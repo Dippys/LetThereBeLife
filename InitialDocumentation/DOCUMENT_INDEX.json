@@ -1,0 +1,38 @@
+{
+  "project": "Emergent Society Simulation With Evolving Language",
+  "document_count": 24,
+  "documents": [
+    "README.md",
+    "00_PROJECT_VISION.md",
+    "01_ARCHITECTURE_OVERVIEW.md",
+    "02_WORLD_MODEL_AND_GENERATION.md",
+    "03_AGENT_DATA_MODEL.md",
+    "04_COGNITION_AND_DECISION_MAKING.md",
+    "05_COMMUNICATION_ARCHITECTURE.md",
+    "06_LANGUAGE_LEARNING_AND_EVOLUTION.md",
+    "07_BELIEFS_MEMORY_RELATIONSHIPS.md",
+    "08_SOCIETY_SYSTEMS.md",
+    "09_EVENT_DRIVEN_SIMULATION.md",
+    "10_STORAGE_AND_MEMORY_BUDGET.md",
+    "11_SPATIAL_PARTITIONING_AND_PATHFINDING.md",
+    "12_SCALING_TO_TEN_MILLION.md",
+    "13_TECH_STACK_RUST_CPP_ENGINE.md",
+    "14_SAVE_LOAD_DETERMINISM.md",
+    "15_DEBUGGING_ANALYTICS_TOOLS.md",
+    "16_IMPLEMENTATION_ROADMAP.md",
+    "17_TESTING_AND_BENCHMARKS.md",
+    "18_FAILURE_MODES_AND_GUARDRAILS.md",
+    "19_REFERENCE_DATA_STRUCTURES.md",
+    "20_OPEN_QUESTIONS_AND_FUTURE_SYSTEMS.md",
+    "21_ARCHITECTURE_DECISIONS.md",
+    "GLOSSARY.md"
+  ],
+  "core_constraints": {
+    "target_persistent_npcs": 10000000,
+    "average_personal_state_target_bytes": 4096,
+    "communication_private_intent": true,
+    "communication_direct_control": false,
+    "world_storage": "chunked procedural with sparse deltas",
+    "simulation_model": "event-driven discrete-event"
+  }
+}

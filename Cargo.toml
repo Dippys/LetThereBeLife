@@ -1,0 +1,17 @@
+[workspace]
+members = ["crates/sim-core", "crates/sim-server", "crates/sim-viewer"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.85"
+
+[workspace.dependencies]
+sim-core = { path = "crates/sim-core" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+

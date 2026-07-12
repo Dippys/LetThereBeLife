@@ -1,0 +1,4 @@
+interface:
+  display_name: "Maintain Living Documentation"
+  short_description: "Synchronize writable docs with engine reality"
+  default_prompt: "Use $maintain-living-docs to update the living documentation for this repository change."

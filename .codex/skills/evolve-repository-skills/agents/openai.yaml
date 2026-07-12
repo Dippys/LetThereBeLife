@@ -1,0 +1,4 @@
+interface:
+  display_name: "Evolve Repository Skills"
+  short_description: "Improve project workflows when gaps recur"
+  default_prompt: "Use $evolve-repository-skills to improve the repository skills after identifying a repeated workflow gap."

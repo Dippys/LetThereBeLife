@@ -1,0 +1,4 @@
+interface:
+  display_name: "Validate Rust Workspace"
+  short_description: "Run deterministic formatting tests and linting"
+  default_prompt: "Use $validate-rust-workspace to run the complete repository quality gate and report exact failures."

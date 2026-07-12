@@ -1,0 +1,4 @@
+interface:
+  display_name: "Orient Let There Be Life"
+  short_description: "Map project context before making changes"
+  default_prompt: "Use $orient-let-there-be-life to inspect this repository and identify the correct implementation and documentation surfaces."
