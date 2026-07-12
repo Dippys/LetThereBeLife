@@ -41,6 +41,16 @@ Get-ChildItem -LiteralPath '.codex/skills' -Directory | ForEach-Object {
 
 Invoke-Checked 'Cargo formatting' { cargo fmt --all -- --check }
 Invoke-Checked 'Workspace tests' { cargo test --workspace }
+Write-Host '==> Copied debug configuration'
+$sourceConfig = 'config/simulation.toml'
+$debugConfig = 'target/debug/config/simulation.toml'
+if (-not (Test-Path -LiteralPath $debugConfig)) {
+    throw "$debugConfig was not produced by the sim-config build"
+}
+if ((Get-FileHash -Algorithm SHA256 -LiteralPath $sourceConfig).Hash -ne
+    (Get-FileHash -Algorithm SHA256 -LiteralPath $debugConfig).Hash) {
+    throw "$debugConfig does not match $sourceConfig"
+}
 Invoke-Checked 'Clippy' { cargo clippy --workspace --all-targets -- -D warnings }
 Invoke-Checked 'Headless smoke test' { cargo run -p sim-server -- --ticks 600 --seed 42 }
 

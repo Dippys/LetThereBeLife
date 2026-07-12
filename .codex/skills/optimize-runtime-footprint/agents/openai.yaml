@@ -1,0 +1,4 @@
+interface:
+  display_name: "Optimize Runtime Footprint"
+  short_description: "Minimize measured CPU memory and data size"
+  default_prompt: "Use $optimize-runtime-footprint to design or review this system for compact data, bounded work, low allocation overhead, and measured performance."

@@ -26,6 +26,7 @@ These instructions apply to the entire repository.
 | Living documentation updates or drift | `.codex/skills/maintain-living-docs/SKILL.md` |
 | Formatting, tests, linting, immutable-doc checks | `.codex/skills/validate-rust-workspace/SKILL.md` |
 | Code, architecture, determinism, or quality review | `.codex/skills/review-engine-quality/SKILL.md` |
+| Compact types, memory, allocations, hot paths, cleanup, or optimization | `.codex/skills/optimize-runtime-footprint/SKILL.md` |
 | Repeated workflow gap or new project skill | `.codex/skills/evolve-repository-skills/SKILL.md` plus the system `$skill-creator` |
 | Broad implementation lifecycle | `.codex/skills/maintain-let-there-be-life/SKILL.md` as coordinator |
 
@@ -37,6 +38,9 @@ Read every selected `SKILL.md` completely before acting. Read referenced resourc
 - Treat presentation objects as views, never persistent simulation truth.
 - Advance simulation through fixed deterministic ticks or scheduled events, never variable render frames.
 - Make seeds, ordering, ownership, mutation boundaries, and invalid-input behavior explicit.
+- Minimize work and stored state first, then allocations and layout, then variable width. Use the smallest proven representation and verify it with size assertions or benchmarks.
+- Treat source brevity as a maintenance preference, not a performance metric. Never sacrifice clarity, safety, determinism, or testability for fewer lines.
+- Remove dead code, unused state, unnecessary clones/allocations, and obsolete dependencies when touching the owning area.
 - Add tests for new behavior and regressions. Benchmark before scale-driven optimization.
 - Avoid unrelated cleanup and speculative abstraction.
 - Do not weaken or skip a failing quality gate to obtain a pass.
@@ -44,4 +48,3 @@ Read every selected `SKILL.md` completely before acting. Read referenced resourc
 ## Definition of done
 
 A change is complete only when code works, relevant tests exist, living documentation matches reality, review findings are resolved or disclosed, the immutable design checksum passes, and the full validation gate succeeds. If a check cannot run, report it as an explicit incomplete validation gap.
-

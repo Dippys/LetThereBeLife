@@ -21,4 +21,6 @@
 - Use checked or saturating arithmetic when domain limits require it.
 - Avoid `unsafe`; require a documented invariant, benchmark evidence, and focused tests before introducing it.
 - Benchmark before optimizing layouts or adding concurrency.
-
+- Use the smallest type justified by the domain range, not the smallest type that happens to fit current sample data.
+- Measure complete record size, alignment, vector capacity, and allocator overhead; field widths alone can be misleading.
+- Prefer less code when two implementations are equally clear, correct, testable, and performant. Do not code-golf hot logic.

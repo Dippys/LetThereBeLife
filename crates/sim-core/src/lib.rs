@@ -1,5 +1,12 @@
 //! Engine-independent deterministic simulation foundation.
 
+mod world;
+
+pub use world::{
+    DEFAULT_INITIAL_WORLD_SIZE, Feature, FeatureKind, GenerateAreaError, GroundType, TerrainCell,
+    World, WorldConfig, WorldConfigError, WorldPosition, WorldRect,
+};
+
 use std::time::Duration;
 
 /// Immutable settings used to construct or reset a simulation.
@@ -7,6 +14,7 @@ use std::time::Duration;
 pub struct EngineConfig {
     pub seed: u64,
     pub ticks_per_second: u32,
+    pub world: WorldConfig,
 }
 
 impl Default for EngineConfig {
@@ -14,6 +22,7 @@ impl Default for EngineConfig {
         Self {
             seed: 1,
             ticks_per_second: 60,
+            world: WorldConfig::default(),
         }
     }
 }
@@ -31,6 +40,7 @@ pub enum EngineCommand {
     SetPaused(bool),
     SetSpeed(f32),
     Reset,
+    GenerateWorldArea(WorldRect),
 }
 
 /// Read-only data intended for renderers, tools, and remote clients.
@@ -47,6 +57,7 @@ pub struct SimulationSnapshot {
 #[derive(Debug)]
 pub struct Engine {
     config: EngineConfig,
+    world: World,
     tick: u64,
     paused: bool,
     speed: f32,
@@ -55,6 +66,7 @@ pub struct Engine {
 impl Engine {
     pub fn new(config: EngineConfig) -> Self {
         Self {
+            world: World::generate(config.seed, config.world),
             config,
             tick: 0,
             paused: false,
@@ -75,6 +87,9 @@ impl Engine {
                 self.paused = false;
                 self.speed = 1.0;
             }
+            EngineCommand::GenerateWorldArea(bounds) => {
+                let _ = self.world.generate_area(bounds);
+            }
         }
     }
 
@@ -87,6 +102,11 @@ impl Engine {
 
     pub fn config(&self) -> EngineConfig {
         self.config
+    }
+
+    /// Returns immutable world state for headless tools and presentation clients.
+    pub fn world(&self) -> &World {
+        &self.world
     }
 
     pub fn snapshot(&self) -> SimulationSnapshot {
@@ -134,6 +154,7 @@ mod tests {
         let config = EngineConfig {
             seed: 42,
             ticks_per_second: 20,
+            ..EngineConfig::default()
         };
         let mut engine = Engine::new(config);
         engine.tick();
@@ -142,5 +163,19 @@ mod tests {
         assert_eq!(engine.config(), config);
         assert_eq!(engine.snapshot().tick, 0);
         assert_eq!(engine.snapshot().speed, 1.0);
+    }
+
+    #[test]
+    fn equal_seeds_generate_equal_worlds() {
+        let left = Engine::new(EngineConfig {
+            seed: 99,
+            ..EngineConfig::default()
+        });
+        let right = Engine::new(EngineConfig {
+            seed: 99,
+            ..EngineConfig::default()
+        });
+
+        assert_eq!(left.world(), right.world());
     }
 }

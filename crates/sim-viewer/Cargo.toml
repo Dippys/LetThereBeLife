@@ -6,7 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+sim-config.workspace = true
 sim-core.workspace = true
 softbuffer = "0.4.8"
 winit = "0.30.12"
-

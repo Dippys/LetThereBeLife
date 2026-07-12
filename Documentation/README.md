@@ -11,6 +11,7 @@ This directory describes the code that is currently implemented and the decision
 - [Architecture decisions](ARCHITECTURE_DECISIONS.md): append-only decisions made during implementation.
 - [Roadmap](ROADMAP.md): completed, active, next, and deferred work.
 - [Testing](TESTING.md): validation commands, existing coverage, and known gaps.
+- [Performance](PERFORMANCE.md): compact-data rules, budgets, measurements, and optimization evidence.
 
 ## Status language
 
@@ -18,4 +19,3 @@ This directory describes the code that is currently implemented and the decision
 - **Active** means work is currently underway.
 - **Planned** means intended but not implemented.
 - **Open** means a decision has not been made.
-

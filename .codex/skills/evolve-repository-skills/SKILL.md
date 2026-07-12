@@ -11,7 +11,7 @@ description: Create or improve repository-local Let There Be Life skills and AGE
 4. Keep skills concise and imperative. Put detailed routing, schemas, or checklists in one-level references; add scripts only for repeated deterministic procedures.
 5. Add or adjust `AGENTS.md` routing so the new skill has a clear entry condition and sequence.
 6. Update `Documentation/ARCHITECTURE_DECISIONS.md` when workflow governance materially changes.
-7. Run `$validate-rust-workspace` after skill changes.
+7. Apply `$optimize-runtime-footprint` when the new workflow affects hot paths, population-scale data, allocations, or cleanup policy.
+8. Run `$validate-rust-workspace` after skill changes.
 
 Never modify `InitialDocumentation/`. Do not create a skill merely to increase the skill count.
-

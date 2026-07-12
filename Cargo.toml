@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/sim-core", "crates/sim-server", "crates/sim-viewer"]
+members = ["crates/sim-config", "crates/sim-core", "crates/sim-server", "crates/sim-viewer"]
 resolver = "2"
 
 [workspace.package]
@@ -10,8 +10,10 @@ rust-version = "1.85"
 
 [workspace.dependencies]
 sim-core = { path = "crates/sim-core" }
+sim-config = { path = "crates/sim-config" }
+serde = { version = "1.0.228", features = ["derive"] }
+toml = "1.1.2"
 
 [profile.release]
 lto = "thin"
 codegen-units = 1
-
