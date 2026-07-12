@@ -1,0 +1,59 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Viewer (debug)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/target/debug/sim-viewer.exe",
+      "args": ["--config", "config/simulation.toml"],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build: viewer (debug)",
+      "sourceLanguages": ["rust"]
+    },
+    {
+      "name": "Viewer (release - smooth)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/target/release/sim-viewer.exe",
+      "args": ["--config", "config/simulation.toml"],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build: viewer (release)",
+      "sourceLanguages": ["rust"]
+    },
+    {
+      "name": "Server (debug)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/target/debug/sim-server.exe",
+      "args": [
+        "--config",
+        "config/simulation.toml",
+        "--ticks",
+        "600",
+        "--seed",
+        "1"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build: server (debug)",
+      "sourceLanguages": ["rust"]
+    },
+    {
+      "name": "Server (release)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/target/release/sim-server.exe",
+      "args": [
+        "--config",
+        "config/simulation.toml",
+        "--ticks",
+        "600",
+        "--seed",
+        "1"
+      ],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build: server (release)",
+      "sourceLanguages": ["rust"]
+    }
+  ]
+}

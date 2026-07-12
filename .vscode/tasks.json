@@ -1,0 +1,51 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build: viewer (debug)",
+      "type": "process",
+      "command": "cargo",
+      "args": ["build", "-p", "sim-viewer"],
+      "group": "build",
+      "problemMatcher": ["$rustc"]
+    },
+    {
+      "label": "build: viewer (release)",
+      "type": "process",
+      "command": "cargo",
+      "args": ["build", "--release", "-p", "sim-viewer"],
+      "group": "build",
+      "problemMatcher": ["$rustc"]
+    },
+    {
+      "label": "build: server (debug)",
+      "type": "process",
+      "command": "cargo",
+      "args": ["build", "-p", "sim-server"],
+      "group": "build",
+      "problemMatcher": ["$rustc"]
+    },
+    {
+      "label": "build: server (release)",
+      "type": "process",
+      "command": "cargo",
+      "args": ["build", "--release", "-p", "sim-server"],
+      "group": "build",
+      "problemMatcher": ["$rustc"]
+    },
+    {
+      "label": "validate: workspace",
+      "type": "process",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        ".codex/skills/validate-rust-workspace/scripts/validate.ps1"
+      ],
+      "group": "test",
+      "problemMatcher": ["$rustc"]
+    }
+  ]
+}

@@ -10,6 +10,7 @@ Last synchronized: 2026-07-12.
 - Deterministic world-space integer noise for elevation and moisture, with deep water, shallow water, sand, grass, forest floor, hill, and bare-rock terrain that is independent of the initial-area boundary.
 - Shared `sim-config` TOML loading for `sim-viewer` and `sim-server`, with explicit validation of initial dimensions.
 - `sim-config` build integration copies `config/simulation.toml` beside Cargo binaries under the active profile directory, including `target/debug/config/simulation.toml` and the equivalent release path.
+- VS Code launch entries build and run viewer/server binaries in debug or release mode with the repository configuration and working directory, plus a task for the complete workspace validation gate.
 - Sparse deterministic tree, rock, and berry-bush feature records owned by the generated world.
 - Fixed-step accumulator in `sim-viewer`, separating variable render timing from 60 Hz simulation ticks and capping large frame delays.
 - Native `winit` window and event lifecycle.

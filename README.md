@@ -12,6 +12,16 @@ Current implementation records, architecture decisions, roadmap status, and vali
 cargo run -p sim-viewer
 ```
 
+### VS Code
+
+Install the recommended Rust Analyzer and CodeLLDB extensions, open **Run and Debug**, and choose one of:
+
+- `Viewer (debug)` for breakpoints and development.
+- `Viewer (release - smooth)` for optimized rendering and fullscreen testing.
+- `Server (debug)` or `Server (release)` for a 600-tick headless run.
+
+All launch entries build the selected binary first, use the repository root as the working directory, and pass `config/simulation.toml`. The **Run Task** menu also includes individual build tasks and `validate: workspace`.
+
 The viewer initially generates the area configured in [`config/simulation.toml`](config/simulation.toml),
 which defaults to 1,024 x 1,024 cells. This is the startup area, not the intended
 maximum world size. Restarting with the same configuration reproduces the same terrain.
