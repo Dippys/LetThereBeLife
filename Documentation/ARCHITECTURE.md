@@ -19,26 +19,27 @@ sim-viewer
 
 ## Current contracts
 
-- Presentation code mutates the engine only through `EngineCommand`.
+- Interactive presentation actions mutate simulation state through `EngineCommand`; completed worker chunks enter through the explicit, capacity-checked `Engine::apply_world_chunks` boundary.
 - Presentation reads engine state through `SimulationSnapshot`.
 - `Engine::tick` advances one deterministic simulation step when not paused.
 - Viewer wall-clock time is accumulated and converted into fixed simulation ticks.
 - Rendered objects are temporary views and are not persistent simulation entities.
-- `World` is generated once from `EngineConfig::seed`; identical seeds produce identical row-major terrain and deterministically ordered sparse features.
-- `WorldConfig` defines validated initial generation dimensions, defaulting to 1,024 x 1,024 cells. Those dimensions are the currently loaded/generated area, not a declared maximum world extent.
+- The initial `World` area is generated once from `EngineConfig::seed`; identical seeds produce identical row-major terrain and deterministically ordered sparse features. Selected chunks can extend loaded coverage afterward.
+- `WorldConfig` defines validated initial generation dimensions, defaulting to 1,024 x 1,024 cells. Those dimensions are the startup area, not a declared maximum world extent or the complete loaded coverage after expansion.
 - Generation visits 64 x 64 chunks, while `World::cell` exposes coordinate lookup without presentation dependencies.
 - Terrain uses dense `TerrainCell` values. Trees, rocks, and berry bushes use sparse `Feature` records rather than per-cell object slots.
 - Elevation and moisture use integer-only, multi-scale world-coordinate noise. Generation does not shape terrain against the initial-area edges, preserving continuity for future adjacent chunks.
 - `sim-viewer::camera::Camera` owns presentation-only center and zoom state. `CameraView` caches the per-frame transform used for screen/world conversion.
 - Mouse-wheel zoom preserves the world point under the cursor. Left-button dragging translates the presentation camera without clamping it to the generated initial area.
 - Camera space uses floating-point presentation coordinates and may move into negative or otherwise ungenerated locations; `World` lookup still returns only simulation-owned generated cells.
-- `EngineCommand::GenerateWorldArea` routes right-drag generation into `sim-core`; `WorldRect` uses signed inclusive-minimum/exclusive-maximum coordinates.
-- Generated selections are split into deterministic 64 x 64 chunks stored by signed `ChunkCoord` in a `BTreeMap`. Each request is capped at 1,048,576 selected cells, and existing chunks are ignored without changing world revision.
+- `EngineCommand::GenerateWorldArea` exposes area generation as an `Engine` command path; `WorldRect` uses signed inclusive-minimum/exclusive-maximum coordinates. The viewer's right-drag does not use this path — it streams chunks through a dedicated worker (see below).
+- Generated selections are split into deterministic 64 x 64 chunks stored by signed `ChunkCoord` in a `BTreeMap`. A selection may span more than 4,096 chunks, but resolving it may yield at most 4,096 missing chunks (16,777,216 generated chunk-payload cells), and the bootstrap retains at most 16,384 generated chunks. Coordinate-to-chunk arithmetic is checked before iteration. A coordinate counts only when its selected portion is not fully covered by the initial rectangle and no retained chunk exists; retained chunks are omitted before worker generation, and duplicate insertion does not change world revision.
 - `World::feature_at` uses binary search over row-major sorted sparse features for bounded hover lookup without a global scan.
-- `World::visit_cells_in` and `visit_features_in` bound presentation extraction to a camera rectangle and relevant chunk keys.
-- Selected-area generation runs on one dedicated viewer worker. It produces self-contained `WorldChunk` values without mutating live state; the main thread applies completed chunks through `Engine::apply_world_chunks`.
-- The viewer caps active presentation at 60 Hz and stops redrawing when paused and unchanged. Input, resize, ticks, and completed generation mark presentation dirty.
-- The `wgpu` renderer keeps camera transforms in uniforms and terrain/features in instance buffers. A padded camera cache prevents buffer uploads during ordinary small pans.
+- `World::visit_cells_in`, `visit_cells_in_step`, and `visit_features_in` bound presentation extraction to a camera rectangle. They filter the capped retained-chunk map instead of iterating every coordinate in a potentially enormous empty camera rectangle. Stepped visits provide deterministic zoomed-out sampling without changing simulation-owned terrain.
+- Selected-area generation runs on one dedicated viewer worker. The main thread validates the selection and queues only missing `ChunkCoord` values; the worker generates them individually and returns `WorldChunk` values through a 64-message bounded channel. The main thread applies at most 16 chunks per frame. `C` stops remaining work without rolling back chunks already applied, and terminal worker outcomes cover completion, cancellation, validation failure, and one-shot disconnection reporting.
+- GPU world-cache rebuilds are deferred while chunks stream and occur once when the generation job finishes, unless camera movement leaves the current cache or zoom changes the sampling step first.
+- The viewer enforces a persistent 60 Hz redraw deadline, including during input bursts and background-generation polling, and stops redrawing when paused and unchanged. Input, resize, ticks, surface recovery, and terminal generation outcomes mark presentation dirty.
+- The `wgpu` renderer keeps camera transforms in 32-byte uniforms and terrain/features in 20-byte rectangle instances. A scale-relative cache margin of approximately 128 screen pixels prevents buffer uploads during ordinary pans at every zoom; terrain is sampled in power-of-two, chunk-aligned blocks of roughly two screen pixels, and static instance uploads are split at 1,000,000 instances per GPU buffer.
 
 ## Dependencies
 

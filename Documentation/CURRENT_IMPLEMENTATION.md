@@ -1,6 +1,6 @@
 # Current Implementation
 
-Last synchronized: 2026-07-12.
+Last synchronized: 2026-07-13.
 
 ## Implemented
 
@@ -14,15 +14,16 @@ Last synchronized: 2026-07-12.
 - Sparse deterministic tree, rock, and berry-bush feature records owned by the generated world.
 - Fixed-step accumulator in `sim-viewer`, separating variable render timing from 60 Hz simulation ticks and capping large frame delays.
 - Native `winit` window and event lifecycle with redraws capped at 60 Hz while active and suspended when paused and visually unchanged.
-- GPU presentation through `wgpu`, using instanced terrain, feature, selection, hover, and status rectangles instead of CPU framebuffer rasterization.
-- Camera-bounded GPU instance caches with a 128-cell margin, rebuilt only when the camera leaves the cached area or world revision changes.
+- GPU presentation through `wgpu`, using size-checked camera uniforms and instanced terrain, feature, selection, hover, and status rectangles instead of CPU framebuffer rasterization.
+- Camera-bounded GPU instance caches with an approximately 128-screen-pixel scale-relative margin, deterministic power-of-two zoomed-out sampling with generated-edge clipping, and static buffers segmented at 1,000,000 instances. Caches rebuild only when the camera leaves the cached area, the sampling step changes, or a synchronized world revision changes.
 - Deterministic 64 x 64 generated chunks keyed by signed `ChunkCoord`, with bounded chunk lookup instead of a growing linear patch search.
-- A dedicated world-generation worker keeps selected-area generation off the window/event-loop thread and merges completed chunks into `sim-core` on the main thread.
+- A dedicated world-generation worker receives only missing chunk coordinates, keeps selected-area generation off the window/event-loop thread, and merges bounded completed batches into `sim-core` on the main thread.
+- Large-generation guardrails: 4,096 missing chunks per request, 16,384 retained generated chunks, 16 chunks applied per frame, stop-remaining-work cancellation with `C` (already applied chunks remain), and deferred GPU cache synchronization. Retained chunks and selected portions fully covered by the initial rectangle do not consume request budget; a partially initial boundary chunk counts when its selection extends into unloaded terrain.
 - Viewer camera starting at full-map fit with cursor-anchored mouse-wheel zoom from 1/16x fit to 64x magnification and unbounded left-button drag panning through generated or empty space.
-- Right-button drag selection with translucent yellow fill and border; release generates deterministic terrain and sparse features for the selected rectangle.
+- Right-button drag selection with a translucent yellow valid preview and red invalid preview for missing-chunk-budget, retained-capacity, or coordinate-safety failures. New previews are disabled while the background generator is busy or unavailable; release generates deterministic terrain and sparse features only for an accepted rectangle.
 - Signed world positions supporting generated patches in negative and positive coordinate space.
 - Hover inspection with a highlighted cell and window-title output for coordinates, terrain, elevation, moisture, and sparse feature kind.
-- Keyboard controls: pause/resume, 1x–8x speed selection, reset, and exit.
+- Keyboard controls: pause/resume, 1x–8x speed selection, cancel active generation, reset, and exit.
 - Headless runner accepting `--ticks` and `--seed`.
 - Unit tests covering equal-input tick determinism, pause behavior, and reset behavior.
 - Repository-local skills for orientation, Rust implementation, living documentation, validation, architecture/code review, and workflow evolution.
@@ -31,8 +32,8 @@ Last synchronized: 2026-07-12.
 
 ## Not implemented
 
-- Streamed or unloadable chunks, regional hydrology, resource quantities, or terrain modification.
-- Chunk-keyed expansion and persistence; selected expansion currently uses retained generated-area patches.
+- Automatic proximity-driven chunk generation, chunk unloading, or chunk persistence; expansion currently requires a right-drag selection and retains generated chunks in memory.
+- Regional hydrology, resource quantities, or terrain modification.
 - Persistent agents, needs, cognition, movement, or event scheduling.
 - General-purpose deterministic RNG streams, save/load, snapshots on disk, or replay logs.
 - Text, asset, animation, and advanced inspection systems beyond the current GPU rectangle renderer.

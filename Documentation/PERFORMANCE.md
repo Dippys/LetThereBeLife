@@ -1,6 +1,6 @@
 # Performance and Footprint
 
-Last synchronized: 2026-07-12.
+Last synchronized: 2026-07-13.
 
 ## Principle
 
@@ -28,11 +28,11 @@ Minimize runtime work, memory, allocations, cache misses, and stored data while 
 
 No canonical release-mode benchmark report exists yet. The current terrain layout intentionally uses `u16` elevation, `u8` moisture, and a byte-represented `GroundType`, but complete record and collection costs must be measured rather than inferred from field widths.
 
-The viewer no longer rasterizes every framebuffer pixel on the CPU. `wgpu` draws compact 20-byte rectangle instances, with camera transforms performed in the vertex shader. Terrain and feature buffers contain only a camera-bounded rectangle plus a 128-cell reuse margin; camera motion inside that margin updates only a uniform.
+The viewer no longer rasterizes every framebuffer pixel on the CPU. `wgpu` draws compact 20-byte rectangle instances, with a size-asserted 32-byte camera uniform transformed in the vertex shader. Terrain and feature buffers contain only a camera-bounded rectangle plus a scale-relative reuse margin of approximately 128 screen pixels; camera motion inside that margin updates only the uniform. Zoomed-out extraction deterministically uses power-of-two steps that divide a 64-cell chunk and target roughly two screen pixels per terrain block. Edge blocks are clipped to actual initial/chunk coverage, and static uploads are segmented at 1,000,000 instances per GPU buffer instead of relying on one potentially oversized allocation.
 
-Generated world data is stored in deterministic 64 x 64 chunks keyed by `ChunkCoord`. Cell lookup performs a `BTreeMap` lookup rather than scanning every generated patch, and camera extraction visits only intersecting chunk keys. Initial-area overlap is filtered so boundary chunks do not duplicate rendered cells.
+Generated world data is stored in deterministic 64 x 64 chunks keyed by `ChunkCoord`. Cell lookup performs a `BTreeMap` lookup rather than scanning every generated patch. Camera extraction filters the capped retained-chunk map and visits cell/feature data only for intersecting chunks, avoiding traversal across enormous empty coordinate rectangles. Initial-area overlap is split out so boundary chunks neither duplicate nor omit rendered cells.
 
-Selection generation remains capped at 1,048,576 selected cells and runs on a dedicated worker thread. Completed chunks increment world revision once and cause one bounded GPU-cache rebuild. Rendering is capped at 60 Hz while the simulation runs and stops when paused with no visual changes.
+Selection generation queues only coordinates whose selected portion is not fully covered by the initial rectangle and that have no retained chunk. A dedicated worker thread returns 64 x 64 chunks through a 64-message bounded channel. The main thread applies at most 16 chunks per frame without redrawing an unchanged paused scene, while GPU world-buffer synchronization is deferred until completion to avoid repeated full visible-cache uploads. A worker job may materialize at most 4,096 missing chunks (16,777,216 chunk-payload cells), even when its selection footprint is larger because it overlaps loaded terrain; total retained generated data is capped at 16,384 chunks. Missing-chunk validation stops on the 4,097th new chunk, and unchanged preview results are cached by selection bounds plus world revision. `C` stops remaining generation work; chunks already applied remain retained. Rendering uses a persistent 60 Hz deadline even during input bursts and worker polling, and stops when paused with no visual changes.
 
 ## Required measurement conditions
 

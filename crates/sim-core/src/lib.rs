@@ -4,8 +4,8 @@ mod world;
 
 pub use world::{
     CHUNK_SIZE, ChunkCoord, DEFAULT_INITIAL_WORLD_SIZE, Feature, FeatureKind, GenerateAreaError,
-    GroundType, TerrainCell, World, WorldChunk, WorldConfig, WorldConfigError, WorldPosition,
-    WorldRect,
+    GroundType, MAX_CHUNKS_PER_GENERATION, MAX_GENERATED_CHUNKS, TerrainCell, World, WorldChunk,
+    WorldConfig, WorldConfigError, WorldPosition, WorldRect,
 };
 
 use std::time::Duration;
@@ -110,7 +110,10 @@ impl Engine {
         &self.world
     }
 
-    pub fn apply_world_chunks(&mut self, chunks: Vec<WorldChunk>) -> usize {
+    pub fn apply_world_chunks(
+        &mut self,
+        chunks: Vec<WorldChunk>,
+    ) -> Result<usize, GenerateAreaError> {
         self.world.insert_chunks(chunks)
     }
 

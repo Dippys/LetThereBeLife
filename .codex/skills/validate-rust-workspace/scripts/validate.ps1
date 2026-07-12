@@ -53,6 +53,7 @@ if ((Get-FileHash -Algorithm SHA256 -LiteralPath $sourceConfig).Hash -ne
 }
 Invoke-Checked 'Clippy' { cargo clippy --workspace --all-targets -- -D warnings }
 Invoke-Checked 'Headless smoke test' { cargo run -p sim-headless -- --ticks 600 --seed 42 }
+Invoke-Checked 'GPU viewer smoke test' { cargo run -p sim-viewer -- --smoke-frames 2 }
 
 if ($Runtime) {
     Write-Host 'Runtime flag selected. Manually verify the viewer because it is interactive:'

@@ -1,7 +1,9 @@
 use std::{borrow::Cow, sync::Arc};
 
 use bytemuck::{Pod, Zeroable};
-use sim_core::{FeatureKind, GroundType, SimulationSnapshot, World, WorldPosition, WorldRect};
+use sim_core::{
+    CHUNK_SIZE, FeatureKind, GroundType, SimulationSnapshot, World, WorldPosition, WorldRect,
+};
 use wgpu::util::DeviceExt;
 use winit::window::Window;
 
@@ -12,6 +14,7 @@ pub struct RenderState {
     pub camera: Camera,
     pub hovered: Option<WorldPosition>,
     pub selection: Option<WorldRect>,
+    pub selection_valid: bool,
 }
 
 pub struct Renderer {
@@ -22,12 +25,13 @@ pub struct Renderer {
     pipeline: wgpu::RenderPipeline,
     world_camera: CameraBinding,
     screen_camera: CameraBinding,
-    terrain: InstanceBuffer,
-    features: InstanceBuffer,
+    terrain: StaticInstanceBuffers,
+    features: StaticInstanceBuffers,
     world_overlay: InstanceBuffer,
     screen_overlay: InstanceBuffer,
     world_revision: u64,
     cached_bounds: Option<WorldRect>,
+    cached_step: u32,
 }
 
 impl Renderer {
@@ -128,22 +132,15 @@ impl Renderer {
             cache: None,
         });
 
-        let initial_bounds = WorldRect {
-            min: WorldPosition { x: 0, y: 0 },
-            max: WorldPosition {
-                x: i64::from(world.width()),
-                y: i64::from(world.height()),
-            },
-        };
-        let (terrain, features) = build_world_instances(world, initial_bounds);
         Ok(Self {
             surface,
-            terrain: InstanceBuffer::immutable(&device, "terrain instances", &terrain),
-            features: InstanceBuffer::immutable(&device, "feature instances", &features),
+            terrain: StaticInstanceBuffers::new(&device, "terrain instances", &[]),
+            features: StaticInstanceBuffers::new(&device, "feature instances", &[]),
             world_overlay: InstanceBuffer::dynamic(&device, "world overlay", 2),
             screen_overlay: InstanceBuffer::dynamic(&device, "screen overlay", 4),
             world_revision: world.revision(),
-            cached_bounds: Some(initial_bounds),
+            cached_bounds: None,
+            cached_step: 1,
             device,
             queue,
             config,
@@ -162,30 +159,51 @@ impl Renderer {
         self.surface.configure(&self.device, &self.config);
     }
 
-    fn sync_view(&mut self, world: &World, requested: WorldRect) {
-        if self.world_revision == world.revision()
-            && self
-                .cached_bounds
-                .is_some_and(|cached| cached.contains_rect(requested))
+    fn sync_view(
+        &mut self,
+        world: &World,
+        requested: WorldRect,
+        scale: f32,
+        allow_world_sync: bool,
+    ) {
+        let step = terrain_sample_step(scale);
+        let cache_contains_view = self
+            .cached_bounds
+            .is_some_and(|cached| cached.contains_rect(requested));
+        let revision_changed = self.world_revision != world.revision();
+        if cache_contains_view
+            && self.cached_step == step
+            && (!revision_changed || !allow_world_sync)
         {
             return;
         }
-        let cached = requested.expanded(128);
-        let (terrain, features) = build_world_instances(world, cached);
-        self.terrain = InstanceBuffer::immutable(&self.device, "terrain instances", &terrain);
-        self.features = InstanceBuffer::immutable(&self.device, "feature instances", &features);
+        let cached = requested.expanded(cache_margin(scale));
+        let (terrain, features) = build_world_instances(world, cached, step);
+        self.terrain = StaticInstanceBuffers::new(&self.device, "terrain instances", &terrain);
+        self.features = StaticInstanceBuffers::new(&self.device, "feature instances", &features);
         self.world_revision = world.revision();
         self.cached_bounds = Some(cached);
+        self.cached_step = step;
     }
 
-    pub fn render(&mut self, world: &World, state: RenderState) -> Result<(), wgpu::SurfaceError> {
+    pub fn render(
+        &mut self,
+        world: &World,
+        state: RenderState,
+        allow_world_sync: bool,
+    ) -> Result<(), wgpu::SurfaceError> {
         let view = state.camera.view(
             self.config.width,
             self.config.height,
             world.width(),
             world.height(),
         );
-        self.sync_view(world, view.world_bounds());
+        self.sync_view(
+            world,
+            view.world_bounds(),
+            view.scale() as f32,
+            allow_world_sync,
+        );
         self.world_camera.write(
             &self.queue,
             CameraUniform::new(
@@ -222,7 +240,7 @@ impl Renderer {
                 bounds.min.y as f32,
                 (bounds.max.x - bounds.min.x) as f32,
                 (bounds.max.y - bounds.min.y) as f32,
-                rgba(255, 220, 35, 72),
+                selection_color(state.selection_valid),
             ));
         }
         self.world_overlay.write(&self.queue, &world_overlay);
@@ -319,6 +337,9 @@ impl CameraUniform {
     }
 }
 
+const _: () = assert!(size_of::<CameraUniform>() == 32);
+const _: () = assert!(size_of::<Instance>() == 20);
+
 struct CameraBinding {
     buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
@@ -394,6 +415,31 @@ struct InstanceBuffer {
     count: u32,
 }
 
+const MAX_INSTANCES_PER_BUFFER: usize = 1_000_000;
+const MIN_TERRAIN_SAMPLE_PIXELS: f32 = 2.0;
+const CACHE_MARGIN_PIXELS: f32 = 128.0;
+
+struct StaticInstanceBuffers {
+    buffers: Vec<InstanceBuffer>,
+}
+
+impl StaticInstanceBuffers {
+    fn new(device: &wgpu::Device, label: &str, instances: &[Instance]) -> Self {
+        let chunks = static_instance_chunks(instances);
+        let mut buffers = Vec::with_capacity(chunks.len());
+        buffers.extend(chunks.enumerate().map(|(index, chunk)| {
+            InstanceBuffer::immutable(device, &format!("{label} {index}"), chunk)
+        }));
+        Self { buffers }
+    }
+
+    fn draw<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) {
+        for buffer in &self.buffers {
+            buffer.draw(pass);
+        }
+    }
+}
+
 impl InstanceBuffer {
     fn immutable(device: &wgpu::Device, label: &str, instances: &[Instance]) -> Self {
         let empty = Instance::zeroed();
@@ -438,19 +484,29 @@ impl InstanceBuffer {
     }
 }
 
-fn build_world_instances(world: &World, bounds: WorldRect) -> (Vec<Instance>, Vec<Instance>) {
+fn build_world_instances(
+    world: &World,
+    bounds: WorldRect,
+    step: u32,
+) -> (Vec<Instance>, Vec<Instance>) {
     let mut terrain = Vec::new();
-    world.visit_cells_in(bounds, |position, cell| {
+    world.visit_cells_in_step(bounds, step, |position, cell| {
+        let size = terrain_block_size(world, position, step);
         terrain.push(Instance::new(
             position.x as f32,
             position.y as f32,
-            1.0,
-            1.0,
+            size[0],
+            size[1],
             terrain_color(cell),
         ));
     });
     let mut features = Vec::new();
     world.visit_features_in(bounds, |feature| {
+        if feature.position.x.rem_euclid(i64::from(step)) != 0
+            || feature.position.y.rem_euclid(i64::from(step)) != 0
+        {
+            return;
+        }
         let color = match feature.kind {
             FeatureKind::Tree => rgba(24, 72, 28, 255),
             FeatureKind::Rock => rgba(118, 116, 108, 255),
@@ -467,6 +523,50 @@ fn build_world_instances(world: &World, bounds: WorldRect) -> (Vec<Instance>, Ve
     (terrain, features)
 }
 
+fn terrain_sample_step(scale: f32) -> u32 {
+    let requested = (MIN_TERRAIN_SAMPLE_PIXELS / scale.max(f32::EPSILON))
+        .ceil()
+        .max(1.0) as u32;
+    requested.clamp(1, CHUNK_SIZE as u32).next_power_of_two()
+}
+
+fn cache_margin(scale: f32) -> i64 {
+    (CACHE_MARGIN_PIXELS / scale.max(f32::EPSILON))
+        .ceil()
+        .max(1.0) as i64
+}
+
+fn terrain_block_size(world: &World, position: WorldPosition, step: u32) -> [f32; 2] {
+    let inside_initial = position.x >= 0
+        && position.y >= 0
+        && position.x < i64::from(world.width())
+        && position.y < i64::from(world.height());
+    let limit = if inside_initial {
+        WorldPosition {
+            x: i64::from(world.width()),
+            y: i64::from(world.height()),
+        }
+    } else {
+        let mut chunk_limit = WorldPosition {
+            x: position.x.div_euclid(CHUNK_SIZE) * CHUNK_SIZE + CHUNK_SIZE,
+            y: position.y.div_euclid(CHUNK_SIZE) * CHUNK_SIZE + CHUNK_SIZE,
+        };
+        if position.y >= 0 && position.y < i64::from(world.height()) {
+            chunk_limit.y = chunk_limit.y.min(i64::from(world.height()));
+        }
+        chunk_limit
+    };
+    let step = i64::from(step);
+    [
+        (limit.x - position.x).min(step) as f32,
+        (limit.y - position.y).min(step) as f32,
+    ]
+}
+
+fn static_instance_chunks(instances: &[Instance]) -> std::slice::Chunks<'_, Instance> {
+    instances.chunks(MAX_INSTANCES_PER_BUFFER)
+}
+
 fn terrain_color(cell: sim_core::TerrainCell) -> u32 {
     let shade = (cell.elevation >> 12) as u8;
     match cell.ground {
@@ -480,6 +580,133 @@ fn terrain_color(cell: sim_core::TerrainCell) -> u32 {
     }
 }
 
+const fn selection_color(valid: bool) -> u32 {
+    if valid {
+        rgba(255, 220, 35, 72)
+    } else {
+        rgba(235, 48, 48, 96)
+    }
+}
+
 const fn rgba(red: u8, green: u8, blue: u8, alpha: u8) -> u32 {
     red as u32 | (green as u32) << 8 | (blue as u32) << 16 | (alpha as u32) << 24
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sim_core::WorldConfig;
+
+    #[test]
+    fn coarse_view_reduces_terrain_instances() {
+        let world = World::generate(1, WorldConfig::new(64, 64).unwrap());
+        let bounds = WorldRect {
+            min: WorldPosition { x: 0, y: 0 },
+            max: WorldPosition { x: 64, y: 64 },
+        };
+        let (full, _) = build_world_instances(&world, bounds, 1);
+        let (coarse, _) = build_world_instances(&world, bounds, 4);
+
+        assert_eq!(full.len(), 4_096);
+        assert_eq!(coarse.len(), 256);
+        assert!(coarse.iter().all(|instance| instance.size == [4.0, 4.0]));
+    }
+
+    #[test]
+    fn sample_step_targets_two_pixel_blocks_and_chunk_divisors() {
+        assert_eq!(terrain_sample_step(4.0), 1);
+        assert_eq!(terrain_sample_step(1.1), 2);
+        assert_eq!(terrain_sample_step(0.5), 4);
+        assert_eq!(terrain_sample_step(0.01), 64);
+    }
+
+    #[test]
+    fn coarse_blocks_stop_at_initial_and_generated_edges() {
+        let initial = World::generate(1, WorldConfig::new(96, 64).unwrap());
+        let (initial_instances, _) = build_world_instances(
+            &initial,
+            WorldRect {
+                min: WorldPosition { x: 0, y: 0 },
+                max: WorldPosition { x: 128, y: 64 },
+            },
+            64,
+        );
+        assert!(
+            initial_instances
+                .iter()
+                .all(|instance| instance.position[0] + instance.size[0] <= 96.0)
+        );
+
+        let mut boundary = World::generate(1, WorldConfig::new(96, 64).unwrap());
+        let boundary_bounds = WorldRect {
+            min: WorldPosition { x: 96, y: 0 },
+            max: WorldPosition { x: 128, y: 64 },
+        };
+        boundary.generate_area(boundary_bounds).unwrap();
+        let (boundary_instances, _) = build_world_instances(
+            &boundary,
+            WorldRect {
+                min: WorldPosition { x: 0, y: 0 },
+                max: boundary_bounds.max,
+            },
+            64,
+        );
+        assert!(
+            boundary_instances.iter().any(|instance| {
+                instance.position == [96.0, 0.0] && instance.size == [32.0, 64.0]
+            })
+        );
+
+        let mut corner = World::generate(1, WorldConfig::new(96, 100).unwrap());
+        let corner_bounds = WorldRect {
+            min: WorldPosition { x: 96, y: 64 },
+            max: WorldPosition { x: 128, y: 128 },
+        };
+        corner.generate_area(corner_bounds).unwrap();
+        let (corner_instances, _) = build_world_instances(
+            &corner,
+            WorldRect {
+                min: WorldPosition { x: 0, y: 0 },
+                max: corner_bounds.max,
+            },
+            64,
+        );
+        assert!(corner_instances.iter().any(|instance| {
+            instance.position == [96.0, 64.0] && instance.size == [32.0, 36.0]
+        }));
+        assert!(corner_instances.iter().any(|instance| {
+            instance.position == [64.0, 100.0] && instance.size == [64.0, 28.0]
+        }));
+
+        let mut expanded = World::generate(1, WorldConfig::new(64, 64).unwrap());
+        let generated_bounds = WorldRect {
+            min: WorldPosition { x: 128, y: 0 },
+            max: WorldPosition { x: 192, y: 64 },
+        };
+        expanded.generate_area(generated_bounds).unwrap();
+        let (generated_instances, _) = build_world_instances(&expanded, generated_bounds, 3);
+        assert!(generated_instances.iter().all(|instance| {
+            instance.position[0] >= 128.0
+                && instance.position[0] + instance.size[0] <= 192.0
+                && instance.position[1] + instance.size[1] <= 64.0
+        }));
+        assert!(
+            generated_instances
+                .iter()
+                .any(|instance| instance.position[0] == 191.0 && instance.size[0] == 1.0)
+        );
+    }
+
+    #[test]
+    fn static_buffers_partition_at_the_device_safe_limit() {
+        let instances = vec![Instance::zeroed(); MAX_INSTANCES_PER_BUFFER + 1];
+        let lengths: Vec<_> = static_instance_chunks(&instances).map(<[_]>::len).collect();
+        assert_eq!(lengths, [MAX_INSTANCES_PER_BUFFER, 1]);
+    }
+
+    #[test]
+    fn invalid_selection_uses_red_preview() {
+        assert_eq!(selection_color(true), rgba(255, 220, 35, 72));
+        assert_eq!(selection_color(false), rgba(235, 48, 48, 96));
+    }
 }

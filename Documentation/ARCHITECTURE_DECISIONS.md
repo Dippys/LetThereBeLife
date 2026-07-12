@@ -66,6 +66,30 @@ Date: 2026-07-12
 
 **Consequences:** Patches remain loaded, and partially overlapping selections can duplicate cells until chunk-keyed streaming supersedes this bootstrap representation.
 
+## D-012: Streaming chunk generation with no fixed selection cap
+
+Date: 2026-07-12
+
+**Supersedes:** The per-command 1,048,576-cell cap and single-batch worker result in D-008.
+
+**Decision:** Drop the per-selection cell cap from `World::generate_area` and `validate_bounds`. Add `World::generate_chunks_streaming(seed, bounds) -> impl Iterator<Item = WorldChunk>` so the viewer worker produces one 64 x 64 chunk at a time and sends it through a bounded mpsc channel (capacity 64). The main thread drains completed chunks each frame and applies them as a batch through `Engine::apply_world_chunks`; `generation_pending` clears when the worker emits its `Done` sentinel.
+
+**Reason:** Large right-drag selections previously produced one large `Vec<WorldChunk>` before the main thread saw any of it, hitching the frame during application. Streaming chunks keeps in-flight memory bounded, lets chunks appear incrementally as the worker completes them, and removes the arbitrary area limit while still rejecting bounds whose width*height overflows `i64`.
+
+**Consequences:** `GenerateAreaError::TooLarge` now means only arithmetic overflow, not an arbitrary size policy. `generate_chunks` still returns a `Vec` for batch/test consumers; the viewer uses the streaming variant. Determinism is unchanged: `generate_chunks_streaming` produces chunks in the same order as `generate_chunks`, verified by a parity test.
+
+## D-013: Large but bounded generation and deferred GPU synchronization
+
+Date: 2026-07-12
+
+**Supersedes:** The unbounded request policy in D-012.
+
+**Decision:** Allow up to 4,096 chunks per generation request (16,777,216 cells) and 16,384 retained generated chunks. Check coordinate and chunk-count arithmetic before iteration, apply at most 16 streamed chunks per frame, support cancellation with `C`, and defer GPU world-cache synchronization until a stream terminates unless the camera leaves its cache.
+
+**Reason:** A bounded channel limits only in-flight memory. Unlimited retained chunks, unbounded main-thread draining, and a full visible GPU-buffer rebuild after every streamed batch can still exhaust memory and recreate the observed hitching.
+
+**Consequences:** Large selections remain substantially larger than the original one-million-cell cap while resource use has explicit ceilings. Worker failures and disconnects terminate the pending state. The automated quality gate renders two hidden GPU frames to catch Rust/WGSL binding-layout regressions.
+
 ## D-006: Measured compactness over source-code golfing
 
 Date: 2026-07-12
@@ -107,3 +131,27 @@ Date: 2026-07-12
 **Reason:** Linear generated-area lookup, global feature scans, synchronous generation, per-pixel CPU rendering, and uncapped polling caused fullscreen and world-growth hitches despite low aggregate CPU and memory usage.
 
 **Consequences:** `sim-core` remains GPU- and thread-runtime-independent; workers produce plain `WorldChunk` values and the engine owns insertion. The viewer adds `wgpu`, `pollster`, and `bytemuck`. GPU buffers rebuild when world revision changes or the camera exits its 128-cell cached margin. Paused unchanged scenes do not redraw.
+
+## D-014: Missing-only generation and scale-bounded GPU extraction
+
+Date: 2026-07-13
+
+**Extends:** D-011 and D-013.
+
+**Decision:** Resolve a validated selection to missing chunk coordinates before starting the viewer worker. Generate those coordinates individually, report worker disconnection once, and avoid paused-scene redraws for intermediate batches. Sample zoomed-out terrain with a power-of-two step derived from camera scale, clip blocks to generated coverage, scale the cache margin to approximately 128 screen pixels, and split static instance data at 1,000,000 instances per GPU buffer.
+
+**Reason:** Regenerating overlapping chunks wastes CPU, intermediate redraws present unchanged buffers, and a large visible rectangle can exceed a device's practical single-buffer budget even though retained world storage is bounded.
+
+**Consequences:** Large right-drag generation remains available up to 4,096 chunks, but repeat and partial-overlap selections perform only missing work. Sampling changes presentation detail only; authoritative terrain remains at full resolution in `sim-core`. The first GPU cache is built for the actual camera view rather than eagerly uploading the entire initial area, and ordinary pans retain a useful cache margin even at minimum zoom.
+
+## D-015: Missing-only per-request generation budget
+
+Date: 2026-07-13
+
+**Supersedes:** D-013's interpretation of 4,096 chunks as the complete selection footprint and extends D-014's missing-only worker queue.
+
+**Decision:** Validate coordinate safety across the complete right-drag rectangle, but count a `ChunkCoord` toward the 4,096-chunk per-request budget only when its selected portion is not fully covered by the initial rectangle and no retained generated chunk exists. Stop validation when the 4,097th missing chunk is observed. Keep raw `generate_chunks` and `generate_chunks_streaming` calls capped by their complete footprint because they have no world state from which to exclude loaded chunks.
+
+**Reason:** Selecting an already generated rectangle plus a small adjacent extension should pay only for the new terrain. Loaded overlap consumes neither generation CPU nor additional retained storage, so charging it against the worker payload limit unnecessarily restricts expansion.
+
+**Consequences:** A selection footprint may exceed 16,777,216 cells when most of it is loaded, while each worker job still creates at most 16,777,216 chunk-payload cells and retained generated storage remains capped at 16,384 chunks. A boundary chunk can recompute cells overlapping a non-aligned initial edge, although initial-owned cells remain authoritative and are filtered from presentation. Preview validation is cached by selection bounds and world revision to avoid repeating the bounded missing-chunk scan on unchanged frames.

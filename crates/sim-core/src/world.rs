@@ -6,6 +6,9 @@ use std::{collections::BTreeMap, error::Error, fmt};
 pub const DEFAULT_INITIAL_WORLD_SIZE: u32 = 1_024;
 const MAX_INITIAL_CELLS: u64 = 16_777_216;
 pub const CHUNK_SIZE: i64 = 64;
+/// Maximum number of previously missing chunks materialized by one request.
+pub const MAX_CHUNKS_PER_GENERATION: u64 = 4_096;
+pub const MAX_GENERATED_CHUNKS: usize = 16_384;
 const NOISE_MAX: i64 = 65_535;
 
 /// Validated initial generation dimensions, not a maximum world extent.
@@ -355,15 +358,27 @@ impl World {
     pub fn visit_cells_in(
         &self,
         bounds: WorldRect,
+        visitor: impl FnMut(WorldPosition, TerrainCell),
+    ) {
+        self.visit_cells_in_step(bounds, 1, visitor);
+    }
+
+    pub fn visit_cells_in_step(
+        &self,
+        bounds: WorldRect,
+        step: u32,
         mut visitor: impl FnMut(WorldPosition, TerrainCell),
     ) {
+        let step = i64::from(step.max(1));
         let min_x = bounds.min.x.max(0).min(i64::from(self.width));
         let min_y = bounds.min.y.max(0).min(i64::from(self.height));
         let max_x = bounds.max.x.max(0).min(i64::from(self.width));
         let max_y = bounds.max.y.max(0).min(i64::from(self.height));
-        for y in min_y..max_y {
+        let min_x = align_to_step(min_x, step);
+        let min_y = align_to_step(min_y, step);
+        for y in (min_y..max_y).step_by(step as usize) {
             let row = y as usize * self.width as usize;
-            for x in min_x..max_x {
+            for x in (min_x..max_x).step_by(step as usize) {
                 visitor(WorldPosition { x, y }, self.terrain[row + x as usize]);
             }
         }
@@ -371,23 +386,60 @@ impl World {
         if bounds.max.x <= bounds.min.x || bounds.max.y <= bounds.min.y {
             return;
         }
-        for coord in chunk_coords(bounds) {
-            let Some(chunk) = self.chunks.get(&coord) else {
-                continue;
+        for chunk in self
+            .chunks
+            .values()
+            .filter(|chunk| chunk_intersects(bounds, chunk.coord))
+        {
+            let origin = chunk_origin(chunk.coord);
+            let chunk_max = WorldPosition {
+                x: origin.x + CHUNK_SIZE,
+                y: origin.y + CHUNK_SIZE,
             };
-            let origin = chunk_origin(coord);
-            let start_x = bounds.min.x.max(origin.x);
-            let start_y = bounds.min.y.max(origin.y);
-            let end_x = bounds.max.x.min(origin.x + CHUNK_SIZE);
-            let end_y = bounds.max.y.min(origin.y + CHUNK_SIZE);
-            for y in start_y..end_y {
-                for x in start_x..end_x {
-                    if x >= 0 && y >= 0 && x < i64::from(self.width) && y < i64::from(self.height) {
-                        continue;
-                    }
-                    let index = ((y - origin.y) * CHUNK_SIZE + x - origin.x) as usize;
-                    visitor(WorldPosition { x, y }, chunk.terrain[index]);
-                }
+            let initial_max = WorldPosition {
+                x: i64::from(self.width),
+                y: i64::from(self.height),
+            };
+            let middle_min_y = origin.y.max(0);
+            let middle_max_y = chunk_max.y.min(initial_max.y);
+            let outside_initial = [
+                WorldRect {
+                    min: origin,
+                    max: WorldPosition {
+                        x: chunk_max.x,
+                        y: chunk_max.y.min(0),
+                    },
+                },
+                WorldRect {
+                    min: WorldPosition {
+                        x: origin.x,
+                        y: origin.y.max(initial_max.y),
+                    },
+                    max: chunk_max,
+                },
+                WorldRect {
+                    min: WorldPosition {
+                        x: origin.x,
+                        y: middle_min_y,
+                    },
+                    max: WorldPosition {
+                        x: chunk_max.x.min(0),
+                        y: middle_max_y,
+                    },
+                },
+                WorldRect {
+                    min: WorldPosition {
+                        x: origin.x.max(initial_max.x),
+                        y: middle_min_y,
+                    },
+                    max: WorldPosition {
+                        x: chunk_max.x,
+                        y: middle_max_y,
+                    },
+                },
+            ];
+            for region in outside_initial {
+                visit_chunk_region(chunk, origin, region, bounds, step, &mut visitor);
             }
         }
     }
@@ -403,10 +455,11 @@ impl World {
         if bounds.max.x <= bounds.min.x || bounds.max.y <= bounds.min.y {
             return;
         }
-        for coord in chunk_coords(bounds) {
-            let Some(chunk) = self.chunks.get(&coord) else {
-                continue;
-            };
+        for chunk in self
+            .chunks
+            .values()
+            .filter(|chunk| chunk_intersects(bounds, chunk.coord))
+        {
             for feature in chunk.features.iter().filter(|feature| {
                 bounds.contains(feature.position)
                     && (feature.position.x < 0
@@ -420,21 +473,15 @@ impl World {
     }
 
     pub fn generate_area(&mut self, bounds: WorldRect) -> Result<(), GenerateAreaError> {
-        let width = bounds.max.x.saturating_sub(bounds.min.x);
-        let height = bounds.max.y.saturating_sub(bounds.min.y);
-        let cells = width
-            .checked_mul(height)
-            .ok_or(GenerateAreaError::TooLarge)?;
-        if width <= 0 || height <= 0 {
-            return Err(GenerateAreaError::Empty);
-        }
-        if cells > 1_048_576 {
-            return Err(GenerateAreaError::TooLarge);
-        }
-        if self.area_is_generated(bounds) {
+        let coords = self.missing_chunk_coords(bounds)?;
+        if coords.is_empty() {
             return Ok(());
         }
-        self.insert_chunks(Self::generate_chunks(self.seed, bounds)?);
+        let chunks = coords
+            .into_iter()
+            .map(|coord| generate_chunk(self.seed, coord))
+            .collect();
+        self.insert_chunks(chunks)?;
         Ok(())
     }
 
@@ -442,54 +489,153 @@ impl World {
         seed: u64,
         bounds: WorldRect,
     ) -> Result<Vec<WorldChunk>, GenerateAreaError> {
-        validate_bounds(bounds)?;
-        let min = chunk_coord(bounds.min);
-        let max = chunk_coord(WorldPosition {
-            x: bounds.max.x - 1,
-            y: bounds.max.y - 1,
-        });
-        let mut chunks = Vec::with_capacity(((max.x - min.x + 1) * (max.y - min.y + 1)) as usize);
-        for y in min.y..=max.y {
-            for x in min.x..=max.x {
-                chunks.push(generate_chunk(seed, ChunkCoord { x, y }));
-            }
-        }
+        let span = validate_full_chunk_request(bounds)?;
+        let mut chunks = Vec::with_capacity(span.total as usize);
+        chunks.extend(span.coords().map(|coord| generate_chunk(seed, coord)));
         Ok(chunks)
     }
 
-    pub fn insert_chunks(&mut self, chunks: Vec<WorldChunk>) -> usize {
+    pub fn generate_chunks_streaming(
+        seed: u64,
+        bounds: WorldRect,
+    ) -> Result<impl Iterator<Item = WorldChunk>, GenerateAreaError> {
+        let span = validate_full_chunk_request(bounds)?;
+        Ok(span.coords().map(move |coord| generate_chunk(seed, coord)))
+    }
+
+    pub fn generate_chunk_at(
+        seed: u64,
+        coord: ChunkCoord,
+    ) -> Result<WorldChunk, GenerateAreaError> {
+        validate_chunk_axis(coord.x)?;
+        validate_chunk_axis(coord.y)?;
+        Ok(generate_chunk(seed, coord))
+    }
+
+    pub fn insert_chunks(&mut self, chunks: Vec<WorldChunk>) -> Result<usize, GenerateAreaError> {
+        let missing: std::collections::BTreeSet<_> = chunks
+            .iter()
+            .map(WorldChunk::coord)
+            .filter(|coord| !self.chunks.contains_key(coord))
+            .collect();
+        let remaining = MAX_GENERATED_CHUNKS.saturating_sub(self.chunks.len());
+        if missing.len() > remaining {
+            return Err(GenerateAreaError::WorldCapacity {
+                requested: missing.len(),
+                remaining,
+            });
+        }
         let mut inserted = 0;
         for chunk in chunks {
-            if self.chunks.insert(chunk.coord, chunk).is_none() {
+            if let std::collections::btree_map::Entry::Vacant(entry) =
+                self.chunks.entry(chunk.coord)
+            {
+                entry.insert(chunk);
                 inserted += 1;
             }
         }
         if inserted > 0 {
             self.revision = self.revision.saturating_add(1);
         }
-        inserted
+        Ok(inserted)
+    }
+
+    /// Validates a world-aware request and returns its missing chunk count.
+    pub fn validate_generation_request(&self, bounds: WorldRect) -> Result<u64, GenerateAreaError> {
+        self.visit_missing_chunks_bounded(bounds, |_| {})
+            .map(|missing| missing as u64)
+    }
+
+    pub fn missing_chunk_coords(
+        &self,
+        bounds: WorldRect,
+    ) -> Result<Vec<ChunkCoord>, GenerateAreaError> {
+        let mut missing = Vec::new();
+        self.visit_missing_chunks_bounded(bounds, |coord| missing.push(coord))?;
+        Ok(missing)
+    }
+
+    fn visit_missing_chunks_bounded(
+        &self,
+        bounds: WorldRect,
+        mut visitor: impl FnMut(ChunkCoord),
+    ) -> Result<usize, GenerateAreaError> {
+        let span = validate_chunk_span(bounds)?;
+        if self.initial_bounds().contains_rect(bounds) {
+            return Ok(0);
+        }
+        let mut missing = 0;
+        for coord in span
+            .coords()
+            .filter(|coord| self.chunk_is_missing(bounds, *coord))
+        {
+            missing += 1;
+            if missing > MAX_CHUNKS_PER_GENERATION as usize {
+                return Err(GenerateAreaError::TooManyChunks {
+                    requested: missing as u64,
+                    maximum: MAX_CHUNKS_PER_GENERATION,
+                });
+            }
+            visitor(coord);
+        }
+        self.ensure_chunk_capacity(missing)?;
+        Ok(missing)
+    }
+
+    fn chunk_is_missing(&self, bounds: WorldRect, coord: ChunkCoord) -> bool {
+        self.selection_needs_chunk(bounds, coord) && !self.chunks.contains_key(&coord)
+    }
+
+    fn ensure_chunk_capacity(&self, requested: usize) -> Result<(), GenerateAreaError> {
+        let remaining = MAX_GENERATED_CHUNKS.saturating_sub(self.chunks.len());
+        if requested > remaining {
+            return Err(GenerateAreaError::WorldCapacity {
+                requested,
+                remaining,
+            });
+        }
+        Ok(())
+    }
+
+    pub fn generated_chunk_count(&self) -> usize {
+        self.chunks.len()
     }
 
     pub fn area_is_generated(&self, bounds: WorldRect) -> bool {
-        if validate_bounds(bounds).is_err() {
+        let Ok(span) = validate_chunk_span(bounds) else {
             return false;
+        };
+        if self.initial_bounds().contains_rect(bounds) {
+            return true;
         }
-        let initial = WorldRect {
+        span.coords().all(|coord| {
+            !self.selection_needs_chunk(bounds, coord) || self.chunks.contains_key(&coord)
+        })
+    }
+
+    fn selection_needs_chunk(&self, bounds: WorldRect, coord: ChunkCoord) -> bool {
+        let origin = chunk_origin(coord);
+        let selected_part = WorldRect {
+            min: WorldPosition {
+                x: bounds.min.x.max(origin.x),
+                y: bounds.min.y.max(origin.y),
+            },
+            max: WorldPosition {
+                x: bounds.max.x.min(origin.x + CHUNK_SIZE),
+                y: bounds.max.y.min(origin.y + CHUNK_SIZE),
+            },
+        };
+        !self.initial_bounds().contains_rect(selected_part)
+    }
+
+    fn initial_bounds(&self) -> WorldRect {
+        WorldRect {
             min: WorldPosition { x: 0, y: 0 },
             max: WorldPosition {
                 x: i64::from(self.width),
                 y: i64::from(self.height),
             },
-        };
-        if initial.contains(bounds.min)
-            && initial.contains(WorldPosition {
-                x: bounds.max.x - 1,
-                y: bounds.max.y - 1,
-            })
-        {
-            return true;
         }
-        chunk_coords(bounds).all(|coord| self.chunks.contains_key(&coord))
     }
 
     /// Finds a sparse surface feature without scanning the complete feature list.
@@ -545,19 +691,114 @@ impl World {
     }
 }
 
-fn validate_bounds(bounds: WorldRect) -> Result<(), GenerateAreaError> {
-    let width = bounds.max.x.saturating_sub(bounds.min.x);
-    let height = bounds.max.y.saturating_sub(bounds.min.y);
-    let cells = width
-        .checked_mul(height)
-        .ok_or(GenerateAreaError::TooLarge)?;
-    if width <= 0 || height <= 0 {
+#[derive(Clone, Copy)]
+struct ChunkSpan {
+    min: ChunkCoord,
+    max: ChunkCoord,
+    total: u128,
+}
+
+impl ChunkSpan {
+    fn coords(self) -> impl Iterator<Item = ChunkCoord> {
+        (self.min.y..=self.max.y)
+            .flat_map(move |y| (self.min.x..=self.max.x).map(move |x| ChunkCoord { x, y }))
+    }
+}
+
+fn validate_chunk_span(bounds: WorldRect) -> Result<ChunkSpan, GenerateAreaError> {
+    if bounds.max.x <= bounds.min.x || bounds.max.y <= bounds.min.y {
         return Err(GenerateAreaError::Empty);
     }
-    if cells > 1_048_576 {
-        return Err(GenerateAreaError::TooLarge);
+    let min = chunk_coord(bounds.min);
+    let max = chunk_coord(WorldPosition {
+        x: bounds.max.x - 1,
+        y: bounds.max.y - 1,
+    });
+    for coord in [min, max] {
+        validate_chunk_axis(coord.x)?;
+        validate_chunk_axis(coord.y)?;
     }
-    Ok(())
+    let columns = (i128::from(max.x) - i128::from(min.x) + 1) as u128;
+    let rows = (i128::from(max.y) - i128::from(min.y) + 1) as u128;
+    let requested = columns
+        .checked_mul(rows)
+        .ok_or(GenerateAreaError::TooLarge)?;
+    Ok(ChunkSpan {
+        min,
+        max,
+        total: requested,
+    })
+}
+
+fn validate_full_chunk_request(bounds: WorldRect) -> Result<ChunkSpan, GenerateAreaError> {
+    let span = validate_chunk_span(bounds)?;
+    if span.total > u128::from(MAX_CHUNKS_PER_GENERATION) {
+        return Err(GenerateAreaError::TooManyChunks {
+            requested: span.total.min(u128::from(u64::MAX)) as u64,
+            maximum: MAX_CHUNKS_PER_GENERATION,
+        });
+    }
+    Ok(span)
+}
+
+fn align_to_step(value: i64, step: i64) -> i64 {
+    let remainder = value.rem_euclid(step);
+    if remainder == 0 {
+        value
+    } else {
+        value.saturating_add(step - remainder)
+    }
+}
+
+fn align_to_step_from(value: i64, origin: i64, step: i64) -> i64 {
+    origin + align_to_step(value - origin, step)
+}
+
+fn chunk_intersects(bounds: WorldRect, coord: ChunkCoord) -> bool {
+    let origin = chunk_origin(coord);
+    bounds.max.x > origin.x
+        && bounds.max.y > origin.y
+        && bounds.min.x < origin.x + CHUNK_SIZE
+        && bounds.min.y < origin.y + CHUNK_SIZE
+}
+
+fn visit_chunk_region(
+    chunk: &WorldChunk,
+    origin: WorldPosition,
+    region: WorldRect,
+    bounds: WorldRect,
+    step: i64,
+    visitor: &mut impl FnMut(WorldPosition, TerrainCell),
+) {
+    let clipped = WorldRect {
+        min: WorldPosition {
+            x: region.min.x.max(bounds.min.x),
+            y: region.min.y.max(bounds.min.y),
+        },
+        max: WorldPosition {
+            x: region.max.x.min(bounds.max.x),
+            y: region.max.y.min(bounds.max.y),
+        },
+    };
+    if clipped.max.x <= clipped.min.x || clipped.max.y <= clipped.min.y {
+        return;
+    }
+    let start_x = align_to_step_from(clipped.min.x, region.min.x, step);
+    let start_y = align_to_step_from(clipped.min.y, region.min.y, step);
+    for y in (start_y..clipped.max.y).step_by(step as usize) {
+        for x in (start_x..clipped.max.x).step_by(step as usize) {
+            let index = ((y - origin.y) * CHUNK_SIZE + x - origin.x) as usize;
+            visitor(WorldPosition { x, y }, chunk.terrain[index]);
+        }
+    }
+}
+
+fn validate_chunk_axis(coord: i64) -> Result<(), GenerateAreaError> {
+    coord
+        .checked_mul(CHUNK_SIZE)
+        .and_then(|origin| origin.checked_add(CHUNK_SIZE))
+        .ok_or(GenerateAreaError::TooLarge)
+        .map(|_| ())
 }
 
 fn chunk_coord(position: WorldPosition) -> ChunkCoord {
@@ -572,15 +813,6 @@ fn chunk_origin(coord: ChunkCoord) -> WorldPosition {
         x: coord.x * CHUNK_SIZE,
         y: coord.y * CHUNK_SIZE,
     }
-}
-
-fn chunk_coords(bounds: WorldRect) -> impl Iterator<Item = ChunkCoord> {
-    let min = chunk_coord(bounds.min);
-    let max = chunk_coord(WorldPosition {
-        x: bounds.max.x - 1,
-        y: bounds.max.y - 1,
-    });
-    (min.y..=max.y).flat_map(move |y| (min.x..=max.x).map(move |x| ChunkCoord { x, y }))
 }
 
 fn generate_chunk(seed: u64, coord: ChunkCoord) -> WorldChunk {
@@ -620,7 +852,31 @@ const fn position_key(position: WorldPosition, width: u32) -> u64 {
 pub enum GenerateAreaError {
     Empty,
     TooLarge,
+    TooManyChunks { requested: u64, maximum: u64 },
+    WorldCapacity { requested: usize, remaining: usize },
 }
+
+impl fmt::Display for GenerateAreaError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => formatter.write_str("generation bounds must have positive dimensions"),
+            Self::TooLarge => formatter.write_str("generation coordinates exceed safe limits"),
+            Self::TooManyChunks { requested, maximum } => write!(
+                formatter,
+                "generation needs at least {requested} new chunks; maximum per request is {maximum}"
+            ),
+            Self::WorldCapacity {
+                requested,
+                remaining,
+            } => write!(
+                formatter,
+                "generation needs {requested} new chunks but only {remaining} slots remain"
+            ),
+        }
+    }
+}
+
+impl Error for GenerateAreaError {}
 
 fn classify_ground(elevation: u16, moisture: u16) -> GroundType {
     match elevation {
@@ -796,16 +1052,197 @@ mod tests {
     }
 
     #[test]
-    fn generated_area_rejects_excessive_selection() {
+    fn generated_area_accepts_large_selection_beyond_prior_cap() {
         let mut world = World::generate(1, WorldConfig::new(64, 64).unwrap());
         let bounds = WorldRect::from_inclusive_points(
             WorldPosition { x: 2_000, y: 2_000 },
             WorldPosition { x: 4_000, y: 4_000 },
         );
+        world
+            .generate_area(bounds)
+            .expect("large selection now allowed");
+        assert!(world.area_is_generated(bounds));
+        assert!(world.cell(WorldPosition { x: 4_000, y: 4_000 }).is_some());
+    }
+
+    #[test]
+    fn generated_area_rejects_overflowing_selection() {
+        let mut world = World::generate(1, WorldConfig::new(64, 64).unwrap());
+        let bounds = WorldRect {
+            min: WorldPosition {
+                x: i64::MIN,
+                y: i64::MIN,
+            },
+            max: WorldPosition {
+                x: i64::MAX,
+                y: i64::MAX,
+            },
+        };
         assert_eq!(
             world.generate_area(bounds),
             Err(GenerateAreaError::TooLarge)
         );
+    }
+
+    #[test]
+    fn generated_area_rejects_more_than_large_chunk_budget() {
+        let bounds = WorldRect::from_inclusive_points(
+            WorldPosition {
+                x: 10_000,
+                y: 10_000,
+            },
+            WorldPosition {
+                x: 15_000,
+                y: 15_000,
+            },
+        );
+        assert!(matches!(
+            World::generate_chunks_streaming(1, bounds),
+            Err(GenerateAreaError::TooManyChunks { .. })
+        ));
+    }
+
+    #[test]
+    fn generation_budget_accepts_4096_chunks_and_rejects_4097() {
+        let maximum = WorldRect {
+            min: WorldPosition { x: 0, y: 0 },
+            max: WorldPosition {
+                x: 64 * CHUNK_SIZE,
+                y: 64 * CHUNK_SIZE,
+            },
+        };
+        assert!(World::generate_chunks_streaming(1, maximum).is_ok());
+
+        let over = WorldRect {
+            min: WorldPosition { x: 0, y: 0 },
+            max: WorldPosition {
+                x: 17 * CHUNK_SIZE,
+                y: 241 * CHUNK_SIZE,
+            },
+        };
+        assert!(matches!(
+            World::generate_chunks_streaming(1, over),
+            Err(GenerateAreaError::TooManyChunks {
+                requested: 4_097,
+                maximum: MAX_CHUNKS_PER_GENERATION,
+            })
+        ));
+    }
+
+    #[test]
+    fn generation_budget_counts_only_missing_chunks() {
+        let world = World::generate(1, WorldConfig::new(64, 64).unwrap());
+        let overlaps_initial = WorldRect {
+            min: WorldPosition { x: 0, y: 0 },
+            max: WorldPosition {
+                x: 17 * CHUNK_SIZE,
+                y: 241 * CHUNK_SIZE,
+            },
+        };
+        assert_eq!(
+            world.validate_generation_request(overlaps_initial),
+            Ok(MAX_CHUNKS_PER_GENERATION)
+        );
+        let missing = world.missing_chunk_coords(overlaps_initial).unwrap();
+        assert_eq!(missing.len(), MAX_CHUNKS_PER_GENERATION as usize);
+        assert!(!missing.contains(&ChunkCoord { x: 0, y: 0 }));
+
+        let outside_origin = WorldPosition {
+            x: 100 * CHUNK_SIZE,
+            y: 100 * CHUNK_SIZE,
+        };
+        let requires_4097 = WorldRect {
+            min: outside_origin,
+            max: WorldPosition {
+                x: outside_origin.x + 17 * CHUNK_SIZE,
+                y: outside_origin.y + 241 * CHUNK_SIZE,
+            },
+        };
+        assert!(matches!(
+            world.validate_generation_request(requires_4097),
+            Err(GenerateAreaError::TooManyChunks {
+                requested: 4_097,
+                maximum: MAX_CHUNKS_PER_GENERATION,
+            })
+        ));
+        assert!(matches!(
+            world.missing_chunk_coords(requires_4097),
+            Err(GenerateAreaError::TooManyChunks {
+                requested: 4_097,
+                maximum: MAX_CHUNKS_PER_GENERATION,
+            })
+        ));
+    }
+
+    #[test]
+    fn missing_budget_counts_partial_initial_boundary_chunk() {
+        let world = World::generate(1, WorldConfig::new(96, 64).unwrap());
+        let bounds = WorldRect {
+            min: WorldPosition { x: 64, y: 0 },
+            max: WorldPosition { x: 128, y: 64 },
+        };
+        assert_eq!(world.validate_generation_request(bounds), Ok(1));
+        assert_eq!(
+            world.missing_chunk_coords(bounds).unwrap(),
+            vec![ChunkCoord { x: 1, y: 0 }]
+        );
+    }
+
+    #[test]
+    fn huge_world_aware_request_stops_at_missing_chunk_limit() {
+        let world = World::generate(1, WorldConfig::new(64, 64).unwrap());
+        let bounds = WorldRect {
+            min: WorldPosition { x: 0, y: 0 },
+            max: WorldPosition {
+                x: 1_000_000_000,
+                y: 1,
+            },
+        };
+        assert!(matches!(
+            world.validate_generation_request(bounds),
+            Err(GenerateAreaError::TooManyChunks {
+                requested: 4_097,
+                maximum: MAX_CHUNKS_PER_GENERATION,
+            })
+        ));
+    }
+
+    #[test]
+    fn one_dimensional_extreme_range_is_rejected() {
+        let bounds = WorldRect {
+            min: WorldPosition { x: i64::MIN, y: 0 },
+            max: WorldPosition { x: 0, y: 1 },
+        };
+        assert!(matches!(
+            World::generate_chunks_streaming(1, bounds),
+            Err(GenerateAreaError::TooManyChunks { .. })
+        ));
+    }
+
+    #[test]
+    fn chunk_at_positive_coordinate_limit_is_rejected() {
+        let bounds = WorldRect {
+            min: WorldPosition {
+                x: i64::MAX - 10,
+                y: 0,
+            },
+            max: WorldPosition { x: i64::MAX, y: 1 },
+        };
+        assert_eq!(
+            World::generate_chunks_streaming(1, bounds).map(|_| ()),
+            Err(GenerateAreaError::TooLarge)
+        );
+    }
+
+    #[test]
+    fn chunk_at_negative_coordinate_limit_is_generated() {
+        let coord = ChunkCoord {
+            x: i64::MIN / CHUNK_SIZE,
+            y: 0,
+        };
+        let chunk = World::generate_chunk_at(1, coord).expect("minimum origin is representable");
+        assert_eq!(chunk.coord(), coord);
+        assert_eq!(chunk.terrain().len(), (CHUNK_SIZE * CHUNK_SIZE) as usize);
     }
 
     #[test]
@@ -833,5 +1270,118 @@ mod tests {
         let revision = world.revision();
         world.generate_area(bounds).unwrap();
         assert_eq!(world.revision(), revision);
+    }
+
+    #[test]
+    fn missing_chunks_skip_initial_and_already_generated_areas() {
+        let mut world = World::generate(5, WorldConfig::new(64, 64).unwrap());
+        let first = WorldRect {
+            min: WorldPosition { x: -64, y: 0 },
+            max: WorldPosition { x: 128, y: 64 },
+        };
+        assert_eq!(
+            world.missing_chunk_coords(first).unwrap(),
+            vec![ChunkCoord { x: -1, y: 0 }, ChunkCoord { x: 1, y: 0 }]
+        );
+        world.generate_area(first).unwrap();
+
+        let extended = WorldRect {
+            min: first.min,
+            max: WorldPosition { x: 192, y: 64 },
+        };
+        assert_eq!(
+            world.missing_chunk_coords(extended).unwrap(),
+            vec![ChunkCoord { x: 2, y: 0 }]
+        );
+    }
+
+    #[test]
+    fn stepped_cell_visit_samples_initial_and_generated_chunks() {
+        let mut world = World::generate(5, WorldConfig::new(64, 64).unwrap());
+        world
+            .generate_area(WorldRect {
+                min: WorldPosition { x: -64, y: 0 },
+                max: WorldPosition { x: 0, y: 64 },
+            })
+            .unwrap();
+        let mut positions = Vec::new();
+        world.visit_cells_in_step(
+            WorldRect {
+                min: WorldPosition { x: -64, y: 0 },
+                max: WorldPosition { x: 64, y: 64 },
+            },
+            4,
+            |position, _| positions.push(position),
+        );
+
+        assert_eq!(positions.len(), 512);
+        assert!(
+            positions
+                .iter()
+                .all(|position| position.x.rem_euclid(4) == 0 && position.y.rem_euclid(4) == 0)
+        );
+    }
+
+    #[test]
+    fn generate_chunks_streaming_matches_batch_output() {
+        let bounds = WorldRect::from_inclusive_points(
+            WorldPosition { x: -64, y: -128 },
+            WorldPosition { x: 200, y: -1 },
+        );
+        let batch = World::generate_chunks(11, bounds).expect("valid bounds");
+        let streamed: Vec<_> = World::generate_chunks_streaming(11, bounds)
+            .expect("valid bounds")
+            .collect();
+        assert_eq!(batch.len(), streamed.len());
+        assert!(batch.iter().zip(streamed.iter()).all(|(a, b)| a == b));
+    }
+
+    #[test]
+    fn generated_chunk_store_enforces_total_capacity() {
+        let mut world = World::generate(1, WorldConfig::new(64, 64).unwrap());
+        let chunks = (0..MAX_GENERATED_CHUNKS)
+            .map(|index| WorldChunk {
+                coord: ChunkCoord {
+                    x: index as i64 + 1,
+                    y: 0,
+                },
+                terrain: Vec::new(),
+                features: Vec::new(),
+            })
+            .collect();
+        assert_eq!(
+            world.insert_chunks(chunks).expect("capacity is accepted"),
+            MAX_GENERATED_CHUNKS
+        );
+        let missing_bounds = WorldRect {
+            min: WorldPosition { x: -64, y: 0 },
+            max: WorldPosition { x: 0, y: 64 },
+        };
+        let capacity_error = GenerateAreaError::WorldCapacity {
+            requested: 1,
+            remaining: 0,
+        };
+        assert_eq!(
+            world.validate_generation_request(missing_bounds),
+            Err(capacity_error)
+        );
+        assert_eq!(
+            world.missing_chunk_coords(missing_bounds),
+            Err(capacity_error)
+        );
+        let error = world
+            .insert_chunks(vec![WorldChunk {
+                coord: ChunkCoord { x: -1, y: 0 },
+                terrain: Vec::new(),
+                features: Vec::new(),
+            }])
+            .expect_err("capacity must be enforced");
+        assert_eq!(
+            error,
+            GenerateAreaError::WorldCapacity {
+                requested: 1,
+                remaining: 0,
+            }
+        );
     }
 }

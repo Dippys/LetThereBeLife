@@ -4,5 +4,5 @@ ticks_per_second = 60
 
 [world]
 # This is the initially generated area, not the maximum extent of the world.
-initial_width = 1024
-initial_height = 1024
+initial_width = 4096
+initial_height = 4096
