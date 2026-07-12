@@ -132,8 +132,22 @@ impl Camera {
 }
 
 impl CameraView {
+    pub fn center(self) -> [f32; 2] {
+        [self.center_x as f32, self.center_y as f32]
+    }
+
     pub const fn scale(self) -> f64 {
         self.scale
+    }
+
+    pub fn world_bounds(self) -> sim_core::WorldRect {
+        sim_core::WorldRect {
+            min: self.screen_to_world_position(0.0, 0.0),
+            max: self.screen_to_world_position(
+                f64::from(self.screen_width),
+                f64::from(self.screen_height),
+            ),
+        }
     }
 
     pub fn screen_to_world_position(self, screen_x: f64, screen_y: f64) -> WorldPosition {
@@ -143,13 +157,6 @@ impl CameraView {
             x: floor_to_i64(x),
             y: floor_to_i64(y),
         }
-    }
-
-    pub fn world_to_screen(self, position: WorldPosition) -> (f64, f64) {
-        (
-            (position.x as f64 - self.center_x) * self.scale + f64::from(self.screen_width) / 2.0,
-            (position.y as f64 - self.center_y) * self.scale + f64::from(self.screen_height) / 2.0,
-        )
     }
 }
 

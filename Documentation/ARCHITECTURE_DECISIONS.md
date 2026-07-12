@@ -95,3 +95,15 @@ Date: 2026-07-12
 **Reason:** The current executable only loads configuration, advances an in-process engine for a fixed number of ticks, and exits. Its name should describe current behavior rather than imply a network contract that does not exist.
 
 **Consequences:** Cargo commands, executable names, VS Code launch entries, validation, and living documentation use `sim-headless`.
+
+## D-011: Chunk-keyed world expansion and GPU presentation
+
+Date: 2026-07-12
+
+**Supersedes:** The temporary `softbuffer` renderer in D-002 and retained patch storage in D-008.
+
+**Decision:** Store selected generated areas as deterministic 64 x 64 chunks keyed by signed coordinates, generate them on a dedicated viewer worker, and replace CPU framebuffer rasterization with `wgpu` instanced rendering. Bound GPU extraction to a padded camera rectangle and cap active redraws at 60 Hz.
+
+**Reason:** Linear generated-area lookup, global feature scans, synchronous generation, per-pixel CPU rendering, and uncapped polling caused fullscreen and world-growth hitches despite low aggregate CPU and memory usage.
+
+**Consequences:** `sim-core` remains GPU- and thread-runtime-independent; workers produce plain `WorldChunk` values and the engine owns insertion. The viewer adds `wgpu`, `pollster`, and `bytemuck`. GPU buffers rebuild when world revision changes or the camera exits its 128-cell cached margin. Paused unchanged scenes do not redraw.

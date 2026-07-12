@@ -13,7 +13,7 @@ sim-headless
 
 sim-viewer
   Loads shared configuration and owns native windowing, keyboard input, the fixed-step driver,
-  camera/hover state, and temporary rendering. Reads SimulationSnapshot
+  camera/hover state, a background generation worker, and wgpu rendering. Reads SimulationSnapshot
   and immutable World data for presentation.
 ```
 
@@ -33,8 +33,12 @@ sim-viewer
 - Mouse-wheel zoom preserves the world point under the cursor. Left-button dragging translates the presentation camera without clamping it to the generated initial area.
 - Camera space uses floating-point presentation coordinates and may move into negative or otherwise ungenerated locations; `World` lookup still returns only simulation-owned generated cells.
 - `EngineCommand::GenerateWorldArea` routes right-drag generation into `sim-core`; `WorldRect` uses signed inclusive-minimum/exclusive-maximum coordinates.
-- Generated selections are retained as dense patches with sparse features. Each command is capped at 1,048,576 cells, and fully generated selections are ignored.
+- Generated selections are split into deterministic 64 x 64 chunks stored by signed `ChunkCoord` in a `BTreeMap`. Each request is capped at 1,048,576 selected cells, and existing chunks are ignored without changing world revision.
 - `World::feature_at` uses binary search over row-major sorted sparse features for bounded hover lookup without a global scan.
+- `World::visit_cells_in` and `visit_features_in` bound presentation extraction to a camera rectangle and relevant chunk keys.
+- Selected-area generation runs on one dedicated viewer worker. It produces self-contained `WorldChunk` values without mutating live state; the main thread applies completed chunks through `Engine::apply_world_chunks`.
+- The viewer caps active presentation at 60 Hz and stops redrawing when paused and unchanged. Input, resize, ticks, and completed generation mark presentation dirty.
+- The `wgpu` renderer keeps camera transforms in uniforms and terrain/features in instance buffers. A padded camera cache prevents buffer uploads during ordinary small pans.
 
 ## Dependencies
 
@@ -42,4 +46,4 @@ sim-viewer
 - `sim-config`: `sim-core`, `serde`, and `toml`; owns filesystem and TOML concerns shared by runtime binaries.
 - The `sim-config` build script tracks the repository configuration and copies it into the active Cargo profile directory so directly launched binaries retain the default `config/simulation.toml` layout.
 - `sim-headless`: `sim-config` and `sim-core`.
-- `sim-viewer`: `sim-config`, `sim-core`, `winit`, and `softbuffer`.
+- `sim-viewer`: `sim-config`, `sim-core`, `winit`, `wgpu`, `pollster`, and `bytemuck`.

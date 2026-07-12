@@ -3,8 +3,9 @@
 mod world;
 
 pub use world::{
-    DEFAULT_INITIAL_WORLD_SIZE, Feature, FeatureKind, GenerateAreaError, GroundType, TerrainCell,
-    World, WorldConfig, WorldConfigError, WorldPosition, WorldRect,
+    CHUNK_SIZE, ChunkCoord, DEFAULT_INITIAL_WORLD_SIZE, Feature, FeatureKind, GenerateAreaError,
+    GroundType, TerrainCell, World, WorldChunk, WorldConfig, WorldConfigError, WorldPosition,
+    WorldRect,
 };
 
 use std::time::Duration;
@@ -107,6 +108,10 @@ impl Engine {
     /// Returns immutable world state for headless tools and presentation clients.
     pub fn world(&self) -> &World {
         &self.world
+    }
+
+    pub fn apply_world_chunks(&mut self, chunks: Vec<WorldChunk>) -> usize {
+        self.world.insert_chunks(chunks)
     }
 
     pub fn snapshot(&self) -> SimulationSnapshot {

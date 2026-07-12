@@ -64,4 +64,4 @@ Verify the workspace with `cargo test --workspace` and `cargo clippy --workspace
 - `sim-core`: deterministic time, engine lifecycle, world generation, sparse features, commands, and presentation snapshots
 - `sim-config`: shared TOML configuration loading and validation
 - `sim-headless`: minimal non-graphical simulation runner
-- `sim-viewer`: native window, input, fixed-step loop, and a software-rendered status view
+- `sim-viewer`: native window, input, fixed-step loop, background chunk generation, and GPU presentation through `wgpu`

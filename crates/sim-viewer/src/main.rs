@@ -1,12 +1,20 @@
 mod camera;
 mod renderer;
 
-use std::{num::NonZeroU32, sync::Arc, time::Instant};
+use std::{
+    sync::{
+        Arc,
+        mpsc::{self, Receiver, SyncSender},
+    },
+    thread,
+    time::{Duration, Instant},
+};
 
 use camera::{Camera, Viewport};
 use sim_config::{AppConfig, DEFAULT_CONFIG_PATH};
-use sim_core::{Engine, EngineCommand, WorldPosition, WorldRect};
-use softbuffer::{Context, Surface};
+use sim_core::{
+    Engine, EngineCommand, GenerateAreaError, World, WorldChunk, WorldPosition, WorldRect,
+};
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
@@ -20,7 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_path = config_path()?;
     let engine = Engine::new(AppConfig::load(config_path)?.engine_config()?);
     let event_loop = EventLoop::new()?;
-    event_loop.set_control_flow(ControlFlow::Poll);
+    event_loop.set_control_flow(ControlFlow::Wait);
     let mut app = ViewerApp::new(engine);
     event_loop.run_app(&mut app)?;
     Ok(())
@@ -44,7 +52,7 @@ fn config_path() -> Result<String, Box<dyn std::error::Error>> {
 
 struct ViewerApp {
     window: Option<Arc<Window>>,
-    surface: Option<Surface<Arc<Window>, Arc<Window>>>,
+    renderer: Option<renderer::Renderer>,
     engine: Engine,
     last_frame: Option<Instant>,
     accumulator: f64,
@@ -54,6 +62,10 @@ struct ViewerApp {
     dragging: bool,
     selection_start: Option<WorldPosition>,
     selection: Option<WorldRect>,
+    generator: WorldGenerator,
+    generation_pending: bool,
+    next_frame: Instant,
+    dirty: bool,
 }
 
 impl ViewerApp {
@@ -61,7 +73,7 @@ impl ViewerApp {
         let camera = Camera::centered(engine.world().width(), engine.world().height());
         Self {
             window: None,
-            surface: None,
+            renderer: None,
             engine,
             last_frame: None,
             accumulator: 0.0,
@@ -71,6 +83,10 @@ impl ViewerApp {
             dragging: false,
             selection_start: None,
             selection: None,
+            generator: WorldGenerator::new(),
+            generation_pending: false,
+            next_frame: Instant::now(),
+            dirty: true,
         }
     }
 }
@@ -82,9 +98,10 @@ impl ViewerApp {
             .with_inner_size(LogicalSize::new(960, 540))
             .with_min_inner_size(LogicalSize::new(640, 360));
         let window = Arc::new(event_loop.create_window(attributes).expect("create window"));
-        let context = Context::new(window.clone()).expect("create graphics context");
-        let surface = Surface::new(&context, window.clone()).expect("create graphics surface");
-        self.surface = Some(surface);
+        self.renderer = Some(
+            renderer::Renderer::new(window.clone(), self.engine.world())
+                .expect("initialize GPU renderer"),
+        );
         self.window = Some(window);
         self.last_frame = Some(Instant::now());
     }
@@ -104,21 +121,14 @@ impl ViewerApp {
     }
 
     fn render(&mut self) {
-        let (Some(window), Some(surface)) = (&self.window, &mut self.surface) else {
+        let (Some(window), Some(renderer)) = (&self.window, &mut self.renderer) else {
             return;
         };
         let size = window.inner_size();
-        let (Some(width), Some(height)) =
-            (NonZeroU32::new(size.width), NonZeroU32::new(size.height))
-        else {
+        if size.width == 0 || size.height == 0 {
             return;
-        };
-        surface.resize(width, height).expect("resize surface");
-        let mut buffer = surface.buffer_mut().expect("acquire frame buffer");
-        renderer::draw(
-            &mut buffer,
-            size.width,
-            size.height,
+        }
+        let result = renderer.render(
             self.engine.world(),
             renderer::RenderState {
                 snapshot: self.engine.snapshot(),
@@ -127,7 +137,26 @@ impl ViewerApp {
                 selection: self.selection,
             },
         );
-        buffer.present().expect("present frame");
+        match result {
+            Ok(()) => {}
+            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                renderer.resize(size.width, size.height)
+            }
+            Err(wgpu::SurfaceError::OutOfMemory) => std::process::exit(1),
+            Err(wgpu::SurfaceError::Timeout | wgpu::SurfaceError::Other) => {}
+        }
+    }
+
+    fn poll_generation(&mut self) -> bool {
+        let Some(result) = self.generator.try_recv() else {
+            return false;
+        };
+        self.generation_pending = false;
+        if let Ok(chunks) = result {
+            self.engine.apply_world_chunks(chunks);
+        }
+        self.update_hover();
+        true
     }
 
     fn update_hover(&mut self) {
@@ -210,6 +239,13 @@ impl ViewerApp {
         };
         if let Some(command) = command {
             self.engine.command(command);
+            if matches!(
+                command,
+                EngineCommand::TogglePause | EngineCommand::SetPaused(_)
+            ) {
+                self.last_frame = Some(Instant::now());
+                self.accumulator = 0.0;
+            }
         }
     }
 }
@@ -228,8 +264,13 @@ impl ApplicationHandler for ViewerApp {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::RedrawRequested => {
-                self.update();
                 self.render();
+            }
+            WindowEvent::Resized(size) => {
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.resize(size.width, size.height);
+                }
+                self.dirty = true;
             }
             WindowEvent::CursorMoved { position, .. } => {
                 if self.dragging
@@ -255,6 +296,7 @@ impl ApplicationHandler for ViewerApp {
                     self.selection = Some(WorldRect::from_inclusive_points(start, current));
                 }
                 self.update_hover();
+                self.dirty = true;
             }
             WindowEvent::CursorLeft { .. } => {
                 self.cursor = None;
@@ -265,6 +307,7 @@ impl ApplicationHandler for ViewerApp {
                 if let Some(window) = &self.window {
                     window.set_title("Let There Be Life");
                 }
+                self.dirty = true;
             }
             WindowEvent::MouseInput {
                 state,
@@ -272,48 +315,138 @@ impl ApplicationHandler for ViewerApp {
                 ..
             } => {
                 self.dragging = state == ElementState::Pressed;
+                self.dirty = true;
             }
             WindowEvent::MouseInput {
                 state,
                 button: MouseButton::Right,
                 ..
-            } => match state {
-                ElementState::Pressed => {
-                    if let (Some(window), Some((x, y))) = (&self.window, self.cursor) {
-                        let size = window.inner_size();
-                        let start = self.camera.screen_to_world_position(
-                            x,
-                            y,
-                            self.viewport(size.width, size.height),
-                        );
-                        self.selection_start = Some(start);
-                        self.selection = Some(WorldRect::from_inclusive_points(start, start));
+            } => {
+                match state {
+                    ElementState::Pressed => {
+                        if let (Some(window), Some((x, y))) = (&self.window, self.cursor) {
+                            let size = window.inner_size();
+                            let start = self.camera.screen_to_world_position(
+                                x,
+                                y,
+                                self.viewport(size.width, size.height),
+                            );
+                            self.selection_start = Some(start);
+                            self.selection = Some(WorldRect::from_inclusive_points(start, start));
+                        }
+                    }
+                    ElementState::Released => {
+                        if let Some(bounds) = self.selection.take() {
+                            if !self.generation_pending
+                                && !self.engine.world().area_is_generated(bounds)
+                            {
+                                self.generation_pending =
+                                    self.generator.request(self.engine.config().seed, bounds);
+                            }
+                        }
+                        self.selection_start = None;
+                        self.update_hover();
                     }
                 }
-                ElementState::Released => {
-                    if let Some(bounds) = self.selection.take() {
-                        self.engine
-                            .command(EngineCommand::GenerateWorldArea(bounds));
-                    }
-                    self.selection_start = None;
-                    self.update_hover();
-                }
-            },
-            WindowEvent::MouseWheel { delta, .. } => self.zoom(delta),
+                self.dirty = true;
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                self.zoom(delta);
+                self.dirty = true;
+            }
             WindowEvent::KeyboardInput { event, .. }
                 if event.state == ElementState::Pressed && !event.repeat =>
             {
                 if let PhysicalKey::Code(code) = event.physical_key {
                     self.handle_key(code, event_loop);
+                    self.dirty = true;
                 }
             }
             _ => {}
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        if let Some(window) = &self.window {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let previous_tick = self.engine.snapshot().tick;
+        self.dirty |= self.poll_generation();
+        self.update();
+        let snapshot = self.engine.snapshot();
+        if (self.dirty || snapshot.tick != previous_tick)
+            && let Some(window) = &self.window
+        {
             window.request_redraw();
+            self.dirty = false;
         }
+        if !snapshot.paused || self.generation_pending {
+            let frame_time = Duration::from_secs_f64(1.0 / 60.0);
+            let now = Instant::now();
+            self.next_frame = self.next_frame.max(now) + frame_time;
+            event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_frame));
+        } else {
+            event_loop.set_control_flow(ControlFlow::Wait);
+        }
+    }
+}
+
+struct GenerationJob {
+    seed: u64,
+    bounds: WorldRect,
+}
+
+struct WorldGenerator {
+    jobs: SyncSender<GenerationJob>,
+    completed: Receiver<Result<Vec<WorldChunk>, GenerateAreaError>>,
+}
+
+impl WorldGenerator {
+    fn new() -> Self {
+        let (jobs_tx, jobs_rx) = mpsc::sync_channel::<GenerationJob>(1);
+        let (completed_tx, completed_rx) = mpsc::channel();
+        thread::Builder::new()
+            .name("world-generator".to_owned())
+            .spawn(move || {
+                while let Ok(job) = jobs_rx.recv() {
+                    if completed_tx
+                        .send(World::generate_chunks(job.seed, job.bounds))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            })
+            .expect("spawn world generator");
+        Self {
+            jobs: jobs_tx,
+            completed: completed_rx,
+        }
+    }
+
+    fn request(&self, seed: u64, bounds: WorldRect) -> bool {
+        self.jobs.try_send(GenerationJob { seed, bounds }).is_ok()
+    }
+
+    fn try_recv(&self) -> Option<Result<Vec<WorldChunk>, GenerateAreaError>> {
+        self.completed.try_recv().ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn world_generation_runs_on_worker_thread() {
+        let generator = WorldGenerator::new();
+        let bounds = WorldRect::from_inclusive_points(
+            WorldPosition { x: -64, y: -64 },
+            WorldPosition { x: -1, y: -1 },
+        );
+        assert!(generator.request(7, bounds));
+        let chunks = generator
+            .completed
+            .recv_timeout(Duration::from_secs(2))
+            .expect("worker returns")
+            .expect("valid generation");
+        assert_eq!(chunks.len(), 1);
     }
 }

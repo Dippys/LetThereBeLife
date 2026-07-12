@@ -1,11 +1,11 @@
 //! Deterministic terrain and sparse surface-feature generation.
 
-use std::{error::Error, fmt};
+use std::{collections::BTreeMap, error::Error, fmt};
 
 /// Default side length of the initially generated area.
 pub const DEFAULT_INITIAL_WORLD_SIZE: u32 = 1_024;
 const MAX_INITIAL_CELLS: u64 = 16_777_216;
-const CHUNK_SIZE: u32 = 64;
+pub const CHUNK_SIZE: i64 = 64;
 const NOISE_MAX: i64 = 65_535;
 
 /// Validated initial generation dimensions, not a maximum world extent.
@@ -103,6 +103,26 @@ impl WorldRect {
             && position.x < self.max.x
             && position.y < self.max.y
     }
+
+    pub fn contains_rect(self, other: Self) -> bool {
+        self.min.x <= other.min.x
+            && self.min.y <= other.min.y
+            && self.max.x >= other.max.x
+            && self.max.y >= other.max.y
+    }
+
+    pub fn expanded(self, cells: i64) -> Self {
+        Self {
+            min: WorldPosition {
+                x: self.min.x.saturating_sub(cells),
+                y: self.min.y.saturating_sub(cells),
+            },
+            max: WorldPosition {
+                x: self.max.x.saturating_add(cells),
+                y: self.max.y.saturating_add(cells),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -138,6 +158,33 @@ pub struct Feature {
     pub kind: FeatureKind,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ChunkCoord {
+    pub x: i64,
+    pub y: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorldChunk {
+    coord: ChunkCoord,
+    terrain: Vec<TerrainCell>,
+    features: Vec<Feature>,
+}
+
+impl WorldChunk {
+    pub const fn coord(&self) -> ChunkCoord {
+        self.coord
+    }
+
+    pub fn terrain(&self) -> &[TerrainCell] {
+        &self.terrain
+    }
+
+    pub fn features(&self) -> &[Feature] {
+        &self.features
+    }
+}
+
 /// A generated base world. Terrain is dense; interactive objects remain sparse.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct World {
@@ -146,15 +193,8 @@ pub struct World {
     height: u32,
     terrain: Vec<TerrainCell>,
     features: Vec<Feature>,
-    generated_areas: Vec<GeneratedArea>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct GeneratedArea {
-    bounds: WorldRect,
-    width: usize,
-    terrain: Vec<TerrainCell>,
-    features: Vec<Feature>,
+    chunks: BTreeMap<ChunkCoord, WorldChunk>,
+    revision: u64,
 }
 
 impl World {
@@ -181,14 +221,14 @@ impl World {
         let mut features = Vec::new();
 
         // Chunk-major generation establishes stable ordering for later streaming.
-        let chunks_x = width.div_ceil(CHUNK_SIZE);
-        let chunks_y = height.div_ceil(CHUNK_SIZE);
+        let chunks_x = width.div_ceil(CHUNK_SIZE as u32);
+        let chunks_y = height.div_ceil(CHUNK_SIZE as u32);
         for chunk_y in 0..chunks_y {
             for chunk_x in 0..chunks_x {
-                let end_y = ((chunk_y + 1) * CHUNK_SIZE).min(height);
-                let end_x = ((chunk_x + 1) * CHUNK_SIZE).min(width);
-                for y in chunk_y * CHUNK_SIZE..end_y {
-                    for x in chunk_x * CHUNK_SIZE..end_x {
+                let end_y = ((chunk_y + 1) * CHUNK_SIZE as u32).min(height);
+                let end_x = ((chunk_x + 1) * CHUNK_SIZE as u32).min(width);
+                for y in chunk_y * CHUNK_SIZE as u32..end_y {
+                    for x in chunk_x * CHUNK_SIZE as u32..end_x {
                         let elevation = terrain_noise(seed, x, y, 0);
                         let moisture = terrain_noise(seed, x, y, 1);
                         let ground = classify_ground(elevation, moisture);
@@ -219,7 +259,8 @@ impl World {
             height,
             terrain,
             features,
-            generated_areas: Vec::new(),
+            chunks: BTreeMap::new(),
+            revision: 0,
         }
     }
 
@@ -239,12 +280,143 @@ impl World {
         &self.features
     }
 
-    pub fn visible_features(&self) -> impl Iterator<Item = &Feature> {
+    pub const fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub fn cells(&self) -> impl Iterator<Item = (WorldPosition, TerrainCell)> + '_ {
+        let width = self.width as usize;
+        let initial = self
+            .terrain
+            .iter()
+            .copied()
+            .enumerate()
+            .map(move |(index, cell)| {
+                (
+                    WorldPosition {
+                        x: (index % width) as i64,
+                        y: (index / width) as i64,
+                    },
+                    cell,
+                )
+            });
+        let initial_width = i64::from(self.width);
+        let initial_height = i64::from(self.height);
+        let generated = self
+            .chunks
+            .values()
+            .flat_map(|chunk| {
+                let origin = chunk_origin(chunk.coord);
+                chunk
+                    .terrain
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .map(move |(index, cell)| {
+                        (
+                            WorldPosition {
+                                x: origin.x + index as i64 % CHUNK_SIZE,
+                                y: origin.y + index as i64 / CHUNK_SIZE,
+                            },
+                            cell,
+                        )
+                    })
+            })
+            .filter(move |(position, _)| {
+                position.x < 0
+                    || position.y < 0
+                    || position.x >= initial_width
+                    || position.y >= initial_height
+            });
+        initial.chain(generated)
+    }
+
+    pub fn all_features(&self) -> impl Iterator<Item = &Feature> {
+        let initial_width = i64::from(self.width);
+        let initial_height = i64::from(self.height);
         self.features.iter().chain(
-            self.generated_areas
-                .iter()
-                .flat_map(|area| area.features.iter()),
+            self.chunks
+                .values()
+                .flat_map(|chunk| chunk.features.iter())
+                .filter(move |feature| {
+                    feature.position.x < 0
+                        || feature.position.y < 0
+                        || feature.position.x >= initial_width
+                        || feature.position.y >= initial_height
+                }),
         )
+    }
+
+    pub fn features_in(&self, bounds: WorldRect) -> impl Iterator<Item = &Feature> {
+        self.all_features()
+            .filter(move |feature| bounds.contains(feature.position))
+    }
+
+    pub fn visit_cells_in(
+        &self,
+        bounds: WorldRect,
+        mut visitor: impl FnMut(WorldPosition, TerrainCell),
+    ) {
+        let min_x = bounds.min.x.max(0).min(i64::from(self.width));
+        let min_y = bounds.min.y.max(0).min(i64::from(self.height));
+        let max_x = bounds.max.x.max(0).min(i64::from(self.width));
+        let max_y = bounds.max.y.max(0).min(i64::from(self.height));
+        for y in min_y..max_y {
+            let row = y as usize * self.width as usize;
+            for x in min_x..max_x {
+                visitor(WorldPosition { x, y }, self.terrain[row + x as usize]);
+            }
+        }
+
+        if bounds.max.x <= bounds.min.x || bounds.max.y <= bounds.min.y {
+            return;
+        }
+        for coord in chunk_coords(bounds) {
+            let Some(chunk) = self.chunks.get(&coord) else {
+                continue;
+            };
+            let origin = chunk_origin(coord);
+            let start_x = bounds.min.x.max(origin.x);
+            let start_y = bounds.min.y.max(origin.y);
+            let end_x = bounds.max.x.min(origin.x + CHUNK_SIZE);
+            let end_y = bounds.max.y.min(origin.y + CHUNK_SIZE);
+            for y in start_y..end_y {
+                for x in start_x..end_x {
+                    if x >= 0 && y >= 0 && x < i64::from(self.width) && y < i64::from(self.height) {
+                        continue;
+                    }
+                    let index = ((y - origin.y) * CHUNK_SIZE + x - origin.x) as usize;
+                    visitor(WorldPosition { x, y }, chunk.terrain[index]);
+                }
+            }
+        }
+    }
+
+    pub fn visit_features_in(&self, bounds: WorldRect, mut visitor: impl FnMut(&Feature)) {
+        for feature in self
+            .features
+            .iter()
+            .filter(|feature| bounds.contains(feature.position))
+        {
+            visitor(feature);
+        }
+        if bounds.max.x <= bounds.min.x || bounds.max.y <= bounds.min.y {
+            return;
+        }
+        for coord in chunk_coords(bounds) {
+            let Some(chunk) = self.chunks.get(&coord) else {
+                continue;
+            };
+            for feature in chunk.features.iter().filter(|feature| {
+                bounds.contains(feature.position)
+                    && (feature.position.x < 0
+                        || feature.position.y < 0
+                        || feature.position.x >= i64::from(self.width)
+                        || feature.position.y >= i64::from(self.height))
+            }) {
+                visitor(feature);
+            }
+        }
     }
 
     pub fn generate_area(&mut self, bounds: WorldRect) -> Result<(), GenerateAreaError> {
@@ -262,38 +434,46 @@ impl World {
         if self.area_is_generated(bounds) {
             return Ok(());
         }
-
-        let width_usize = width as usize;
-        let mut terrain = Vec::with_capacity(cells as usize);
-        let mut features = Vec::new();
-        for y in bounds.min.y..bounds.max.y {
-            for x in bounds.min.x..bounds.max.x {
-                let elevation = terrain_noise(self.seed, x, y, 0);
-                let moisture = terrain_noise(self.seed, x, y, 1);
-                let ground = classify_ground(elevation, moisture);
-                terrain.push(TerrainCell {
-                    elevation,
-                    moisture: (moisture >> 8) as u8,
-                    ground,
-                });
-                if let Some(kind) = generate_feature(self.seed, x, y, ground, moisture) {
-                    features.push(Feature {
-                        position: WorldPosition { x, y },
-                        kind,
-                    });
-                }
-            }
-        }
-        self.generated_areas.push(GeneratedArea {
-            bounds,
-            width: width_usize,
-            terrain,
-            features,
-        });
+        self.insert_chunks(Self::generate_chunks(self.seed, bounds)?);
         Ok(())
     }
 
-    fn area_is_generated(&self, bounds: WorldRect) -> bool {
+    pub fn generate_chunks(
+        seed: u64,
+        bounds: WorldRect,
+    ) -> Result<Vec<WorldChunk>, GenerateAreaError> {
+        validate_bounds(bounds)?;
+        let min = chunk_coord(bounds.min);
+        let max = chunk_coord(WorldPosition {
+            x: bounds.max.x - 1,
+            y: bounds.max.y - 1,
+        });
+        let mut chunks = Vec::with_capacity(((max.x - min.x + 1) * (max.y - min.y + 1)) as usize);
+        for y in min.y..=max.y {
+            for x in min.x..=max.x {
+                chunks.push(generate_chunk(seed, ChunkCoord { x, y }));
+            }
+        }
+        Ok(chunks)
+    }
+
+    pub fn insert_chunks(&mut self, chunks: Vec<WorldChunk>) -> usize {
+        let mut inserted = 0;
+        for chunk in chunks {
+            if self.chunks.insert(chunk.coord, chunk).is_none() {
+                inserted += 1;
+            }
+        }
+        if inserted > 0 {
+            self.revision = self.revision.saturating_add(1);
+        }
+        inserted
+    }
+
+    pub fn area_is_generated(&self, bounds: WorldRect) -> bool {
+        if validate_bounds(bounds).is_err() {
+            return false;
+        }
         let initial = WorldRect {
             min: WorldPosition { x: 0, y: 0 },
             max: WorldPosition {
@@ -301,18 +481,15 @@ impl World {
                 y: i64::from(self.height),
             },
         };
-        (initial.contains(bounds.min)
+        if initial.contains(bounds.min)
             && initial.contains(WorldPosition {
                 x: bounds.max.x - 1,
                 y: bounds.max.y - 1,
-            }))
-            || self.generated_areas.iter().any(|area| {
-                area.bounds.contains(bounds.min)
-                    && area.bounds.contains(WorldPosition {
-                        x: bounds.max.x - 1,
-                        y: bounds.max.y - 1,
-                    })
             })
+        {
+            return true;
+        }
+        chunk_coords(bounds).all(|coord| self.chunks.contains_key(&coord))
     }
 
     /// Finds a sparse surface feature without scanning the complete feature list.
@@ -330,17 +507,16 @@ impl World {
                 .and_then(|index| self.features.get(index))
                 .copied();
         }
-        self.generated_areas
-            .iter()
-            .rev()
-            .find(|area| area.bounds.contains(position))
-            .and_then(|area| {
-                area.features
+        self.chunks
+            .get(&chunk_coord(position))
+            .and_then(|chunk| {
+                chunk
+                    .features
                     .binary_search_by_key(&(position.y, position.x), |feature| {
                         (feature.position.y, feature.position.x)
                     })
                     .ok()
-                    .and_then(|index| area.features.get(index))
+                    .and_then(|index| chunk.features.get(index))
             })
             .copied()
     }
@@ -356,16 +532,83 @@ impl World {
                 .get((position.y as u32 * self.width + position.x as u32) as usize)
                 .copied();
         }
-        self.generated_areas
-            .iter()
-            .rev()
-            .find(|area| area.bounds.contains(position))
-            .and_then(|area| {
-                let x = (position.x - area.bounds.min.x) as usize;
-                let y = (position.y - area.bounds.min.y) as usize;
-                area.terrain.get(y * area.width + x)
+        let coord = chunk_coord(position);
+        let origin = chunk_origin(coord);
+        self.chunks
+            .get(&coord)
+            .and_then(|chunk| {
+                let x = (position.x - origin.x) as usize;
+                let y = (position.y - origin.y) as usize;
+                chunk.terrain.get(y * CHUNK_SIZE as usize + x)
             })
             .copied()
+    }
+}
+
+fn validate_bounds(bounds: WorldRect) -> Result<(), GenerateAreaError> {
+    let width = bounds.max.x.saturating_sub(bounds.min.x);
+    let height = bounds.max.y.saturating_sub(bounds.min.y);
+    let cells = width
+        .checked_mul(height)
+        .ok_or(GenerateAreaError::TooLarge)?;
+    if width <= 0 || height <= 0 {
+        return Err(GenerateAreaError::Empty);
+    }
+    if cells > 1_048_576 {
+        return Err(GenerateAreaError::TooLarge);
+    }
+    Ok(())
+}
+
+fn chunk_coord(position: WorldPosition) -> ChunkCoord {
+    ChunkCoord {
+        x: position.x.div_euclid(CHUNK_SIZE),
+        y: position.y.div_euclid(CHUNK_SIZE),
+    }
+}
+
+fn chunk_origin(coord: ChunkCoord) -> WorldPosition {
+    WorldPosition {
+        x: coord.x * CHUNK_SIZE,
+        y: coord.y * CHUNK_SIZE,
+    }
+}
+
+fn chunk_coords(bounds: WorldRect) -> impl Iterator<Item = ChunkCoord> {
+    let min = chunk_coord(bounds.min);
+    let max = chunk_coord(WorldPosition {
+        x: bounds.max.x - 1,
+        y: bounds.max.y - 1,
+    });
+    (min.y..=max.y).flat_map(move |y| (min.x..=max.x).map(move |x| ChunkCoord { x, y }))
+}
+
+fn generate_chunk(seed: u64, coord: ChunkCoord) -> WorldChunk {
+    let origin = chunk_origin(coord);
+    let mut terrain = Vec::with_capacity((CHUNK_SIZE * CHUNK_SIZE) as usize);
+    let mut features = Vec::new();
+    for y in origin.y..origin.y + CHUNK_SIZE {
+        for x in origin.x..origin.x + CHUNK_SIZE {
+            let elevation = terrain_noise(seed, x, y, 0);
+            let moisture = terrain_noise(seed, x, y, 1);
+            let ground = classify_ground(elevation, moisture);
+            terrain.push(TerrainCell {
+                elevation,
+                moisture: (moisture >> 8) as u8,
+                ground,
+            });
+            if let Some(kind) = generate_feature(seed, x, y, ground, moisture) {
+                features.push(Feature {
+                    position: WorldPosition { x, y },
+                    kind,
+                });
+            }
+        }
+    }
+    WorldChunk {
+        coord,
+        terrain,
+        features,
     }
 }
 
@@ -563,5 +806,32 @@ mod tests {
             world.generate_area(bounds),
             Err(GenerateAreaError::TooLarge)
         );
+    }
+
+    #[test]
+    fn generated_chunks_are_keyed_and_do_not_duplicate_initial_cells() {
+        let mut world = World::generate(5, WorldConfig::new(64, 64).unwrap());
+        let bounds = WorldRect::from_inclusive_points(
+            WorldPosition { x: 60, y: 0 },
+            WorldPosition { x: 70, y: 10 },
+        );
+        world.generate_area(bounds).unwrap();
+        assert_eq!(world.revision(), 1);
+        assert!(world.area_is_generated(bounds));
+        assert_eq!(world.cells().count(), 64 * 64 + 64 * 64);
+        assert!(world.cell(WorldPosition { x: 70, y: 10 }).is_some());
+    }
+
+    #[test]
+    fn generating_existing_chunks_does_not_advance_revision() {
+        let mut world = World::generate(5, WorldConfig::new(64, 64).unwrap());
+        let bounds = WorldRect::from_inclusive_points(
+            WorldPosition { x: -10, y: -10 },
+            WorldPosition { x: -1, y: -1 },
+        );
+        world.generate_area(bounds).unwrap();
+        let revision = world.revision();
+        world.generate_area(bounds).unwrap();
+        assert_eq!(world.revision(), revision);
     }
 }

@@ -28,9 +28,11 @@ Minimize runtime work, memory, allocations, cache misses, and stored data while 
 
 No canonical release-mode benchmark report exists yet. The current terrain layout intentionally uses `u16` elevation, `u8` moisture, and a byte-represented `GroundType`, but complete record and collection costs must be measured rather than inferred from field widths.
 
-The viewer computes one `CameraView` transform per frame rather than recomputing fit scale for every framebuffer pixel. Hover feature lookup uses binary search over sorted sparse records; rendering still scans the full sparse feature list and culls off-screen records, which remains an open optimization before worlds or feature counts grow substantially.
+The viewer no longer rasterizes every framebuffer pixel on the CPU. `wgpu` draws compact 20-byte rectangle instances, with camera transforms performed in the vertex shader. Terrain and feature buffers contain only a camera-bounded rectangle plus a 128-cell reuse margin; camera motion inside that margin updates only a uniform.
 
-Selection generation is capped at 1,048,576 cells per command. Dense patches remain loaded and partially overlapping patches may duplicate terrain until chunk-keyed storage replaces them.
+Generated world data is stored in deterministic 64 x 64 chunks keyed by `ChunkCoord`. Cell lookup performs a `BTreeMap` lookup rather than scanning every generated patch, and camera extraction visits only intersecting chunk keys. Initial-area overlap is filtered so boundary chunks do not duplicate rendered cells.
+
+Selection generation remains capped at 1,048,576 selected cells and runs on a dedicated worker thread. Completed chunks increment world revision once and cause one bounded GPU-cache rebuild. Rendering is capped at 60 Hz while the simulation runs and stops when paused with no visual changes.
 
 ## Required measurement conditions
 
@@ -48,3 +50,4 @@ Selection generation is capped at 1,048,576 cells per command. Dense patches rem
 - Event scheduler bytes per scheduled event.
 - Allocations and generation time per world chunk.
 - Release binary size and startup-time targets.
+- Maximum cached visible GPU instance count and upload-time budget.

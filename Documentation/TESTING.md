@@ -46,9 +46,12 @@ completed tick=600 simulated_seconds=10.000 seed=42 initial_world=1024x1024
 - The viewer camera initially centers/fits the world, preserves cursor anchoring during zoom, and can pan beyond generated world edges.
 - Viewer zoom clamps at 1/16x of the initial fit rather than stopping at the startup framing.
 - Selected patches generate deterministically in negative coordinate space and reject excessive selections.
+- Chunk-keyed generation filters initial-area overlap and does not duplicate rendered cells.
+- Re-requesting existing chunks does not advance world revision.
+- The viewer world-generation worker returns completed chunks independently of the event-loop thread.
 
 ## Known gaps
 
-- Viewer event dispatch, title updates, and framebuffer rendering have no automated tests yet; camera coordinate behavior is unit tested.
+- GPU surface creation, drawing, resize recovery, and interactive event dispatch remain runtime-smoke-tested rather than fully automated; camera and generation-worker behavior is unit tested.
 - No property tests, world-generation benchmarks, distribution snapshots, save/load tests, or long-running soak tests exist yet.
 - No automated foundational type-size assertions, allocation measurements, or release-mode performance baselines exist yet.
