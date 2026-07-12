@@ -18,7 +18,7 @@ Install the recommended Rust Analyzer and CodeLLDB extensions, open **Run and De
 
 - `Viewer (debug)` for breakpoints and development.
 - `Viewer (release - smooth)` for optimized rendering and fullscreen testing.
-- `Server (debug)` or `Server (release)` for a 600-tick headless run.
+- `Headless simulation (debug)` or `Headless simulation (release)` for a 600-tick run without presentation.
 
 All launch entries build the selected binary first, use the repository root as the working directory, and pass `config/simulation.toml`. The **Run Task** menu also includes individual build tasks and `validate: workspace`.
 
@@ -38,7 +38,7 @@ initial_height = 1024
 
 Use a different file with `cargo run -p sim-viewer -- --config path/to/file.toml`.
 
-Cargo builds copy the default file to `target/<profile>/config/simulation.toml`, so the viewer and server can also be launched directly from `target/debug` or `target/release` without manually copying configuration.
+Cargo builds copy the default file to `target/<profile>/config/simulation.toml`, so the viewer and headless runner can also be launched directly from `target/debug` or `target/release` without manually copying configuration.
 
 Viewer controls:
 
@@ -54,7 +54,7 @@ Viewer controls:
 Run the headless engine smoke test with:
 
 ```powershell
-cargo run -p sim-server -- --config config/simulation.toml --ticks 600 --seed 1
+cargo run -p sim-headless -- --config config/simulation.toml --ticks 600 --seed 1
 ```
 
 Verify the workspace with `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings`.
@@ -63,5 +63,5 @@ Verify the workspace with `cargo test --workspace` and `cargo clippy --workspace
 
 - `sim-core`: deterministic time, engine lifecycle, world generation, sparse features, commands, and presentation snapshots
 - `sim-config`: shared TOML configuration loading and validation
-- `sim-server`: minimal headless runner
+- `sim-headless`: minimal non-graphical simulation runner
 - `sim-viewer`: native window, input, fixed-step loop, and a software-rendered status view

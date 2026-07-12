@@ -19,7 +19,7 @@ The gate also verifies that `target/debug/config/simulation.toml` exists and is 
 ## Runtime checks
 
 ```powershell
-cargo run -p sim-server -- --ticks 600 --seed 42
+cargo run -p sim-headless -- --ticks 600 --seed 42
 cargo run -p sim-viewer
 ```
 

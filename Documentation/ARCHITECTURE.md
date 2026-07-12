@@ -8,7 +8,7 @@ sim-core
   commands, and snapshots.
   Has no windowing or rendering dependency.
 
-sim-server
+sim-headless
   Loads shared configuration and runs sim-core headlessly for a requested number of ticks.
 
 sim-viewer
@@ -41,5 +41,5 @@ sim-viewer
 - `sim-core`: Rust standard library only.
 - `sim-config`: `sim-core`, `serde`, and `toml`; owns filesystem and TOML concerns shared by runtime binaries.
 - The `sim-config` build script tracks the repository configuration and copies it into the active Cargo profile directory so directly launched binaries retain the default `config/simulation.toml` layout.
-- `sim-server`: `sim-config` and `sim-core`.
+- `sim-headless`: `sim-config` and `sim-core`.
 - `sim-viewer`: `sim-config`, `sim-core`, `winit`, and `softbuffer`.

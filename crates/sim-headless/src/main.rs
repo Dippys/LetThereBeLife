@@ -13,7 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--seed" => seed = Some(parse_next(&mut args, "--seed")),
             "--config" => config_path = parse_next(&mut args, "--config"),
             "--help" | "-h" => {
-                println!("Usage: sim-server [--config PATH] [--ticks NUMBER] [--seed NUMBER]");
+                println!("Usage: sim-headless [--config PATH] [--ticks NUMBER] [--seed NUMBER]");
                 return Ok(());
             }
             unknown => {

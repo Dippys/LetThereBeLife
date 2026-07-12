@@ -18,18 +18,18 @@
       "problemMatcher": ["$rustc"]
     },
     {
-      "label": "build: server (debug)",
+      "label": "build: headless (debug)",
       "type": "process",
       "command": "cargo",
-      "args": ["build", "-p", "sim-server"],
+      "args": ["build", "-p", "sim-headless"],
       "group": "build",
       "problemMatcher": ["$rustc"]
     },
     {
-      "label": "build: server (release)",
+      "label": "build: headless (release)",
       "type": "process",
       "command": "cargo",
-      "args": ["build", "--release", "-p", "sim-server"],
+      "args": ["build", "--release", "-p", "sim-headless"],
       "group": "build",
       "problemMatcher": ["$rustc"]
     },

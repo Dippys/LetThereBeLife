@@ -22,10 +22,10 @@
       "sourceLanguages": ["rust"]
     },
     {
-      "name": "Server (debug)",
+      "name": "Headless simulation (debug)",
       "type": "lldb",
       "request": "launch",
-      "program": "${workspaceFolder}/target/debug/sim-server.exe",
+      "program": "${workspaceFolder}/target/debug/sim-headless.exe",
       "args": [
         "--config",
         "config/simulation.toml",
@@ -35,14 +35,14 @@
         "1"
       ],
       "cwd": "${workspaceFolder}",
-      "preLaunchTask": "build: server (debug)",
+      "preLaunchTask": "build: headless (debug)",
       "sourceLanguages": ["rust"]
     },
     {
-      "name": "Server (release)",
+      "name": "Headless simulation (release)",
       "type": "lldb",
       "request": "launch",
-      "program": "${workspaceFolder}/target/release/sim-server.exe",
+      "program": "${workspaceFolder}/target/release/sim-headless.exe",
       "args": [
         "--config",
         "config/simulation.toml",
@@ -52,7 +52,7 @@
         "1"
       ],
       "cwd": "${workspaceFolder}",
-      "preLaunchTask": "build: server (release)",
+      "preLaunchTask": "build: headless (release)",
       "sourceLanguages": ["rust"]
     }
   ]

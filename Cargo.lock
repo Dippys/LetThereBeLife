@@ -1246,7 +1246,7 @@ name = "sim-core"
 version = "0.1.0"
 
 [[package]]
-name = "sim-server"
+name = "sim-headless"
 version = "0.1.0"
 dependencies = [
  "sim-config",

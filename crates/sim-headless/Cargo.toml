@@ -1,5 +1,5 @@
 [package]
-name = "sim-server"
+name = "sim-headless"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

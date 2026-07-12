@@ -3,7 +3,7 @@
 ## Ownership
 
 - `sim-core`: deterministic engine state, commands, time, and snapshots; standard library only unless a measured need justifies more.
-- `sim-server`: headless process concerns and command-line input.
+- `sim-headless`: headless process concerns and command-line input.
 - `sim-viewer`: windowing, user input, wall-clock accumulation, and presentation.
 - Add a crate only when it creates a real dependency boundary, not merely a new folder.
 

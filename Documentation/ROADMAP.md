@@ -10,7 +10,7 @@ Last synchronized: 2026-07-12.
 - Initial formatting, testing, and linting baseline.
 - Repository-local agent skill and separate living-documentation system.
 - Deterministic configurable initial-area generation with terrain and sparse surface features.
-- Shared TOML runtime configuration for the viewer and server.
+- Shared TOML runtime configuration for the viewer and headless runner.
 - Cursor-anchored viewer zoom and terrain/feature hover inspection.
 - Unbounded left-drag camera panning across generated and unrendered space.
 - Selection-driven deterministic generation beyond the initial area.

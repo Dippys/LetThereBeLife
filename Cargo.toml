@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/sim-config", "crates/sim-core", "crates/sim-server", "crates/sim-viewer"]
+members = ["crates/sim-config", "crates/sim-core", "crates/sim-headless", "crates/sim-viewer"]
 resolver = "2"
 
 [workspace.package]

@@ -52,7 +52,7 @@ if ((Get-FileHash -Algorithm SHA256 -LiteralPath $sourceConfig).Hash -ne
     throw "$debugConfig does not match $sourceConfig"
 }
 Invoke-Checked 'Clippy' { cargo clippy --workspace --all-targets -- -D warnings }
-Invoke-Checked 'Headless smoke test' { cargo run -p sim-server -- --ticks 600 --seed 42 }
+Invoke-Checked 'Headless smoke test' { cargo run -p sim-headless -- --ticks 600 --seed 42 }
 
 if ($Runtime) {
     Write-Host 'Runtime flag selected. Manually verify the viewer because it is interactive:'
