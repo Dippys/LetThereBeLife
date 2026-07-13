@@ -2,7 +2,8 @@ use std::{borrow::Cow, sync::Arc};
 
 use bytemuck::{Pod, Zeroable};
 use sim_core::{
-    CHUNK_SIZE, FeatureKind, GroundType, SimulationSnapshot, World, WorldPosition, WorldRect,
+    CHUNK_SIZE, ChunkInspection, ChunkPresence, FeatureKind, GroundType, SimulationSnapshot, World,
+    WorldPosition, WorldRect,
 };
 use wgpu::util::DeviceExt;
 use winit::window::Window;
@@ -12,6 +13,7 @@ use crate::camera::Camera;
 pub struct RenderState {
     pub snapshot: SimulationSnapshot,
     pub camera: Camera,
+    pub inspected: Option<ChunkInspection>,
     pub hovered: Option<WorldPosition>,
     pub selection: Option<WorldRect>,
     pub selection_valid: bool,
@@ -28,6 +30,7 @@ pub struct Renderer {
     terrain: StaticInstanceBuffers,
     features: StaticInstanceBuffers,
     world_overlay: InstanceBuffer,
+    world_overlay_instances: Vec<Instance>,
     screen_overlay: InstanceBuffer,
     world_revision: u64,
     cached_bounds: Option<WorldRect>,
@@ -136,7 +139,12 @@ impl Renderer {
             surface,
             terrain: StaticInstanceBuffers::new(&device, "terrain instances", &[]),
             features: StaticInstanceBuffers::new(&device, "feature instances", &[]),
-            world_overlay: InstanceBuffer::dynamic(&device, "world overlay", 2),
+            world_overlay: InstanceBuffer::dynamic(
+                &device,
+                "world overlay",
+                WORLD_OVERLAY_CAPACITY,
+            ),
+            world_overlay_instances: Vec::with_capacity(WORLD_OVERLAY_CAPACITY),
             screen_overlay: InstanceBuffer::dynamic(&device, "screen overlay", 4),
             world_revision: world.revision(),
             cached_bounds: None,
@@ -224,7 +232,8 @@ impl Renderer {
             ),
         );
 
-        let mut world_overlay = Vec::with_capacity(2);
+        let world_overlay = &mut self.world_overlay_instances;
+        world_overlay.clear();
         if let Some(position) = state.hovered {
             world_overlay.push(Instance::new(
                 position.x as f32,
@@ -243,7 +252,13 @@ impl Renderer {
                 selection_color(state.selection_valid),
             ));
         }
-        self.world_overlay.write(&self.queue, &world_overlay);
+        if let Some(inspection) = state.inspected
+            && let Some(outline) = chunk_outline(inspection, view.scale() as f32)
+        {
+            world_overlay.extend_from_slice(&outline);
+        }
+        debug_assert!(world_overlay.len() <= WORLD_OVERLAY_CAPACITY);
+        self.world_overlay.write(&self.queue, world_overlay);
 
         let pulse = ((state.snapshot.tick / 12) % 80) as f32;
         let marker_x = ((state.snapshot.tick / 2)
@@ -418,6 +433,9 @@ struct InstanceBuffer {
 const MAX_INSTANCES_PER_BUFFER: usize = 1_000_000;
 const MIN_TERRAIN_SAMPLE_PIXELS: f32 = 2.0;
 const CACHE_MARGIN_PIXELS: f32 = 128.0;
+const WORLD_OVERLAY_CAPACITY: usize = 6;
+const MIN_CHUNK_OUTLINE_PIXELS: f32 = 4.0;
+const MAX_CHUNK_OUTLINE_WORLD_WIDTH: f32 = 8.0;
 
 struct StaticInstanceBuffers {
     buffers: Vec<InstanceBuffer>,
@@ -580,6 +598,31 @@ fn terrain_color(cell: sim_core::TerrainCell) -> u32 {
     }
 }
 
+fn chunk_outline(inspection: ChunkInspection, scale: f32) -> Option<[Instance; 4]> {
+    if scale * (CHUNK_SIZE as f32) < MIN_CHUNK_OUTLINE_PIXELS {
+        return None;
+    }
+    let bounds = inspection.bounds;
+    let x = bounds.min.x as f32;
+    let y = bounds.min.y as f32;
+    let width = (bounds.max.x - bounds.min.x) as f32;
+    let height = (bounds.max.y - bounds.min.y) as f32;
+    let line = (1.0 / scale.max(f32::EPSILON)).clamp(1.0, MAX_CHUNK_OUTLINE_WORLD_WIDTH);
+    let color = match inspection.presence {
+        ChunkPresence::Missing => rgba(235, 70, 70, 190),
+        ChunkPresence::PartialInitial => rgba(255, 205, 55, 190),
+        ChunkPresence::Initial => rgba(80, 180, 255, 180),
+        ChunkPresence::Retained => rgba(85, 225, 135, 190),
+        ChunkPresence::RetainedPartialInitial => rgba(85, 225, 135, 190),
+    };
+    Some([
+        Instance::new(x, y, width, line, color),
+        Instance::new(x, y + height - line, width, line, color),
+        Instance::new(x, y, line, height, color),
+        Instance::new(x + width - line, y, line, height, color),
+    ])
+}
+
 const fn selection_color(valid: bool) -> u32 {
     if valid {
         rgba(255, 220, 35, 72)
@@ -708,5 +751,30 @@ mod tests {
     fn invalid_selection_uses_red_preview() {
         assert_eq!(selection_color(true), rgba(255, 220, 35, 72));
         assert_eq!(selection_color(false), rgba(235, 48, 48, 96));
+    }
+
+    #[test]
+    fn chunk_outline_uses_signed_chunk_bounds() {
+        let world = World::generate(1, WorldConfig::new(64, 64).unwrap());
+        let inspection = world
+            .inspect_chunk_at(WorldPosition { x: -1, y: 63 })
+            .unwrap();
+        let outline = chunk_outline(inspection, 1.0).unwrap();
+
+        assert_eq!(outline[0].position, [-64.0, 0.0]);
+        assert_eq!(outline[0].size, [64.0, 1.0]);
+        assert_eq!(outline[1].position, [-64.0, 63.0]);
+        assert_eq!(outline[2].position, [-64.0, 0.0]);
+        assert_eq!(outline[3].position, [-1.0, 0.0]);
+    }
+
+    #[test]
+    fn subpixel_chunks_do_not_create_inspection_overlays() {
+        let world = World::generate(1, WorldConfig::new(64, 64).unwrap());
+        let inspection = world
+            .inspect_chunk_at(WorldPosition { x: 0, y: 0 })
+            .unwrap();
+        assert!(chunk_outline(inspection, 0.01).is_none());
+        assert!(chunk_outline(inspection, 0.1).is_some());
     }
 }

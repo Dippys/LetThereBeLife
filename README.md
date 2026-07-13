@@ -44,13 +44,14 @@ Cargo builds copy the default file to `target/<profile>/config/simulation.toml`,
 
 Viewer controls:
 
-- Move the pointer over the map to highlight a cell and show its coordinates, terrain, elevation, moisture, and feature in the window title.
+- Move the pointer over the map to inspect world, chunk, and chunk-local coordinates plus initial, partial-initial, retained, retained partial-initial, or missing coverage in the window title. Loaded cells also show terrain, elevation, moisture, and feature. The inspected chunk is outlined blue for initial, yellow for partial-initial, green for retained (including retained partial-initial), or red for missing coverage when it is large enough to read on screen.
 - Scroll the mouse wheel to zoom in or out around the pointer, down to 1/16x of the initial full-area fit.
-- Hold the left mouse button and drag to move freely, including beyond the currently generated area.
+- Hold the left mouse button and drag to move freely, including beyond the currently generated area. Releasing the drag automatically requests missing chunks in the visible view; startup, resize, zoom, and successful generation completion also re-evaluate visible demand.
 - Hold the right mouse button and drag to preview a translucent selection. It is yellow while the request is within the missing-chunk, retained-capacity, and coordinate-safety limits; otherwise it is red. A new preview starts only when the background generator is available and idle, and release generates an accepted world area.
 - A selection may span more than 4,096 chunks when it overlaps loaded terrain, but one release can add at most 4,096 previously missing chunks (16,777,216 generated chunk-payload cells). The bootstrap retains at most 16,384 generated chunks.
+- Automatic generation uses the same all-or-nothing limits. If a zoomed-out visible view needs more than 4,096 missing chunks or exceeds retained capacity, the title explains why automatic generation paused; zoom in or use a smaller right-drag selection. Automatic and manual requests share one worker, so selection waits for active automatic work to finish or be cancelled.
 - Already loaded chunks and selection portions fully covered by the initial rectangle consume none of the per-request budget. A boundary chunk still counts when the selection extends from its initial-area portion into unloaded terrain. At distant zoom levels, rendering samples terrain near screen-pixel density and splits large instance uploads into bounded GPU buffers.
-- `C`: stop the remaining generation work (chunks already applied stay loaded)
+- `C`: stop the remaining generation work (chunks already applied stay loaded); the same automatic view is not retried until another view-change trigger
 - `Space`: pause/resume simulation
 - `1`, `2`, `3`, `4`: set simulation speed to 1x, 2x, 4x, or 8x
 - `R`: reset to the configured seed

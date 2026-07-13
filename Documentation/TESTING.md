@@ -46,6 +46,7 @@ completed tick=600 simulated_seconds=10.000 seed=42 initial_world=4096x4096
 - Initial-area generation matches independently generated 64 x 64 chunks for every terrain cell and sparse feature in a 128 x 128 overlap.
 - `GroundType` remains one byte and `TerrainCell` remains four bytes; surface features remain excluded from water and sand.
 - Terrain lookup accepts valid edge coordinates and rejects out-of-bounds coordinates.
+- Chunk inspection uses canonical Euclidean coordinates across -65, -64, -1, 0, 63, and 64; it distinguishes full initial coverage, a non-aligned partial-initial boundary before and after its remainder is retained, fully retained chunks, missing chunks, and an unrepresentable positive edge.
 - Rectangular initial-area generation preserves configured dimensions and exact cell count.
 - Overlapping configured initial areas generate identical terrain and features at equal world coordinates.
 - Invalid zero-sized or excessive initial allocations are rejected.
@@ -53,13 +54,16 @@ completed tick=600 simulated_seconds=10.000 seed=42 initial_world=4096x4096
 - Sparse features remain row-major sorted and support coordinate lookup.
 - The viewer camera initially centers/fits the world, preserves cursor anchoring during zoom, and can pan beyond generated world edges.
 - Viewer zoom clamps at 1/16x of the initial fit rather than stopping at the startup framing.
+- Camera view rectangles floor fractional minimum edges and ceil fractional maximum edges while preserving exact integer maxima as exclusive bounds.
 - Selected patches generate deterministically in negative coordinate space. Generation budgeting counts only missing chunks: a selection spanning 4,097 chunks is accepted when one chunk is already covered (4,096 missing), while a selection requiring 4,097 new chunks is rejected. Unsafe-coordinate selections remain rejected while the representable negative coordinate edge is accepted.
 - A non-aligned initial boundary counts as missing when a selected 64 x 64 chunk extends from its initial-area portion into unloaded terrain.
 - Generated-world storage rejects inserts beyond its 16,384-chunk retained capacity.
 - The worker reports invalid chunk coordinates, supports cancellation, applies no more than the configured per-frame chunk budget, and reports disconnection only once.
 - Right-drag preview uses the same missing-chunk budget: a footprint larger than 4,096 chunks remains yellow when at most 4,096 are missing, a 4,097-missing request is red, and no preview starts while generation is active or its worker is unavailable.
+- Automatic visible-area requests queue nothing for fully loaded coverage, request the exact missing chunk across each positive/negative initial edge, accept 4,096 missing chunks, reject the 4,097th, skip retained work without advancing revision, serialize with manual selection and active camera drag, retry the same view only after completion, and preserve a newer viewport demand that arrives while cancellation is draining.
 - Chunk-keyed generation filters initial-area and existing-chunk overlap before worker generation and does not duplicate rendered cells.
 - Stepped cell visits sample initial and generated chunks deterministically; renderer tests verify coarse instance reduction, power-of-two scale selection, initial/generated edge clipping, and the static-buffer partition boundary.
+- Chunk-inspection rendering aligns its four-rectangle outline to signed chunk bounds and suppresses the overlay when a chunk projects below four screen pixels.
 - Re-requesting existing chunks does not advance world revision.
 - The viewer world-generation worker returns completed chunks independently of the event-loop thread.
 
@@ -68,4 +72,4 @@ completed tick=600 simulated_seconds=10.000 seed=42 initial_world=4096x4096
 - GPU adapter/surface creation, shader binding layout, drawing, and presentation are covered by the automated hidden-window smoke run. Resize recovery and interactive event dispatch remain manual runtime checks.
 - No property tests, canonical world-generation benchmark harness, generator checksums, full watershed/tributary tests, save/load tests, or long-running soak tests exist yet.
 - Renderer `CameraUniform` and `Instance` sizes have compile-time assertions; broader foundational layout assertions, allocation measurements, and a canonical controlled release-benchmark harness do not exist yet. `Documentation/PERFORMANCE.md` records non-canonical local release measurements.
-- Segmented multi-buffer drawing, deferred-sync completion/cancellation, and an interactive large right-drag generation path are not integration-tested; the hidden GPU smoke covers startup pipeline creation and presentation.
+- Segmented multi-buffer drawing, deferred-sync completion/cancellation, interactive automatic pan/zoom generation, and an interactive large right-drag generation path are not integration-tested; the hidden GPU smoke covers startup pipeline creation and presentation.

@@ -3,9 +3,10 @@
 mod world;
 
 pub use world::{
-    CHUNK_SIZE, ChunkCoord, DEFAULT_INITIAL_WORLD_SIZE, Feature, FeatureKind, GenerateAreaError,
-    GroundType, MAX_CHUNKS_PER_GENERATION, MAX_GENERATED_CHUNKS, TerrainCell, World, WorldChunk,
-    WorldConfig, WorldConfigError, WorldPosition, WorldRect,
+    CHUNK_SIZE, ChunkCoord, ChunkInspection, ChunkLocalPosition, ChunkPresence,
+    DEFAULT_INITIAL_WORLD_SIZE, Feature, FeatureKind, GenerateAreaError, GroundType,
+    MAX_CHUNKS_PER_GENERATION, MAX_GENERATED_CHUNKS, TerrainCell, World, WorldChunk, WorldConfig,
+    WorldConfigError, WorldPosition, WorldRect,
 };
 
 use std::time::Duration;
@@ -185,5 +186,30 @@ mod tests {
         });
 
         assert_eq!(left.world(), right.world());
+    }
+
+    #[test]
+    fn applied_chunks_remain_engine_owned_and_deduplicated() {
+        let config = EngineConfig {
+            seed: 9,
+            world: WorldConfig::new(64, 64).unwrap(),
+            ..EngineConfig::default()
+        };
+        let mut engine = Engine::new(config);
+        let coord = ChunkCoord { x: -1, y: 0 };
+        let chunk = World::generate_chunk_at(config.seed, coord).unwrap();
+
+        assert_eq!(engine.apply_world_chunks(vec![chunk.clone()]), Ok(1));
+        let revision = engine.world().revision();
+        assert_eq!(
+            engine
+                .world()
+                .inspect_chunk_at(WorldPosition { x: -1, y: 0 })
+                .unwrap()
+                .presence,
+            ChunkPresence::Retained
+        );
+        assert_eq!(engine.apply_world_chunks(vec![chunk]), Ok(0));
+        assert_eq!(engine.world().revision(), revision);
     }
 }

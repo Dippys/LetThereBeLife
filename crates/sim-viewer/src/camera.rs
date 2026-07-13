@@ -141,27 +141,42 @@ impl CameraView {
     }
 
     pub fn world_bounds(self) -> sim_core::WorldRect {
+        let min = self.world_point(0.0, 0.0);
+        let max = self.world_point(f64::from(self.screen_width), f64::from(self.screen_height));
         sim_core::WorldRect {
-            min: self.screen_to_world_position(0.0, 0.0),
-            max: self.screen_to_world_position(
-                f64::from(self.screen_width),
-                f64::from(self.screen_height),
-            ),
+            min: WorldPosition {
+                x: floor_to_i64(min.0),
+                y: floor_to_i64(min.1),
+            },
+            max: WorldPosition {
+                x: ceil_to_i64(max.0),
+                y: ceil_to_i64(max.1),
+            },
         }
     }
 
     pub fn screen_to_world_position(self, screen_x: f64, screen_y: f64) -> WorldPosition {
-        let x = self.center_x + (screen_x - f64::from(self.screen_width) / 2.0) / self.scale;
-        let y = self.center_y + (screen_y - f64::from(self.screen_height) / 2.0) / self.scale;
+        let (x, y) = self.world_point(screen_x, screen_y);
         WorldPosition {
             x: floor_to_i64(x),
             y: floor_to_i64(y),
         }
     }
+
+    fn world_point(self, screen_x: f64, screen_y: f64) -> (f64, f64) {
+        (
+            self.center_x + (screen_x - f64::from(self.screen_width) / 2.0) / self.scale,
+            self.center_y + (screen_y - f64::from(self.screen_height) / 2.0) / self.scale,
+        )
+    }
 }
 
 fn floor_to_i64(value: f64) -> i64 {
     value.floor().clamp(i64::MIN as f64, i64::MAX as f64) as i64
+}
+
+fn ceil_to_i64(value: f64) -> i64 {
+    value.ceil().clamp(i64::MIN as f64, i64::MAX as f64) as i64
 }
 
 #[cfg(test)]
@@ -206,6 +221,36 @@ mod tests {
         camera.zoom_at(-100.0, (480.0, 270.0), test_viewport());
         assert_eq!(camera.zoom, MIN_ZOOM);
         assert!(camera.scale(960, 540, 1_024, 1_024) < 1.0);
+    }
+
+    #[test]
+    fn world_bounds_include_fractionally_visible_edge_cells() {
+        let bounds = CameraView {
+            center_x: 0.5,
+            center_y: 0.5,
+            scale: 1.0,
+            screen_width: 2,
+            screen_height: 2,
+        }
+        .world_bounds();
+
+        assert_eq!(bounds.min, WorldPosition { x: -1, y: -1 });
+        assert_eq!(bounds.max, WorldPosition { x: 2, y: 2 });
+    }
+
+    #[test]
+    fn world_bounds_keep_exact_integer_maximum_exclusive() {
+        let bounds = CameraView {
+            center_x: 1.0,
+            center_y: 1.0,
+            scale: 1.0,
+            screen_width: 2,
+            screen_height: 2,
+        }
+        .world_bounds();
+
+        assert_eq!(bounds.min, WorldPosition { x: 0, y: 0 });
+        assert_eq!(bounds.max, WorldPosition { x: 2, y: 2 });
     }
 
     const fn test_viewport() -> Viewport {

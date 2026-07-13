@@ -7,8 +7,10 @@ pub const DEFAULT_INITIAL_WORLD_SIZE: u32 = 1_024;
 const MAX_INITIAL_CELLS: u64 = 16_777_216;
 pub const CHUNK_SIZE: i64 = 64;
 /// Maximum number of previously missing chunks materialized by one request.
-pub const MAX_CHUNKS_PER_GENERATION: u64 = 4_096;
-pub const MAX_GENERATED_CHUNKS: usize = 16_384;
+//pub const MAX_CHUNKS_PER_GENERATION: u64 = 4_096; ORIGINAL VALUE
+//pub const MAX_GENERATED_CHUNKS: usize = 16_384; ORIGINAL VALUE
+pub const MAX_CHUNKS_PER_GENERATION: u64 = 131_072; // TEMP: Increased to allow for larger world generation requests
+pub const MAX_GENERATED_CHUNKS: usize = 262_144; // TEMP: Increased to allow for larger world generation requests
 const NOISE_MAX: i64 = 65_535;
 const DEEP_WATER_MAX: u16 = 25_000;
 const SHALLOW_WATER_MAX: u16 = 30_000;
@@ -208,6 +210,66 @@ pub struct Feature {
 pub struct ChunkCoord {
     pub x: i64,
     pub y: i64,
+}
+
+impl ChunkCoord {
+    /// Resolves the canonical chunk address for a signed world position.
+    pub fn from_world_position(position: WorldPosition) -> Self {
+        Self {
+            x: position.x.div_euclid(CHUNK_SIZE),
+            y: position.y.div_euclid(CHUNK_SIZE),
+        }
+    }
+
+    /// Returns this chunk's half-open world bounds when both axes are representable.
+    pub fn bounds(self) -> Result<WorldRect, GenerateAreaError> {
+        let min = WorldPosition {
+            x: self
+                .x
+                .checked_mul(CHUNK_SIZE)
+                .ok_or(GenerateAreaError::TooLarge)?,
+            y: self
+                .y
+                .checked_mul(CHUNK_SIZE)
+                .ok_or(GenerateAreaError::TooLarge)?,
+        };
+        let max = WorldPosition {
+            x: min
+                .x
+                .checked_add(CHUNK_SIZE)
+                .ok_or(GenerateAreaError::TooLarge)?,
+            y: min
+                .y
+                .checked_add(CHUNK_SIZE)
+                .ok_or(GenerateAreaError::TooLarge)?,
+        };
+        Ok(WorldRect { min, max })
+    }
+}
+
+/// How a complete chunk footprint is currently represented by the world.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChunkPresence {
+    Missing,
+    PartialInitial,
+    Initial,
+    Retained,
+    RetainedPartialInitial,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChunkLocalPosition {
+    pub x: u8,
+    pub y: u8,
+}
+
+/// Read-only chunk metadata for debugging and presentation clients.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChunkInspection {
+    pub coord: ChunkCoord,
+    pub bounds: WorldRect,
+    pub local: ChunkLocalPosition,
+    pub presence: ChunkPresence,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -647,6 +709,39 @@ impl World {
         self.chunks.len()
     }
 
+    /// Describes the chunk containing `position` without exposing mutable world storage.
+    pub fn inspect_chunk_at(
+        &self,
+        position: WorldPosition,
+    ) -> Result<ChunkInspection, GenerateAreaError> {
+        let coord = ChunkCoord::from_world_position(position);
+        let bounds = coord.bounds()?;
+        let initial = self.initial_bounds();
+        let retained = self.chunks.contains_key(&coord);
+        let presence = if initial.contains_rect(bounds) {
+            ChunkPresence::Initial
+        } else if rects_intersect(initial, bounds) {
+            if retained {
+                ChunkPresence::RetainedPartialInitial
+            } else {
+                ChunkPresence::PartialInitial
+            }
+        } else if retained {
+            ChunkPresence::Retained
+        } else {
+            ChunkPresence::Missing
+        };
+        Ok(ChunkInspection {
+            coord,
+            bounds,
+            local: ChunkLocalPosition {
+                x: (position.x - bounds.min.x) as u8,
+                y: (position.y - bounds.min.y) as u8,
+            },
+            presence,
+        })
+    }
+
     pub fn area_is_generated(&self, bounds: WorldRect) -> bool {
         let Ok(span) = validate_chunk_span(bounds) else {
             return false;
@@ -808,6 +903,13 @@ fn chunk_intersects(bounds: WorldRect, coord: ChunkCoord) -> bool {
         && bounds.min.y < origin.y + CHUNK_SIZE
 }
 
+fn rects_intersect(left: WorldRect, right: WorldRect) -> bool {
+    left.max.x > right.min.x
+        && left.max.y > right.min.y
+        && left.min.x < right.max.x
+        && left.min.y < right.max.y
+}
+
 fn visit_chunk_region(
     chunk: &WorldChunk,
     origin: WorldPosition,
@@ -848,10 +950,7 @@ fn validate_chunk_axis(coord: i64) -> Result<(), GenerateAreaError> {
 }
 
 fn chunk_coord(position: WorldPosition) -> ChunkCoord {
-    ChunkCoord {
-        x: position.x.div_euclid(CHUNK_SIZE),
-        y: position.y.div_euclid(CHUNK_SIZE),
-    }
+    ChunkCoord::from_world_position(position)
 }
 
 fn chunk_origin(coord: ChunkCoord) -> WorldPosition {
@@ -2483,6 +2582,86 @@ mod tests {
         assert_eq!(
             world.missing_chunk_coords(bounds).unwrap(),
             vec![ChunkCoord { x: 1, y: 0 }]
+        );
+    }
+
+    #[test]
+    fn chunk_inspection_tracks_signed_boundaries_and_partial_initial_coverage() {
+        let mut world = World::generate(1, WorldConfig::new(96, 64).unwrap());
+        let cases = [
+            (
+                WorldPosition { x: -65, y: 0 },
+                ChunkCoord { x: -2, y: 0 },
+                ChunkLocalPosition { x: 63, y: 0 },
+                ChunkPresence::Missing,
+            ),
+            (
+                WorldPosition { x: -64, y: 0 },
+                ChunkCoord { x: -1, y: 0 },
+                ChunkLocalPosition { x: 0, y: 0 },
+                ChunkPresence::Missing,
+            ),
+            (
+                WorldPosition { x: -1, y: 0 },
+                ChunkCoord { x: -1, y: 0 },
+                ChunkLocalPosition { x: 63, y: 0 },
+                ChunkPresence::Missing,
+            ),
+            (
+                WorldPosition { x: 0, y: 0 },
+                ChunkCoord { x: 0, y: 0 },
+                ChunkLocalPosition { x: 0, y: 0 },
+                ChunkPresence::Initial,
+            ),
+            (
+                WorldPosition { x: 63, y: 0 },
+                ChunkCoord { x: 0, y: 0 },
+                ChunkLocalPosition { x: 63, y: 0 },
+                ChunkPresence::Initial,
+            ),
+            (
+                WorldPosition { x: 64, y: 0 },
+                ChunkCoord { x: 1, y: 0 },
+                ChunkLocalPosition { x: 0, y: 0 },
+                ChunkPresence::PartialInitial,
+            ),
+            (
+                WorldPosition { x: 96, y: 0 },
+                ChunkCoord { x: 1, y: 0 },
+                ChunkLocalPosition { x: 32, y: 0 },
+                ChunkPresence::PartialInitial,
+            ),
+        ];
+
+        for (position, coord, local, presence) in cases {
+            let inspection = world.inspect_chunk_at(position).unwrap();
+            assert_eq!(inspection.coord, coord);
+            assert_eq!(inspection.local, local);
+            assert_eq!(inspection.presence, presence);
+            assert!(inspection.bounds.contains(position));
+        }
+
+        world
+            .generate_area(WorldRect {
+                min: WorldPosition { x: 96, y: 0 },
+                max: WorldPosition { x: 128, y: 64 },
+            })
+            .unwrap();
+        assert_eq!(
+            world
+                .inspect_chunk_at(WorldPosition { x: 96, y: 0 })
+                .unwrap()
+                .presence,
+            ChunkPresence::RetainedPartialInitial
+        );
+    }
+
+    #[test]
+    fn chunk_inspection_rejects_an_unrepresentable_positive_edge() {
+        let world = World::generate(1, WorldConfig::new(64, 64).unwrap());
+        assert_eq!(
+            world.inspect_chunk_at(WorldPosition { x: i64::MAX, y: 0 }),
+            Err(GenerateAreaError::TooLarge)
         );
     }
 

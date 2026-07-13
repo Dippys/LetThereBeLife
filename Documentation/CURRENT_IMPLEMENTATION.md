@@ -19,10 +19,12 @@ Last synchronized: 2026-07-13.
 - Deterministic 64 x 64 generated chunks keyed by signed `ChunkCoord`, with bounded chunk lookup instead of a growing linear patch search.
 - A dedicated world-generation worker receives only missing chunk coordinates, keeps selected-area generation off the window/event-loop thread, and merges bounded completed batches into `sim-core` on the main thread.
 - Large-generation guardrails: 4,096 missing chunks per request, 16,384 retained generated chunks, 16 chunks applied per frame, stop-remaining-work cancellation with `C` (already applied chunks remain), and deferred GPU cache synchronization. Retained chunks and selected portions fully covered by the initial rectangle do not consume request budget; a partially initial boundary chunk counts when its selection extends into unloaded terrain.
+- Automatic visible-area generation requests run after startup, resize, zoom, completed generation, and left-drag pan release. Requests reuse the missing-only worker path and are skipped as a whole when the visible area exceeds coordinate, per-request, or retained-capacity limits; the window title reports the reason until the view changes.
 - Viewer camera starting at full-map fit with cursor-anchored mouse-wheel zoom from 1/16x fit to 64x magnification and unbounded left-button drag panning through generated or empty space.
 - Right-button drag selection with a translucent yellow valid preview and red invalid preview for missing-chunk-budget, retained-capacity, or coordinate-safety failures. New previews are disabled while the background generator is busy or unavailable; release generates deterministic terrain and sparse features only for an accepted rectangle.
 - Signed world positions supporting generated patches in negative and positive coordinate space.
-- Hover inspection with a highlighted cell and window-title output for coordinates, terrain, elevation, moisture, and sparse feature kind.
+- Allocation-free `sim-core` chunk inspection exposing canonical signed chunk coordinates, half-open bounds, compact local coordinates, and initial, partial-initial, retained, retained partial-initial, or missing coverage without exposing mutable storage.
+- Hover inspection with a highlighted loaded cell, a color-coded outline for the inspected chunk when it is at least four screen pixels wide, and window-title output for world/chunk/local coordinates, coverage, terrain, elevation, moisture, and sparse feature kind. Unloaded cells remain inspectable.
 - Keyboard controls: pause/resume, 1x–8x speed selection, cancel active generation, reset, and exit.
 - Headless runner accepting `--ticks` and `--seed`.
 - Unit tests covering equal-input tick determinism, pause behavior, and reset behavior.
@@ -32,7 +34,7 @@ Last synchronized: 2026-07-13.
 
 ## Not implemented
 
-- Automatic proximity-driven chunk generation, chunk unloading, or chunk persistence; expansion currently requires a right-drag selection and retains generated chunks in memory.
+- Chunk unloading, generator versioning, or chunk persistence; initial and automatically or manually generated chunks currently remain in memory until exit.
 - Full drainage basins, tributaries, local streams, wetlands, dynamic water flow, erosion, dams/canals, resource quantities, or terrain modification. Current lakes and major rivers are bounded deterministic terrain shaping, not watershed simulation.
 - Persistent agents, needs, cognition, movement, or event scheduling.
 - General-purpose deterministic RNG streams, save/load, snapshots on disk, or replay logs.
