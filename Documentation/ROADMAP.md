@@ -1,6 +1,6 @@
 # Implementation Roadmap
 
-Last synchronized: 2026-07-12.
+Last synchronized: 2026-07-13.
 
 ## Completed
 
@@ -15,12 +15,14 @@ Last synchronized: 2026-07-12.
 - Cursor-anchored viewer zoom and terrain/feature hover inspection.
 - Unbounded left-drag camera panning across generated and unrendered space.
 - Selection-driven deterministic generation beyond the initial area.
+- Continental-scale ocean shaping with sparse bounded inland-lake descriptors and deterministic topology/size regression coverage.
+- Relief-following coast-anchored major rivers with highland headwaters, non-self-intersecting smoothed routes, downstream widening, overview-scale continuity, and deterministic chunk-seam coverage.
 
 ## Next
 
 - Add chunk-boundary inspection and automatic on-demand generation without moving world ownership into the viewer.
 - Add chunk unloading and persistence policies around the deduplicated chunk store.
-- Add regional hydrology and stable generator versioning before persistence.
+- Add watershed-scale drainage basins, tributaries, local streams, wetlands, and stable generator versioning before persistence; current lake/major-river descriptors are terrain shaping rather than dynamic flow simulation.
 
 ## Planned
 

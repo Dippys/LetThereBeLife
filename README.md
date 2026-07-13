@@ -23,8 +23,10 @@ Install the recommended Rust Analyzer and CodeLLDB extensions, open **Run and De
 All launch entries build the selected binary first, use the repository root as the working directory, and pass `config/simulation.toml`. The **Run Task** menu also includes individual build tasks and `validate: workspace`.
 
 The viewer initially generates the area configured in [`config/simulation.toml`](config/simulation.toml),
-which defaults to 1,024 x 1,024 cells. This is the startup area, not the intended
-maximum world size. Restarting with the same configuration reproduces the same terrain.
+which currently requests 4,096 x 4,096 cells. The Rust fallback is 1,024 x 1,024 when
+dimensions are omitted. This is the startup area, not the intended maximum world size.
+Restarting with the same configuration reproduces the same continental oceans, coasts,
+sparse inland lakes, and the highland-fed major river flowing into the continental-water coast.
 
 ```toml
 [simulation]
@@ -32,8 +34,8 @@ seed = 1
 ticks_per_second = 60
 
 [world]
-initial_width = 1024
-initial_height = 1024
+initial_width = 4096
+initial_height = 4096
 ```
 
 Use a different file with `cargo run -p sim-viewer -- --config path/to/file.toml`.

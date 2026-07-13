@@ -155,3 +155,37 @@ Date: 2026-07-13
 **Reason:** Selecting an already generated rectangle plus a small adjacent extension should pay only for the new terrain. Loaded overlap consumes neither generation CPU nor additional retained storage, so charging it against the worker payload limit unnecessarily restricts expansion.
 
 **Consequences:** A selection footprint may exceed 16,777,216 cells when most of it is loaded, while each worker job still creates at most 16,777,216 chunk-payload cells and retained generated storage remains capped at 16,384 chunks. A boundary chunk can recompute cells overlapping a non-aligned initial edge, although initial-owned cells remain authoritative and are filtered from presentation. Preview validation is cached by selection bounds and world revision to avoid repeating the bounded missing-chunk scan on unchanged frames.
+
+## D-016: Explicit continental oceans and bounded lake descriptors
+
+Date: 2026-07-13
+
+**Decision:** Make the 2,048-cell absolute-coordinate continental field solely responsible for ocean, shallow-water, and sand-coast membership. Finer broad/regional fields may shape inland relief but cannot independently cross sea level. Replace thresholded local lake noise with at most one deterministic descriptor per eligible 1,024-cell region. Each descriptor has bounded radii, a guaranteed deep-water core, shallow and sand bands, regional shoreline perturbation, and margins that keep it inside the owning region. Resolve the descriptor once per aligned 64 x 64 generation chunk without adding persistent cell state.
+
+**Reason:** Multi-scale local thresholds produced many similarly sized water splashes, and merely tuning their frequency could not rule out tiny puddles on other seeds. Separating ocean topology from bounded lakes creates coherent oceans and a small number of substantial inland water bodies while preserving deterministic on-demand generation.
+
+**Consequences:** Worlds generated from an existing seed intentionally change and require an explicit generator version before persistence is introduced. Full drainage, river routing, and watershed hydrology remain planned. `TerrainCell` remains four bytes, and initial-area/chunk output stays identical because all descriptors and fields depend only on the seed and signed world coordinates.
+
+## D-017: Coast-anchored descending major rivers
+
+Date: 2026-07-13
+
+**Extends:** D-016's explicit continental ocean topology.
+
+**Decision:** Derive at most one major river inside each aligned 2,048-cell region from a fixed 8 x 8 continentalness lattice. Select bounded hashed coastal candidates that neighbor pre-existing continental water, grow upstream through strictly higher lattice nodes, discard routes with fewer than four land nodes or an insufficiently high source, then reverse the route so every accepted coarse path descends into that outlet. Refine each edge with a deterministic midpoint offset and rasterize a 24-to-48-cell tapered channel with a deep core, shallow water, and sand bank. Resolve the route once per 64 x 64 chunk and retain only intersecting segments in a fixed-capacity transient array.
+
+**Reason:** Random local-noise channels do not guarantee an outlet, while a global watershed solve conflicts with independent on-demand chunks. Coast-anchored reverse growth guarantees a continental-water mouth, strict coarse descent, bounded work, and seam-independent regeneration without pretending to implement complete hydrology. The repository seed's separate 32-cell topology sample sees one boundary-touching continental-water component.
+
+**Consequences:** Existing seeds intentionally produce new terrain again. The viewer needs no river-specific state because existing deep-water, shallow-water, and sand rendering applies automatically. `TerrainCell` remains four bytes and rivers add no persistent allocation. Full basin accumulation, tributaries, local streams, wetlands, dynamic flow, and generator versioning remain future work.
+
+## D-018: Relief-following non-self-intersecting major rivers
+
+Date: 2026-07-13
+
+**Supersedes:** D-017's 8 x 8 continentalness route, random midpoint offsets, and 24-cell-wide abrupt source.
+
+**Decision:** Derive each eligible regional river from a 16 x 16 lattice of pre-lake continental relief rather than the continent mask. Try at most eight deterministic coastal outlets and grow upstream through strictly higher eight-neighbor nodes while preferring gentle rises and stable headings. Reject returns beside the old path and diagonal edges that cross it, require 7 to 14 land nodes and a baseline source elevation of at least 50,001, then select a non-reversing continental-water mouth. Probe five bounded midpoint offsets per coarse edge while minimizing violation of its downhill elevation envelope, apply deterministic integer corner cutting, and reject refined descriptors whose nonlocal width-expanded water-and-bank corridors touch. Rasterize a nominal 20-cell shallow headwater feeding a nominal 16-to-48-cell widening channel; widen a narrow sand bank throughout and introduce the deep core downstream. Keep the 16-cell overview sample connected from headwater to outlet.
+
+**Reason:** The prior greedy route was topologically connected but visually failed: a coarse continent-mask walk could form hairpins, cross its own diagonal geometry, ignore displayed valleys, end abruptly in grass, and alias into disconnected-looking lines at full-map zoom. Actual-relief routing, non-crossing constraints, aligned outlets, terrain-selected refinement, and an overview-width floor directly encode the missing visual and drainage invariants without requiring a global watershed solve.
+
+**Consequences:** The repository seed now has one coherent startup-area major river rather than two malformed lines. Every accepted coarse route descends through pre-lake continental relief, but smoothed points are bounded visual refinement rather than a full final-elevation flow solve. The system still does not model basin accumulation, tributaries, lake inflows/outflows, erosion, or dynamic discharge. Each chunk evaluates a fixed 256-sample lattice and fixed-capacity arrays with no heap allocation or persistent terrain bytes. Existing seeds intentionally change again and still require generator versioning before persistence.
