@@ -23,15 +23,26 @@ Last synchronized: 2026-07-14.
 - Parallel cold-region preparation, indexed regional macro/climate sampling, a wider bounded task window, and 32 x 32 bootstrap pages without changing generated chunk content across pool sizes.
 - A centered 65,536 x 65,536-cell generation envelope (1,048,576 chunks, 16 GiB raw terrain at full residency), with origin-outward paging and core-enforced spatial bounds.
 
+## Active
+
+- Keep Phase 1 world foundation as the project focus until the generated world is coherent and convincing at full-map, regional, chunk-boundary, and close inspection scales. This intentionally extends world-generation work beyond the initial baseline described in `InitialDocumentation/16_IMPLEMENTATION_ROADMAP.md` before moving into agents or another simulation domain.
+- Treat generated terrain as intentionally unstable while there is no save/load or other persisted world output. Seed output may change as world generation improves; generator versioning is not current work.
+
 ## Next
 
-- Extend the focused generation-pool throughput harness into controlled first-window, first-terrain, full-bootstrap-completion, frame-hitch, resident-memory, and allocation measurements; use them to set explicit runtime budgets.
-- Add stable generator versioning before any persisted world output, then define chunk unloading and persistence policies around the deduplicated chunk store.
-- Extend the current region-local static drainage into cross-region basins, tributaries, local streams, wetlands, erosion, and dynamic water only when their ownership, persistence, and performance budgets are specified.
+- Improve large-scale world coherence, starting with cross-region drainage and basins so rivers, lakes, and watersheds do not stop at regional implementation boundaries.
+- Refine terrain, climate, biome transitions, coastlines, tributaries, local streams, wetlands, and sparse feature placement within explicit deterministic and performance bounds. Keep erosion and dynamic water for the point where their ownership and runtime budgets are defined.
+- Establish a repeatable representative-seed world-quality review at full-map, regional, seam, and close-up scales, then turn durable findings into deterministic regression tests instead of relying only on visual iteration.
+- Extend the focused generation measurements where needed to protect world-generation iteration, including first terrain, bootstrap completion, frame hitches, resident memory, and allocations; use measured results to set explicit runtime budgets.
+
+## Deferred
+
+- Generator versioning, save/load, chunk persistence, and unloading policy are deferred until persisted world output is about to be introduced and the generator is ready to stabilize. Version identifiers must still be added before the first durable world format ships.
+- Physical agents and later simulation phases remain deferred until the active world-foundation quality bar is met.
 
 ## Planned
 
-Follow the phases described in `InitialDocumentation/16_IMPLEMENTATION_ROADMAP.md`, using that file only as immutable design input. Record implementation status here as milestones land.
+After the active world-foundation focus is complete, resume the phases described in `InitialDocumentation/16_IMPLEMENTATION_ROADMAP.md`, using that file only as immutable design input. Record implementation status here as milestones land.
 
 ## Open
 
