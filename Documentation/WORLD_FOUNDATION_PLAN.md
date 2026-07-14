@@ -1,8 +1,8 @@
 # World Foundation Improvement Plan
 
-Last synchronized: 2026-07-14.
+Last synchronized: 2026-07-15.
 
-Status: **Active**. Slices 0 through 3 are implemented; Slices 4 through 7 remain planned. This document sequences the remaining Phase 1 world-foundation work and marks implemented behavior explicitly.
+Status: **Active**. Slices 0 through 4 are implemented; Slices 5 through 7 remain planned. This document sequences the remaining Phase 1 world-foundation work and marks implemented behavior explicitly.
 
 ## Purpose
 
@@ -23,7 +23,7 @@ The implemented generator already provides:
 
 - a centered `65,536 x 65,536`-cell world envelope;
 - deterministic 64 x 64 chunks and 4,096-cell drainage regions;
-- a canonical 256-cell whole-envelope drainage skeleton with connected major channels, basin identities, and deterministic lake outlets;
+- a canonical 256-cell whole-envelope drainage skeleton with basin identities, deterministic lake outlets, and sparse explicitly lake-fed graded river routes;
 - analytic continents, oceans, coastlines, relief, plate-boundary mountains, temperature, and moisture;
 - whole-envelope priority-flood lakes and accumulated-flow major rivers refined through regional sampling;
 - packed surface and biome semantics covering ocean/lake/river water, beach/desert sand, soil-backed grassland/savanna/forest/wetland/tundra, alpine hill/rock, and snow/ice;
@@ -32,8 +32,8 @@ The implemented generator already provides:
 
 Known limitations that motivate this plan:
 
-- the connected drainage skeleton intentionally resolves only major channels and coarse lakes; tributary hierarchy, local streams, drainage-grounded wetlands, and transition detail remain later slices;
-- the provisional wetland class uses saturated lowland climate/elevation rather than water-table, floodplain, basin-edge, or poor-drainage evidence;
+- current rivers are deliberately lake-fed only; spring, snowmelt, and finer-than-256-cell catchment sources are not yet modeled;
+- zoomed-out sampled rendering can miss minority terrain and features beyond the explicit step-4 river sampling guarantee until Slice 6 adds summaries;
 - traversal, fertility, resource yield, and settlement suitability are not yet exposed as derived query contracts;
 - sparse features have only a kind and position, with no resource quantity, species, lifecycle, or modification state;
 - zoomed-out terrain expands one sampled cell over each coarse block, while features survive only at coordinates aligned to the sample step;
@@ -62,7 +62,7 @@ The slices are ordered by dependency. A later slice may be designed while an ear
 | 1 | Cross-region drainage skeleton | Connected watersheds, rivers, and lake outlets |
 | 2 | Finite-world climate contract | Climate variation that fits the actual envelope |
 | 3 | Terrain and biome semantics | More meaningful land classes without uncontrolled type growth |
-| 4 | Tributaries, local streams, wetlands, and transitions | Regional geography that remains convincing close up |
+| 4 | Sparse sourced rivers, wetlands, and transitions | Regional geography that remains convincing close up |
 | 5 | Surface-feature ecology and resource readiness | Useful distributions and an explicit path to depletion state |
 | 6 | Multi-scale renderer summaries | Terrain and features remain legible when zoomed out |
 | 7 | Phase 1 exit contract | Passability, resource queries, and a documented handoff to agents |
@@ -85,7 +85,7 @@ Make generator changes reviewable with the same seeds, coordinates, scales, stat
 ### Deliverables
 
 - Define a small representative seed set containing the repository seed plus seeds chosen for different continent, mountain, desert, forest, lake, and river layouts.
-- Define canonical full-envelope, regional, drainage-seam, coastline, river-mouth, lake, mountain, and close-up views.
+- Define canonical full-envelope, regional, drainage-seam, coastline, river-mouth, river-source, mountain, and close-up views.
 - Extend developer tooling only as needed to emit those views and a compact terrain/feature distribution report.
 - Record the exact release-mode commands and expected output locations.
 - Record baseline generation time, sampled terrain distribution, feature density, and relevant cache/type sizes.
@@ -190,7 +190,7 @@ The choice must also define approximate tile scale, expected climate-zone widths
 
 Status: **Implemented** on 2026-07-14. `TerrainCell` still occupies four bytes: its former one-byte ground enum is now a private packed `TerrainClass` whose low nibble is exposed as `SurfaceType` and high nibble as `BiomeType`. The safe `TerrainCell::surface`, `TerrainCell::biome`, and `TerrainCell::classification` accessors distinguish deep/shallow water, sand, soil, hill, rock, and snow/ice surfaces from ocean, lake, river, beach, desert, grassland, savanna, forest, wetland, tundra, and alpine environments.
 
-Classification uses the existing broad interpolated elevation, temperature, and moisture fields, so the new meanings form regional bands rather than independent cell scatter. Lake identity survives overlapping river segments while deep-water precedence remains order independent. Wetland currently means saturated warm/temperate lowland; Slice 4 must replace or refine that provisional climate/elevation rule with water-table, floodplain, basin-edge, or drainage evidence. Traversal, fertility, resource yield, and settlement suitability remain derived future rules rather than stored cell flags.
+Classification uses the existing broad interpolated elevation, temperature, and moisture fields, so the new meanings form regional bands rather than independent cell scatter. Lake identity survives overlapping river segments while deep-water precedence remains order independent. Slice 4 subsequently replaced the provisional moisture/elevation-only wetland rule with low-slope floodplain and basin-edge evidence. Traversal, fertility, resource yield, and settlement suitability remain derived future rules rather than stored cell flags.
 
 The viewer HUD and both viewer/developer palettes expose the split semantics. World-quality review format 2 records seven surface and eleven biome distributions plus the packed semantic byte in its stable hash. The four canonical complete-envelope hashes are `a2373a6b276fcb06`, `a3bef667d00b0691`, `0c174931efc451af`, and `7ce7b66e324e6cb6` for seeds 1, 7, 42, and 10,001 respectively.
 
@@ -239,16 +239,22 @@ These are simulation-facing meanings, not a requirement for separate art assets 
 - `TerrainCell` size and full-world logical payload are asserted and documented after the chosen representation changes.
 - Existing water-depth precedence and feature exclusion on water remain correct.
 
-## Slice 4: Tributaries, local streams, wetlands, and transitions
+## Slice 4: Sparse sourced rivers, wetlands, and transitions
+
+Status: **Implemented**, structurally revised on 2026-07-15 after visual review rejected the threshold-exposed network. The complete priority-filled graph remains hidden canonical topology, but no river begins merely because runoff crossed a numeric frontier. Moisture at or below 12,000 contributes no perennial runoff. Visible rivers must originate at the exact spill edge of a nonterminal canonical lake with at least 260,000 flow, drain to ocean or world edge, remain at least 2,048 cells from another selected source, and fit within a 24-source complete-envelope cap. The four review seeds retain 4-15 sources and 33-144 links; seed 1 retains 87 links rather than the rejected 4,479-link revision or 13,653-link leaf pattern.
+
+Eight-neighbor routing rejects a diagonal that would cross one already selected in the same coarse cell. Selected links use exact canonical endpoints, bounded perpendicular curves, and at most six cells of interior detail; the complete four-seed intersection regression rejects crossings, collinear overlap, and unrelated endpoint contact. Each 28-byte segment owns `u16` start/end water surfaces that never rise downstream. Chunk rasterization projects that grade, so an upland river remains above sea level until its route descends naturally. Wetlands require low slope plus either the interpolated edge of canonical standing water or an 18-cell floodplain halo, together with the existing climate/elevation limits. A four-cell riparian bank turns qualifying dry shore soil into grassland. The already-computed coherent detail field boundedly displaces beach, desert, forest, wetland, snowline, and treeline thresholds without changing water ownership or adding another noise evaluation or retained state.
+
+The four representative seeds use the 13-entry allocation-free `ChunkContext` fast path; an empty `Vec` fallback preserves valid arbitrary-seed generation instead of panicking if that measured capacity is exceeded. Canonical review format 2 hashes are `f95c7be0eb48381c`, `5db53acad12b153a`, `cd0ab6e48e2ca92b`, and `ff4a7c35517124f0` for seeds 1, 7, 42, and 10,001. Visual review on 2026-07-15 inspected explicit source-lake and mouth views and confirmed sparse continuous curved routes with visible water-body origins and correct upland grade. Lake-only sourcing is intentionally conservative; spring/snowmelt sources and optional major tributaries remain future reviewed work rather than unexplained blue lines.
 
 ### Objective
 
-Add the smaller-scale water and transition structures that make regional geography believable after major drainage continuity is correct.
+Make visible water sparse, sourced, graded, and believable after major drainage continuity is correct, while retaining hydrologic terrain transitions.
 
 ### Deliverables
 
-- Derive tributary hierarchy or stream order from canonical accumulated flow.
-- Add narrower local streams at a lower threshold than major rivers, with explicit minimum visible width rules by zoom level.
+- Select a bounded set of explicit sources from canonical accumulated runoff rather than exposing threshold frontiers.
+- Retain complete source-to-destination paths with deterministic hierarchy, width, grade, and minimum visibility rules.
 - Generate wetlands from shallow water table, low slope, floodplain proximity, basin edges, or poorly drained terrain rather than unrelated noise.
 - Refine coastline, beach, riverbank, lake-edge, biome-edge, and treeline transitions within bounded deterministic rules.
 - Preserve water-body connectivity through local detail; detail noise must not sever a channel selected by the drainage hierarchy.
@@ -256,11 +262,11 @@ Add the smaller-scale water and transition structures that make regional geograp
 ### Acceptance criteria
 
 - Tributaries join downstream channels rather than crossing or stopping beside them.
-- Local streams have a valid downstream path and do not originate from visual noise alone.
+- Every visible river has an explicit source body, a non-rising downstream grade, and a valid path to open water.
 - Wetlands occur in hydrologically plausible places and remain absent from steep or arid terrain unless explicitly justified.
 - Coast and bank transitions remain recognizable at close and regional scales.
 - Chunk and region seams do not change channel width, wetland classification, or transition ownership.
-- Per-chunk river lookup remains bounded; any replacement for the current 25-segment bound has a proof, assertion, or measured bounded structure.
+- Per-chunk river lookup remains finite and deterministic; representative generation stays inside the 13-segment allocation-free fast path and arbitrary-seed overflow remains safe.
 
 ## Slice 5: Surface-feature ecology and resource readiness
 
@@ -422,7 +428,7 @@ The following are outside this plan unless a measured or gameplay-critical depen
 These must be resolved in the owning slice rather than silently assumed:
 
 - whether the provisional physical tile scale should become a durable movement/persistence contract;
-- hydrologic wetland inputs and local stream/transition ownership;
+- hydrologic wetland inputs and sourced-river/transition ownership;
 - the first derived traversal, fertility, resource, and settlement query contract;
 - stable feature identity and sparse mutable-state keying;
 - renderer summary representation and residency budget;
@@ -435,7 +441,7 @@ This plan is complete when:
 - major drainage crosses regional boundaries without discontinuities;
 - climate meaning matches the finite world envelope;
 - terrain classes carry the minimum semantics required for movement, water, gathering, and settlement;
-- local streams, wetlands, and transitions are coherent and deterministic;
+- sourced rivers, wetlands, and transitions are coherent and deterministic;
 - features are environmentally distributed and have a clear immutable-base/mutable-state boundary;
 - the viewer preserves important terrain and feature information at every supported zoom;
 - representative multi-seed review, deterministic tests, and performance measurements pass;

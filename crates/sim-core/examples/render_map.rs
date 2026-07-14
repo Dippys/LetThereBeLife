@@ -66,8 +66,14 @@ const FOCUSED_VIEWS: [ReviewView; 8] = [
         false,
     ),
     ReviewView::new("coastline", 1, (-2_048, 2_048, 4_096, 4_096), 8, false),
-    ReviewView::new("river-mouth", 42, (14_080, 16_640, 2_048, 2_048), 2, false),
-    ReviewView::new("lake", 1, (2_048, -4_096, 2_048, 2_048), 4, false),
+    ReviewView::new("river-mouth", 1, (-16_896, -17_152, 2_048, 2_048), 2, false),
+    ReviewView::new(
+        "river-source",
+        1,
+        (-14_592, -16_384, 2_048, 2_048),
+        2,
+        false,
+    ),
     ReviewView::new("mountain", 7, (-16_384, -4_096, 8_192, 8_192), 16, false),
     ReviewView::new("close-up", 1, (-25_088, 14_848, 512, 512), 1, true),
 ];

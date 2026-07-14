@@ -26,6 +26,7 @@ use crate::world::{
     BiomeType, CHUNK_SIZE, ChunkLoadRequest, ClimateSample, FeatureKind, SurfaceType, TerrainCell,
     TerrainClass,
 };
+use drainage::FLOODPLAIN_RADIUS;
 use hydrology::{
     GRID, LAKE_MIN_DEPTH, NODE_STEP, RegionMap, RiverSegment, point_segment_distance_ratio,
 };
@@ -39,14 +40,17 @@ const BEACH_MAX: i32 = 33_000;
 const HILL_MIN: i32 = 50_000;
 const ROCK_MIN: i32 = 56_000;
 const LAKE_DEEP_DEPTH: i32 = 1_600;
-const DEEP_WATER_FILL: i32 = 24_500;
-const SHALLOW_WATER_FILL: i32 = 27_800;
 const DESERT_MOISTURE_MAX: i32 = 12_000;
 const DESERT_TEMPERATURE_MIN: i32 = 30_000;
 const FOREST_MOISTURE_MIN: i32 = 30_000;
 const FOREST_TEMPERATURE_MIN: i32 = 13_000;
 const WETLAND_MOISTURE_MIN: i32 = 48_000;
 const WETLAND_ELEVATION_MAX: i32 = 39_000;
+const WETLAND_SLOPE_MAX: i64 = 90;
+const RIPARIAN_MOISTURE_MIN: i32 = 10_000;
+const RIPARIAN_ELEVATION_MAX: i32 = 42_000;
+const RIPARIAN_SLOPE_MAX: i64 = 180;
+const RIVERBANK_RADIUS: i64 = 4;
 const SAVANNA_MOISTURE_MAX: i32 = 24_000;
 const TUNDRA_TEMPERATURE_MAX: i32 = 13_000;
 const SNOW_TEMPERATURE_MAX: i32 = 6_500;
@@ -162,16 +166,20 @@ pub(crate) fn prepare_chunk_regions(seed: u64, requests: &[ChunkLoadRequest]) {
 }
 
 // Whole-world channel links are subdivided at the 32-cell refinement step.
-// Eight is the measured maximum across the four representative seeds and the
-// complete finite envelope; the fixed array avoids one allocation per chunk.
-const MAX_CHUNK_RIVERS: usize = 8;
+// Thirteen is the measured water-plus-floodplain maximum across the four
+// representative seeds and complete envelope; the fixed array avoids one
+// allocation per chunk.
+const MAX_CHUNK_RIVERS: usize = 13;
 const EMPTY_SEGMENT: RiverSegment = RiverSegment {
     ax: 0,
     ay: 0,
     bx: 0,
     by: 0,
     channel_id: 0,
+    surface_a: 0,
+    surface_b: 0,
     half_width: 0,
+    stream_order: 0,
 };
 
 /// Everything one chunk needs from the global and regional tiers: a 3x3 node
@@ -187,6 +195,7 @@ pub(crate) struct ChunkContext {
     roughness: [i32; 9],
     rivers: [RiverSegment; MAX_CHUNK_RIVERS],
     river_len: usize,
+    overflow_rivers: Vec<RiverSegment>,
 }
 
 impl ChunkContext {
@@ -208,6 +217,7 @@ impl ChunkContext {
             roughness: [0; 9],
             rivers: [EMPTY_SEGMENT; MAX_CHUNK_RIVERS],
             river_len: 0,
+            overflow_rivers: Vec::new(),
         };
         for offset_y in 0..3 {
             for offset_x in 0..3 {
@@ -223,22 +233,34 @@ impl ChunkContext {
 
         for segment in &map.rivers {
             if river_intersects_chunk(*segment, origin_x, origin_y) {
-                assert!(
-                    context.river_len < MAX_CHUNK_RIVERS,
-                    "a chunk exceeded the proved regional river-segment bound"
-                );
-                context.rivers[context.river_len] = *segment;
-                context.river_len += 1;
+                context.push_river(*segment);
             }
         }
         context
     }
 
+    fn push_river(&mut self, segment: RiverSegment) {
+        if self.river_len < MAX_CHUNK_RIVERS {
+            self.rivers[self.river_len] = segment;
+            self.river_len += 1;
+        } else {
+            self.overflow_rivers.push(segment);
+        }
+    }
+
+    fn river_segments(&self) -> impl Iterator<Item = &RiverSegment> {
+        self.rivers[..self.river_len]
+            .iter()
+            .chain(self.overflow_rivers.iter())
+    }
+
     fn interpolate(&self, values: &[i32; 9], local_x: i64, local_y: i64) -> i64 {
-        let cell_x = (local_x / NODE_STEP) as usize;
-        let cell_y = (local_y / NODE_STEP) as usize;
-        let fx = local_x % NODE_STEP;
-        let fy = local_y % NODE_STEP;
+        debug_assert!((0..=CHUNK_SIZE).contains(&local_x));
+        debug_assert!((0..=CHUNK_SIZE).contains(&local_y));
+        let cell_x = (local_x / NODE_STEP).min(1) as usize;
+        let cell_y = (local_y / NODE_STEP).min(1) as usize;
+        let fx = local_x - cell_x as i64 * NODE_STEP;
+        let fy = local_y - cell_y as i64 * NODE_STEP;
         let base = cell_y * 3 + cell_x;
         let top = i64::from(values[base]) * (NODE_STEP - fx) + i64::from(values[base + 1]) * fx;
         let bottom =
@@ -254,6 +276,7 @@ impl ChunkContext {
         let temperature = self.interpolate(&self.temperature, local_x, local_y) as i32;
         let moisture = self.interpolate(&self.moisture, local_x, local_y) as i32;
         let water_depth = self.interpolate(&self.water_depth, local_x, local_y) as i32;
+        let slope = self.local_slope(local_x, local_y);
 
         // Local detail is the last tier: its amplitude comes from the regional
         // roughness budget and is damped near sea level so coasts stay ragged
@@ -267,6 +290,9 @@ impl ChunkContext {
 
         let mut water_surface = None;
         let mut water_biome = None;
+        let mut river_grade = None;
+        let mut floodplain = false;
+        let mut riverbank = false;
         if water_depth >= LAKE_MIN_DEPTH {
             let surface = macro_elevation + i64::from(water_depth - LAKE_MIN_DEPTH);
             elevation = surface.clamp(0, 65_535) as i32;
@@ -277,7 +303,7 @@ impl ChunkContext {
             });
             water_biome = Some(BiomeType::Lake);
         }
-        for segment in &self.rivers[..self.river_len] {
+        for segment in self.river_segments() {
             let (distance_sq, denominator) = point_segment_distance_ratio(
                 x,
                 y,
@@ -287,22 +313,44 @@ impl ChunkContext {
                 i64::from(segment.by),
             );
             let half_width = i64::from(segment.half_width);
+            let floodplain_width = half_width + FLOODPLAIN_RADIUS;
+            floodplain |=
+                distance_sq <= i128::from(floodplain_width * floodplain_width) * denominator;
+            let bank_width = half_width + RIVERBANK_RADIUS;
+            riverbank |= distance_sq <= i128::from(bank_width * bank_width) * denominator;
             let core = half_width * 5 / 8;
             if segment.half_width >= 8 && distance_sq <= i128::from(core * core) * denominator {
-                elevation = elevation.min(DEEP_WATER_FILL);
+                let grade = river_surface_at(x, y, *segment);
+                river_grade = Some(river_grade.map_or(grade, |current: i32| current.min(grade)));
                 water_surface = Some(SurfaceType::DeepWater);
                 water_biome.get_or_insert(BiomeType::River);
             } else if distance_sq <= i128::from(half_width * half_width) * denominator {
-                elevation = elevation.min(SHALLOW_WATER_FILL);
+                let grade = river_surface_at(x, y, *segment);
+                river_grade = Some(river_grade.map_or(grade, |current: i32| current.min(grade)));
                 if water_surface != Some(SurfaceType::DeepWater) {
                     water_surface = Some(SurfaceType::ShallowWater);
                 }
                 water_biome.get_or_insert(BiomeType::River);
             }
         }
+        if water_biome == Some(BiomeType::River) {
+            elevation = river_grade.expect("river water has a longitudinal grade");
+        }
 
         let class = water_surface.map_or_else(
-            || classify(elevation, moisture, temperature),
+            || {
+                let basin_edge = water_depth > 0 && water_depth < LAKE_MIN_DEPTH;
+                let hydrologic_wetland = (basin_edge || floodplain) && slope <= WETLAND_SLOPE_MAX;
+                let riparian_bank = (basin_edge || riverbank) && slope <= RIPARIAN_SLOPE_MAX;
+                classify(
+                    elevation,
+                    moisture,
+                    temperature,
+                    hydrologic_wetland,
+                    riparian_bank,
+                    detail as i32,
+                )
+            },
             |surface| {
                 TerrainClass::new(
                     surface,
@@ -318,50 +366,97 @@ impl ChunkContext {
         );
         (cell, feature(self.seed, x, y, class, moisture, temperature))
     }
+
+    fn local_slope(&self, local_x: i64, local_y: i64) -> i64 {
+        let next_x = (local_x + 1).min(CHUNK_SIZE);
+        let next_y = (local_y + 1).min(CHUNK_SIZE);
+        let elevation = self.interpolate(&self.elevation, local_x, local_y);
+        let dx = self.interpolate(&self.elevation, next_x, local_y) - elevation;
+        let dy = self.interpolate(&self.elevation, local_x, next_y) - elevation;
+        dx.abs().max(dy.abs())
+    }
 }
 
 fn river_intersects_chunk(segment: RiverSegment, origin_x: i64, origin_y: i64) -> bool {
     let max_x = origin_x + CHUNK_SIZE;
     let max_y = origin_y + CHUNK_SIZE;
-    i64::from(segment.ax.max(segment.bx)).saturating_add(i64::from(segment.half_width)) >= origin_x
-        && i64::from(segment.ax.min(segment.bx)).saturating_sub(i64::from(segment.half_width))
-            < max_x
-        && i64::from(segment.ay.max(segment.by)).saturating_add(i64::from(segment.half_width))
-            >= origin_y
-        && i64::from(segment.ay.min(segment.by)).saturating_sub(i64::from(segment.half_width))
-            < max_y
+    let influence = i64::from(segment.half_width) + FLOODPLAIN_RADIUS;
+    i64::from(segment.ax.max(segment.bx)).saturating_add(influence) >= origin_x
+        && i64::from(segment.ax.min(segment.bx)).saturating_sub(influence) < max_x
+        && i64::from(segment.ay.max(segment.by)).saturating_add(influence) >= origin_y
+        && i64::from(segment.ay.min(segment.by)).saturating_sub(influence) < max_y
 }
 
-fn classify(elevation: i32, moisture: i32, temperature: i32) -> TerrainClass {
+fn river_surface_at(x: i64, y: i64, segment: RiverSegment) -> i32 {
+    let dx = i128::from(segment.bx) - i128::from(segment.ax);
+    let dy = i128::from(segment.by) - i128::from(segment.ay);
+    let length_squared = dx * dx + dy * dy;
+    if length_squared == 0 {
+        return i32::from(segment.surface_a);
+    }
+    let projection = ((i128::from(x) - i128::from(segment.ax)) * dx
+        + (i128::from(y) - i128::from(segment.ay)) * dy)
+        .clamp(0, length_squared);
+    let surface = (i128::from(segment.surface_a) * (length_squared - projection)
+        + i128::from(segment.surface_b) * projection)
+        / length_squared;
+    surface as i32
+}
+
+fn classify(
+    elevation: i32,
+    moisture: i32,
+    temperature: i32,
+    hydrologic_wetland: bool,
+    riparian_bank: bool,
+    transition: i32,
+) -> TerrainClass {
+    let transition = transition.clamp(-(NOISE_HALF as i32), NOISE_HALF as i32);
+    let beach_max = BEACH_MAX + transition / 40;
+    let desert_moisture_max = DESERT_MOISTURE_MAX + transition / 24;
+    let forest_moisture_min = FOREST_MOISTURE_MIN + transition / 16;
+    let wetland_moisture_min = WETLAND_MOISTURE_MIN + transition / 32;
+    let forest_temperature_min = FOREST_TEMPERATURE_MIN + transition / 32;
+    let tundra_temperature_max = TUNDRA_TEMPERATURE_MAX + transition / 32;
+    let snow_temperature_max = SNOW_TEMPERATURE_MAX + transition / 40;
+    let mountain_snow_temperature_max = MOUNTAIN_SNOW_TEMPERATURE_MAX + transition / 40;
     if elevation <= DEEP_WATER_MAX {
         TerrainClass::new(SurfaceType::DeepWater, BiomeType::Ocean)
     } else if elevation <= SEA_LEVEL {
         TerrainClass::new(SurfaceType::ShallowWater, BiomeType::Ocean)
-    } else if elevation <= BEACH_MAX {
+    } else if elevation <= beach_max {
         TerrainClass::new(SurfaceType::Sand, BiomeType::Beach)
-    } else if temperature < SNOW_TEMPERATURE_MAX {
+    } else if temperature < snow_temperature_max {
         TerrainClass::new(SurfaceType::SnowIce, BiomeType::Tundra)
     } else if elevation > ROCK_MIN {
-        let surface = if temperature < MOUNTAIN_SNOW_TEMPERATURE_MAX {
+        let surface = if temperature < mountain_snow_temperature_max {
             SurfaceType::SnowIce
         } else {
             SurfaceType::Rock
         };
         TerrainClass::new(surface, BiomeType::Alpine)
     } else if elevation > HILL_MIN {
-        let surface = if temperature < MOUNTAIN_SNOW_TEMPERATURE_MAX {
+        let surface = if temperature < mountain_snow_temperature_max {
             SurfaceType::SnowIce
         } else {
             SurfaceType::Hill
         };
         TerrainClass::new(surface, BiomeType::Alpine)
-    } else if temperature < TUNDRA_TEMPERATURE_MAX {
+    } else if temperature < tundra_temperature_max {
         TerrainClass::new(SurfaceType::Soil, BiomeType::Tundra)
-    } else if moisture < DESERT_MOISTURE_MAX && temperature > DESERT_TEMPERATURE_MIN {
-        TerrainClass::new(SurfaceType::Sand, BiomeType::Desert)
-    } else if moisture > WETLAND_MOISTURE_MIN && elevation <= WETLAND_ELEVATION_MAX {
+    } else if hydrologic_wetland
+        && moisture > wetland_moisture_min
+        && elevation <= WETLAND_ELEVATION_MAX
+    {
         TerrainClass::new(SurfaceType::Soil, BiomeType::Wetland)
-    } else if moisture > FOREST_MOISTURE_MIN && temperature > FOREST_TEMPERATURE_MIN {
+    } else if riparian_bank
+        && moisture >= RIPARIAN_MOISTURE_MIN
+        && elevation <= RIPARIAN_ELEVATION_MAX
+    {
+        TerrainClass::new(SurfaceType::Soil, BiomeType::Grassland)
+    } else if moisture < desert_moisture_max && temperature > DESERT_TEMPERATURE_MIN {
+        TerrainClass::new(SurfaceType::Sand, BiomeType::Desert)
+    } else if moisture > forest_moisture_min && temperature > forest_temperature_min {
         TerrainClass::new(SurfaceType::Soil, BiomeType::Forest)
     } else if moisture < SAVANNA_MOISTURE_MAX && temperature > DESERT_TEMPERATURE_MIN {
         TerrainClass::new(SurfaceType::Soil, BiomeType::Savanna)
@@ -571,7 +666,7 @@ mod tests {
                 land += 1;
                 let temperature = temperature_field(PROBE_SEED, x, y, elevation);
                 let moisture = moisture_field(PROBE_SEED, x, y, elevation);
-                match classify(elevation, moisture, temperature).biome() {
+                match classify(elevation, moisture, temperature, false, false, 0).biome() {
                     BiomeType::Desert => desert[j * SIDE + i] = true,
                     BiomeType::Forest => forest[j * SIDE + i] = true,
                     BiomeType::Grassland | BiomeType::Savanna => grass += 1,
@@ -601,26 +696,45 @@ mod tests {
 
     #[test]
     fn terrain_semantics_separate_equal_surfaces_by_environment() {
-        let beach = classify(32_000, 8_000, 38_000);
-        let desert = classify(38_000, 8_000, 38_000);
+        let beach = classify(32_000, 8_000, 38_000, false, false, 0);
+        let desert = classify(38_000, 8_000, 38_000, false, false, 0);
         assert_eq!(beach.surface(), SurfaceType::Sand);
         assert_eq!(desert.surface(), SurfaceType::Sand);
         assert_eq!(beach.biome(), BiomeType::Beach);
         assert_eq!(desert.biome(), BiomeType::Desert);
 
-        let grassland = classify(38_000, 30_000, 22_000);
-        let wetland = classify(38_000, 52_000, 22_000);
+        let grassland = classify(38_000, 30_000, 22_000, false, false, 0);
+        let wetland = classify(38_000, 52_000, 22_000, true, false, 0);
         assert_eq!(grassland.surface(), SurfaceType::Soil);
         assert_eq!(wetland.surface(), SurfaceType::Soil);
         assert_eq!(grassland.biome(), BiomeType::Grassland);
         assert_eq!(wetland.biome(), BiomeType::Wetland);
 
-        let cold_lowland = classify(38_000, 24_000, 5_000);
-        let cold_mountain = classify(58_000, 24_000, 7_500);
+        let cold_lowland = classify(38_000, 24_000, 5_000, false, false, 0);
+        let cold_mountain = classify(58_000, 24_000, 7_500, false, false, 0);
         assert_eq!(cold_lowland.surface(), SurfaceType::SnowIce);
         assert_eq!(cold_lowland.biome(), BiomeType::Tundra);
         assert_eq!(cold_mountain.surface(), SurfaceType::SnowIce);
         assert_eq!(cold_mountain.biome(), BiomeType::Alpine);
+    }
+
+    #[test]
+    fn bounded_transition_offsets_refine_beaches_biomes_and_riparian_banks() {
+        let expanded_beach = classify(33_400, 20_000, 22_000, false, false, 32_000);
+        let contracted_beach = classify(33_400, 20_000, 22_000, false, false, -32_000);
+        assert_eq!(expanded_beach.biome(), BiomeType::Beach);
+        assert_ne!(contracted_beach.biome(), BiomeType::Beach);
+
+        let forest_side = classify(38_000, 30_000, 22_000, false, false, -16_000);
+        let grass_side = classify(38_000, 30_000, 22_000, false, false, 16_000);
+        assert_eq!(forest_side.biome(), BiomeType::Forest);
+        assert_eq!(grass_side.biome(), BiomeType::Grassland);
+
+        let dry_ground = classify(38_000, 11_000, 38_000, false, false, 0);
+        let riverbank = classify(38_000, 11_000, 38_000, false, true, 0);
+        assert_eq!(dry_ground.biome(), BiomeType::Desert);
+        assert_eq!(riverbank.surface(), SurfaceType::Soil);
+        assert_eq!(riverbank.biome(), BiomeType::Grassland);
     }
 
     #[test]
@@ -782,14 +896,17 @@ mod tests {
     }
 
     #[test]
-    fn river_core_wins_over_overlapping_bank_in_any_segment_order() {
+    fn graded_mountain_river_core_wins_in_any_segment_order() {
         let core = RiverSegment {
             ax: 0,
             ay: 16,
             bx: 32,
             by: 16,
             channel_id: 1,
+            surface_a: 42_000,
+            surface_b: 40_000,
             half_width: 8,
+            stream_order: 3,
         };
         let bank = RiverSegment {
             ax: 23,
@@ -797,7 +914,10 @@ mod tests {
             bx: 23,
             by: 32,
             channel_id: 2,
+            surface_a: 41_000,
+            surface_b: 41_000,
             half_width: 8,
+            stream_order: 2,
         };
 
         for ordered in [[core, bank], [bank, core]] {
@@ -814,14 +934,71 @@ mod tests {
                 roughness: [0; 9],
                 rivers,
                 river_len: ordered.len(),
+                overflow_rivers: Vec::new(),
             };
 
             let (cell, feature) = context.generate(16, 16);
             assert_eq!(cell.surface(), SurfaceType::DeepWater);
             assert_eq!(cell.biome(), BiomeType::River);
-            assert_eq!(cell.elevation, DEEP_WATER_FILL as u16);
+            assert_eq!(cell.elevation, 41_000);
             assert!(feature.is_none());
         }
+    }
+
+    #[test]
+    fn wetlands_require_low_slope_hydrologic_evidence() {
+        let stream = RiverSegment {
+            ax: 0,
+            ay: 0,
+            bx: 32,
+            by: 0,
+            channel_id: 1,
+            surface_a: 38_000,
+            surface_b: 37_000,
+            half_width: 2,
+            stream_order: 1,
+        };
+        let context = |elevation: [i32; 9], water_depth: [i32; 9], moisture| {
+            let mut rivers = [EMPTY_SEGMENT; MAX_CHUNK_RIVERS];
+            rivers[0] = stream;
+            ChunkContext {
+                seed: PROBE_SEED,
+                origin_x: 0,
+                origin_y: 0,
+                elevation,
+                water_depth,
+                temperature: [22_000; 9],
+                moisture: [moisture; 9],
+                roughness: [0; 9],
+                rivers,
+                river_len: 1,
+                overflow_rivers: Vec::new(),
+            }
+        };
+
+        let floodplain = context([38_000; 9], [0; 9], 52_000).generate(16, 16).0;
+        assert_eq!(floodplain.biome(), BiomeType::Wetland);
+
+        let basin_edge = context([38_000; 9], [100; 9], 52_000).generate(32, 32).0;
+        assert_eq!(basin_edge.biome(), BiomeType::Wetland);
+
+        let steep = context(
+            [
+                38_000, 42_000, 46_000, 38_000, 42_000, 46_000, 38_000, 42_000, 46_000,
+            ],
+            [0; 9],
+            52_000,
+        )
+        .generate(16, 16)
+        .0;
+        assert_ne!(steep.biome(), BiomeType::Wetland);
+
+        let arid = context([38_000; 9], [0; 9], 8_000).generate(16, 16).0;
+        assert_ne!(arid.biome(), BiomeType::Wetland);
+
+        let mut no_river = context([38_000; 9], [0; 9], 52_000);
+        no_river.river_len = 0;
+        assert_ne!(no_river.generate(16, 16).0.biome(), BiomeType::Wetland);
     }
 
     #[test]
@@ -830,17 +1007,18 @@ mod tests {
             let map = RegionMap::build(seed, region_x, region_y);
             let mut coords = BTreeSet::new();
             for segment in &map.rivers {
+                let influence = i64::from(segment.half_width) + FLOODPLAIN_RADIUS;
                 let min_x = i64::from(segment.ax.min(segment.bx))
-                    .saturating_sub(i64::from(segment.half_width))
+                    .saturating_sub(influence)
                     .div_euclid(CHUNK_SIZE);
                 let max_x = i64::from(segment.ax.max(segment.bx))
-                    .saturating_add(i64::from(segment.half_width))
+                    .saturating_add(influence)
                     .div_euclid(CHUNK_SIZE);
                 let min_y = i64::from(segment.ay.min(segment.by))
-                    .saturating_sub(i64::from(segment.half_width))
+                    .saturating_sub(influence)
                     .div_euclid(CHUNK_SIZE);
                 let max_y = i64::from(segment.ay.max(segment.by))
-                    .saturating_add(i64::from(segment.half_width))
+                    .saturating_add(influence)
                     .div_euclid(CHUNK_SIZE);
                 for chunk_y in min_y..=max_y {
                     for chunk_x in min_x..=max_x {
@@ -865,6 +1043,7 @@ mod tests {
                     .collect();
                 assert!(expected.len() <= MAX_CHUNK_RIVERS);
                 let context = ChunkContext::new(seed, origin_x, origin_y);
+                assert!(context.overflow_rivers.is_empty());
                 assert_eq!(
                     &context.rivers[..context.river_len],
                     expected.as_slice(),
@@ -872,6 +1051,39 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn chunk_context_uses_a_safe_overflow_path_beyond_the_measured_fast_bound() {
+        let mut context = ChunkContext {
+            seed: PROBE_SEED,
+            origin_x: 0,
+            origin_y: 0,
+            elevation: [38_000; 9],
+            water_depth: [0; 9],
+            temperature: [22_000; 9],
+            moisture: [20_000; 9],
+            roughness: [0; 9],
+            rivers: [EMPTY_SEGMENT; MAX_CHUNK_RIVERS],
+            river_len: 0,
+            overflow_rivers: Vec::new(),
+        };
+        for channel_id in 1..=MAX_CHUNK_RIVERS as u32 + 1 {
+            context.push_river(RiverSegment {
+                ax: 0,
+                ay: 0,
+                bx: 32,
+                by: 0,
+                channel_id,
+                surface_a: 38_000,
+                surface_b: 37_000,
+                half_width: 2,
+                stream_order: 1,
+            });
+        }
+        assert_eq!(context.river_len, MAX_CHUNK_RIVERS);
+        assert_eq!(context.overflow_rivers.len(), 1);
+        assert_eq!(context.river_segments().count(), MAX_CHUNK_RIVERS + 1);
     }
 
     #[test]
