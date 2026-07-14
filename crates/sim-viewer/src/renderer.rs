@@ -2,8 +2,8 @@ use std::{borrow::Cow, sync::Arc};
 
 use bytemuck::{Pod, Zeroable};
 use sim_core::{
-    CHUNK_SIZE, ChunkInspection, ChunkPresence, FeatureKind, GroundType, SimulationSnapshot, World,
-    WorldPosition, WorldRect,
+    CHUNK_SIZE, ChunkInspection, ChunkPresence, FeatureKind, GroundType, SimulationSnapshot,
+    WORLD_GENERATION_BOUNDS, World, WorldPosition, WorldRect,
 };
 use wgpu::util::DeviceExt;
 use winit::window::Window;
@@ -272,6 +272,7 @@ impl Renderer {
         {
             world_overlay.extend_from_slice(&outline);
         }
+        world_overlay.extend_from_slice(&world_border(view.scale() as f32));
         debug_assert!(world_overlay.len() <= WORLD_OVERLAY_CAPACITY);
         self.world_overlay.write(&self.queue, world_overlay);
 
@@ -448,9 +449,10 @@ struct InstanceBuffer {
 const MAX_INSTANCES_PER_BUFFER: usize = 1_000_000;
 const MIN_TERRAIN_SAMPLE_PIXELS: f32 = 2.0;
 const CACHE_MARGIN_PIXELS: f32 = 128.0;
-const WORLD_OVERLAY_CAPACITY: usize = 6;
+const WORLD_OVERLAY_CAPACITY: usize = 10;
 const MIN_CHUNK_OUTLINE_PIXELS: f32 = 4.0;
 const MAX_CHUNK_OUTLINE_WORLD_WIDTH: f32 = 8.0;
+const MAX_WORLD_BORDER_WIDTH: f32 = 32.0;
 
 struct StaticInstanceBuffers {
     buffers: Vec<InstanceBuffer>,
@@ -657,6 +659,22 @@ fn chunk_outline(inspection: ChunkInspection, scale: f32) -> Option<[Instance; 4
     ])
 }
 
+fn world_border(scale: f32) -> [Instance; 4] {
+    let bounds = WORLD_GENERATION_BOUNDS;
+    let x = bounds.min.x as f32;
+    let y = bounds.min.y as f32;
+    let width = (bounds.max.x - bounds.min.x) as f32;
+    let height = (bounds.max.y - bounds.min.y) as f32;
+    let line = (2.0 / scale.max(f32::EPSILON)).clamp(1.0, MAX_WORLD_BORDER_WIDTH);
+    let color = rgba(245, 40, 40, 230);
+    [
+        Instance::new(x, y, width, line, color),
+        Instance::new(x, y + height - line, width, line, color),
+        Instance::new(x, y, line, height, color),
+        Instance::new(x + width - line, y, line, height, color),
+    ]
+}
+
 const fn selection_color(valid: bool) -> u32 {
     if valid {
         rgba(255, 220, 35, 72)
@@ -677,10 +695,7 @@ mod tests {
     #[test]
     fn coarse_view_reduces_terrain_instances() {
         let world = World::generate(1, WorldConfig::new(64, 64).unwrap());
-        let bounds = WorldRect {
-            min: WorldPosition { x: 0, y: 0 },
-            max: WorldPosition { x: 64, y: 64 },
-        };
+        let bounds = world.initial_bounds();
         let (full, _) = build_world_instances(&world, bounds, 1);
         let (coarse, _) = build_world_instances(&world, bounds, 4);
 
@@ -811,6 +826,22 @@ mod tests {
     fn invalid_selection_uses_red_preview() {
         assert_eq!(selection_color(true), rgba(255, 220, 35, 72));
         assert_eq!(selection_color(false), rgba(235, 48, 48, 96));
+    }
+
+    #[test]
+    fn world_border_marks_the_centered_generation_envelope() {
+        let border = world_border(1.0);
+
+        assert_eq!(border[0].position, [-32_768.0, -32_768.0]);
+        assert_eq!(border[0].size, [65_536.0, 2.0]);
+        assert_eq!(border[1].position, [-32_768.0, 32_766.0]);
+        assert_eq!(border[2].size, [2.0, 65_536.0]);
+        assert_eq!(border[3].position, [32_766.0, -32_768.0]);
+        assert!(
+            border
+                .iter()
+                .all(|instance| instance.color == rgba(245, 40, 40, 230))
+        );
     }
 
     #[test]

@@ -14,9 +14,14 @@ mod hydrology;
 mod noise;
 mod plates;
 
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::{
+    collections::BTreeSet as RegionSet,
+    sync::{Arc, Mutex, MutexGuard, OnceLock},
+};
 
-use crate::world::{CHUNK_SIZE, FeatureKind, GroundType, TerrainCell};
+use rayon::prelude::*;
+
+use crate::world::{CHUNK_SIZE, ChunkLoadRequest, FeatureKind, GroundType, TerrainCell};
 use hydrology::{
     GRID, LAKE_MIN_DEPTH, NODE_STEP, RegionMap, RiverSegment, point_segment_distance_ratio,
 };
@@ -44,7 +49,7 @@ const FEATURE_SEED: u64 = 0x4654_5253;
 const CANOPY_SEED: u64 = 0x4341_4e4f_5059_4e4f;
 const BUSH_SEED: u64 = 0x4255_5348_434c_5553;
 
-const REGION_CACHE_CAPACITY: usize = 40;
+const REGION_CACHE_CAPACITY: usize = 64;
 
 type RegionKey = (u64, i64, i64);
 type RegionSlot = Arc<OnceLock<Arc<RegionMap>>>;
@@ -64,7 +69,7 @@ fn lock_region_cache() -> MutexGuard<'static, Vec<(RegionKey, RegionSlot)>> {
 fn trim_region_cache(cache: &mut Vec<(RegionKey, RegionSlot)>) {
     while cache.len() > REGION_CACHE_CAPACITY {
         let Some(position) = cache.iter().rposition(|(_, slot)| slot.get().is_some()) else {
-            // More than 40 distinct regions may briefly be building at once on
+            // More than 64 distinct regions may briefly be building at once on
             // a large machine. Never evict an in-flight build: doing so could
             // let another worker duplicate the same expensive regional solve.
             break;
@@ -92,6 +97,28 @@ fn region(seed: u64, region_x: i64, region_y: i64) -> Arc<RegionMap> {
     let map = Arc::clone(slot.get_or_init(|| Arc::new(RegionMap::build(seed, region_x, region_y))));
     trim_region_cache(&mut lock_region_cache());
     map
+}
+
+/// Materializes the regional prerequisites for an ordered, bounded chunk
+/// request window before dependent chunk workers enter the build-once cache.
+pub(crate) fn prepare_chunk_regions(seed: u64, requests: &[ChunkLoadRequest]) {
+    let chunks_per_region = REGION_SIZE / CHUNK_SIZE;
+    let mut prepared = RegionSet::new();
+    for request in requests {
+        let coord = request.coord();
+        let key = (
+            coord.x.div_euclid(chunks_per_region),
+            coord.y.div_euclid(chunks_per_region),
+        );
+        prepared.insert(key);
+    }
+    prepared
+        .into_iter()
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        .for_each(|(region_x, region_y)| {
+            region(seed, region_x, region_y);
+        });
 }
 
 // A 64-cell chunk can overlap at most five 32-cell hydrology nodes on each
@@ -321,6 +348,7 @@ mod tests {
     use super::climate::{moisture as moisture_field, temperature as temperature_field};
     use super::plates::macro_sample;
     use super::*;
+    use rayon::ThreadPoolBuilder;
     use std::cmp::Reverse;
     use std::collections::BTreeSet;
     use std::sync::{Arc as SyncArc, Barrier};
@@ -703,6 +731,26 @@ mod tests {
             maps.iter().all(|map| Arc::ptr_eq(map, &maps[0])),
             "concurrent requests for one region must share its materialization"
         );
+    }
+
+    #[test]
+    fn regional_parallelism_preserves_exact_output_across_pool_sizes() {
+        let build = |workers| {
+            ThreadPoolBuilder::new()
+                .num_threads(workers)
+                .build()
+                .unwrap()
+                .install(|| RegionMap::build(0x5041_5241_4c4c_454c, -7, 11))
+        };
+        let single = build(1);
+        let parallel = build(4);
+
+        assert_eq!(parallel.elevation, single.elevation);
+        assert_eq!(parallel.water_depth, single.water_depth);
+        assert_eq!(parallel.temperature, single.temperature);
+        assert_eq!(parallel.moisture, single.moisture);
+        assert_eq!(parallel.roughness, single.roughness);
+        assert_eq!(parallel.rivers, single.rivers);
     }
 
     #[test]

@@ -6,9 +6,10 @@ mod worldgen;
 pub use world::{
     CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkInspection, ChunkLoadRequest, ChunkLocalPosition,
     ChunkPresence, DEFAULT_INITIAL_WORLD_SIZE, Feature, FeatureKind, GenerateAreaError,
-    GeneratedCell, GroundType, MAX_CHUNKS_PER_GENERATION, MAX_GENERATED_CHUNKS, MAX_INITIAL_CHUNKS,
-    TerrainCell, World, WorldChunk, WorldChunkLoad, WorldConfig, WorldConfigError, WorldPosition,
-    WorldRect,
+    GeneratedCell, GroundType, MAX_CHUNKS_PER_GENERATION, MAX_GENERATED_CELLS,
+    MAX_GENERATED_CHUNKS, MAX_GENERATED_TERRAIN_BYTES, MAX_INITIAL_CHUNKS, TerrainCell,
+    WORLD_GENERATION_BOUNDS, WORLD_HALF_EXTENT, WORLD_SIDE_CELLS, World, WorldChunk,
+    WorldChunkLoad, WorldConfig, WorldConfigError, WorldPosition, WorldRect,
 };
 
 use std::time::Duration;
@@ -257,7 +258,7 @@ mod tests {
             .map(|request| World::generate_chunk_load(config.seed, request))
             .collect();
 
-        assert_eq!(resident.apply_world_chunk_loads(loads), Ok(2));
+        assert_eq!(resident.apply_world_chunk_loads(loads), Ok(4));
         for _ in 0..600 {
             unloaded.tick();
             resident.tick();
@@ -280,7 +281,7 @@ mod tests {
         engine.command(EngineCommand::GenerateWorldArea(initial));
 
         assert!(engine.world().area_is_generated(initial));
-        assert_eq!(engine.world().loaded_chunk_count(), 2);
+        assert_eq!(engine.world().loaded_chunk_count(), 4);
     }
 
     #[test]
@@ -302,7 +303,7 @@ mod tests {
                 .inspect_chunk_at(WorldPosition { x: -1, y: 0 })
                 .unwrap()
                 .presence,
-            ChunkPresence::Retained
+            ChunkPresence::RetainedPartialInitial
         );
         assert_eq!(engine.apply_world_chunks(vec![chunk]), Ok(0));
         assert_eq!(engine.world().revision(), revision);

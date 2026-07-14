@@ -1558,6 +1558,9 @@ dependencies = [
 [[package]]
 name = "sim-core"
 version = "0.1.0"
+dependencies = [
+ "rayon",
+]
 
 [[package]]
 name = "sim-headless"

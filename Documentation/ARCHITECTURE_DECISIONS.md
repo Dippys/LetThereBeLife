@@ -241,3 +241,43 @@ Replace per-thread hydrology caches with a process-shared 40-completed-entry bui
 **Reason:** Chunk synthesis is a pure seed-and-coordinate computation and can safely execute concurrently, but a naive worker-per-chunk design would duplicate the expensive 4,096-cell regional hydrology solve and multiply its roughly 325 KiB lattice payload per worker. Ordered bounded streaming preserves deterministic observation, cancellation, memory guardrails, and simulation ownership while using available CPU capacity. A same-seed cold-cache release measurement on a 16-logical-CPU machine improved the 4,096-chunk generation-and-channel workload from a 895.7 ms median with one worker to 186.1 ms with 15 workers, approximately 4.8x.
 
 **Consequences:** `sim-viewer` now depends on Rayon; `sim-core` remains standard-library-only and exposes no scheduler or mutable cache handle. Cache completion and worker scheduling cannot change generated content, and tests compare one-worker and multi-worker ordered payloads exactly. Completed cache storage remains about 12.7 MiB of logical lattice data before metadata, while in-flight entries may temporarily exceed 40 only for distinct concurrent region builds. This change accelerates on-demand derivation but does not make a 256k x 256k dense bootstrap viable: the 16,777,216-cell bootstrap limit and 16,384 retained-expansion limit remain, and massive worlds still require overview LOD, unloading, persistence, and sparse modified-chunk policies.
+
+## D-023: Parallel regional preparation and wider bounded viewport pages
+
+Date: 2026-07-14
+
+**Supersedes:** D-021 and D-022 where they specify 8 x 8 automatic pages, two tasks per worker, serial cold-region construction, standard-library-only `sim-core`, and the earlier world-capacity ceilings.
+
+**Decision:** Add Rayon to `sim-core` for pure indexed regional derivation. Before a viewer request window releases dependent chunk tasks, prepare its distinct build-once regional maps through the same fixed pool. Parallelize macro elevation, roughness, temperature, and coarse moisture lattice slots by stable index; retain serial priority-flood and river-extraction ordering. Use four tasks per worker with a hard 64-task cap, align the completed regional LRU at 64 entries, preserve the 64-result channel and authoritative request-order emission, and enlarge center-out automatic pages to 32 x 32 chunks. Keep cancellation checks before and after cold preparation so a pre-cancelled job performs no derivation.
+
+Accept the implemented ceilings of 268,435,456 bootstrap cells, 65,536 missing chunks per request, and 4,194,304 retained expansion chunks. Treat them as hard validity ceilings rather than target resident-memory budgets.
+
+**Reason:** Chunk fan-out alone left the first worker in each cold 4,096-cell drainage region performing the expensive regional solve while sibling workers waited on its `OnceLock`. Preparing the shared dependency first lets the independent regional fields use the pool and prevents parked followers; a larger bounded page and reorder window reduce coordinator/event-loop bubbles during large zoomed-out demand. Indexed writes and ordered output preserve seed-and-coordinate determinism.
+
+**Consequences:** Pool size and completion order do not change terrain: a regression compares every regional lattice and river segment between one-worker and four-worker builds, while existing coordinator tests compare exact chunk payload order. On a 16-logical-CPU machine, fresh-process release medians improved from 225.8 ms with one worker to 38.3 ms with 15 workers for a cold 1,024-chunk page, and from 908.7 ms to 133.8 ms for 4,096 chunks. The 65,536-chunk request ceiling represents up to 1 GiB of logical terrain payload, and the retained expansion ceiling represents 64 GiB before sparse features and container overhead. A fully resident 256k x 256k world remains outside these budgets and still requires LOD, unloading, persistence, and sparse modification storage.
+
+## D-024: Centered finite world envelope and origin-outward generation
+
+Date: 2026-07-14
+
+**Supersedes:** D-007's unbounded-extent interpretation, D-019's unbounded camera navigation, and D-023's count-only retained expansion ceiling.
+
+**Decision:** Define the maximum generatable world as the half-open square from `-32,768` inclusive to `32,768` exclusive on each axis. With 64 x 64 chunks this is exactly 1,024 x 1,024 chunks, or 1,048,576 chunks total. With the size-asserted four-byte `TerrainCell`, its 4,294,967,296 cells represent exactly 16 GiB of raw terrain payload. Enforce this spatial envelope in `sim-core` for bootstrap configuration, direct generators, area requests, inspection, and load acceptance instead of relying only on a retained-chunk counter.
+
+Center configured bootstrap bounds and the viewer camera on `(0, 0)`. Center automatic page zero over chunks `-16..15` on both axes, then enumerate deterministic rings outward. Clamp the camera center to the envelope, reduce maximum zoom-out to 1/8x of initial fit, clip visible generation demand to the envelope, and render a persistent red square just inside its four edges.
+
+**Reason:** A count-only capacity can be spent primarily in one direction and does not communicate where generation must stop. A fixed centered coordinate envelope makes opposite directions equally available, gives every generation entry point the same invariant, and gives users a visible boundary. The 16 GiB figure is an area calculation for dense raw terrain, not a promise that total process memory remains at or below 16 GiB.
+
+**Consequences:** Generation cannot move the boundary or continue past it even if count capacity remains. Full residency still costs more than 16 GiB after sparse features, tree/map nodes, metadata, caches, and allocator overhead, so unloading and persistence remain required before treating full-envelope residency as practical. Existing bootstrap coordinates and iteration order become signed and origin-centered; tests and presentation behavior explicitly follow that contract.
+
+## D-025: Maximum zoom-out fits the complete world envelope
+
+Date: 2026-07-14
+
+**Supersedes:** D-024 only where it fixed maximum zoom-out at 1/8x of the configured bootstrap fit and clamped only the camera center.
+
+**Decision:** Derive the camera's minimum zoom from the ratio of the complete-world fit scale to the configured-bootstrap fit scale for the current viewport. Clamp each visible camera axis inside the world when it fits; center an axis when the viewport is as large as or larger than the world. For the repository's square 4,096-cell bootstrap and 65,536-cell world side, minimum zoom is 1/16x of initial fit.
+
+**Reason:** A fixed 1/8x floor displayed only half the full world's height. Cursor anchoring plus center-only clamping could also leave an edge off-screen at minimum zoom. Deriving the floor from both rectangles guarantees the complete red boundary fits regardless of window aspect ratio or valid bootstrap dimensions.
+
+**Consequences:** Startup framing remains unchanged. Ordinary wheel zoom remains cursor-anchored, while world-edge clamping may move the camera as necessary; at maximum zoom-out the full envelope is centered and visible. Extremely wide or tall windows may show empty presentation space outside the square on the surplus axis, but automatic generation remains clipped to authoritative world bounds.

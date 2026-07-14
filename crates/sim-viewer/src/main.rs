@@ -15,7 +15,7 @@ use generation::{
 use sim_config::{AppConfig, DEFAULT_CONFIG_PATH};
 use sim_core::{
     ChunkInspection, ChunkLoadRequest, ChunkPresence, Engine, EngineCommand, GenerateAreaError,
-    World, WorldChunkLoad, WorldPosition, WorldRect,
+    WORLD_GENERATION_BOUNDS, World, WorldChunkLoad, WorldPosition, WorldRect,
 };
 use winit::{
     application::ApplicationHandler,
@@ -118,11 +118,8 @@ struct ViewerApp {
 
 impl ViewerApp {
     fn new(engine: Engine, smoke_frames: Option<u32>) -> Self {
-        let camera = Camera::centered(engine.world().width(), engine.world().height());
-        let bootstrap_focus = WorldPosition {
-            x: i64::from(engine.world().width()) / 2,
-            y: i64::from(engine.world().height()) / 2,
-        };
+        let camera = Camera::at_origin();
+        let bootstrap_focus = WorldPosition { x: 0, y: 0 };
         let bootstrap_pager = ViewportPager::new(engine.world().initial_bounds(), bootstrap_focus)
             .expect("validated configured bootstrap bounds create pages");
         Self {
@@ -409,7 +406,7 @@ impl ViewerApp {
         if size.width == 0 || size.height == 0 {
             return false;
         }
-        let bounds = self
+        let visible_bounds = self
             .camera
             .view(
                 size.width,
@@ -418,6 +415,9 @@ impl ViewerApp {
                 self.engine.world().height(),
             )
             .world_bounds();
+        let Some(bounds) = visible_bounds.intersection(WORLD_GENERATION_BOUNDS) else {
+            return false;
+        };
         let previous_block = self.automatic_generation_blocked;
         let focus = self.camera.screen_to_world_position(
             f64::from(size.width) / 2.0,
@@ -691,6 +691,8 @@ impl ApplicationHandler for ViewerApp {
                 if let Some(renderer) = &mut self.renderer {
                     renderer.resize(size.width, size.height);
                 }
+                self.camera
+                    .constrain_to_viewport(self.viewport(size.width, size.height));
                 self.automatic_generation_needed = true;
                 self.cancel_background_generation();
                 self.dirty = true;
@@ -906,6 +908,10 @@ fn inspection_title(
                     title.push_str(" | cell=unloaded");
                 }
             }
+            Err(GenerateAreaError::OutsideWorldBounds) => title.push_str(&format!(
+                " | ({}, {}) | outside world boundary",
+                position.x, position.y
+            )),
             Err(_) => title.push_str(&format!(
                 " | ({}, {}) | chunk coordinates unavailable",
                 position.x, position.y
@@ -995,15 +1001,20 @@ mod tests {
             .take_next_paged_requests(GenerationKind::Bootstrap)
             .expect("bootstrap request is valid")
             .expect("unloaded bootstrap area has work");
-        assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].bounds(), app.engine.world().initial_bounds());
+        assert_eq!(requests.len(), 4);
+        assert!(requests.iter().all(|request| {
+            app.engine
+                .world()
+                .initial_bounds()
+                .contains_rect(request.bounds())
+        }));
 
         let seed = app.engine.config().seed;
         let loads = requests
             .into_iter()
             .map(|request| World::generate_chunk_load(seed, request))
             .collect();
-        assert_eq!(app.engine.apply_world_chunk_loads(loads), Ok(1));
+        assert_eq!(app.engine.apply_world_chunk_loads(loads), Ok(4));
 
         assert_eq!(
             app.take_next_paged_requests(GenerationKind::Bootstrap)
@@ -1183,7 +1194,7 @@ mod tests {
         assert!(selection_is_valid(&world, Some(world.initial_bounds())));
         assert!(!selection_is_valid(&world, Some(oversized)));
 
-        let title = inspection_title(&world, Some(WorldPosition { x: 64, y: 0 }), None, false);
+        let title = inspection_title(&world, Some(WorldPosition { x: 47, y: 0 }), None, false);
         assert!(title.contains("coverage=partial-initial-unloaded"));
         assert!(title.contains("cell=unloaded"));
         assert!(

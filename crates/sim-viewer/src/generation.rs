@@ -14,7 +14,8 @@ use sim_core::{
     WorldRect,
 };
 
-pub const AUTOMATIC_PAGE_CHUNKS: i64 = 8;
+pub const AUTOMATIC_PAGE_CHUNKS: i64 = 32;
+const AUTOMATIC_PAGE_HALF: i64 = AUTOMATIC_PAGE_CHUNKS / 2;
 
 pub type GenerationId = u64;
 
@@ -60,7 +61,7 @@ struct TaskCompletion {
 }
 
 const COMPLETED_CHANNEL_CAPACITY: usize = 64;
-const TASKS_PER_WORKER: usize = 2;
+const TASKS_PER_WORKER: usize = 4;
 
 /// One persistent coordinator backed by a fixed computation pool. Workers
 /// produce immutable world payloads; only the viewer event loop applies them.
@@ -226,15 +227,20 @@ fn run_generation_job(
     let (task_tx, task_rx) = mpsc::sync_channel::<TaskCompletion>(task_window);
     let (output_connected, cancelled, next_output) = pool.in_place_scope(move |scope| {
         let mut output_connected = true;
-        let mut cancelled = false;
+        let mut cancelled = cancelled_job.load(Ordering::Acquire) == id;
         let mut next_request = 0;
         let mut next_output = 0;
         let mut active = 0;
         let mut buffered = 0;
+        let mut prepared_until = 0;
         let mut ready: Vec<Option<WorldChunkLoad>> = std::iter::repeat_with(|| None)
             .take(request_count)
             .collect();
-        while active + buffered < task_window && next_request < request_count {
+        if !cancelled {
+            prepare_request_window(seed, &job.requests, &mut prepared_until, task_window);
+            cancelled = cancelled_job.load(Ordering::Acquire) == id;
+        }
+        while !cancelled && active + buffered < task_window && next_request < request_count {
             spawn_generation_task(
                 scope,
                 task_tx.clone(),
@@ -288,6 +294,18 @@ fn run_generation_job(
 
             if output_connected && !cancelled {
                 while active + buffered < task_window && next_request < request_count {
+                    if next_request == prepared_until {
+                        prepare_request_window(
+                            seed,
+                            &job.requests,
+                            &mut prepared_until,
+                            task_window,
+                        );
+                        if cancelled_job.load(Ordering::Acquire) == id {
+                            cancelled = true;
+                            break;
+                        }
+                    }
                     spawn_generation_task(
                         scope,
                         task_tx.clone(),
@@ -314,6 +332,19 @@ fn run_generation_job(
         GenerationOutcome::Completed
     };
     completed.send(WorkerMessage::Done { id, outcome }).is_ok()
+}
+
+fn prepare_request_window(
+    seed: u64,
+    requests: &[ChunkLoadRequest],
+    prepared_until: &mut usize,
+    task_window: usize,
+) {
+    let end = prepared_until
+        .saturating_add(task_window)
+        .min(requests.len());
+    World::prepare_chunk_loads(seed, &requests[*prepared_until..end]);
+    *prepared_until = end;
 }
 
 /// A bounded, deterministic center-out sequence of chunk pages for automatic
@@ -347,19 +378,13 @@ impl ViewportPager {
             coord.bounds()?;
         }
 
-        let min_page_x = min_chunk.x.div_euclid(AUTOMATIC_PAGE_CHUNKS);
-        let max_page_x = max_chunk.x.div_euclid(AUTOMATIC_PAGE_CHUNKS);
-        let min_page_y = min_chunk.y.div_euclid(AUTOMATIC_PAGE_CHUNKS);
-        let max_page_y = max_chunk.y.div_euclid(AUTOMATIC_PAGE_CHUNKS);
+        let min_page_x = chunk_page(min_chunk.x);
+        let max_page_x = chunk_page(max_chunk.x);
+        let min_page_y = chunk_page(min_chunk.y);
+        let max_page_y = chunk_page(max_chunk.y);
         let focus_chunk = ChunkCoord::from_world_position(focus);
-        let focus_page_x = focus_chunk
-            .x
-            .div_euclid(AUTOMATIC_PAGE_CHUNKS)
-            .clamp(min_page_x, max_page_x);
-        let focus_page_y = focus_chunk
-            .y
-            .div_euclid(AUTOMATIC_PAGE_CHUNKS)
-            .clamp(min_page_y, max_page_y);
+        let focus_page_x = chunk_page(focus_chunk.x).clamp(min_page_x, max_page_x);
+        let focus_page_y = chunk_page(focus_chunk.y).clamp(min_page_y, max_page_y);
         let maximum_radius = [
             focus_page_x - min_page_x,
             max_page_x - focus_page_x,
@@ -422,6 +447,12 @@ impl ViewportPager {
             self.next_radius += 1;
         }
     }
+}
+
+fn chunk_page(chunk: i64) -> i64 {
+    chunk
+        .saturating_add(AUTOMATIC_PAGE_HALF)
+        .div_euclid(AUTOMATIC_PAGE_CHUNKS)
 }
 
 struct PageRing {
@@ -522,8 +553,12 @@ impl PageRing {
 
 fn page_bounds(page_x: i64, page_y: i64, bounds: WorldRect) -> Option<WorldRect> {
     let min_chunk = ChunkCoord {
-        x: page_x.checked_mul(AUTOMATIC_PAGE_CHUNKS)?,
-        y: page_y.checked_mul(AUTOMATIC_PAGE_CHUNKS)?,
+        x: page_x
+            .checked_mul(AUTOMATIC_PAGE_CHUNKS)?
+            .checked_sub(AUTOMATIC_PAGE_HALF)?,
+        y: page_y
+            .checked_mul(AUTOMATIC_PAGE_CHUNKS)?
+            .checked_sub(AUTOMATIC_PAGE_HALF)?,
     };
     let max_chunk = ChunkCoord {
         x: min_chunk.x.checked_add(AUTOMATIC_PAGE_CHUNKS - 1)?,
@@ -606,6 +641,11 @@ mod tests {
                 .iter()
                 .any(|request| request.coord() == ChunkCoord { x: 0, y: 0 })
         );
+        let coords: Vec<_> = first.iter().map(|request| request.coord()).collect();
+        assert_eq!(coords.iter().map(|coord| coord.x).min(), Some(-16));
+        assert_eq!(coords.iter().map(|coord| coord.x).max(), Some(15));
+        assert_eq!(coords.iter().map(|coord| coord.y).min(), Some(-16));
+        assert_eq!(coords.iter().map(|coord| coord.y).max(), Some(15));
         let second = pager.next_requests(&world).unwrap().unwrap();
         assert!(second.len() <= (AUTOMATIC_PAGE_CHUNKS * AUTOMATIC_PAGE_CHUNKS) as usize);
         assert!(
@@ -644,6 +684,28 @@ mod tests {
     }
 
     #[test]
+    fn cold_regional_preparation_completes_with_one_worker() {
+        let seed = 0x434f_4c44_5f4f_4e45;
+        let world = World::new(seed, WorldConfig::new(512, 512).unwrap());
+        let requests = world
+            .missing_chunk_load_requests(world.initial_bounds())
+            .unwrap();
+        let request_count = requests.len();
+        let generator = WorldGenerator::with_worker_count(1);
+        generator
+            .request(GenerationJob {
+                id: 39,
+                seed,
+                requests,
+            })
+            .unwrap();
+
+        let (loads, outcome) = wait_for_job(&generator, 39, request_count);
+        assert_eq!(outcome, GenerationOutcome::Completed);
+        assert_eq!(loads.len(), request_count);
+    }
+
+    #[test]
     fn cancelled_pool_job_does_not_start_queued_chunk_work() {
         let seed = 92;
         let world = World::new(seed, WorldConfig::new(512, 512).unwrap());
@@ -678,7 +740,18 @@ mod tests {
                     .expect("benchmark worker count must be an integer")
             })
             .unwrap_or_else(default_worker_count);
-        let world = World::new(SEED, WorldConfig::new(4_096, 4_096).unwrap());
+        let world_size = std::env::var("SIM_GENERATION_BENCH_WORLD_SIZE")
+            .ok()
+            .map(|value| {
+                value
+                    .parse()
+                    .expect("benchmark world size must be an integer")
+            })
+            .unwrap_or(4_096);
+        let world = World::new(
+            SEED,
+            WorldConfig::new(world_size, world_size).expect("benchmark world size must be valid"),
+        );
         let requests = world
             .missing_chunk_load_requests(world.initial_bounds())
             .unwrap();

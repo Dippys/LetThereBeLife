@@ -12,6 +12,8 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
+use rayon::prelude::*;
+
 use super::climate::{moisture, temperature};
 use super::plates::{SEA_LEVEL, macro_sample};
 
@@ -59,17 +61,21 @@ impl RegionMap {
         let mut elevation = vec![0_i32; NODE_COUNT];
         let mut temperature_map = vec![0_i32; NODE_COUNT];
         let mut roughness = vec![0_i32; NODE_COUNT];
-        for j in 0..GRID {
-            for i in 0..GRID {
+        elevation
+            .par_iter_mut()
+            .zip(roughness.par_iter_mut())
+            .zip(temperature_map.par_iter_mut())
+            .enumerate()
+            .for_each(|(index, ((elevation, roughness), temperature_value))| {
+                let i = index % GRID;
+                let j = index / GRID;
                 let x = origin_x.saturating_add(i as i64 * NODE_STEP);
                 let y = origin_y.saturating_add(j as i64 * NODE_STEP);
-                let index = j * GRID + i;
                 let sample = macro_sample(seed, x, y);
-                elevation[index] = sample.elevation;
-                roughness[index] = sample.roughness;
-                temperature_map[index] = temperature(seed, x, y, sample.elevation);
-            }
-        }
+                *elevation = sample.elevation;
+                *roughness = sample.roughness;
+                *temperature_value = temperature(seed, x, y, sample.elevation);
+            });
         let moisture_map = moisture_lattice(seed, origin_x, origin_y);
 
         let fill = priority_fill(&elevation);
@@ -100,14 +106,17 @@ const MOISTURE_COARSE_GRID: usize = (GRID - 1) / MOISTURE_COARSE_STEP + 1;
 
 fn moisture_lattice(seed: u64, origin_x: i64, origin_y: i64) -> Vec<i32> {
     let mut coarse = vec![0_i32; MOISTURE_COARSE_GRID * MOISTURE_COARSE_GRID];
-    for cj in 0..MOISTURE_COARSE_GRID {
-        for ci in 0..MOISTURE_COARSE_GRID {
+    coarse
+        .par_iter_mut()
+        .enumerate()
+        .for_each(|(index, moisture_value)| {
+            let ci = index % MOISTURE_COARSE_GRID;
+            let cj = index / MOISTURE_COARSE_GRID;
             let x = origin_x.saturating_add((ci * MOISTURE_COARSE_STEP) as i64 * NODE_STEP);
             let y = origin_y.saturating_add((cj * MOISTURE_COARSE_STEP) as i64 * NODE_STEP);
             let elevation = macro_sample(seed, x, y).elevation;
-            coarse[cj * MOISTURE_COARSE_GRID + ci] = moisture(seed, x, y, elevation);
-        }
-    }
+            *moisture_value = moisture(seed, x, y, elevation);
+        });
     let mut fine = vec![0_i32; NODE_COUNT];
     let step = MOISTURE_COARSE_STEP as i64;
     for j in 0..GRID {
