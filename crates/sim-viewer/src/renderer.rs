@@ -3,7 +3,7 @@ use std::{borrow::Cow, fmt::Write, sync::Arc};
 use bytemuck::{Pod, Zeroable};
 use sim_core::{
     CHUNK_SIZE, ChunkInspection, ChunkPresence, FeatureKind, GenerateAreaError, GroundType,
-    SimulationSnapshot, WORLD_GENERATION_BOUNDS, World, WorldPosition, WorldRect,
+    PrevailingWind, SimulationSnapshot, WORLD_GENERATION_BOUNDS, World, WorldPosition, WorldRect,
 };
 use wgpu::util::DeviceExt;
 use winit::window::Window;
@@ -754,16 +754,23 @@ fn write_hud_text(output: &mut String, world: &World, state: &RenderState) {
             if let Some(cell) = world.cell(position) {
                 writeln!(output, "TERRAIN {}", ground_label(cell.ground))
                     .expect("writing to String cannot fail");
-                write!(
-                    output,
-                    "ELEV {}  MOIST {}  FEATURE {}",
-                    cell.elevation,
-                    cell.moisture,
-                    world
-                        .feature_at(position)
-                        .map_or("NONE", |feature| feature_label(feature.kind))
-                )
-                .expect("writing to String cannot fail");
+                if let Some(climate) = world.climate_at(position) {
+                    writeln!(
+                        output,
+                        "ELEV {}  TEMP {}  MOIST {}",
+                        cell.elevation, climate.temperature, climate.moisture
+                    )
+                    .expect("writing to String cannot fail");
+                    write!(
+                        output,
+                        "WIND {}  FEATURE {}",
+                        wind_label(climate.wind),
+                        world
+                            .feature_at(position)
+                            .map_or("NONE", |feature| feature_label(feature.kind))
+                    )
+                    .expect("writing to String cannot fail");
+                }
             } else {
                 write!(output, "CELL UNLOADED").expect("writing to String cannot fail");
             }
@@ -808,6 +815,13 @@ const fn ground_label(ground: GroundType) -> &'static str {
         GroundType::ForestFloor => "FOREST FLOOR",
         GroundType::Hill => "HILL",
         GroundType::BareRock => "BARE ROCK",
+    }
+}
+
+const fn wind_label(wind: PrevailingWind) -> &'static str {
+    match wind {
+        PrevailingWind::Southeast => "SE",
+        PrevailingWind::Northwest => "NW",
     }
 }
 
@@ -1240,7 +1254,9 @@ mod tests {
         assert!(text.contains("COVERAGE "));
         assert!(text.contains("TERRAIN "));
         assert!(text.contains("ELEV "));
+        assert!(text.contains("TEMP "));
         assert!(text.contains("MOIST "));
+        assert!(text.contains("WIND "));
         assert!(text.contains("FEATURE "));
     }
 

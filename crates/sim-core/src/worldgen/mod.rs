@@ -22,12 +22,14 @@ use std::{
 
 use rayon::prelude::*;
 
-use crate::world::{CHUNK_SIZE, ChunkLoadRequest, FeatureKind, GroundType, TerrainCell};
+use crate::world::{
+    CHUNK_SIZE, ChunkLoadRequest, ClimateSample, FeatureKind, GroundType, TerrainCell,
+};
 use hydrology::{
     GRID, LAKE_MIN_DEPTH, NODE_STEP, RegionMap, RiverSegment, point_segment_distance_ratio,
 };
 use noise::{NOISE_HALF, centered_noise, hash, value_noise};
-use plates::SEA_LEVEL;
+use plates::{SEA_LEVEL, macro_sample};
 
 pub(crate) use hydrology::REGION_SIZE;
 
@@ -98,6 +100,33 @@ fn region(seed: u64, region_x: i64, region_y: i64) -> Arc<RegionMap> {
     let map = Arc::clone(slot.get_or_init(|| Arc::new(RegionMap::build(seed, region_x, region_y))));
     trim_region_cache(&mut lock_region_cache());
     map
+}
+
+pub(crate) fn climate_at(seed: u64, x: i64, y: i64, moisture: u8) -> ClimateSample {
+    let base_x = x.div_euclid(NODE_STEP) * NODE_STEP;
+    let base_y = y.div_euclid(NODE_STEP) * NODE_STEP;
+    let mut temperatures = [0_i32; 4];
+    for (index, (node_x, node_y)) in [
+        (base_x, base_y),
+        (base_x + NODE_STEP, base_y),
+        (base_x, base_y + NODE_STEP),
+        (base_x + NODE_STEP, base_y + NODE_STEP),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let elevation = macro_sample(seed, node_x, node_y).elevation;
+        temperatures[index] = climate::temperature(seed, node_x, node_y, elevation);
+    }
+    let fx = x.rem_euclid(NODE_STEP);
+    let fy = y.rem_euclid(NODE_STEP);
+    let top = i64::from(temperatures[0]) * (NODE_STEP - fx) + i64::from(temperatures[1]) * fx;
+    let bottom = i64::from(temperatures[2]) * (NODE_STEP - fx) + i64::from(temperatures[3]) * fx;
+    ClimateSample {
+        temperature: ((top * (NODE_STEP - fy) + bottom * fy) / (NODE_STEP * NODE_STEP)) as u16,
+        moisture,
+        wind: climate::prevailing_wind(seed, x, y),
+    }
 }
 
 /// Materializes the regional prerequisites for an ordered, bounded chunk
@@ -363,7 +392,10 @@ mod tests {
         let mut cells = vec![false; SIDE * SIDE];
         for j in 0..SIDE {
             for i in 0..SIDE {
-                cells[j * SIDE + i] = predicate(i as i64 * STEP, j as i64 * STEP);
+                cells[j * SIDE + i] = predicate(
+                    crate::world::WORLD_GENERATION_BOUNDS.min.x + i as i64 * STEP,
+                    crate::world::WORLD_GENERATION_BOUNDS.min.y + j as i64 * STEP,
+                );
             }
         }
         cells
@@ -494,8 +526,8 @@ mod tests {
         let mut land = 0_usize;
         for j in 0..SIDE {
             for i in 0..SIDE {
-                let x = i as i64 * STEP;
-                let y = j as i64 * STEP;
+                let x = crate::world::WORLD_GENERATION_BOUNDS.min.x + i as i64 * STEP;
+                let y = crate::world::WORLD_GENERATION_BOUNDS.min.y + j as i64 * STEP;
                 let elevation = macro_sample(PROBE_SEED, x, y).elevation;
                 if elevation <= SEA_LEVEL {
                     continue;
@@ -529,6 +561,79 @@ mod tests {
         // must be much larger than single samples.
         assert!(component_sizes(&desert, SIDE)[0] >= 30);
         assert!(component_sizes(&forest, SIDE)[0] >= 30);
+    }
+
+    #[test]
+    fn complete_envelope_contains_cold_temperate_and_warm_lowlands() {
+        const COLD_MAX: i32 = 15_000;
+        const WARM_MIN: i32 = 30_000;
+
+        let mut representative_cold_hemispheres = [0_usize; 2];
+        for seed in [1, 7, 42, 10_001] {
+            let mut zones = [0_usize; 3];
+            for j in 0..SIDE {
+                for i in 0..SIDE {
+                    let x = crate::world::WORLD_GENERATION_BOUNDS.min.x + i as i64 * STEP;
+                    let y = crate::world::WORLD_GENERATION_BOUNDS.min.y + j as i64 * STEP;
+                    let elevation = macro_sample(seed, x, y).elevation;
+                    if !(SEA_LEVEL + 500..=42_000).contains(&elevation) {
+                        continue;
+                    }
+                    let temperature = temperature_field(seed, x, y, elevation);
+                    let zone = if temperature < COLD_MAX {
+                        representative_cold_hemispheres[usize::from(y >= 0)] += 1;
+                        0
+                    } else if temperature >= WARM_MIN {
+                        2
+                    } else {
+                        1
+                    };
+                    zones[zone] += 1;
+                }
+            }
+            let total: usize = zones.iter().sum();
+            assert!(total > 1_000, "seed {seed} has too few sampled lowlands");
+            for (name, count) in ["cold", "temperate", "warm"].into_iter().zip(zones) {
+                assert!(
+                    count * 100 >= total * 3,
+                    "seed {seed} {name} lowlands cover only {count} of {total} samples"
+                );
+            }
+        }
+        assert!(
+            representative_cold_hemispheres
+                .into_iter()
+                .all(|count| count > 0),
+            "representative seeds lack cold lowlands in one hemisphere"
+        );
+    }
+
+    #[test]
+    fn climate_inspection_matches_chunk_classification_inputs() {
+        let seed = 42;
+        for (x, y) in [
+            (-32_768_i64, -32_768_i64),
+            (-16_385, 7_999),
+            (-1, -1),
+            (0, 0),
+            (16_384, -8_001),
+            (32_767, 32_767),
+        ] {
+            let origin_x = x.div_euclid(CHUNK_SIZE) * CHUNK_SIZE;
+            let origin_y = y.div_euclid(CHUNK_SIZE) * CHUNK_SIZE;
+            let context = ChunkContext::new(seed, origin_x, origin_y);
+            let (cell, _) = context.generate(x, y);
+            let expected_temperature = context.interpolate(
+                &context.temperature,
+                x - context.origin_x,
+                y - context.origin_y,
+            ) as u16;
+            let inspected = climate_at(seed, x, y, cell.moisture);
+
+            assert_eq!(inspected.temperature, expected_temperature);
+            assert_eq!(inspected.moisture, cell.moisture);
+            assert_eq!(inspected, climate_at(seed, x, y, cell.moisture));
+        }
     }
 
     #[test]

@@ -7,7 +7,7 @@ use std::{
     fmt,
 };
 
-use crate::worldgen::{ChunkContext, REGION_SIZE};
+use crate::worldgen::{ChunkContext, REGION_SIZE, climate_at};
 
 /// Default side length of the initially generated area.
 pub const DEFAULT_INITIAL_WORLD_SIZE: u32 = 1_024;
@@ -202,6 +202,24 @@ pub enum GroundType {
     ForestFloor,
     Hill,
     BareRock,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum PrevailingWind {
+    Southeast,
+    Northwest,
+}
+
+/// Diagnostic climate inputs for a generated cell. Temperature is derived
+/// from the same 32-cell lattice used during classification; moisture remains
+/// the compact value retained by `TerrainCell`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+pub struct ClimateSample {
+    pub temperature: u16,
+    pub moisture: u8,
+    pub wind: PrevailingWind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1033,6 +1051,13 @@ impl World {
             .and_then(|chunk| chunk.cell(coord, position))
     }
 
+    /// Returns classification climate for a resident cell without allocating
+    /// or materializing terrain or regional caches.
+    pub fn climate_at(&self, position: WorldPosition) -> Option<ClimateSample> {
+        let cell = self.cell(position)?;
+        Some(climate_at(self.seed, position.x, position.y, cell.moisture))
+    }
+
     /// Returns the exact resident tile coverage containing `position`.
     ///
     /// A configured bootstrap coordinate can be declared but not yet loaded, so
@@ -1302,6 +1327,7 @@ mod tests {
     fn terrain_records_keep_their_compact_layout() {
         assert_eq!(std::mem::size_of::<GroundType>(), 1);
         assert_eq!(std::mem::size_of::<TerrainCell>(), 4);
+        assert_eq!(std::mem::size_of::<ClimateSample>(), 4);
     }
 
     #[test]

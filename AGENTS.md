@@ -17,6 +17,12 @@ These instructions apply to the entire repository.
 7. Apply `.codex/skills/validate-rust-workspace/SKILL.md` before declaring a change complete.
 8. Report implementation, documentation, review findings, and exact validation evidence.
 
+## Delegation policy
+
+- The root `gpt-5.6-sol` agent owns planning, architectural decisions, integration, and final validation. Use it with high reasoning for architecture, difficult debugging or review, concurrency and performance work, integration decisions, and final high-risk review.
+- Delegate independent exploration, testing, research, ordinary review, and well-scoped implementation to `gpt-5.6-terra` with medium reasoning. Use `gpt-5.6-luna` with low reasoning only for objectively mechanical, low-risk tasks; never use it for architecture, broad implementation, concurrency, persistence, memory layout, security, or performance decisions.
+- Do not spawn subagents for trivial tasks or allow recursive spawning. Never have agents edit overlapping files concurrently, and review all delegated work before accepting it.
+
 ## Skill routing
 
 | Task | Skill |

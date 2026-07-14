@@ -2,7 +2,7 @@
 
 Last synchronized: 2026-07-14.
 
-Status: **Active**. Slices 0 and 1 are implemented; Slices 2 through 7 remain planned. This document sequences the remaining Phase 1 world-foundation work and marks implemented behavior explicitly.
+Status: **Active**. Slices 0 through 2 are implemented; Slices 3 through 7 remain planned. This document sequences the remaining Phase 1 world-foundation work and marks implemented behavior explicitly.
 
 ## Purpose
 
@@ -149,6 +149,12 @@ The first implementation should evaluate a coarse step such as 128 or 256 cells 
 - Build time, temporary allocations, and retained bytes for the drainage skeleton and regional maps are recorded.
 
 ## Slice 2: Finite-world climate contract
+
+Status: **Implemented** on 2026-07-14. The finite vertical envelope is one stylized cold-to-warm-to-cold band: lowland baseline temperature rises from 6,000 at either vertical edge to 46,000 at the center before broad deterministic variation and altitude lapse. Four 16,384-cell circulation bands alternate northwest/southeast prevailing flow; 8,192-cell noise displaces their boundaries by up to 6,000 cells so transitions are broad and non-linear. Horizontal edges do not wrap, and off-envelope analytic samples remain boundary input for the existing 17,000-cell ocean-fetch probes rather than wrapped geography.
+
+The provisional physical interpretation is approximately 2 metres per cell, making the envelope about 131 km square. The climate zones are intentionally compressed for readable gameplay geography rather than claimed as an Earth-scale latitude model: cold lowland shoulders occupy roughly the outer 7,000 cells of each side before variation, temperate transitions roughly the next 12,000 cells per side, and the central warm band roughly 26,000 cells wide. This scale remains a world-foundation convention, not a persistence or movement-resolution commitment.
+
+`World::climate_at` exposes a four-byte `ClimateSample` for resident-cell inspection without growing the four-byte `TerrainCell` or materializing a regional cache. Temperature exactly reproduces the generator's 32-cell lattice interpolation from four analytic nodes; moisture is the retained eight-bit cell value and prevailing wind is derived directly. Complete-envelope multi-seed tests enforce cold, temperate, and warm lowland coverage, signed-edge inspection equality, wobbled circulation transitions, and existing worker/cache determinism. Tundra, snow, and other cold terrain meanings remain Slice 3.
 
 ### Objective
 

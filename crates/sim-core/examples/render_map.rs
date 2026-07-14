@@ -16,8 +16,9 @@ use std::{
 };
 
 use sim_core::{
-    CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkLocalPosition, Feature, FeatureKind,
-    GeneratedCell, GroundType, TerrainCell, WORLD_GENERATION_BOUNDS, WorldPosition, WorldRect,
+    CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkLocalPosition, ClimateSample, Feature,
+    FeatureKind, GeneratedCell, GroundType, PrevailingWind, TerrainCell, WORLD_GENERATION_BOUNDS,
+    WorldPosition, WorldRect,
 };
 
 const DEFAULT_WIDTH: i64 = 4_096;
@@ -559,6 +560,8 @@ fn representation_report() -> String {
     for (name, size, align) in [
         type_layout::<GroundType>("GroundType"),
         type_layout::<TerrainCell>("TerrainCell"),
+        type_layout::<PrevailingWind>("PrevailingWind"),
+        type_layout::<ClimateSample>("ClimateSample"),
         type_layout::<FeatureKind>("FeatureKind"),
         type_layout::<Feature>("Feature"),
         type_layout::<GeneratedCell>("GeneratedCell"),

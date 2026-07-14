@@ -3,12 +3,10 @@
 
 use super::noise::{NOISE_HALF, centered_noise, value_noise};
 use super::plates::{SEA_LEVEL, macro_sample};
+use crate::world::{PrevailingWind, WORLD_HALF_EXTENT};
 
-/// World-space wavelength of one full cold-warm-cold latitude cycle.
-const LATITUDE_PERIOD: i64 = 262_144;
-/// Shifts the cycle so the default start area sits in a temperate-warm band
-/// instead of on a polar node at `y = 0`.
-const LATITUDE_OFFSET: i64 = 96_000;
+/// One circulation band spans one quarter of the finite north-south envelope.
+const WIND_BAND_WIDTH: i64 = WORLD_HALF_EXTENT / 2;
 
 const TEMP_VARIATION_SEED: u64 = 0x5445_4d50_5641_5249;
 const MOIST_VARIATION_SEED: u64 = 0x4d4f_4953_5456_4152;
@@ -38,16 +36,10 @@ const UPWIND_PROBES: [(i64, i64); 16] = [
 const PROBE_JITTER_SEEDS: [u64; 2] = [0x4d4f_4953_544a_4954, 0x4d4f_4953_544a_4232];
 
 pub(crate) fn temperature(seed: u64, x: i64, y: i64, elevation: i32) -> i32 {
-    let phase = y
-        .saturating_add(LATITUDE_OFFSET)
-        .rem_euclid(LATITUDE_PERIOD);
-    let half = LATITUDE_PERIOD / 2;
-    let toward_warm = if phase < half {
-        phase
-    } else {
-        LATITUDE_PERIOD - phase
-    };
-    let latitude = 6_000 + toward_warm * 40_000 / half;
+    // The finite envelope is one complete cold-to-warm-to-cold band. This is
+    // deliberately not periodic: neither world axis currently wraps.
+    let toward_warm = WORLD_HALF_EXTENT.saturating_sub(y.abs()).max(0);
+    let latitude = 6_000 + toward_warm * 40_000 / WORLD_HALF_EXTENT;
     let variation = centered_noise(seed ^ TEMP_VARIATION_SEED, x, y, 16_384) * 7_000 / NOISE_HALF;
     let lapse = i64::from((elevation - SEA_LEVEL).max(0)) * 3 / 4;
     (latitude + variation - lapse).clamp(0, 65_535) as i32
@@ -60,13 +52,20 @@ const WIND_BAND_SEED: u64 = 0x5749_4e44_4241_4e44;
 /// steps) so humidity terraces from one ray's coastline never align. Band
 /// edges are wobbled by low-frequency noise so the direction change never
 /// draws a straight east-west seam.
-fn wind_rays(seed: u64, x: i64, y: i64) -> [(i64, i64, i64); 2] {
+pub(crate) fn prevailing_wind(seed: u64, x: i64, y: i64) -> PrevailingWind {
     let wobble = centered_noise(seed ^ WIND_BAND_SEED, x, y, 8_192) * 6_000 / NOISE_HALF;
-    let banded_y = y.saturating_add(LATITUDE_OFFSET).saturating_add(wobble);
-    if banded_y.div_euclid(LATITUDE_PERIOD / 4).rem_euclid(2) == 0 {
-        [(4, 3, 5), (6, 1, 6)]
+    let banded_y = y.saturating_add(WORLD_HALF_EXTENT).saturating_add(wobble);
+    if banded_y.div_euclid(WIND_BAND_WIDTH).rem_euclid(2) == 0 {
+        PrevailingWind::Southeast
     } else {
-        [(-4, -3, 5), (-6, -1, 6)]
+        PrevailingWind::Northwest
+    }
+}
+
+fn wind_rays(seed: u64, x: i64, y: i64) -> [(i64, i64, i64); 2] {
+    match prevailing_wind(seed, x, y) {
+        PrevailingWind::Southeast => [(4, 3, 5), (6, 1, 6)],
+        PrevailingWind::Northwest => [(-4, -3, 5), (-6, -1, 6)],
     }
 }
 
@@ -101,4 +100,32 @@ pub(crate) fn moisture(seed: u64, x: i64, y: i64, elevation: i32) -> i32 {
     }
     moist += centered_noise(seed ^ MOIST_VARIATION_SEED, x, y, 5_120) * 5_000 / NOISE_HALF;
     moist.clamp(500, 62_000) as i32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finite_latitude_band_is_cold_at_both_edges_and_warmest_at_center() {
+        let elevation = SEA_LEVEL;
+        let south = temperature(1, 0, -WORLD_HALF_EXTENT, elevation);
+        let center = temperature(1, 0, 0, elevation);
+        let north = temperature(1, 0, WORLD_HALF_EXTENT, elevation);
+
+        assert!(center > south + 25_000);
+        assert!(center > north + 25_000);
+    }
+
+    #[test]
+    fn circulation_boundaries_are_not_straight_world_space_seams() {
+        for boundary in [-WIND_BAND_WIDTH, 0, WIND_BAND_WIDTH] {
+            let directions: Vec<_> = (-WORLD_HALF_EXTENT..WORLD_HALF_EXTENT)
+                .step_by(512)
+                .map(|x| prevailing_wind(7, x, boundary))
+                .collect();
+            assert!(directions.contains(&PrevailingWind::Southeast));
+            assert!(directions.contains(&PrevailingWind::Northwest));
+        }
+    }
 }

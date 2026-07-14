@@ -5,10 +5,10 @@ mod worldgen;
 
 pub use world::{
     CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkInspection, ChunkLoadRequest, ChunkLocalPosition,
-    ChunkPresence, DEFAULT_INITIAL_WORLD_SIZE, Feature, FeatureKind, GenerateAreaError,
-    GeneratedCell, GroundType, MAX_CHUNKS_PER_GENERATION, MAX_GENERATED_CELLS,
-    MAX_GENERATED_CHUNKS, MAX_GENERATED_TERRAIN_BYTES, MAX_INITIAL_CHUNKS, TerrainCell,
-    WORLD_GENERATION_BOUNDS, WORLD_HALF_EXTENT, WORLD_SIDE_CELLS, World, WorldChunk,
+    ChunkPresence, ClimateSample, DEFAULT_INITIAL_WORLD_SIZE, Feature, FeatureKind,
+    GenerateAreaError, GeneratedCell, GroundType, MAX_CHUNKS_PER_GENERATION, MAX_GENERATED_CELLS,
+    MAX_GENERATED_CHUNKS, MAX_GENERATED_TERRAIN_BYTES, MAX_INITIAL_CHUNKS, PrevailingWind,
+    TerrainCell, WORLD_GENERATION_BOUNDS, WORLD_HALF_EXTENT, WORLD_SIDE_CELLS, World, WorldChunk,
     WorldChunkLoad, WorldConfig, WorldConfigError, WorldPosition, WorldRect,
 };
 
