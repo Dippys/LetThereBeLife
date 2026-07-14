@@ -22,6 +22,7 @@ Last synchronized: 2026-07-14.
 - Deterministic multi-threaded chunk generation with a fixed computation pool, bounded ordered result streaming, generation-ID cancellation, build-once shared regional caching, adaptive bounded main-thread insertion, and a same-seed release throughput harness.
 - Parallel cold-region preparation, indexed regional macro/climate sampling, a wider bounded task window, and 32 x 32 bootstrap pages without changing generated chunk content across pool sizes.
 - A centered 65,536 x 65,536-cell generation envelope (1,048,576 chunks, 16 GiB raw terrain at full residency), with origin-outward paging and core-enforced spatial bounds.
+- World-foundation Slice 0: a repeatable four-seed, 12-view quality baseline with full-envelope, regional, both-axis drainage-seam, coastline, river-mouth, lake, mountain, and close-up evidence; deterministic metadata/distribution/type reports; focused tooling tests; and recorded release timing and peak working set.
 
 ## Active
 
@@ -34,7 +35,7 @@ Detailed sequencing, implementation areas, acceptance criteria, performance chec
 
 - Improve large-scale world coherence, starting with cross-region drainage and basins so rivers, lakes, and watersheds do not stop at regional implementation boundaries.
 - Refine terrain, climate, biome transitions, coastlines, tributaries, local streams, wetlands, and sparse feature placement within explicit deterministic and performance bounds. Keep erosion and dynamic water for the point where their ownership and runtime budgets are defined.
-- Establish a repeatable representative-seed world-quality review at full-map, regional, seam, and close-up scales, then turn durable findings into deterministic regression tests instead of relying only on visual iteration.
+- Use the implemented representative-seed review set when changing world generation, and turn durable multi-seed findings into deterministic quality thresholds only when they express intended world behavior rather than preserve the current repository seed.
 - Extend the focused generation measurements where needed to protect world-generation iteration, including first terrain, bootstrap completion, frame hitches, resident memory, and allocations; use measured results to set explicit runtime budgets.
 
 ## Deferred

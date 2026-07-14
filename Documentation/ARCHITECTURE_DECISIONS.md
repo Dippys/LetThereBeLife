@@ -303,3 +303,13 @@ Date: 2026-07-14
 **Reason:** Dynamic title text is visually detached from the simulation and the old top-left bars expose little actionable information. A self-contained HUD makes status, time, generation, and terrain inspection legible in the same visual context while retaining the requested time-square identity. Reusing rectangle instances avoids a font/runtime dependency for the current diagnostic UI.
 
 **Consequences:** `sim-viewer` gains presentation-only cursor position and generation-status views; no HUD value becomes simulation truth. The reusable HUD string and fixed CPU/GPU screen-overlay capacities bound allocation and upload size, with regression coverage for supported layouts. The bitmap alphabet is intentionally utilitarian; richer typography or interactive widgets would require a later UI/rendering decision.
+
+## D-028: Canonical sampled world-quality evidence
+
+Date: 2026-07-14
+
+**Decision:** Define world-foundation review format 1 as four representative seeds (1, 7, 42, and 10,001), four complete-envelope overviews, and fixed regional, both-axis 4,096-cell drainage-seam, coastline, river-mouth, lake, mountain, and feature-visible close-up views. Produce all 12 views through the release `sim-core` `render_map --review-set` workflow. Record half-open bounds, sampling step, dimensions, source revision, terrain and sparse-feature counts, feature density, public type sizes/alignment, and a stable coordinate-sensitive semantic sample hash in deterministic TSV reports. Keep elapsed time out of those deterministic files and report it only to the console and measured performance documentation.
+
+**Reason:** Generator work needs comparable evidence at the same seeds, coordinates, scales, and seams before cross-region drainage and later classification changes intentionally alter output. A read-only `ChunkGenerator` client can produce that evidence without allocating a persistent world or making presentation summaries authoritative. Multiple seeds reduce the risk of choosing thresholds solely to protect seed 1's current appearance.
+
+**Consequences:** `cargo test --workspace` now runs the example's bounds, alignment, seam, seed-set, metadata, and hash contract tests. Derived BMP/TSV artifacts live under ignored `target/` output by default and may be regenerated rather than committed. Hash changes identify sampled output drift but are not automatically failures or quality judgments; intentional generator changes must review every seed and document the behavioral reason. This decision does not introduce persistence generator versioning, full-resolution world checksums, or quantitative terrain-quality thresholds.

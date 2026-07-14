@@ -10,3 +10,8 @@ path = "src/lib.rs"
 
 [dependencies]
 rayon.workspace = true
+
+[[example]]
+name = "render_map"
+path = "examples/render_map.rs"
+test = true

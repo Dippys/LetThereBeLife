@@ -2,7 +2,7 @@
 
 Last synchronized: 2026-07-14.
 
-Status: **Planned**. This document sequences the remaining Phase 1 world-foundation work. It does not describe behavior as implemented unless explicitly stated as current baseline.
+Status: **Active**. Slice 0 is implemented; Slices 1 through 7 remain planned. This document sequences the remaining Phase 1 world-foundation work and marks implemented behavior explicitly.
 
 ## Purpose
 
@@ -67,6 +67,8 @@ The slices are ordered by dependency. A later slice may be designed while an ear
 | 7 | Phase 1 exit contract | Passability, resource queries, and a documented handoff to agents |
 
 ## Slice 0: Repeatable world-quality baseline
+
+Status: **Implemented** on 2026-07-14. Run `cargo run --release -p sim-core --example render_map -- --review-set`; the canonical BMPs and deterministic TSV reports are written under `target/world-quality/`. Exact coverage, output files, measurements, and limitations are recorded in `TESTING.md` and `PERFORMANCE.md`.
 
 ### Objective
 

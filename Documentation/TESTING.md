@@ -32,6 +32,26 @@ Expected headless result for the command above:
 completed tick=600 simulated_seconds=10.000 seed=42 initial_world=4096x4096
 ```
 
+## Repeatable world-quality review
+
+Build and emit the complete canonical set with one release-mode command from the repository root:
+
+```powershell
+cargo run --release -p sim-core --example render_map -- --review-set
+```
+
+The command writes ignored derived artifacts under `target/world-quality/`:
+
+- `seed-<seed>/<view>.bmp`: 12 canonical sampled images across seeds 1, 7, 42, and 10,001;
+- `review_manifest.tsv`: review format, source revision (with `+dirty` when tracked files differ), view name, seed, half-open bounds, sample step, dimensions, feature-overlay state, semantic sample hash, and relative image path;
+- `distribution.tsv`: exact sampled terrain counts, feature-kind counts, aggregate feature density in parts per million, and the semantic hash;
+- `representation.tsv`: `size_of` and alignment for `GroundType`, `TerrainCell`, `FeatureKind`, `Feature`, `GeneratedCell`, and `ChunkCoord`;
+- `seed_roles.tsv`: the fixed reason each seed belongs to the set.
+
+The four `full-envelope` views sample `[-32,768, 32,768)` at a 128-cell step. Focused views cover the origin region, an x-axis drainage boundary, a y-axis drainage boundary, coastline, a verified river mouth, lake, mountain belt, and a cell-scale forest/coast close-up with sparse feature colors. The reports are deterministic for equal generator inputs and source-revision metadata; per-view and total elapsed times are intentionally console-only. `--source-revision TEXT` can replace Git discovery for packaged or controlled comparisons, and `--out-dir PATH` can isolate repeated runs.
+
+These views are review evidence, not pass/fail appearance thresholds. When generator behavior changes intentionally, compare all representative seeds and update hashes only with the implementation and documented decision that caused the change.
+
 ## Existing automated coverage
 
 - Identical engine inputs yield identical snapshots after 1,000 ticks.
@@ -52,6 +72,7 @@ completed tick=600 simulated_seconds=10.000 seed=42 initial_world=4096x4096
 - Overlapping configured initial areas generate identical terrain and features at equal world coordinates.
 - Invalid zero-sized or excessive initial allocations are rejected.
 - `ChunkGenerator` validates unrepresentable chunk coordinates and invalid local cells, while valid samples match `World::generate_chunk_at` terrain and feature output.
+- The `render_map` example test harness rejects views outside the finite envelope or pixel budget, proves sampling alignment across signed chunk boundaries, asserts that canonical seam views cross both axes of a 4,096-cell boundary, keeps repository seed 1 in a unique multi-seed set, and verifies byte-stable manifest metadata plus coordinate-sensitive deterministic semantic hashes.
 - TOML configuration parsing maps simulation/world settings and rejects invalid world dimensions.
 - Resident cell and feature iteration is locked to deterministic chunk-coordinate then tile-local row order; sparse features remain row-major within each loaded tile and support coordinate lookup.
 - The viewer camera starts at world origin, preserves cursor anchoring during ordinary zoom, and clamps visible edges to the maximum world boundary where the viewport fits.
@@ -74,6 +95,6 @@ completed tick=600 simulated_seconds=10.000 seed=42 initial_world=4096x4096
 ## Known gaps
 
 - GPU adapter/surface creation, shader binding layout, drawing, and presentation are covered by the automated hidden-window smoke run. Resize recovery and interactive event dispatch remain manual runtime checks.
-- No property tests, generator checksums, cross-region drainage/tributary tests, save/load tests, or long-running soak tests exist yet. A focused ignored release test measures cold generation with a fixed seed, selectable worker count, and optional square world size; current records cover one 1,024-chunk page footprint and 4,096 chunks, but this is not yet the complete world-generation benchmark suite.
-- Renderer `CameraUniform` and `Instance` sizes have compile-time assertions; broader foundational layout assertions, allocation/resident-memory measurements, frame-time capture, and a canonical multi-workload reporting harness do not exist yet. `Documentation/PERFORMANCE.md` records current representation calculations and those remaining measurement gaps.
+- No property tests, authoritative full-resolution generator checksums, cross-region drainage/tributary tests, save/load tests, or long-running soak tests exist yet. The world-quality set records deterministic hashes only for its fixed sampled views. A focused ignored release test measures cold generation with a fixed seed, selectable worker count, and optional square world size; current records cover one 1,024-chunk page footprint and 4,096 chunks, but this is not yet the complete world-generation benchmark suite.
+- Renderer `CameraUniform` and `Instance` sizes have compile-time assertions, `TerrainCell` has a unit size assertion, and the world-quality report records relevant public generation-tool layouts. Broader foundational layout assertions, allocation instrumentation, frame-time capture, and a canonical multi-workload runtime benchmark harness do not exist yet. `Documentation/PERFORMANCE.md` records current representation calculations and those remaining measurement gaps.
 - Segmented multi-buffer drawing, interactive confirmation that pan/zoom remains generation-free, a full bootstrap completion run, and an interactive large right-drag generation path are not integration-tested. The hidden GPU smoke covers startup pipeline creation plus the first streamed terrain arrival and presentation.

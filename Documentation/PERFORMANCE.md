@@ -28,6 +28,37 @@ Minimize runtime work, memory, allocations, cache misses, and stored data while 
 
 The current terrain layout intentionally uses `u16` elevation, `u8` moisture, and a byte-represented `GroundType`; a unit assertion fixes `TerrainCell` at 4 bytes. The 16,777,216-cell bootstrap ceiling therefore permits a 64 MiB logical cell payload before tile metadata and sparse features. `Engine::new` owns zero terrain cells; the viewer retains only streamed clipped bootstrap/full expansion tiles, while headless explicitly chooses the cost of completely materializing its configured rectangle.
 
+### World-quality baseline
+
+World-foundation Slice 0 uses this exact release workload:
+
+```powershell
+cargo build --release -p sim-core --example render_map
+target/release/examples/render_map.exe --review-set --out-dir target/world-quality
+```
+
+The workload emits four 512 x 512 full-envelope views plus eight fixed focused views, 4,456,448 sampled cells total. Three fresh-process runs on 2026-07-14 used `rustc 1.96.1 (31fca3adb 2026-06-26)` on the same 16-logical-CPU machine as the generation-pool measurements:
+
+| Run | Elapsed | Peak working set |
+| ---: | ---: | ---: |
+| 1 | 12,139.6 ms | 34.2 MiB |
+| 2 | 12,206.6 ms | 34.7 MiB |
+| 3 | 11,499.6 ms | 33.8 MiB |
+| **Median** | **12,139.6 ms** | **34.2 MiB** |
+
+The measurement includes regional derivation, sampling, pixel buffers, distribution/hash accounting, 12 BMP writes, and four TSV reports. It excludes Cargo compilation and does not construct or retain a `World`. Peak working set is an operating-system process observation polled every 25 ms, not allocator attribution. All per-view semantic hashes were identical across the three processes.
+
+Each full-envelope view samples 262,144 fixed coordinates at a 128-cell step. This is the recorded baseline distribution, not a quality threshold:
+
+| Seed | Deep water | Shallow water | Sand | Grass | Forest floor | Hill | Bare rock | Features / 10k samples |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 49.12% | 2.00% | 3.90% | 38.65% | 3.38% | 2.00% | 0.94% | 25.71 |
+| 7 | 69.14% | 1.99% | 7.23% | 16.43% | 3.94% | 0.83% | 0.45% | 24.38 |
+| 42 | 49.46% | 2.91% | 13.54% | 26.93% | 5.30% | 0.94% | 0.92% | 35.93 |
+| 10,001 | 56.63% | 2.44% | 9.39% | 24.22% | 5.63% | 1.40% | 0.30% | 37.84 |
+
+The generated `representation.tsv` currently records: `GroundType` 1 byte/alignment 1, `TerrainCell` 4/2, `FeatureKind` 1/1, `Feature` 24/8, `GeneratedCell` 6/2, and `ChunkCoord` 16/8. These are complete Rust record sizes, not sums of field widths. The existing regional-cache calculation below remains the relevant retained derivation-cache baseline.
+
 Local release measurements on 2026-07-14, with the repository's `4096 x 4096`, seed-1 configuration, warm build artifacts, and `rustc 1.96.1 (31fca3adb 2026-06-26)`:
 
 | Command | Runs (ms) | Median | Scope |
