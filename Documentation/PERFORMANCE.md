@@ -52,12 +52,40 @@ Each full-envelope view samples 262,144 fixed coordinates at a 128-cell step. Th
 
 | Seed | Deep water | Shallow water | Sand | Grass | Forest floor | Hill | Bare rock | Features / 10k samples |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 49.12% | 2.00% | 3.90% | 38.65% | 3.38% | 2.00% | 0.94% | 25.71 |
-| 7 | 69.14% | 1.99% | 7.23% | 16.43% | 3.94% | 0.83% | 0.45% | 24.38 |
-| 42 | 49.46% | 2.91% | 13.54% | 26.93% | 5.30% | 0.94% | 0.92% | 35.93 |
-| 10,001 | 56.63% | 2.44% | 9.39% | 24.22% | 5.63% | 1.40% | 0.30% | 37.84 |
+| 1 | 49.83% | 4.41% | 3.54% | 36.03% | 3.25% | 1.99% | 0.94% | 24.60 |
+| 7 | 69.42% | 2.84% | 6.93% | 15.85% | 3.68% | 0.83% | 0.45% | 22.89 |
+| 42 | 49.85% | 4.67% | 12.72% | 25.76% | 5.15% | 0.94% | 0.92% | 34.71 |
+| 10,001 | 57.04% | 3.94% | 8.80% | 23.22% | 5.31% | 1.39% | 0.30% | 35.78 |
 
 The generated `representation.tsv` currently records: `GroundType` 1 byte/alignment 1, `TerrainCell` 4/2, `FeatureKind` 1/1, `Feature` 24/8, `GeneratedCell` 6/2, and `ChunkCoord` 16/8. These are complete Rust record sizes, not sums of field widths. The existing regional-cache calculation below remains the relevant retained derivation-cache baseline.
+
+### Cross-region drainage skeleton
+
+The candidate command is the ignored release test documented in `TESTING.md`, run in a fresh process for each `SIM_DRAINAGE_STEP`. Seed 1 on 2026-07-14 produced:
+
+| Step | Grid | Build time | Lakes | Channel links | Render segments | Retained logical bytes | Scratch logical upper bound |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 128 | 513 x 513 | 175.9 ms | 187 | 6,966 | 27,864 | 1,918,704 | 17,369,154 |
+| **256** | **257 x 257** | **44.3 ms** | **167** | **3,832** | **30,656** | **1,109,240** | **4,359,234** |
+
+Step 256 is implemented. Both candidates sample the expensive upwind moisture field every fourth drainage node and bilinearly interpolate it before flow routing. Step 256 retains the same complete-envelope basin/outlet model at roughly one quarter of the measured build time and scratch payload. The higher segment count despite fewer coarse links comes from subdividing every retained channel at the fixed 32-cell regional-refinement step: a 256-cell link emits eight compact render segments while a 128-cell candidate emits four. Visual review retained convincing major-channel, lake, seam, and river-mouth topology; smaller tributaries remain deliberately deferred.
+
+`DrainageSegment` is size-asserted at 24 bytes, `ChannelLink` at 28 bytes, and `LakeDescriptor` at 12 bytes. The selected skeleton also retains two 66,049-entry `u16` arrays for filled surface and lake depth. Seeds 1, 7, 42, and 10,001 retain 1,109,240, 800,592, 1,160,660, and 1,084,860 bytes respectively, or 4,155,352 logical bytes together. The representation is bounded even for an adversarial seed: at most one coarse link and eight render segments per node yield a conservative 15,587,564-byte per-seed / 62,350,256-byte four-cache ceiling. These numbers exclude `Arc`, boxed-slice/cache metadata, and allocator overhead.
+
+The scratch figure is an explicit upper bound over the fixed-size node build vectors for elevation, moisture, fill, priority-queue entries, flow targets/accumulation, basin/channel/lake labels, and traversal buffers. It excludes output-vector spare capacity during construction, allocator metadata, Rayon stacks, and thread-local plate/climate caches; the fresh-process working-set measurement below captures those costs together but does not attribute them.
+
+The per-chunk `RiverSegment` uses the same 24-byte layout and its fixed array is now eight entries (192 bytes), down from 25 entries (600 bytes). Eight was the observed maximum after width-expanded indexing over all 1,048,576 chunks for each representative seed. No per-chunk river-vector allocation was introduced.
+
+Three fresh-process post-Slice-1 canonical review runs used the already-built release executable and separate output directories:
+
+| Run | Elapsed | Peak working set |
+| ---: | ---: | ---: |
+| 1 | 12,163.2 ms | 36.9 MiB |
+| 2 | 11,284.1 ms | 37.4 MiB |
+| 3 | 12,547.9 ms | 37.0 MiB |
+| **Median** | **12,163.2 ms** | **37.0 MiB** |
+
+Compared with the Slice-0 median (12,139.6 ms and 34.2 MiB), elapsed time was effectively unchanged (+0.2%) and peak working set increased by 2.8 MiB. The memory increase is consistent with retaining four seed skeletons during the four-seed review; this is an OS process measurement, not allocator attribution.
 
 Local release measurements on 2026-07-14, with the repository's `4096 x 4096`, seed-1 configuration, warm build artifacts, and `rustc 1.96.1 (31fca3adb 2026-06-26)`:
 
@@ -79,7 +107,7 @@ The focused throughput command is `cargo test --release -p sim-viewer generation
 
 On this 16-logical-CPU machine, the normal 15-worker policy was 5.9x faster for a cold 1,024-chunk page and 6.8x faster for the 4,096-chunk workload. Before cold-region preparation and parallel regional fields were added, a same-checkout 15-worker 4,096-chunk sample took 206.6 ms; the new three-run median is 133.8 ms. The test validates output count and terminal status, retains returned payloads, and excludes `Engine` insertion, GPU synchronization, and rendering. It is a focused comparison, not yet a resident-memory or frame-time benchmark.
 
-Each cached 129 x 129 region currently retains five `i32` lattices for elevation, lake depth, temperature, moisture, and roughness: about 325 KiB of logical array payload before river segments, box metadata, and temporary build buffers. The process-shared 64-completed-entry cache therefore has about 20.3 MiB of lattice payload at capacity before those extras, rather than that amount per worker. The capacity matches the viewer's maximum prepared task window so a sparse window cannot evict a freshly prepared region before its dependent chunk starts. In-flight build slots are never evicted and can temporarily exceed 64 entries if more distinct regions are concurrently requested outside that viewer boundary. These are representation calculations, not a resident-memory measurement. A fixed 25-slot per-chunk river index avoids per-cell scans of all regional channels.
+Each cached 129 x 129 region still retains five `i32` lattices for elevation, canonical lake depth, temperature, moisture, and roughness: about 325 KiB of logical array payload before river segments, box metadata, and temporary build buffers. The process-shared 64-completed-entry cache therefore has about 20.3 MiB of lattice payload at capacity before those extras, rather than that amount per worker. The capacity matches the viewer's maximum prepared task window so a sparse window cannot evict a freshly prepared region before its dependent chunk starts. In-flight build slots are never evicted and can temporarily exceed 64 entries if more distinct regions are concurrently requested outside that viewer boundary. These are representation calculations, not a resident-memory measurement. The separate four-seed skeleton cache is measured above.
 
 Manual requests are capped at 65,536 missing chunks (268,435,456 terrain cells, or 1 GiB logical `TerrainCell` payload). The complete centered envelope contains 1,048,576 chunks and 4,294,967,296 cells: exactly 16 GiB of logical `TerrainCell` payload if every cell is resident. That number is a raw-terrain-area definition, not a process-memory promise; sparse features, `BTreeMap` nodes, chunk metadata, regional derivation caches, and allocator overhead are additional. All generation paths reject coordinates outside `[-32,768, 32,768)` before allocating work, so generating heavily toward one side cannot move or consume a separate count-only boundary.
 

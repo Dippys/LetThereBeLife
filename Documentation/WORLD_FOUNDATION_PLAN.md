@@ -2,7 +2,7 @@
 
 Last synchronized: 2026-07-14.
 
-Status: **Active**. Slice 0 is implemented; Slices 1 through 7 remain planned. This document sequences the remaining Phase 1 world-foundation work and marks implemented behavior explicitly.
+Status: **Active**. Slices 0 and 1 are implemented; Slices 2 through 7 remain planned. This document sequences the remaining Phase 1 world-foundation work and marks implemented behavior explicitly.
 
 ## Purpose
 
@@ -23,15 +23,16 @@ The implemented generator already provides:
 
 - a centered `65,536 x 65,536`-cell world envelope;
 - deterministic 64 x 64 chunks and 4,096-cell drainage regions;
+- a canonical 256-cell whole-envelope drainage skeleton with connected major channels, basin identities, and deterministic lake outlets;
 - analytic continents, oceans, coastlines, relief, plate-boundary mountains, temperature, and moisture;
-- region-local priority-flood lakes and accumulated-flow rivers;
+- whole-envelope priority-flood lakes and accumulated-flow major rivers refined through regional sampling;
 - deep water, shallow water, sand, grass, forest floor, hill, and bare-rock terrain;
 - sparse deterministic trees, rocks, and berry bushes;
 - bounded parallel generation and camera-bounded `wgpu` rectangle rendering.
 
 Known limitations that motivate this plan:
 
-- regional drainage has deliberate dry margins, so rivers, lakes, and watersheds do not cross drainage-region boundaries;
+- the connected drainage skeleton intentionally resolves only major channels and coarse lakes; tributary hierarchy, local streams, wetlands, and transition detail remain later slices;
 - the latitude cycle is four times the height of the finite world envelope, so playable lowlands never reach the intended polar end of the climate function;
 - most moderate land collapses into grass or forest floor, while substrate, soil, wetland, tundra, snow, dry grassland, fertility, and traversal meaning are absent or conflated;
 - sparse features have only a kind and position, with no resource quantity, species, lifecycle, or modification state;
@@ -98,6 +99,17 @@ Make generator changes reviewable with the same seeds, coordinates, scales, stat
 - No quality threshold is chosen solely to preserve the current seed's appearance.
 
 ## Slice 1: Cross-region drainage skeleton
+
+Status: **Implemented** on 2026-07-14. `crates/sim-core/src/worldgen/drainage.rs` now builds one immutable 257 x 257 whole-envelope skeleton per seed at a 256-cell step. It owns canonical basin sink IDs, lake IDs/outlets/spill elevations, channel identities, confluences, ocean/world-edge destinations, and shared 32-cell-subdivided river geometry. Regional maps sample the same filled surface and segments on both sides of every edge; the former two-node lake and four-node river dry margins are removed.
+
+The release-only comparison command is:
+
+```powershell
+$env:SIM_DRAINAGE_STEP='128' # repeat with 256
+cargo test --release -p sim-core worldgen::drainage::tests::compare_candidate_skeleton_steps -- --ignored --nocapture --test-threads=1
+```
+
+On the recorded machine, fresh test processes measured 175.9 ms / 1,918,704 retained logical bytes / 17,369,154 scratch-upper-bound bytes for step 128, versus 44.3 ms / 1,109,240 retained logical bytes / 4,359,234 scratch-upper-bound bytes for step 256. Both candidates sample expensive upwind moisture every fourth skeleton node and interpolate it before routing. Step 256 retained 167 canonical lakes and 3,832 coarse channel links for seed 1 while using roughly one quarter of the build time and scratch of step 128; its 12-view review set retained convincing complete-envelope topology. The four representative seeds retain 4,155,352 logical skeleton bytes together; the representation's conservative all-nodes-channel theoretical ceiling is 62,350,256 bytes for four cached seeds. Both exclude `Arc`, vector-box, cache-entry, and allocator metadata. Existing `RegionMap` payload remains five 129 x 129 `i32` arrays (about 325 KiB) plus its bounded river vector.
 
 ### Objective
 

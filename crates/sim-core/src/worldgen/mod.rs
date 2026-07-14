@@ -4,12 +4,13 @@
 //! 1. Global analytic fields (`plates`, `climate`): continents, oceans,
 //!    mountain arcs, plateaus, temperature, and moisture as pure functions of
 //!    the seed and world coordinates.
-//! 2. Regional drainage (`hydrology`): cached per-region lattices that fill
-//!    depressions into lakes and route runoff into rivers.
+//! 2. Canonical drainage (`drainage`, refined by `hydrology`): one bounded
+//!    whole-envelope basin/channel graph plus cached per-region sampling.
 //! 3. Local detail: small roughness-budgeted noise applied per cell, which may
 //!    erode coastlines and vary forests but never decides where geography is.
 
 mod climate;
+mod drainage;
 mod hydrology;
 mod noise;
 mod plates;
@@ -102,6 +103,10 @@ fn region(seed: u64, region_x: i64, region_y: i64) -> Arc<RegionMap> {
 /// Materializes the regional prerequisites for an ordered, bounded chunk
 /// request window before dependent chunk workers enter the build-once cache.
 pub(crate) fn prepare_chunk_regions(seed: u64, requests: &[ChunkLoadRequest]) {
+    if requests.is_empty() {
+        return;
+    }
+    drainage::world_drainage(seed);
     let chunks_per_region = REGION_SIZE / CHUNK_SIZE;
     let mut prepared = RegionSet::new();
     for request in requests {
@@ -121,15 +126,16 @@ pub(crate) fn prepare_chunk_regions(seed: u64, requests: &[ChunkLoadRequest]) {
         });
 }
 
-// A 64-cell chunk can overlap at most five 32-cell hydrology nodes on each
-// axis. Each node emits at most one outgoing segment, so 25 slots retain every
-// width-expanded segment that can affect a chunk.
-const MAX_CHUNK_RIVERS: usize = 25;
+// Whole-world channel links are subdivided at the 32-cell refinement step.
+// Eight is the measured maximum across the four representative seeds and the
+// complete finite envelope; the fixed array avoids one allocation per chunk.
+const MAX_CHUNK_RIVERS: usize = 8;
 const EMPTY_SEGMENT: RiverSegment = RiverSegment {
     ax: 0,
     ay: 0,
     bx: 0,
     by: 0,
+    channel_id: 0,
     half_width: 0,
 };
 
@@ -235,15 +241,20 @@ impl ChunkContext {
             });
         }
         for segment in &self.rivers[..self.river_len] {
-            let (distance_sq, denominator) =
-                point_segment_distance_ratio(x, y, segment.ax, segment.ay, segment.bx, segment.by);
-            let core = segment.half_width * 5 / 8;
+            let (distance_sq, denominator) = point_segment_distance_ratio(
+                x,
+                y,
+                i64::from(segment.ax),
+                i64::from(segment.ay),
+                i64::from(segment.bx),
+                i64::from(segment.by),
+            );
+            let half_width = i64::from(segment.half_width);
+            let core = half_width * 5 / 8;
             if segment.half_width >= 8 && distance_sq <= i128::from(core * core) * denominator {
                 elevation = elevation.min(DEEP_WATER_FILL);
                 water_ground = Some(GroundType::DeepWater);
-            } else if distance_sq
-                <= i128::from(segment.half_width * segment.half_width) * denominator
-            {
+            } else if distance_sq <= i128::from(half_width * half_width) * denominator {
                 elevation = elevation.min(SHALLOW_WATER_FILL);
                 if water_ground != Some(GroundType::DeepWater) {
                     water_ground = Some(GroundType::ShallowWater);
@@ -267,25 +278,12 @@ impl ChunkContext {
 fn river_intersects_chunk(segment: RiverSegment, origin_x: i64, origin_y: i64) -> bool {
     let max_x = origin_x + CHUNK_SIZE;
     let max_y = origin_y + CHUNK_SIZE;
-    segment
-        .ax
-        .max(segment.bx)
-        .saturating_add(segment.half_width)
-        >= origin_x
-        && segment
-            .ax
-            .min(segment.bx)
-            .saturating_sub(segment.half_width)
+    i64::from(segment.ax.max(segment.bx)).saturating_add(i64::from(segment.half_width)) >= origin_x
+        && i64::from(segment.ax.min(segment.bx)).saturating_sub(i64::from(segment.half_width))
             < max_x
-        && segment
-            .ay
-            .max(segment.by)
-            .saturating_add(segment.half_width)
+        && i64::from(segment.ay.max(segment.by)).saturating_add(i64::from(segment.half_width))
             >= origin_y
-        && segment
-            .ay
-            .min(segment.by)
-            .saturating_sub(segment.half_width)
+        && i64::from(segment.ay.min(segment.by)).saturating_sub(i64::from(segment.half_width))
             < max_y
 }
 
@@ -534,71 +532,54 @@ mod tests {
     }
 
     #[test]
-    fn rivers_descend_and_terminate_in_water_basins_or_border_drainage() {
-        let mut total_rivers = 0;
-        let mut lake_nodes = 0;
+    fn adjacent_regions_share_canonical_water_and_crossing_channels() {
+        let mut crossing_channels = 0;
+        let mut wet_seam_nodes = 0;
         for seed in [PROBE_SEED, 42] {
-            for region_y in -1..=1_i64 {
-                for region_x in -1..=1_i64 {
-                    let map = RegionMap::build(seed, region_x, region_y);
-                    let origin_x = region_x * REGION_SIZE;
-                    let origin_y = region_y * REGION_SIZE;
-                    let node_of = |px: i64, py: i64| {
-                        let i = (px - origin_x + NODE_STEP / 2).div_euclid(NODE_STEP) as usize;
-                        let j = (py - origin_y + NODE_STEP / 2).div_euclid(NODE_STEP) as usize;
-                        j * GRID + i
-                    };
-                    let fill = |node: usize| map.elevation[node] + map.water_depth[node];
-                    let sources: BTreeSet<(i64, i64)> = map
-                        .rivers
-                        .iter()
-                        .map(|segment| (segment.ax, segment.ay))
-                        .collect();
-                    for segment in &map.rivers {
-                        total_rivers += 1;
-                        let upstream = node_of(segment.ax, segment.ay);
-                        let downstream = node_of(segment.bx, segment.by);
-                        assert!(
-                            fill(upstream) > fill(downstream),
-                            "river segment flows uphill for seed {seed} in region {region_x},{region_y}"
-                        );
-                        let continues = sources.contains(&(segment.bx, segment.by));
-                        let reaches_water = map.elevation[downstream] <= SEA_LEVEL
-                            || map.water_depth[downstream] >= LAKE_MIN_DEPTH;
-                        let i = downstream % GRID;
-                        let j = downstream / GRID;
-                        let near_border_drain = i <= 8 || j <= 8 || i >= GRID - 9 || j >= GRID - 9;
-                        assert!(
-                            continues || reaches_water || near_border_drain,
-                            "river dies inland for seed {seed} in region {region_x},{region_y}"
-                        );
-                    }
-                    for j in 0..GRID {
-                        for i in 0..GRID {
-                            let node = j * GRID + i;
-                            assert!(map.water_depth[node] >= 0);
-                            let in_lake_margin = i < hydrology::LAKE_BORDER_MARGIN_NODES
-                                || j < hydrology::LAKE_BORDER_MARGIN_NODES
-                                || i >= GRID - hydrology::LAKE_BORDER_MARGIN_NODES
-                                || j >= GRID - hydrology::LAKE_BORDER_MARGIN_NODES;
-                            if in_lake_margin {
-                                assert_eq!(
-                                    map.water_depth[node], 0,
-                                    "region-edge lake water for seed {seed} in region {region_x},{region_y}"
-                                );
-                            }
-                            if map.water_depth[node] >= LAKE_MIN_DEPTH
-                                && map.elevation[node] > SEA_LEVEL
-                            {
-                                lake_nodes += 1;
-                            }
-                        }
-                    }
+            for seam_region in [-1_i64, 0, 1] {
+                let left = RegionMap::build(seed, seam_region - 1, 0);
+                let right = RegionMap::build(seed, seam_region, 0);
+                let seam_x = seam_region * REGION_SIZE;
+                for j in 0..GRID {
+                    let left_depth = left.water_depth[j * GRID + GRID - 1];
+                    let right_depth = right.water_depth[j * GRID];
+                    assert_eq!(left_depth, right_depth);
+                    wet_seam_nodes += usize::from(left_depth >= LAKE_MIN_DEPTH);
+                }
+                for segment in left.rivers.iter().filter(|segment| {
+                    i64::from(segment.ax.min(segment.bx)) < seam_x
+                        && i64::from(segment.ax.max(segment.bx)) >= seam_x
+                }) {
+                    assert!(right.rivers.contains(segment));
+                    crossing_channels += 1;
+                }
+
+                let top = RegionMap::build(seed, 0, seam_region - 1);
+                let bottom = RegionMap::build(seed, 0, seam_region);
+                let seam_y = seam_region * REGION_SIZE;
+                for i in 0..GRID {
+                    let top_depth = top.water_depth[(GRID - 1) * GRID + i];
+                    let bottom_depth = bottom.water_depth[i];
+                    assert_eq!(top_depth, bottom_depth);
+                    wet_seam_nodes += usize::from(top_depth >= LAKE_MIN_DEPTH);
+                }
+                for segment in top.rivers.iter().filter(|segment| {
+                    i64::from(segment.ay.min(segment.by)) < seam_y
+                        && i64::from(segment.ay.max(segment.by)) >= seam_y
+                }) {
+                    assert!(bottom.rivers.contains(segment));
+                    crossing_channels += 1;
                 }
             }
         }
-        assert!(total_rivers > 20, "too few rivers: {total_rivers}");
-        assert!(lake_nodes > 10, "too few lake nodes: {lake_nodes}");
+        assert!(
+            crossing_channels > 0,
+            "canonical channels never crossed the tested region seams"
+        );
+        assert!(
+            wet_seam_nodes > 0,
+            "canonical lakes never reached the tested region seams"
+        );
     }
 
     #[test]
@@ -645,6 +626,7 @@ mod tests {
             ay: 16,
             bx: 32,
             by: 16,
+            channel_id: 1,
             half_width: 8,
         };
         let bank = RiverSegment {
@@ -652,6 +634,7 @@ mod tests {
             ay: 0,
             bx: 23,
             by: 32,
+            channel_id: 2,
             half_width: 8,
         };
 
@@ -684,25 +667,17 @@ mod tests {
             let map = RegionMap::build(seed, region_x, region_y);
             let mut coords = BTreeSet::new();
             for segment in &map.rivers {
-                let min_x = segment
-                    .ax
-                    .min(segment.bx)
-                    .saturating_sub(segment.half_width)
+                let min_x = i64::from(segment.ax.min(segment.bx))
+                    .saturating_sub(i64::from(segment.half_width))
                     .div_euclid(CHUNK_SIZE);
-                let max_x = segment
-                    .ax
-                    .max(segment.bx)
-                    .saturating_add(segment.half_width)
+                let max_x = i64::from(segment.ax.max(segment.bx))
+                    .saturating_add(i64::from(segment.half_width))
                     .div_euclid(CHUNK_SIZE);
-                let min_y = segment
-                    .ay
-                    .min(segment.by)
-                    .saturating_sub(segment.half_width)
+                let min_y = i64::from(segment.ay.min(segment.by))
+                    .saturating_sub(i64::from(segment.half_width))
                     .div_euclid(CHUNK_SIZE);
-                let max_y = segment
-                    .ay
-                    .max(segment.by)
-                    .saturating_add(segment.half_width)
+                let max_y = i64::from(segment.ay.max(segment.by))
+                    .saturating_add(i64::from(segment.half_width))
                     .div_euclid(CHUNK_SIZE);
                 for chunk_y in min_y..=max_y {
                     for chunk_x in min_x..=max_x {
@@ -750,6 +725,49 @@ mod tests {
     }
 
     #[test]
+    fn cross_region_chunks_are_order_and_worker_count_independent() {
+        use crate::{ChunkCoord, World};
+
+        let seed = 0x4352_4f53_5352_4547;
+        let coords = [
+            ChunkCoord { x: -65, y: -1 },
+            ChunkCoord { x: -64, y: -1 },
+            ChunkCoord { x: -1, y: -65 },
+            ChunkCoord { x: -1, y: -64 },
+            ChunkCoord { x: 63, y: 0 },
+            ChunkCoord { x: 64, y: 0 },
+            ChunkCoord { x: 0, y: 63 },
+            ChunkCoord { x: 0, y: 64 },
+        ];
+        let generate = |workers, ordered: Vec<ChunkCoord>| {
+            ThreadPoolBuilder::new()
+                .num_threads(workers)
+                .build()
+                .unwrap()
+                .install(|| {
+                    let mut chunks: Vec<_> = ordered
+                        .into_par_iter()
+                        .map(|coord| {
+                            (
+                                coord,
+                                World::generate_chunk_at(seed, coord)
+                                    .expect("test coordinate is inside the finite world"),
+                            )
+                        })
+                        .collect();
+                    chunks.sort_unstable_by_key(|(coord, _)| (coord.x, coord.y));
+                    chunks
+                })
+        };
+
+        let single = generate(1, coords.to_vec());
+        let mut reversed = coords.to_vec();
+        reversed.reverse();
+        let parallel = generate(4, reversed);
+        assert_eq!(parallel, single);
+    }
+
+    #[test]
     fn concurrent_region_requests_share_one_build() {
         const WORKERS: usize = 8;
         let seed = 0x5348_4152_4544_4341;
@@ -760,7 +778,7 @@ mod tests {
                 let barrier = SyncArc::clone(&barrier);
                 std::thread::spawn(move || {
                     barrier.wait();
-                    region(seed, 17, -23)
+                    region(seed, 3, -4)
                 })
             })
             .collect();
@@ -782,7 +800,7 @@ mod tests {
                 .num_threads(workers)
                 .build()
                 .unwrap()
-                .install(|| RegionMap::build(0x5041_5241_4c4c_454c, -7, 11))
+                .install(|| RegionMap::build(0x5041_5241_4c4c_454c, -7, 7))
         };
         let single = build(1);
         let parallel = build(4);

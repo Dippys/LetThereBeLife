@@ -27,9 +27,9 @@ requests 4,096 x 4,096 cells. The Rust fallback is 1,024 x 1,024 when dimensions
 The viewer opens first, then streams that bootstrap area in prioritized chunk pages; the headless
 runner explicitly materializes it before ticking. This is a deterministic loading target, not the
 intended maximum world size. Restarting with the same configuration reproduces the same continental oceans, coasts,
-plate/climate fields, region-local static lakes, drainage-derived river channels, and sparse
-surface features. These channels are deterministic terrain generation, not dynamic or
-cross-region water simulation.
+plate/climate fields, whole-envelope static lakes, cross-region major river channels, and sparse
+surface features. These channels are static deterministic terrain generation, not a
+time-varying water simulation.
 
 ```toml
 [simulation]

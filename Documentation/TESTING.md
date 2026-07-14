@@ -52,6 +52,15 @@ The four `full-envelope` views sample `[-32,768, 32,768)` at a 128-cell step. Fo
 
 These views are review evidence, not pass/fail appearance thresholds. When generator behavior changes intentionally, compare all representative seeds and update hashes only with the implementation and documented decision that caused the change.
 
+World-foundation Slice 1 intentionally changed the review hashes. The 2026-07-14 post-slice hashes are `4ac6e9e78a60b3d7` (seed 1), `458a1d9705b8c62a` (seed 7), `c36f08d95cc061fc` (seed 42), and `6b6f4a20dfd589e3` (seed 10,001) for the complete-envelope views. Visual inspection confirmed connected major channels in both seam views, deterministic lake inlet/outlet geometry, and channels reaching the recorded river-mouth coast.
+
+Compare drainage skeleton candidates in isolated release test processes by setting `SIM_DRAINAGE_STEP` to `128` and `256` in turn. `SIM_DRAINAGE_SEED` optionally selects a seed and defaults to 1:
+
+```powershell
+$env:SIM_DRAINAGE_STEP='256'
+cargo test --release -p sim-core worldgen::drainage::tests::compare_candidate_skeleton_steps -- --ignored --nocapture --test-threads=1
+```
+
 ## Existing automated coverage
 
 - Identical engine inputs yield identical snapshots after 1,000 ticks.
@@ -61,9 +70,10 @@ These views are review evidence, not pass/fail appearance thresholds. When gener
 - World generation is deterministic and different seeds change terrain.
 - Generated samples contain terrain variation plus sparse features.
 - A structural fixed-seed overview checks a dominant open ocean, varied continent sizes, elongated connected mountain ranges, and coherent desert, forest, and grass regions.
-- Regional-drainage checks cover two seeds and positive/negative 4,096-cell regions. They prove coarse river segments descend through the filled surface, terminate in water/continuing drainage/border drainage, and keep the two-node lake edge margin dry.
+- Whole-envelope drainage checks build seeds 1, 7, 42, and 10,001 and prove every major link continues with the same channel identity, joins a declared confluence, enters an identified lake, reaches ocean/world-edge drainage, or uses explicit terminal-basin status. They cover river crossings on positive and negative x/y 4,096-cell seams, basin identity through downstream links, canonical lake outlets, and the eight-segment complete-envelope chunk-index maximum.
+- Adjacent `RegionMap` checks compare every shared x/y seam sample exactly and prove crossed river segments are present on both sides without the former fixed dry margins. A focused chunk regression generates signed seam-adjacent chunks in forward/single-worker and reversed/four-worker order and requires byte-identical results.
 - Rasterized samples from flooded regional nodes must remain deep or shallow water and cannot emit a sparse surface feature. An overlapping-segment regression proves a deep river core wins over a shallow bank in both segment orders. A multi-seed river-index regression compares every candidate chunk's retained fixed-array segments against the region's exact width-expanded intersection set.
-- Initial generation is compared to independently generated chunks both near the origin and across the 4,096-cell regional boundary. A coordinate-order regression ensures wide chunk spans finish one drainage region before beginning the next, while a cold-cache reset cannot change chunk output. Direct one-worker and four-worker `RegionMap` builds compare every retained lattice and river segment exactly.
+- Initial generation is compared to independently generated chunks both near the origin and across the 4,096-cell regional boundary. A coordinate-order regression ensures wide chunk spans finish one drainage region before beginning the next, while a cold-cache reset cannot change chunk output. Direct one-worker and four-worker builds compare every retained `DrainageSkeleton` field and every `RegionMap` lattice/river segment exactly.
 - Deferred bootstrap construction has zero resident cells while retaining exact configured bounds and unloaded inspection states. Streamed aligned and clipped bootstrap payloads match eager terrain/features even when inserted in a different order; eager materialization is also exercised in multiple bounded batches.
 - `GroundType` remains one byte and `TerrainCell` remains four bytes; surface features remain excluded from water and sand.
 - Terrain lookup exposes only resident valid coordinates and rejects configured-but-unloaded or out-of-bounds cells.
@@ -95,6 +105,6 @@ These views are review evidence, not pass/fail appearance thresholds. When gener
 ## Known gaps
 
 - GPU adapter/surface creation, shader binding layout, drawing, and presentation are covered by the automated hidden-window smoke run. Resize recovery and interactive event dispatch remain manual runtime checks.
-- No property tests, authoritative full-resolution generator checksums, cross-region drainage/tributary tests, save/load tests, or long-running soak tests exist yet. The world-quality set records deterministic hashes only for its fixed sampled views. A focused ignored release test measures cold generation with a fixed seed, selectable worker count, and optional square world size; current records cover one 1,024-chunk page footprint and 4,096 chunks, but this is not yet the complete world-generation benchmark suite.
+- No property tests, authoritative full-resolution generator checksums, tributary/local-stream hierarchy tests, save/load tests, or long-running soak tests exist yet. Cross-region major drainage has deterministic topology, seam, pool-size, request-order, and complete-envelope index coverage, while the world-quality set records hashes only for its fixed sampled views. Focused ignored release tests measure candidate skeleton steps and cold chunk generation, but this is not yet the complete world-generation benchmark suite.
 - Renderer `CameraUniform` and `Instance` sizes have compile-time assertions, `TerrainCell` has a unit size assertion, and the world-quality report records relevant public generation-tool layouts. Broader foundational layout assertions, allocation instrumentation, frame-time capture, and a canonical multi-workload runtime benchmark harness do not exist yet. `Documentation/PERFORMANCE.md` records current representation calculations and those remaining measurement gaps.
 - Segmented multi-buffer drawing, interactive confirmation that pan/zoom remains generation-free, a full bootstrap completion run, and an interactive large right-drag generation path are not integration-tested. The hidden GPU smoke covers startup pipeline creation plus the first streamed terrain arrival and presentation.
