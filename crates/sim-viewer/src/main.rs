@@ -1,22 +1,21 @@
 mod camera;
+mod generation;
 mod renderer;
 
 use std::{
-    cell::Cell,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, SyncSender},
-    },
+    sync::{Arc, mpsc},
     thread,
     time::{Duration, Instant},
 };
 
 use camera::{Camera, Viewport};
+use generation::{
+    GenerationId, GenerationJob, GenerationKind, GenerationOutcome, ViewportPager, WorldGenerator,
+};
 use sim_config::{AppConfig, DEFAULT_CONFIG_PATH};
 use sim_core::{
-    ChunkCoord, ChunkInspection, ChunkPresence, Engine, EngineCommand, GenerateAreaError, World,
-    WorldChunk, WorldPosition, WorldRect,
+    ChunkInspection, ChunkLoadRequest, ChunkPresence, Engine, EngineCommand, GenerateAreaError,
+    World, WorldChunkLoad, WorldPosition, WorldRect,
 };
 use winit::{
     application::ApplicationHandler,
@@ -47,6 +46,12 @@ struct SelectionValidation {
     bounds: WorldRect,
     world_revision: u64,
     valid: bool,
+}
+
+struct ActiveGeneration {
+    id: GenerationId,
+    kind: GenerationKind,
+    discard_loads: bool,
 }
 
 fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Error>> {
@@ -94,18 +99,32 @@ struct ViewerApp {
     selection: Option<WorldRect>,
     selection_validation: Option<SelectionValidation>,
     generator: WorldGenerator,
-    generation_pending: bool,
+    active_generation: Option<ActiveGeneration>,
+    pending_manual: Option<Vec<ChunkLoadRequest>>,
+    pending_automatic: Option<Vec<ChunkLoadRequest>>,
+    pending_bootstrap: Option<Vec<ChunkLoadRequest>>,
+    bootstrap_pager: Option<ViewportPager>,
+    automatic_pager: Option<ViewportPager>,
     automatic_generation_needed: bool,
     automatic_generation_blocked: Option<GenerateAreaError>,
-    world_sync_ready: bool,
+    next_generation_id: GenerationId,
+    pending_world_changes: Option<WorldRect>,
+    next_world_sync: Instant,
     next_frame: Instant,
     dirty: bool,
     smoke_frames: Option<u32>,
+    smoke_deadline: Option<Instant>,
 }
 
 impl ViewerApp {
     fn new(engine: Engine, smoke_frames: Option<u32>) -> Self {
         let camera = Camera::centered(engine.world().width(), engine.world().height());
+        let bootstrap_focus = WorldPosition {
+            x: i64::from(engine.world().width()) / 2,
+            y: i64::from(engine.world().height()) / 2,
+        };
+        let bootstrap_pager = ViewportPager::new(engine.world().initial_bounds(), bootstrap_focus)
+            .expect("validated configured bootstrap bounds create pages");
         Self {
             window: None,
             renderer: None,
@@ -121,13 +140,21 @@ impl ViewerApp {
             selection: None,
             selection_validation: None,
             generator: WorldGenerator::new(),
-            generation_pending: false,
+            active_generation: None,
+            pending_manual: None,
+            pending_automatic: None,
+            pending_bootstrap: None,
+            bootstrap_pager: Some(bootstrap_pager),
+            automatic_pager: None,
             automatic_generation_needed: true,
             automatic_generation_blocked: None,
-            world_sync_ready: true,
+            next_generation_id: 1,
+            pending_world_changes: None,
+            next_world_sync: Instant::now(),
             next_frame: Instant::now(),
             dirty: true,
             smoke_frames,
+            smoke_deadline: smoke_frames.map(|_| Instant::now() + SMOKE_TIMEOUT),
         }
     }
 }
@@ -171,7 +198,9 @@ impl ViewerApp {
         if size.width == 0 || size.height == 0 {
             return false;
         }
-        let allow_world_sync = self.world_sync_ready;
+        let allow_world_sync = self
+            .pending_world_changes
+            .is_some_and(|_| Instant::now() >= self.next_world_sync);
         let result = renderer.render(
             self.engine.world(),
             renderer::RenderState {
@@ -183,12 +212,16 @@ impl ViewerApp {
                 selection_valid,
             },
             allow_world_sync,
+            self.pending_world_changes,
         );
-        if allow_world_sync {
-            self.world_sync_ready = false;
-        }
         match result {
-            Ok(()) => true,
+            Ok(()) => {
+                if allow_world_sync {
+                    self.pending_world_changes = None;
+                    self.next_world_sync = Instant::now() + WORLD_SYNC_INTERVAL;
+                }
+                true
+            }
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
                 renderer.resize(size.width, size.height);
                 self.dirty = true;
@@ -199,6 +232,48 @@ impl ViewerApp {
                 self.dirty = true;
                 false
             }
+        }
+    }
+
+    fn render_smoke_frame_if_ready(&mut self, event_loop: &ActiveEventLoop) -> bool {
+        let Some(frames) = self.smoke_frames else {
+            return false;
+        };
+        if self.engine.world().loaded_chunk_count() == 0 {
+            return false;
+        }
+        assert!(
+            self.render(),
+            "GPU smoke frame failed after streamed terrain arrived"
+        );
+        if frames == 1 {
+            self.smoke_frames = None;
+            self.smoke_deadline = None;
+            event_loop.exit();
+        } else {
+            self.smoke_frames = Some(frames - 1);
+            self.dirty = true;
+            self.next_frame = Instant::now();
+        }
+        true
+    }
+
+    fn run_smoke(&mut self, event_loop: &ActiveEventLoop) {
+        self.refresh_visible_generation();
+        self.schedule_generation();
+        while self.smoke_frames.is_some() {
+            self.poll_generation();
+            self.schedule_generation();
+            if self.render_smoke_frame_if_ready(event_loop) {
+                continue;
+            }
+            if self
+                .smoke_deadline
+                .is_some_and(|deadline| Instant::now() >= deadline)
+            {
+                panic!("viewer smoke timed out before rendering streamed terrain");
+            }
+            thread::sleep(Duration::from_millis(1));
         }
     }
 
@@ -224,36 +299,53 @@ impl ViewerApp {
     }
 
     fn poll_generation(&mut self) -> bool {
-        let GenerationPoll {
-            chunks,
-            outcome,
-            mut changed,
-        } = self.generator.drain(MAX_CHUNKS_APPLIED_PER_FRAME);
-        if let Some(outcome) = outcome {
-            self.generation_pending = false;
-            self.world_sync_ready = true;
-            self.automatic_generation_needed =
-                automatic_generation_needed_after(self.automatic_generation_needed, &outcome);
-            match outcome {
-                GenerationOutcome::Failed(error) => {
-                    eprintln!("world generation failed: {error}");
+        let Some(active) = &self.active_generation else {
+            return false;
+        };
+        let id = active.id;
+        let discard_loads = active.discard_loads;
+        let poll = self
+            .generator
+            .drain(id, MAX_CHUNKS_APPLIED_PER_FRAME, discard_loads);
+        let mut changed = false;
+
+        if !poll.loads.is_empty() {
+            let changed_bounds = union_load_bounds(&poll.loads);
+            match self.engine.apply_world_chunk_loads(poll.loads) {
+                Ok(inserted) if inserted > 0 => {
+                    if let Some(bounds) = changed_bounds {
+                        self.mark_world_changed(bounds);
+                    }
+                    self.update_hover();
+                    changed = true;
                 }
-                GenerationOutcome::WorkerStopped => {
-                    eprintln!("world generation worker stopped unexpectedly");
+                Ok(_) => {}
+                Err(error) => {
+                    eprintln!("could not apply generated chunks: {error}");
+                    self.cancel_active_generation();
+                    changed = true;
                 }
-                GenerationOutcome::Completed | GenerationOutcome::Cancelled => {}
             }
         }
-        if !chunks.is_empty() {
-            if let Err(error) = self.engine.apply_world_chunks(chunks) {
-                eprintln!("could not apply generated chunks: {error}");
-                self.generator.cancel();
-                self.generation_pending = false;
-                self.automatic_generation_needed = false;
-                self.world_sync_ready = true;
-                changed = true;
+
+        if let Some(outcome) = poll.outcome {
+            let active = self
+                .active_generation
+                .take()
+                .expect("worker outcomes always belong to an active job");
+            if matches!(outcome, GenerationOutcome::WorkerStopped) {
+                eprintln!("world generation worker stopped unexpectedly");
+                self.update_hover();
             }
-            self.update_hover();
+            if matches!(active.kind, GenerationKind::Automatic)
+                && matches!(outcome, GenerationOutcome::Completed)
+            {
+                self.automatic_generation_blocked = None;
+            }
+            if self.pending_world_changes.is_some() {
+                self.next_world_sync = Instant::now();
+            }
+            changed = true;
         }
         changed
     }
@@ -275,21 +367,15 @@ impl ViewerApp {
             self.engine.world(),
             position,
             self.automatic_generation_blocked,
+            !self.generator.is_available(),
         );
         window.set_title(&title);
     }
 
-    fn request_visible_generation(&mut self) -> bool {
-        if !can_request_automatic_generation(
-            self.automatic_generation_needed,
-            self.generation_pending,
-            self.generator.is_available(),
-            self.selection_start.is_some(),
-            self.dragging,
-        ) {
+    fn refresh_visible_generation(&mut self) -> bool {
+        if !self.automatic_generation_needed || self.selection_start.is_some() || self.dragging {
             return false;
         }
-        self.automatic_generation_needed = false;
         let Some(window) = &self.window else {
             return false;
         };
@@ -307,18 +393,21 @@ impl ViewerApp {
             )
             .world_bounds();
         let previous_block = self.automatic_generation_blocked;
-        match visible_generation_coords(self.engine.world(), bounds) {
-            Ok(coords) if coords.is_empty() => {
+        let focus = self.camera.screen_to_world_position(
+            f64::from(size.width) / 2.0,
+            f64::from(size.height) / 2.0,
+            self.viewport(size.width, size.height),
+        );
+        self.automatic_generation_needed = false;
+        self.pending_automatic = None;
+        match ViewportPager::new(bounds, focus) {
+            Ok(pager) => {
+                self.automatic_pager = Some(pager);
                 self.automatic_generation_blocked = None;
-            }
-            Ok(coords) => {
-                self.automatic_generation_blocked = None;
-                self.generation_pending = self.generator.request(self.engine.config().seed, coords);
-                if !self.generation_pending {
-                    eprintln!("world generation worker could not accept automatic request");
-                }
+                self.cancel_background_generation();
             }
             Err(error) => {
+                self.automatic_pager = None;
                 self.automatic_generation_blocked = Some(error);
             }
         }
@@ -327,6 +416,163 @@ impl ViewerApp {
             self.update_hover();
         }
         changed
+    }
+
+    fn schedule_generation(&mut self) -> bool {
+        if self.active_generation.is_some() || !self.generator.is_available() {
+            return false;
+        }
+        if let Some(requests) = self.pending_manual.take() {
+            return self.start_generation(GenerationKind::Manual, requests);
+        }
+        if let Some(requests) = self.pending_automatic.take() {
+            return self.start_generation(GenerationKind::Automatic, requests);
+        }
+        match self.take_next_paged_requests(GenerationKind::Automatic) {
+            Ok(Some(requests)) => {
+                return self.start_generation(GenerationKind::Automatic, requests);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.automatic_generation_blocked = Some(error);
+                self.automatic_pager = None;
+                self.update_hover();
+                return true;
+            }
+        }
+        if let Some(requests) = self.pending_bootstrap.take() {
+            return self.start_generation(GenerationKind::Bootstrap, requests);
+        }
+        match self.take_next_paged_requests(GenerationKind::Bootstrap) {
+            Ok(Some(requests)) => self.start_generation(GenerationKind::Bootstrap, requests),
+            Ok(None) => false,
+            Err(error) => {
+                eprintln!("bootstrap generation paused: {error}");
+                self.bootstrap_pager = None;
+                true
+            }
+        }
+    }
+
+    fn take_next_paged_requests(
+        &mut self,
+        kind: GenerationKind,
+    ) -> Result<Option<Vec<ChunkLoadRequest>>, GenerateAreaError> {
+        let requests = match kind {
+            GenerationKind::Automatic => self
+                .automatic_pager
+                .as_mut()
+                .map(|pager| pager.next_requests(self.engine.world()))
+                .transpose()?
+                .flatten(),
+            GenerationKind::Bootstrap => self
+                .bootstrap_pager
+                .as_mut()
+                .map(|pager| pager.next_requests(self.engine.world()))
+                .transpose()?
+                .flatten(),
+            GenerationKind::Manual => None,
+        };
+        if requests.is_none() {
+            match kind {
+                GenerationKind::Automatic => self.automatic_pager = None,
+                GenerationKind::Bootstrap => self.bootstrap_pager = None,
+                GenerationKind::Manual => {}
+            }
+        }
+        Ok(requests)
+    }
+
+    fn start_generation(&mut self, kind: GenerationKind, requests: Vec<ChunkLoadRequest>) -> bool {
+        let id = self.next_generation_id;
+        self.next_generation_id = self.next_generation_id.saturating_add(1).max(1);
+        let job = GenerationJob {
+            id,
+            seed: self.engine.config().seed,
+            requests,
+        };
+        match self.generator.request(job) {
+            Ok(()) => {
+                self.active_generation = Some(ActiveGeneration {
+                    id,
+                    kind,
+                    discard_loads: false,
+                });
+                true
+            }
+            Err(mpsc::TrySendError::Full(job)) => {
+                self.requeue_generation(kind, job.requests);
+                false
+            }
+            Err(mpsc::TrySendError::Disconnected(job)) => {
+                self.requeue_generation(kind, job.requests);
+                eprintln!("world generation worker stopped before accepting request");
+                self.update_hover();
+                true
+            }
+        }
+    }
+
+    fn requeue_generation(&mut self, kind: GenerationKind, requests: Vec<ChunkLoadRequest>) {
+        let slot = match kind {
+            GenerationKind::Manual => &mut self.pending_manual,
+            GenerationKind::Automatic => &mut self.pending_automatic,
+            GenerationKind::Bootstrap => &mut self.pending_bootstrap,
+        };
+        debug_assert!(slot.is_none(), "only one unsent page per priority exists");
+        *slot = Some(requests);
+    }
+
+    fn generation_is_pending(&self) -> bool {
+        self.generator.is_available()
+            && (self.pending_manual.is_some()
+                || self.pending_automatic.is_some()
+                || self.pending_bootstrap.is_some()
+                || self.automatic_generation_needed
+                || self.automatic_pager.is_some()
+                || self.bootstrap_pager.is_some())
+    }
+
+    fn cancel_active_generation(&mut self) {
+        if let Some(active) = &mut self.active_generation
+            && !active.discard_loads
+        {
+            active.discard_loads = true;
+            self.generator.cancel(active.id);
+        }
+    }
+
+    fn cancel_background_generation(&mut self) {
+        if self
+            .active_generation
+            .as_ref()
+            .is_some_and(|active| !matches!(active.kind, GenerationKind::Manual))
+        {
+            self.cancel_active_generation();
+        }
+    }
+
+    fn cancel_pending_generation(&mut self) {
+        self.cancel_active_generation();
+        self.pending_manual = None;
+        self.pending_automatic = None;
+        self.pending_bootstrap = None;
+        self.automatic_pager = None;
+        self.bootstrap_pager = None;
+        self.automatic_generation_needed = false;
+        self.automatic_generation_blocked = None;
+        self.selection_start = None;
+        self.selection = None;
+        self.selection_validation = None;
+        self.update_hover();
+    }
+
+    fn mark_world_changed(&mut self, bounds: WorldRect) {
+        self.pending_world_changes = Some(match self.pending_world_changes {
+            Some(previous) => union_bounds(previous, bounds),
+            None => bounds,
+        });
+        self.dirty = true;
     }
 
     fn zoom(&mut self, delta: MouseScrollDelta) {
@@ -349,6 +595,7 @@ impl ViewerApp {
             },
         );
         self.automatic_generation_needed = true;
+        self.cancel_background_generation();
         self.update_hover();
     }
 
@@ -370,10 +617,7 @@ impl ViewerApp {
             KeyCode::Digit4 => Some(EngineCommand::SetSpeed(8.0)),
             KeyCode::KeyR => Some(EngineCommand::Reset),
             KeyCode::KeyC => {
-                if self.generation_pending {
-                    self.generator.cancel();
-                }
-                self.automatic_generation_needed = false;
+                self.cancel_pending_generation();
                 None
             }
             KeyCode::Escape => {
@@ -401,11 +645,8 @@ impl ApplicationHandler for ViewerApp {
         if self.window.is_none() {
             self.create_window(event_loop);
         }
-        if let Some(frames) = self.smoke_frames.take() {
-            for _ in 0..frames {
-                assert!(self.render(), "GPU smoke frame failed");
-            }
-            event_loop.exit();
+        if self.smoke_frames.is_some() {
+            self.run_smoke(event_loop);
         }
     }
 
@@ -416,16 +657,20 @@ impl ApplicationHandler for ViewerApp {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::RedrawRequested => {
-                self.render();
+                if !self.render_smoke_frame_if_ready(event_loop) {
+                    self.render();
+                }
             }
             WindowEvent::Resized(size) => {
                 if let Some(renderer) = &mut self.renderer {
                     renderer.resize(size.width, size.height);
                 }
                 self.automatic_generation_needed = true;
+                self.cancel_background_generation();
                 self.dirty = true;
             }
             WindowEvent::CursorMoved { position, .. } => {
+                let mut camera_moved = false;
                 if self.dragging
                     && let Some((previous_x, previous_y)) = self.cursor
                 {
@@ -436,9 +681,14 @@ impl ApplicationHandler for ViewerApp {
                             position.y - previous_y,
                             self.viewport(size.width, size.height),
                         );
+                        camera_moved = position.x != previous_x || position.y != previous_y;
                     }
                 }
                 self.cursor = Some((position.x, position.y));
+                if camera_moved {
+                    self.automatic_generation_needed = true;
+                    self.cancel_background_generation();
+                }
                 if let Some(start) = self.selection_start {
                     let size = self.window.as_ref().expect("window exists").inner_size();
                     let current = self.camera.screen_to_world_position(
@@ -457,6 +707,7 @@ impl ApplicationHandler for ViewerApp {
                 self.hovered = None;
                 if self.dragging {
                     self.automatic_generation_needed = true;
+                    self.cancel_background_generation();
                 }
                 self.dragging = false;
                 self.selection_start = None;
@@ -466,6 +717,7 @@ impl ApplicationHandler for ViewerApp {
                         self.engine.world(),
                         None,
                         self.automatic_generation_blocked,
+                        !self.generator.is_available(),
                     ));
                 }
                 self.dirty = true;
@@ -477,6 +729,7 @@ impl ApplicationHandler for ViewerApp {
             } => {
                 if state == ElementState::Released && self.dragging {
                     self.automatic_generation_needed = true;
+                    self.cancel_background_generation();
                 }
                 self.dragging = state == ElementState::Pressed;
                 self.dirty = true;
@@ -488,10 +741,12 @@ impl ApplicationHandler for ViewerApp {
             } => {
                 match state {
                     ElementState::Pressed => {
-                        if can_start_selection(
-                            self.generation_pending,
-                            self.generator.is_available(),
-                        ) && let (Some(window), Some((x, y))) = (&self.window, self.cursor)
+                        if self.generator.is_available()
+                            && !self
+                                .active_generation
+                                .as_ref()
+                                .is_some_and(|active| matches!(active.kind, GenerationKind::Manual))
+                            && let (Some(window), Some((x, y))) = (&self.window, self.cursor)
                         {
                             let size = window.inner_size();
                             let start = self.camera.screen_to_world_position(
@@ -505,23 +760,13 @@ impl ApplicationHandler for ViewerApp {
                     }
                     ElementState::Released => {
                         if let Some(bounds) = self.selection.take() {
-                            if !self.generation_pending
-                                && !self.engine.world().area_is_generated(bounds)
-                            {
-                                match self.engine.world().missing_chunk_coords(bounds) {
-                                    Ok(coords) if !coords.is_empty() => {
-                                        self.generation_pending = self
-                                            .generator
-                                            .request(self.engine.config().seed, coords);
-                                        if !self.generation_pending {
-                                            eprintln!(
-                                                "world generation worker could not accept request"
-                                            );
-                                        }
-                                    }
-                                    Ok(_) => {}
-                                    Err(error) => eprintln!("world generation rejected: {error}"),
+                            match self.engine.world().missing_chunk_load_requests(bounds) {
+                                Ok(requests) if !requests.is_empty() => {
+                                    self.pending_manual = Some(requests);
+                                    self.cancel_background_generation();
                                 }
+                                Ok(_) => {}
+                                Err(error) => eprintln!("world generation rejected: {error}"),
                             }
                         }
                         self.selection_start = None;
@@ -549,14 +794,27 @@ impl ApplicationHandler for ViewerApp {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let frame_due = Instant::now() >= self.next_frame;
         let previous_tick = self.engine.snapshot().tick;
+        // Worker arrivals only populate presentation-demanded materialization
+        // after this event-loop turn's fixed simulation phase. Current
+        // simulation state therefore never observes arrival timing mid-tick.
+        self.update();
         if frame_due {
             self.dirty |= self.poll_generation();
-            self.dirty |= self.request_visible_generation();
+            self.dirty |= self.refresh_visible_generation();
+            self.dirty |= self.schedule_generation();
         }
-        self.update();
         let snapshot = self.engine.snapshot();
         let now = Instant::now();
-        let needs_redraw = self.dirty || snapshot.tick != previous_tick;
+        if self.smoke_deadline.is_some_and(|deadline| now >= deadline) {
+            panic!("viewer smoke timed out before rendering streamed terrain");
+        }
+        if frame_due {
+            self.render_smoke_frame_if_ready(event_loop);
+        }
+        let sync_due = self
+            .pending_world_changes
+            .is_some_and(|_| now >= self.next_world_sync);
+        let needs_redraw = self.dirty || snapshot.tick != previous_tick || sync_due;
         if needs_redraw
             && now >= self.next_frame
             && let Some(window) = &self.window
@@ -565,7 +823,12 @@ impl ApplicationHandler for ViewerApp {
             self.dirty = false;
             self.next_frame = now + FRAME_TIME;
         }
-        if !snapshot.paused || self.generation_pending || self.dirty {
+        if !snapshot.paused
+            || self.active_generation.is_some()
+            || self.generation_is_pending()
+            || self.pending_world_changes.is_some()
+            || self.dirty
+        {
             if self.next_frame <= now {
                 self.next_frame = now + FRAME_TIME;
             }
@@ -580,6 +843,7 @@ fn inspection_title(
     world: &World,
     position: Option<WorldPosition>,
     automatic_generation_blocked: Option<GenerateAreaError>,
+    generation_worker_unavailable: bool,
 ) -> String {
     let mut title = "Let There Be Life".to_owned();
     if let Some(position) = position {
@@ -587,6 +851,8 @@ fn inspection_title(
             Ok(inspection) => {
                 let presence = match inspection.presence {
                     ChunkPresence::Missing => "missing",
+                    ChunkPresence::InitialUnloaded => "initial-unloaded",
+                    ChunkPresence::PartialInitialUnloaded => "partial-initial-unloaded",
                     ChunkPresence::PartialInitial => "partial-initial",
                     ChunkPresence::Initial => "initial",
                     ChunkPresence::Retained => "retained",
@@ -623,476 +889,277 @@ fn inspection_title(
     if let Some(error) = automatic_generation_blocked {
         title.push_str(&format!(" | automatic generation paused: {error}"));
     }
+    if generation_worker_unavailable {
+        title.push_str(" | generation worker unavailable");
+    }
     title
-}
-
-fn visible_generation_coords(
-    world: &World,
-    bounds: WorldRect,
-) -> Result<Vec<ChunkCoord>, GenerateAreaError> {
-    world.missing_chunk_coords(bounds)
 }
 
 fn selection_is_valid(world: &World, selection: Option<WorldRect>) -> bool {
     selection.is_none_or(|bounds| world.validate_generation_request(bounds).is_ok())
 }
 
-const fn can_request_automatic_generation(
-    generation_needed: bool,
-    generation_pending: bool,
-    generator_available: bool,
-    selection_active: bool,
-    camera_dragging: bool,
-) -> bool {
-    generation_needed
-        && !generation_pending
-        && generator_available
-        && !selection_active
-        && !camera_dragging
-}
-
-const fn can_start_selection(generation_pending: bool, generator_available: bool) -> bool {
-    !generation_pending && generator_available
-}
-
-struct GenerationJob {
-    seed: u64,
-    coords: Vec<ChunkCoord>,
-}
-
 const MAX_CHUNKS_APPLIED_PER_FRAME: usize = 16;
 const FRAME_TIME: Duration = Duration::from_nanos(16_666_667);
+const SMOKE_TIMEOUT: Duration = Duration::from_secs(30);
+const WORLD_SYNC_INTERVAL: Duration = Duration::from_millis(125);
 
-enum WorkerMessage {
-    Chunk(WorldChunk),
-    Done(GenerationOutcome),
+fn union_load_bounds(loads: &[WorldChunkLoad]) -> Option<WorldRect> {
+    loads
+        .iter()
+        .map(WorldChunkLoad::bounds)
+        .reduce(union_bounds)
 }
 
-enum GenerationOutcome {
-    Completed,
-    Cancelled,
-    Failed(GenerateAreaError),
-    WorkerStopped,
-}
-
-const fn automatic_generation_needed_after(
-    current_demand: bool,
-    outcome: &GenerationOutcome,
-) -> bool {
-    current_demand || matches!(outcome, GenerationOutcome::Completed)
-}
-
-struct GenerationPoll {
-    chunks: Vec<WorldChunk>,
-    outcome: Option<GenerationOutcome>,
-    changed: bool,
-}
-
-struct WorldGenerator {
-    jobs: SyncSender<GenerationJob>,
-    completed: Receiver<WorkerMessage>,
-    cancelled: Arc<AtomicBool>,
-    disconnected: Cell<bool>,
-}
-
-impl WorldGenerator {
-    fn new() -> Self {
-        let (jobs_tx, jobs_rx) = mpsc::sync_channel::<GenerationJob>(1);
-        let (completed_tx, completed_rx) = mpsc::sync_channel::<WorkerMessage>(64);
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let worker_cancelled = Arc::clone(&cancelled);
-        thread::Builder::new()
-            .name("world-generator".to_owned())
-            .spawn(move || {
-                while let Ok(job) = jobs_rx.recv() {
-                    let mut outcome = GenerationOutcome::Completed;
-                    for coord in job.coords {
-                        if worker_cancelled.load(Ordering::Relaxed) {
-                            outcome = GenerationOutcome::Cancelled;
-                            break;
-                        }
-                        let chunk = match World::generate_chunk_at(job.seed, coord) {
-                            Ok(chunk) => chunk,
-                            Err(error) => {
-                                outcome = GenerationOutcome::Failed(error);
-                                break;
-                            }
-                        };
-                        if completed_tx.send(WorkerMessage::Chunk(chunk)).is_err() {
-                            return;
-                        }
-                    }
-                    if completed_tx.send(WorkerMessage::Done(outcome)).is_err() {
-                        return;
-                    }
-                }
-            })
-            .expect("spawn world generator");
-        Self {
-            jobs: jobs_tx,
-            completed: completed_rx,
-            cancelled,
-            disconnected: Cell::new(false),
-        }
-    }
-
-    fn request(&self, seed: u64, coords: Vec<ChunkCoord>) -> bool {
-        if self.disconnected.get() || coords.is_empty() {
-            return false;
-        }
-        self.cancelled.store(false, Ordering::Relaxed);
-        self.jobs.try_send(GenerationJob { seed, coords }).is_ok()
-    }
-
-    fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Relaxed);
-    }
-
-    fn is_available(&self) -> bool {
-        !self.disconnected.get()
-    }
-
-    fn drain(&self, limit: usize) -> GenerationPoll {
-        if self.disconnected.get() {
-            return GenerationPoll {
-                chunks: Vec::new(),
-                outcome: None,
-                changed: false,
-            };
-        }
-        let mut chunks = Vec::with_capacity(limit);
-        let mut outcome = None;
-        let mut disconnected = false;
-        for _ in 0..limit {
-            let message = match self.completed.try_recv() {
-                Ok(message) => message,
-                Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    self.disconnected.set(true);
-                    disconnected = true;
-                    break;
-                }
-            };
-            match message {
-                WorkerMessage::Chunk(chunk) => chunks.push(chunk),
-                WorkerMessage::Done(result) => {
-                    outcome = Some(result);
-                    break;
-                }
-            }
-        }
-        if disconnected && outcome.is_none() {
-            outcome = Some(GenerationOutcome::WorkerStopped);
-        }
-        let changed = outcome.is_some();
-        GenerationPoll {
-            chunks,
-            outcome,
-            changed,
-        }
+fn union_bounds(left: WorldRect, right: WorldRect) -> WorldRect {
+    WorldRect {
+        min: WorldPosition {
+            x: left.min.x.min(right.min.x),
+            y: left.min.y.min(right.min.y),
+        },
+        max: WorldPosition {
+            x: left.max.x.max(right.max.x),
+            y: left.max.y.max(right.max.y),
+        },
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sim_core::{CHUNK_SIZE, EngineConfig, MAX_CHUNKS_PER_GENERATION, WorldConfig};
 
-    #[test]
-    fn world_generation_runs_on_worker_thread() {
-        let generator = WorldGenerator::new();
-        assert!(generator.request(7, vec![ChunkCoord { x: -1, y: -1 }]));
-        let mut chunks = Vec::new();
-        while let WorkerMessage::Chunk(chunk) = generator
-            .completed
-            .recv_timeout(Duration::from_secs(2))
-            .expect("worker returns")
-        {
-            chunks.push(chunk);
-        }
-        assert_eq!(chunks.len(), 1);
+    fn engine_with_world(width: u32, height: u32) -> Engine {
+        Engine::new(EngineConfig {
+            seed: 7,
+            ticks_per_second: 60,
+            world: WorldConfig::new(width, height).expect("small test world is valid"),
+        })
     }
 
     #[test]
-    fn generation_drain_honors_per_frame_limit() {
-        let (jobs, _job_receiver) = mpsc::sync_channel(1);
-        let (completed_sender, completed) = mpsc::sync_channel(64);
-        let generator = WorldGenerator {
-            jobs,
-            completed,
-            cancelled: Arc::new(AtomicBool::new(false)),
-            disconnected: Cell::new(false),
-        };
-        let bounds = WorldRect::from_inclusive_points(
-            WorldPosition { x: -128, y: -128 },
-            WorldPosition { x: -1, y: -1 },
-        );
-        for chunk in World::generate_chunks(3, bounds).expect("valid generation") {
-            completed_sender.send(WorkerMessage::Chunk(chunk)).unwrap();
-        }
-        completed_sender
-            .send(WorkerMessage::Done(GenerationOutcome::Completed))
-            .unwrap();
+    fn streamed_changes_coalesce_into_one_dirty_region() {
+        let mut app = ViewerApp::new(engine_with_world(64, 64), None);
+        app.dirty = false;
+        app.mark_world_changed(WorldRect {
+            min: WorldPosition { x: -32, y: 8 },
+            max: WorldPosition { x: 4, y: 72 },
+        });
+        app.mark_world_changed(WorldRect {
+            min: WorldPosition { x: 2, y: -4 },
+            max: WorldPosition { x: 96, y: 12 },
+        });
 
-        let first = generator.drain(2);
-        assert_eq!(first.chunks.len(), 2);
-        assert!(first.outcome.is_none());
-        let second = generator.drain(2);
-        assert_eq!(second.chunks.len(), 2);
-        assert!(second.outcome.is_none());
-        let third = generator.drain(2);
-        assert!(third.chunks.is_empty());
-        assert!(matches!(third.outcome, Some(GenerationOutcome::Completed)));
-    }
-
-    #[test]
-    fn worker_reports_invalid_chunk_coordinate() {
-        let generator = WorldGenerator::new();
-        assert!(generator.request(1, vec![ChunkCoord { x: i64::MAX, y: 0 }],));
-        assert!(matches!(
-            generator
-                .completed
-                .recv_timeout(Duration::from_secs(2))
-                .expect("worker returns"),
-            WorkerMessage::Done(GenerationOutcome::Failed(GenerateAreaError::TooLarge))
-        ));
-    }
-
-    #[test]
-    fn large_generation_can_be_cancelled() {
-        let generator = WorldGenerator::new();
-        let coords = (0..4_096)
-            .map(|index| ChunkCoord {
-                x: index % 64,
-                y: index / 64,
+        assert!(app.dirty);
+        assert_eq!(
+            app.pending_world_changes,
+            Some(WorldRect {
+                min: WorldPosition { x: -32, y: -4 },
+                max: WorldPosition { x: 96, y: 72 },
             })
+        );
+    }
+
+    #[test]
+    fn bootstrap_pager_materializes_once_then_releases_its_queue() {
+        let mut app = ViewerApp::new(engine_with_world(64, 64), None);
+        let requests = app
+            .take_next_paged_requests(GenerationKind::Bootstrap)
+            .expect("bootstrap request is valid")
+            .expect("unloaded bootstrap area has work");
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].bounds(), app.engine.world().initial_bounds());
+
+        let seed = app.engine.config().seed;
+        let loads = requests
+            .into_iter()
+            .map(|request| World::generate_chunk_load(seed, request))
             .collect();
-        assert!(generator.request(1, coords));
-        generator.cancel();
-        loop {
-            match generator
-                .completed
-                .recv_timeout(Duration::from_secs(5))
-                .expect("worker returns")
-            {
-                WorkerMessage::Chunk(_) => {}
-                WorkerMessage::Done(outcome) => {
-                    assert!(matches!(outcome, GenerationOutcome::Cancelled));
-                    break;
-                }
-            }
-        }
+        assert_eq!(app.engine.apply_world_chunk_loads(loads), Ok(1));
+
+        assert_eq!(
+            app.take_next_paged_requests(GenerationKind::Bootstrap)
+                .expect("loaded bootstrap page is valid"),
+            None
+        );
+        assert!(app.bootstrap_pager.is_none());
     }
 
     #[test]
-    fn disconnected_worker_is_reported_once() {
-        let (jobs, _job_receiver) = mpsc::sync_channel(1);
-        let (completed_sender, completed) = mpsc::sync_channel(1);
-        drop(completed_sender);
-        let generator = WorldGenerator {
-            jobs,
-            completed,
-            cancelled: Arc::new(AtomicBool::new(false)),
-            disconnected: Cell::new(false),
+    fn manual_generation_preempts_bootstrap_paging() {
+        let mut app = ViewerApp::new(engine_with_world(64, 64), None);
+        let manual_bounds = WorldRect {
+            min: WorldPosition { x: 64, y: 0 },
+            max: WorldPosition { x: 128, y: 64 },
         };
+        app.pending_manual = Some(
+            app.engine
+                .world()
+                .missing_chunk_load_requests(manual_bounds)
+                .expect("manual selection is valid"),
+        );
 
-        let first = generator.drain(1);
+        assert!(app.schedule_generation());
         assert!(matches!(
-            first.outcome,
-            Some(GenerationOutcome::WorkerStopped)
+            app.active_generation.as_ref().map(|active| active.kind),
+            Some(GenerationKind::Manual)
         ));
-        assert!(first.changed);
-        assert!(!generator.is_available());
+        assert!(app.pending_manual.is_none());
 
-        let second = generator.drain(1);
-        assert!(second.outcome.is_none());
-        assert!(!second.changed);
-        assert!(!generator.request(1, vec![ChunkCoord { x: 0, y: 0 }]));
+        app.cancel_active_generation();
+        assert!(
+            app.active_generation
+                .as_ref()
+                .is_some_and(|active| active.discard_loads)
+        );
     }
 
     #[test]
-    fn selection_preview_uses_missing_chunk_budget() {
-        let engine = Engine::default();
-        let valid = WorldRect {
-            min: WorldPosition { x: 0, y: 0 },
-            max: WorldPosition {
-                x: 17 * sim_core::CHUNK_SIZE,
-                y: 241 * sim_core::CHUNK_SIZE,
-            },
+    fn requeued_background_page_is_preserved_until_higher_priority_manual_work_runs() {
+        let mut app = ViewerApp::new(engine_with_world(64, 64), None);
+        let automatic = app
+            .engine
+            .world()
+            .missing_chunk_load_requests(app.engine.world().initial_bounds())
+            .expect("automatic page is valid");
+        let manual_bounds = WorldRect {
+            min: WorldPosition { x: 64, y: 0 },
+            max: WorldPosition { x: 128, y: 64 },
         };
-        let outside_origin = WorldPosition {
-            x: 100 * sim_core::CHUNK_SIZE,
-            y: 100 * sim_core::CHUNK_SIZE,
-        };
-        let oversized = WorldRect {
-            min: outside_origin,
-            max: WorldPosition {
-                x: outside_origin.x + 17 * sim_core::CHUNK_SIZE,
-                y: outside_origin.y + 241 * sim_core::CHUNK_SIZE,
-            },
-        };
+        let manual = app
+            .engine
+            .world()
+            .missing_chunk_load_requests(manual_bounds)
+            .expect("manual selection is valid");
 
-        assert!(selection_is_valid(engine.world(), None));
-        assert_eq!(engine.world().validate_generation_request(valid), Ok(3_841));
-        assert!(selection_is_valid(engine.world(), Some(valid)));
-        assert!(!selection_is_valid(engine.world(), Some(oversized)));
-        assert!(can_start_selection(false, true));
-        assert!(!can_start_selection(true, true));
-        assert!(!can_start_selection(false, false));
+        app.requeue_generation(GenerationKind::Automatic, automatic);
+        app.pending_manual = Some(manual);
+
+        assert!(app.schedule_generation());
+        assert!(matches!(
+            app.active_generation.as_ref().map(|active| active.kind),
+            Some(GenerationKind::Manual)
+        ));
+        assert!(app.pending_automatic.is_some());
     }
 
     #[test]
-    fn automatic_generation_queues_only_visible_missing_chunks() {
-        let world = World::generate(1, sim_core::WorldConfig::new(64, 64).unwrap());
-        let initial = WorldRect {
+    fn background_cancellation_never_discards_manual_generation() {
+        let mut app = ViewerApp::new(engine_with_world(64, 64), None);
+        app.active_generation = Some(ActiveGeneration {
+            id: 10,
+            kind: GenerationKind::Manual,
+            discard_loads: false,
+        });
+        app.cancel_background_generation();
+        assert!(
+            app.active_generation
+                .as_ref()
+                .is_some_and(|active| !active.discard_loads)
+        );
+
+        app.active_generation = Some(ActiveGeneration {
+            id: 11,
+            kind: GenerationKind::Automatic,
+            discard_loads: false,
+        });
+        app.cancel_background_generation();
+        assert!(
+            app.active_generation
+                .as_ref()
+                .is_some_and(|active| active.discard_loads)
+        );
+    }
+
+    #[test]
+    fn cancellation_clears_an_active_right_drag_before_it_can_queue_manual_work() {
+        let mut app = ViewerApp::new(engine_with_world(64, 64), None);
+        let selection = WorldRect {
             min: WorldPosition { x: 0, y: 0 },
             max: WorldPosition { x: 64, y: 64 },
         };
-        assert!(
-            visible_generation_coords(&world, initial)
-                .unwrap()
-                .is_empty()
-        );
+        app.active_generation = Some(ActiveGeneration {
+            id: 12,
+            kind: GenerationKind::Automatic,
+            discard_loads: false,
+        });
+        app.pending_manual = Some(Vec::new());
+        app.pending_automatic = Some(Vec::new());
+        app.pending_bootstrap = Some(Vec::new());
+        app.selection_start = Some(selection.min);
+        app.selection = Some(selection);
+        app.selection_validation = Some(SelectionValidation {
+            bounds: selection,
+            world_revision: 0,
+            valid: true,
+        });
 
-        let cases = [
-            (
-                WorldRect {
-                    min: WorldPosition { x: -1, y: 0 },
-                    max: WorldPosition { x: 64, y: 64 },
-                },
-                ChunkCoord { x: -1, y: 0 },
-            ),
-            (
-                WorldRect {
-                    min: WorldPosition { x: 0, y: 0 },
-                    max: WorldPosition { x: 65, y: 64 },
-                },
-                ChunkCoord { x: 1, y: 0 },
-            ),
-            (
-                WorldRect {
-                    min: WorldPosition { x: 0, y: -1 },
-                    max: WorldPosition { x: 64, y: 64 },
-                },
-                ChunkCoord { x: 0, y: -1 },
-            ),
-            (
-                WorldRect {
-                    min: WorldPosition { x: 0, y: 0 },
-                    max: WorldPosition { x: 64, y: 65 },
-                },
-                ChunkCoord { x: 0, y: 1 },
-            ),
-        ];
-        for (bounds, expected) in cases {
-            assert_eq!(
-                visible_generation_coords(&world, bounds).unwrap(),
-                [expected]
-            );
-        }
+        app.cancel_pending_generation();
+
+        assert!(
+            app.active_generation
+                .as_ref()
+                .is_some_and(|active| active.discard_loads)
+        );
+        assert!(app.pending_manual.is_none());
+        assert!(app.pending_automatic.is_none());
+        assert!(app.pending_bootstrap.is_none());
+        assert!(app.selection_start.is_none());
+        assert!(app.selection.is_none());
+        assert!(app.selection_validation.is_none());
+        assert!(app.automatic_pager.is_none());
+        assert!(app.bootstrap_pager.is_none());
     }
 
     #[test]
-    fn automatic_generation_preserves_request_budget() {
-        let world = World::generate(1, sim_core::WorldConfig::new(64, 64).unwrap());
-        let maximum = WorldRect {
-            min: WorldPosition { x: 64, y: 0 },
-            max: WorldPosition {
-                x: 64 + 64 * sim_core::CHUNK_SIZE,
-                y: 64 * sim_core::CHUNK_SIZE,
-            },
-        };
-        assert_eq!(
-            visible_generation_coords(&world, maximum).unwrap().len(),
-            sim_core::MAX_CHUNKS_PER_GENERATION as usize
-        );
+    fn streamed_load_bounds_accumulate_exact_clipped_bootstrap_coverage() {
+        let world = World::new(7, WorldConfig::new(96, 64).expect("test world is valid"));
+        let expected = world.initial_bounds();
+        let loads = world
+            .missing_chunk_load_requests(expected)
+            .expect("bootstrap request is valid")
+            .into_iter()
+            .map(|request| World::generate_chunk_load(7, request))
+            .collect::<Vec<_>>();
 
+        assert_eq!(union_load_bounds(&loads), Some(expected));
+        assert_eq!(
+            union_bounds(
+                WorldRect {
+                    min: WorldPosition { x: -32, y: 8 },
+                    max: WorldPosition { x: 4, y: 72 },
+                },
+                WorldRect {
+                    min: WorldPosition { x: 2, y: -4 },
+                    max: WorldPosition { x: 96, y: 12 },
+                },
+            ),
+            WorldRect {
+                min: WorldPosition { x: -32, y: -4 },
+                max: WorldPosition { x: 96, y: 72 },
+            }
+        );
+    }
+
+    #[test]
+    fn selection_validation_and_inspection_distinguish_unloaded_bootstrap_tiles() {
+        let world = World::new(7, WorldConfig::new(96, 64).expect("test world is valid"));
         let oversized = WorldRect {
+            min: WorldPosition { x: 128, y: 0 },
             max: WorldPosition {
-                x: 64 + 65 * sim_core::CHUNK_SIZE,
-                ..maximum.max
+                x: 192,
+                y: (MAX_CHUNKS_PER_GENERATION as i64 + 1) * CHUNK_SIZE,
             },
-            ..maximum
         };
-        assert!(matches!(
-            visible_generation_coords(&world, oversized),
-            Err(GenerateAreaError::TooManyChunks {
-                requested: 4_097,
-                maximum: sim_core::MAX_CHUNKS_PER_GENERATION,
-            })
-        ));
-    }
 
-    #[test]
-    fn automatic_generation_does_not_repeat_retained_work() {
-        let mut world = World::generate(1, sim_core::WorldConfig::new(64, 64).unwrap());
-        let bounds = WorldRect {
-            min: WorldPosition { x: -64, y: 0 },
-            max: WorldPosition { x: 0, y: 64 },
-        };
-        assert_eq!(
-            visible_generation_coords(&world, bounds).unwrap(),
-            [ChunkCoord { x: -1, y: 0 }]
-        );
-        world.generate_area(bounds).unwrap();
-        let revision = world.revision();
+        assert!(selection_is_valid(&world, Some(world.initial_bounds())));
+        assert!(!selection_is_valid(&world, Some(oversized)));
 
-        assert!(
-            visible_generation_coords(&world, bounds)
-                .unwrap()
-                .is_empty()
-        );
-        assert_eq!(world.revision(), revision);
-    }
-
-    #[test]
-    fn automatic_generation_arbitration_and_retry_are_explicit() {
-        assert!(can_request_automatic_generation(
-            true, false, true, false, false
-        ));
-        assert!(!can_request_automatic_generation(
-            false, false, true, false, false
-        ));
-        assert!(!can_request_automatic_generation(
-            true, true, true, false, false
-        ));
-        assert!(!can_request_automatic_generation(
-            true, false, false, false, false
-        ));
-        assert!(!can_request_automatic_generation(
-            true, false, true, true, false
-        ));
-        assert!(!can_request_automatic_generation(
-            true, false, true, false, true
-        ));
-
-        assert!(automatic_generation_needed_after(
-            false,
-            &GenerationOutcome::Completed
-        ));
-        assert!(!automatic_generation_needed_after(
-            false,
-            &GenerationOutcome::Cancelled
-        ));
-        assert!(!automatic_generation_needed_after(
-            false,
-            &GenerationOutcome::Failed(GenerateAreaError::TooLarge)
-        ));
-        assert!(!automatic_generation_needed_after(
-            false,
-            &GenerationOutcome::WorkerStopped
-        ));
-        assert!(automatic_generation_needed_after(
-            true,
-            &GenerationOutcome::Cancelled
-        ));
-    }
-
-    #[test]
-    fn inspection_title_reports_unloaded_negative_chunk_coordinates() {
-        let world = World::generate(1, sim_core::WorldConfig::new(64, 64).unwrap());
-        let title = inspection_title(&world, Some(WorldPosition { x: -1, y: -65 }), None);
-
-        assert!(title.contains("chunk=(-1, -2) local=(63, 63) coverage=missing"));
+        let title = inspection_title(&world, Some(WorldPosition { x: 64, y: 0 }), None, false);
+        assert!(title.contains("coverage=partial-initial-unloaded"));
         assert!(title.contains("cell=unloaded"));
+        assert!(
+            inspection_title(&world, None, None, true).contains("generation worker unavailable")
+        );
     }
 }

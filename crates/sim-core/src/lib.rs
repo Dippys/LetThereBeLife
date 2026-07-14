@@ -1,12 +1,14 @@
 //! Engine-independent deterministic simulation foundation.
 
 mod world;
+mod worldgen;
 
 pub use world::{
-    CHUNK_SIZE, ChunkCoord, ChunkInspection, ChunkLocalPosition, ChunkPresence,
-    DEFAULT_INITIAL_WORLD_SIZE, Feature, FeatureKind, GenerateAreaError, GroundType,
-    MAX_CHUNKS_PER_GENERATION, MAX_GENERATED_CHUNKS, TerrainCell, World, WorldChunk, WorldConfig,
-    WorldConfigError, WorldPosition, WorldRect,
+    CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkInspection, ChunkLoadRequest, ChunkLocalPosition,
+    ChunkPresence, DEFAULT_INITIAL_WORLD_SIZE, Feature, FeatureKind, GenerateAreaError,
+    GeneratedCell, GroundType, MAX_CHUNKS_PER_GENERATION, MAX_GENERATED_CHUNKS, MAX_INITIAL_CHUNKS,
+    TerrainCell, World, WorldChunk, WorldChunkLoad, WorldConfig, WorldConfigError, WorldPosition,
+    WorldRect,
 };
 
 use std::time::Duration;
@@ -66,9 +68,14 @@ pub struct Engine {
 }
 
 impl Engine {
+    /// Creates deterministic simulation state without synchronously materializing terrain.
+    ///
+    /// Call [`Self::materialize_initial_area`] for eager headless workflows. The
+    /// viewer instead streams explicit [`WorldChunkLoad`] payloads through the
+    /// main-thread insertion boundary.
     pub fn new(config: EngineConfig) -> Self {
         Self {
-            world: World::generate(config.seed, config.world),
+            world: World::new(config.seed, config.world),
             config,
             tick: 0,
             paused: false,
@@ -116,6 +123,24 @@ impl Engine {
         chunks: Vec<WorldChunk>,
     ) -> Result<usize, GenerateAreaError> {
         self.world.insert_chunks(chunks)
+    }
+
+    /// Applies bootstrap-aware worker payloads while retaining authoritative
+    /// world ownership in `sim-core`.
+    ///
+    /// This changes only the deterministic terrain materialization cache. It
+    /// does not advance, rewind, or otherwise alter fixed simulation time.
+    pub fn apply_world_chunk_loads(
+        &mut self,
+        loads: Vec<WorldChunkLoad>,
+    ) -> Result<usize, GenerateAreaError> {
+        self.world.insert_chunk_loads(loads)
+    }
+
+    /// Eagerly materializes the configured bootstrap rectangle for headless
+    /// callers that need complete startup coverage before advancing.
+    pub fn materialize_initial_area(&mut self) -> Result<(), GenerateAreaError> {
+        self.world.materialize_initial_area()
     }
 
     pub fn snapshot(&self) -> SimulationSnapshot {
@@ -186,6 +211,76 @@ mod tests {
         });
 
         assert_eq!(left.world(), right.world());
+    }
+
+    #[test]
+    fn engine_construction_is_deferred_and_headless_materialization_is_explicit() {
+        let config = EngineConfig {
+            seed: 99,
+            world: WorldConfig::new(96, 64).unwrap(),
+            ..EngineConfig::default()
+        };
+        let mut engine = Engine::new(config);
+
+        assert_eq!(engine.world().loaded_chunk_count(), 0);
+        assert!(
+            !engine
+                .world()
+                .area_is_generated(engine.world().initial_bounds())
+        );
+        engine.materialize_initial_area().unwrap();
+        let eager = World::generate(config.seed, config.world);
+        assert_eq!(
+            engine.world().cells().collect::<Vec<_>>(),
+            eager.cells().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            engine.world().all_features().copied().collect::<Vec<_>>(),
+            eager.all_features().copied().collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn terrain_materialization_does_not_change_fixed_tick_progression() {
+        let config = EngineConfig {
+            seed: 99,
+            world: WorldConfig::new(96, 64).unwrap(),
+            ..EngineConfig::default()
+        };
+        let mut unloaded = Engine::new(config);
+        let mut resident = Engine::new(config);
+        let loads = resident
+            .world()
+            .missing_chunk_load_requests(resident.world().initial_bounds())
+            .unwrap()
+            .into_iter()
+            .map(|request| World::generate_chunk_load(config.seed, request))
+            .collect();
+
+        assert_eq!(resident.apply_world_chunk_loads(loads), Ok(2));
+        for _ in 0..600 {
+            unloaded.tick();
+            resident.tick();
+        }
+
+        assert_eq!(unloaded.snapshot(), resident.snapshot());
+        assert_eq!(unloaded.snapshot().tick, 600);
+    }
+
+    #[test]
+    fn generate_initial_area_command_uses_bootstrap_batching() {
+        let config = EngineConfig {
+            seed: 99,
+            world: WorldConfig::new(128, 64).unwrap(),
+            ..EngineConfig::default()
+        };
+        let mut engine = Engine::new(config);
+        let initial = engine.world().initial_bounds();
+
+        engine.command(EngineCommand::GenerateWorldArea(initial));
+
+        assert!(engine.world().area_is_generated(initial));
+        assert_eq!(engine.world().loaded_chunk_count(), 2);
     }
 
     #[test]

@@ -201,3 +201,29 @@ Date: 2026-07-13
 **Reason:** Camera exploration should materialize nearby visible terrain without requiring repetitive selection, while chunk seams and partial initial boundaries must remain inspectable in signed coordinate space. Reusing `World::missing_chunk_coords` keeps loaded-state truth, deduplication, capacity, and ordering in `sim-core`; event-driven requests avoid a per-frame global scan, and all-or-nothing rejection avoids silently favoring row-major chunks in enormous zoomed-out views.
 
 **Consequences:** The viewer still owns only camera, input, worker lifecycle, and temporary presentation data; `Engine` retains authoritative world ownership. A normal visible request can create at most 4,096 chunks, applies at most 16 per frame, and retains at most 16,384 total generated chunks. Views beyond those limits remain navigable but display an automatic-generation pause reason in the title, and right-drag can request a smaller valid area. Chunk outlines use at most four extra rectangle instances and disappear below four projected pixels. No dependency or persistent terrain representation changes.
+
+## D-020: Layered regional generation within existing memory guardrails
+
+Date: 2026-07-14
+
+**Supersedes:** D-016, D-017, and D-018's continental-field, lake-descriptor, and coast-anchored river algorithms.
+
+**Decision:** Generate terrain through three deterministic integer-only tiers: analytic plate/climate fields, cached 4,096-cell regional drainage lattices, and 64 x 64 chunk synthesis. Keep the existing 16,777,216-cell initial-area limit, 4,096-chunk request limit, and 16,384 retained-chunk limit. Traverse chunks by complete drainage region so the bounded 40-entry cache remains effective; keep sparse features row-major within each generated tile. Keep regional lake water two lattice nodes away from borders and stop region-local rivers before the four-node border margin until cross-region drainage has an owned design.
+
+**Reason:** The prior descriptor-based lakes and rivers were replaced by a more coherent regional drainage model, but temporarily raising allocation limits to render a much larger default world would have violated the engine's bounded-footprint rules. Regional caches must not become hidden simulation truth or create cache-order-dependent output.
+
+**Consequences:** Existing seed output changes again and remains ineligible for persistence until generator versioning exists. `TerrainCell` remains four bytes; regional cache data and per-chunk river indexes are transient derivation state. Lakes and river channels are static terrain, not a complete watershed, erosion, or dynamic-flow implementation. Regression coverage now includes drainage descent across signed regions, dry regional lake margins, rasterized water/feature exclusion, and complete river indexing; cross-region drainage and canonical performance measurement remain planned.
+
+## D-021: Deferred bootstrap coverage and progressive viewport streaming
+
+Date: 2026-07-14
+
+**Supersedes:** The eager-start portions of D-005 and D-007, D-013's terminal-only GPU synchronization, and D-019's all-or-nothing automatic visible-demand submission.
+
+**Decision:** Construct `Engine` and `World` with only a deterministic declared bootstrap rectangle; do not allocate or generate its terrain synchronously. Store actual coverage as private chunk-backed tiles: exact clipped bootstrap tiles inside the configured rectangle and complete expansion tiles elsewhere. Keep eager materialization as an explicit headless/tooling operation. Carry opaque core-owned load requests and loads across the viewer worker boundary, and reject loads whose seed or bootstrap coverage does not match the receiving world.
+
+Use one persistent viewer worker with monotonically increasing job IDs. Manual selection preempts automatic demand, automatic current-viewport pages preempt bootstrap pages, and stale automatic/bootstrap results are discarded after cancellation while already applied chunks remain. Enumerate viewport pages deterministically from the camera center in 8 x 8 chunk pages without preallocating the complete zoomed-out request. Merge no more than 16 loads per frame on the event-loop thread. Coalesce visible affected GPU cache rebuilds to a 125 ms streaming cadence, skip uploads for off-cache changes, and force a final sync when a page ends.
+
+**Reason:** The prior dense initial allocation delayed first window creation, while the prior worker could generate individual chunks but held all terrain invisible until a job completed. A zoomed-out viewport also turned into one oversized request or stale distant work. Treating configured bootstrap bounds as loaded data would make a lazy path unsafe at non-aligned edges.
+
+**Consequences:** `World::cell`, feature queries, visitors, area checks, and inspection now distinguish declared coverage from resident coverage; an unloaded initial tile is not simulation truth. Initial clipped tiles do not consume the 16,384 expansion-tile capacity, but a partial tile promoted to a full expansion tile does. The headless runner preserves its complete-bootstrap startup contract by explicitly materializing before ticks. The viewer applies worker loads only after each event-loop turn's fixed simulation phase, so no tick observes an arrival mid-step; current simulation state does not branch on materialization residency. Any future terrain-dependent simulation must use a residency-independent deterministic query or an explicit deterministic loading phase. Extreme zoom can progressively stream nearest full-detail tiles but cannot permanently retain an unbounded high-detail world; overview LOD, unloading, and persistence remain separate future work.

@@ -1,0 +1,697 @@
+//! Layered deterministic world generation.
+//!
+//! Structure comes from three tiers, largest first:
+//! 1. Global analytic fields (`plates`, `climate`): continents, oceans,
+//!    mountain arcs, plateaus, temperature, and moisture as pure functions of
+//!    the seed and world coordinates.
+//! 2. Regional drainage (`hydrology`): cached per-region lattices that fill
+//!    depressions into lakes and route runoff into rivers.
+//! 3. Local detail: small roughness-budgeted noise applied per cell, which may
+//!    erode coastlines and vary forests but never decides where geography is.
+
+mod climate;
+mod hydrology;
+mod noise;
+mod plates;
+
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use crate::world::{CHUNK_SIZE, FeatureKind, GroundType, TerrainCell};
+use hydrology::{
+    GRID, LAKE_MIN_DEPTH, NODE_STEP, RegionMap, RiverSegment, point_segment_distance_ratio,
+};
+use noise::{NOISE_HALF, centered_noise, hash, value_noise};
+use plates::SEA_LEVEL;
+
+pub(crate) use hydrology::REGION_SIZE;
+
+const DEEP_WATER_MAX: i32 = 25_000;
+const BEACH_MAX: i32 = 33_000;
+const HILL_MIN: i32 = 50_000;
+const ROCK_MIN: i32 = 56_000;
+const LAKE_DEEP_DEPTH: i32 = 1_600;
+const DEEP_WATER_FILL: i32 = 24_500;
+const SHALLOW_WATER_FILL: i32 = 27_800;
+const DESERT_MOISTURE_MAX: i32 = 12_000;
+const DESERT_TEMPERATURE_MIN: i32 = 30_000;
+const FOREST_MOISTURE_MIN: i32 = 31_000;
+const FOREST_TEMPERATURE_MIN: i32 = 13_000;
+const FROZEN_TEMPERATURE_MAX: i32 = 9_000;
+
+const DETAIL_SEED_A: u64 = 0x4445_5441_494c_4131;
+const DETAIL_SEED_B: u64 = 0x4445_5441_494c_4232;
+const FEATURE_SEED: u64 = 0x4654_5253;
+const CANOPY_SEED: u64 = 0x4341_4e4f_5059_4e4f;
+const BUSH_SEED: u64 = 0x4255_5348_434c_5553;
+
+const REGION_CACHE_CAPACITY: usize = 40;
+
+type RegionKey = (u64, i64, i64);
+
+thread_local! {
+    static REGION_CACHE: RefCell<Vec<(RegionKey, Rc<RegionMap>)>> =
+        const { RefCell::new(Vec::new()) };
+}
+
+fn region(seed: u64, region_x: i64, region_y: i64) -> Rc<RegionMap> {
+    let key = (seed, region_x, region_y);
+    if let Some(map) = REGION_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        cache
+            .iter()
+            .position(|(entry, _)| *entry == key)
+            .map(|position| {
+                let entry = cache.remove(position);
+                let map = entry.1.clone();
+                cache.insert(0, entry);
+                map
+            })
+    }) {
+        return map;
+    }
+    let map = Rc::new(RegionMap::build(seed, region_x, region_y));
+    REGION_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        cache.insert(0, (key, map.clone()));
+        cache.truncate(REGION_CACHE_CAPACITY);
+    });
+    map
+}
+
+// A 64-cell chunk can overlap at most five 32-cell hydrology nodes on each
+// axis. Each node emits at most one outgoing segment, so 25 slots retain every
+// width-expanded segment that can affect a chunk.
+const MAX_CHUNK_RIVERS: usize = 25;
+const EMPTY_SEGMENT: RiverSegment = RiverSegment {
+    ax: 0,
+    ay: 0,
+    bx: 0,
+    by: 0,
+    half_width: 0,
+};
+
+/// Everything one chunk needs from the global and regional tiers: a 3x3 node
+/// lattice to interpolate plus the river segments that touch the chunk.
+pub(crate) struct ChunkContext {
+    seed: u64,
+    origin_x: i64,
+    origin_y: i64,
+    elevation: [i32; 9],
+    water_depth: [i32; 9],
+    temperature: [i32; 9],
+    moisture: [i32; 9],
+    roughness: [i32; 9],
+    rivers: [RiverSegment; MAX_CHUNK_RIVERS],
+    river_len: usize,
+}
+
+impl ChunkContext {
+    pub(crate) fn new(seed: u64, origin_x: i64, origin_y: i64) -> Self {
+        let region_x = origin_x.div_euclid(REGION_SIZE);
+        let region_y = origin_y.div_euclid(REGION_SIZE);
+        let map = region(seed, region_x, region_y);
+        let node_x = ((origin_x - region_x * REGION_SIZE) / NODE_STEP) as usize;
+        let node_y = ((origin_y - region_y * REGION_SIZE) / NODE_STEP) as usize;
+
+        let mut context = Self {
+            seed,
+            origin_x,
+            origin_y,
+            elevation: [0; 9],
+            water_depth: [0; 9],
+            temperature: [0; 9],
+            moisture: [0; 9],
+            roughness: [0; 9],
+            rivers: [EMPTY_SEGMENT; MAX_CHUNK_RIVERS],
+            river_len: 0,
+        };
+        for offset_y in 0..3 {
+            for offset_x in 0..3 {
+                let node = (node_y + offset_y) * GRID + node_x + offset_x;
+                let local = offset_y * 3 + offset_x;
+                context.elevation[local] = map.elevation[node];
+                context.water_depth[local] = map.water_depth[node];
+                context.temperature[local] = map.temperature[node];
+                context.moisture[local] = map.moisture[node];
+                context.roughness[local] = map.roughness[node];
+            }
+        }
+
+        for segment in &map.rivers {
+            if river_intersects_chunk(*segment, origin_x, origin_y) {
+                assert!(
+                    context.river_len < MAX_CHUNK_RIVERS,
+                    "a chunk exceeded the proved regional river-segment bound"
+                );
+                context.rivers[context.river_len] = *segment;
+                context.river_len += 1;
+            }
+        }
+        context
+    }
+
+    fn interpolate(&self, values: &[i32; 9], local_x: i64, local_y: i64) -> i64 {
+        let cell_x = (local_x / NODE_STEP) as usize;
+        let cell_y = (local_y / NODE_STEP) as usize;
+        let fx = local_x % NODE_STEP;
+        let fy = local_y % NODE_STEP;
+        let base = cell_y * 3 + cell_x;
+        let top = i64::from(values[base]) * (NODE_STEP - fx) + i64::from(values[base + 1]) * fx;
+        let bottom =
+            i64::from(values[base + 3]) * (NODE_STEP - fx) + i64::from(values[base + 4]) * fx;
+        (top * (NODE_STEP - fy) + bottom * fy) / (NODE_STEP * NODE_STEP)
+    }
+
+    pub(crate) fn generate(&self, x: i64, y: i64) -> (TerrainCell, Option<FeatureKind>) {
+        let local_x = x - self.origin_x;
+        let local_y = y - self.origin_y;
+        let macro_elevation = self.interpolate(&self.elevation, local_x, local_y);
+        let roughness = self.interpolate(&self.roughness, local_x, local_y);
+        let temperature = self.interpolate(&self.temperature, local_x, local_y) as i32;
+        let moisture = self.interpolate(&self.moisture, local_x, local_y) as i32;
+        let water_depth = self.interpolate(&self.water_depth, local_x, local_y) as i32;
+
+        // Local detail is the last tier: its amplitude comes from the regional
+        // roughness budget and is damped near sea level so coasts stay ragged
+        // without dissolving into speckle.
+        let detail = (centered_noise(self.seed ^ DETAIL_SEED_A, x, y, 160) * 5
+            + centered_noise(self.seed ^ DETAIL_SEED_B, x, y, 40) * 2)
+            / 7;
+        let coast_damp = 300 + (macro_elevation - i64::from(SEA_LEVEL)).abs().min(2_300);
+        let amplitude = roughness * coast_damp / 2_600;
+        let mut elevation = (macro_elevation + detail * amplitude / NOISE_HALF) as i32;
+
+        let mut water_ground = None;
+        if water_depth >= LAKE_MIN_DEPTH {
+            let surface = macro_elevation + i64::from(water_depth - LAKE_MIN_DEPTH);
+            elevation = surface.clamp(0, 65_535) as i32;
+            water_ground = Some(if water_depth >= LAKE_MIN_DEPTH + LAKE_DEEP_DEPTH {
+                GroundType::DeepWater
+            } else {
+                GroundType::ShallowWater
+            });
+        }
+        for segment in &self.rivers[..self.river_len] {
+            let (distance_sq, denominator) =
+                point_segment_distance_ratio(x, y, segment.ax, segment.ay, segment.bx, segment.by);
+            let core = segment.half_width * 5 / 8;
+            if segment.half_width >= 8 && distance_sq <= i128::from(core * core) * denominator {
+                elevation = elevation.min(DEEP_WATER_FILL);
+                water_ground = Some(GroundType::DeepWater);
+            } else if distance_sq
+                <= i128::from(segment.half_width * segment.half_width) * denominator
+            {
+                elevation = elevation.min(SHALLOW_WATER_FILL);
+                water_ground = Some(GroundType::ShallowWater);
+            }
+        }
+
+        let ground = water_ground.unwrap_or_else(|| classify(elevation, moisture, temperature));
+        let cell = TerrainCell {
+            elevation: elevation.clamp(0, 65_535) as u16,
+            moisture: (moisture.clamp(0, 65_535) >> 8) as u8,
+            ground,
+        };
+        (
+            cell,
+            feature(self.seed, x, y, ground, moisture, temperature),
+        )
+    }
+}
+
+fn river_intersects_chunk(segment: RiverSegment, origin_x: i64, origin_y: i64) -> bool {
+    let max_x = origin_x + CHUNK_SIZE;
+    let max_y = origin_y + CHUNK_SIZE;
+    segment
+        .ax
+        .max(segment.bx)
+        .saturating_add(segment.half_width)
+        >= origin_x
+        && segment
+            .ax
+            .min(segment.bx)
+            .saturating_sub(segment.half_width)
+            < max_x
+        && segment
+            .ay
+            .max(segment.by)
+            .saturating_add(segment.half_width)
+            >= origin_y
+        && segment
+            .ay
+            .min(segment.by)
+            .saturating_sub(segment.half_width)
+            < max_y
+}
+
+fn classify(elevation: i32, moisture: i32, temperature: i32) -> GroundType {
+    if elevation <= DEEP_WATER_MAX {
+        GroundType::DeepWater
+    } else if elevation <= SEA_LEVEL {
+        GroundType::ShallowWater
+    } else if elevation <= BEACH_MAX {
+        GroundType::Sand
+    } else if elevation > ROCK_MIN {
+        GroundType::BareRock
+    } else if elevation > HILL_MIN {
+        if temperature < FROZEN_TEMPERATURE_MAX {
+            GroundType::BareRock
+        } else {
+            GroundType::Hill
+        }
+    } else if moisture < DESERT_MOISTURE_MAX && temperature > DESERT_TEMPERATURE_MIN {
+        GroundType::Sand
+    } else if moisture > FOREST_MOISTURE_MIN && temperature > FOREST_TEMPERATURE_MIN {
+        GroundType::ForestFloor
+    } else {
+        GroundType::Grass
+    }
+}
+
+fn feature(
+    seed: u64,
+    x: i64,
+    y: i64,
+    ground: GroundType,
+    moisture: i32,
+    temperature: i32,
+) -> Option<FeatureKind> {
+    if !matches!(
+        ground,
+        GroundType::Grass | GroundType::ForestFloor | GroundType::Hill | GroundType::BareRock
+    ) {
+        return None;
+    }
+    let roll = (hash(seed ^ FEATURE_SEED, x, y) % 10_000) as i64;
+    match ground {
+        GroundType::ForestFloor => {
+            // Canopy noise opens clearings instead of uniform tree spam.
+            let canopy = value_noise(seed ^ CANOPY_SEED, x, y, 176);
+            (canopy > 16_000 && roll < 640).then_some(FeatureKind::Tree)
+        }
+        GroundType::Grass if moisture > 30_000 && temperature > FOREST_TEMPERATURE_MIN => {
+            (roll < 55).then_some(FeatureKind::Tree)
+        }
+        GroundType::Grass if moisture > 18_000 => (roll < 70
+            && value_noise(seed ^ BUSH_SEED, x, y, 96) > 39_000)
+            .then_some(FeatureKind::BerryBush),
+        GroundType::Hill | GroundType::BareRock => (roll < 170).then_some(FeatureKind::Rock),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::climate::{moisture as moisture_field, temperature as temperature_field};
+    use super::plates::macro_sample;
+    use super::*;
+    use std::cmp::Reverse;
+    use std::collections::BTreeSet;
+
+    /// Overview lattice used by the structural checks: `SIDE` x `SIDE` samples
+    /// spaced `STEP` cells apart (a 65,536-cell-wide window).
+    const STEP: i64 = 256;
+    const SIDE: usize = 256;
+    const PROBE_SEED: u64 = 1;
+
+    fn sample_grid(predicate: impl Fn(i64, i64) -> bool) -> Vec<bool> {
+        let mut cells = vec![false; SIDE * SIDE];
+        for j in 0..SIDE {
+            for i in 0..SIDE {
+                cells[j * SIDE + i] = predicate(i as i64 * STEP, j as i64 * STEP);
+            }
+        }
+        cells
+    }
+
+    /// Sizes of 4-connected true components, largest first.
+    fn component_sizes(cells: &[bool], side: usize) -> Vec<usize> {
+        component_bounds(cells, side)
+            .into_iter()
+            .map(|(size, _, _)| size)
+            .collect()
+    }
+
+    /// (size, bbox width, bbox height) of 4-connected components, largest first.
+    fn component_bounds(cells: &[bool], side: usize) -> Vec<(usize, usize, usize)> {
+        let mut visited = vec![false; cells.len()];
+        let mut results = Vec::new();
+        for start in 0..cells.len() {
+            if !cells[start] || visited[start] {
+                continue;
+            }
+            visited[start] = true;
+            let mut stack = vec![start];
+            let (mut min_x, mut max_x) = (start % side, start % side);
+            let (mut min_y, mut max_y) = (start / side, start / side);
+            let mut size = 0;
+            while let Some(index) = stack.pop() {
+                size += 1;
+                let x = index % side;
+                let y = index / side;
+                min_x = min_x.min(x);
+                max_x = max_x.max(x);
+                min_y = min_y.min(y);
+                max_y = max_y.max(y);
+                let neighbors = [
+                    x.checked_sub(1).map(|next| y * side + next),
+                    (x + 1 < side).then_some(y * side + x + 1),
+                    y.checked_sub(1).map(|next| next * side + x),
+                    (y + 1 < side).then_some((y + 1) * side + x),
+                ];
+                for neighbor in neighbors.into_iter().flatten() {
+                    if cells[neighbor] && !visited[neighbor] {
+                        visited[neighbor] = true;
+                        stack.push(neighbor);
+                    }
+                }
+            }
+            results.push((size, max_x - min_x + 1, max_y - min_y + 1));
+        }
+        results.sort_unstable_by_key(|entry| Reverse(entry.0));
+        results
+    }
+
+    #[test]
+    fn continents_have_multiscale_size_distribution() {
+        let land = sample_grid(|x, y| macro_sample(PROBE_SEED, x, y).elevation > SEA_LEVEL);
+        let total = land.len();
+        let land_count = land.iter().filter(|&&cell| cell).count();
+        let land_fraction = land_count as f64 / total as f64;
+        assert!(
+            (0.2..=0.65).contains(&land_fraction),
+            "land fraction {land_fraction} out of range"
+        );
+
+        let water: Vec<bool> = land.iter().map(|&cell| !cell).collect();
+        let ocean_components = component_sizes(&water, SIDE);
+        assert!(
+            ocean_components[0] * 2 >= total - land_count,
+            "no dominant open ocean: largest {} of {}",
+            ocean_components[0],
+            total - land_count
+        );
+
+        let land_components = component_sizes(&land, SIDE);
+        assert!(
+            land_components.len() >= 3,
+            "expected several landmasses, found {}",
+            land_components.len()
+        );
+        assert!(
+            land_components[0] * 5 >= land_count,
+            "largest landmass too small: {} of {land_count}",
+            land_components[0]
+        );
+        let median = land_components[land_components.len() / 2];
+        assert!(
+            land_components[0] >= median * 5,
+            "landmass sizes too uniform: largest {} median {median}",
+            land_components[0]
+        );
+    }
+
+    #[test]
+    fn mountains_form_elongated_connected_ranges() {
+        let high = sample_grid(|x, y| macro_sample(PROBE_SEED, x, y).elevation > 50_000);
+        let land_count = sample_grid(|x, y| macro_sample(PROBE_SEED, x, y).elevation > SEA_LEVEL)
+            .iter()
+            .filter(|&&cell| cell)
+            .count();
+        let high_count = high.iter().filter(|&&cell| cell).count();
+        let high_fraction = high_count as f64 / land_count as f64;
+        assert!(
+            (0.002..=0.15).contains(&high_fraction),
+            "mountain fraction {high_fraction} out of range"
+        );
+
+        let ranges = component_bounds(&high, SIDE);
+        let (size, width, height) = ranges[0];
+        let span = width.max(height);
+        assert!(
+            span as i64 * STEP >= 2_500,
+            "largest range spans only {} cells",
+            span as i64 * STEP
+        );
+        // Ranges are arcs and ridge lines, not filled discs: a disc of area
+        // `size` has span^2 about 1.3x its area, an arc far more.
+        assert!(
+            span * span >= size * 3,
+            "largest range is a blob: {size} cells in {width}x{height}"
+        );
+    }
+
+    #[test]
+    fn climate_produces_coherent_biome_regions() {
+        let mut desert = vec![false; SIDE * SIDE];
+        let mut forest = vec![false; SIDE * SIDE];
+        let mut grass = 0_usize;
+        let mut land = 0_usize;
+        for j in 0..SIDE {
+            for i in 0..SIDE {
+                let x = i as i64 * STEP;
+                let y = j as i64 * STEP;
+                let elevation = macro_sample(PROBE_SEED, x, y).elevation;
+                if elevation <= SEA_LEVEL {
+                    continue;
+                }
+                land += 1;
+                let temperature = temperature_field(PROBE_SEED, x, y, elevation);
+                let moisture = moisture_field(PROBE_SEED, x, y, elevation);
+                match classify(elevation, moisture, temperature) {
+                    GroundType::Sand if elevation > BEACH_MAX => desert[j * SIDE + i] = true,
+                    GroundType::ForestFloor => forest[j * SIDE + i] = true,
+                    GroundType::Grass => grass += 1,
+                    _ => {}
+                }
+            }
+        }
+        let desert_count = desert.iter().filter(|&&cell| cell).count();
+        let forest_count = forest.iter().filter(|&&cell| cell).count();
+        assert!(
+            grass * 50 >= land,
+            "grasslands nearly absent: {grass} of {land}"
+        );
+        assert!(
+            desert_count * 100 >= land,
+            "deserts nearly absent: {desert_count} of {land}"
+        );
+        assert!(
+            forest_count * 100 >= land * 3,
+            "forests nearly absent: {forest_count} of {land}"
+        );
+        // Biomes form contiguous regions, not speckle: the largest patches
+        // must be much larger than single samples.
+        assert!(component_sizes(&desert, SIDE)[0] >= 30);
+        assert!(component_sizes(&forest, SIDE)[0] >= 30);
+    }
+
+    #[test]
+    fn rivers_descend_and_terminate_in_water_basins_or_border_drainage() {
+        let mut total_rivers = 0;
+        let mut lake_nodes = 0;
+        for seed in [PROBE_SEED, 42] {
+            for region_y in -1..=1_i64 {
+                for region_x in -1..=1_i64 {
+                    let map = RegionMap::build(seed, region_x, region_y);
+                    let origin_x = region_x * REGION_SIZE;
+                    let origin_y = region_y * REGION_SIZE;
+                    let node_of = |px: i64, py: i64| {
+                        let i = (px - origin_x + NODE_STEP / 2).div_euclid(NODE_STEP) as usize;
+                        let j = (py - origin_y + NODE_STEP / 2).div_euclid(NODE_STEP) as usize;
+                        j * GRID + i
+                    };
+                    let fill = |node: usize| map.elevation[node] + map.water_depth[node];
+                    let sources: BTreeSet<(i64, i64)> = map
+                        .rivers
+                        .iter()
+                        .map(|segment| (segment.ax, segment.ay))
+                        .collect();
+                    for segment in &map.rivers {
+                        total_rivers += 1;
+                        let upstream = node_of(segment.ax, segment.ay);
+                        let downstream = node_of(segment.bx, segment.by);
+                        assert!(
+                            fill(upstream) > fill(downstream),
+                            "river segment flows uphill for seed {seed} in region {region_x},{region_y}"
+                        );
+                        let continues = sources.contains(&(segment.bx, segment.by));
+                        let reaches_water = map.elevation[downstream] <= SEA_LEVEL
+                            || map.water_depth[downstream] >= LAKE_MIN_DEPTH;
+                        let i = downstream % GRID;
+                        let j = downstream / GRID;
+                        let near_border_drain = i <= 8 || j <= 8 || i >= GRID - 9 || j >= GRID - 9;
+                        assert!(
+                            continues || reaches_water || near_border_drain,
+                            "river dies inland for seed {seed} in region {region_x},{region_y}"
+                        );
+                    }
+                    for j in 0..GRID {
+                        for i in 0..GRID {
+                            let node = j * GRID + i;
+                            assert!(map.water_depth[node] >= 0);
+                            let in_lake_margin = i < hydrology::LAKE_BORDER_MARGIN_NODES
+                                || j < hydrology::LAKE_BORDER_MARGIN_NODES
+                                || i >= GRID - hydrology::LAKE_BORDER_MARGIN_NODES
+                                || j >= GRID - hydrology::LAKE_BORDER_MARGIN_NODES;
+                            if in_lake_margin {
+                                assert_eq!(
+                                    map.water_depth[node], 0,
+                                    "region-edge lake water for seed {seed} in region {region_x},{region_y}"
+                                );
+                            }
+                            if map.water_depth[node] >= LAKE_MIN_DEPTH
+                                && map.elevation[node] > SEA_LEVEL
+                            {
+                                lake_nodes += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(total_rivers > 20, "too few rivers: {total_rivers}");
+        assert!(lake_nodes > 10, "too few lake nodes: {lake_nodes}");
+    }
+
+    #[test]
+    fn flooded_lattice_nodes_render_as_water_without_surface_features() {
+        let mut checked = 0;
+        for seed in [PROBE_SEED, 42] {
+            for region_y in -1..=1_i64 {
+                for region_x in -1..=1_i64 {
+                    let map = RegionMap::build(seed, region_x, region_y);
+                    for (node, &depth) in map.water_depth.iter().enumerate() {
+                        if depth < LAKE_MIN_DEPTH || checked >= 48 {
+                            continue;
+                        }
+                        let x = region_x * REGION_SIZE + (node % GRID) as i64 * NODE_STEP;
+                        let y = region_y * REGION_SIZE + (node / GRID) as i64 * NODE_STEP;
+                        let origin_x = x.div_euclid(CHUNK_SIZE) * CHUNK_SIZE;
+                        let origin_y = y.div_euclid(CHUNK_SIZE) * CHUNK_SIZE;
+                        let context = ChunkContext::new(seed, origin_x, origin_y);
+                        let (cell, feature) = context.generate(x, y);
+                        assert!(
+                            matches!(
+                                cell.ground,
+                                GroundType::DeepWater | GroundType::ShallowWater
+                            ),
+                            "flooded node {node} rendered as {:?}",
+                            cell.ground
+                        );
+                        assert!(feature.is_none(), "water node {node} emitted a feature");
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        assert!(
+            checked >= 16,
+            "expected representative flooded lattice nodes"
+        );
+    }
+
+    #[test]
+    fn chunk_river_index_retains_every_intersecting_segment() {
+        for (seed, region_x, region_y) in [(1, -1, -1), (7, 0, 0), (42, 1, -1)] {
+            let map = RegionMap::build(seed, region_x, region_y);
+            let mut coords = BTreeSet::new();
+            for segment in &map.rivers {
+                let min_x = segment
+                    .ax
+                    .min(segment.bx)
+                    .saturating_sub(segment.half_width)
+                    .div_euclid(CHUNK_SIZE);
+                let max_x = segment
+                    .ax
+                    .max(segment.bx)
+                    .saturating_add(segment.half_width)
+                    .div_euclid(CHUNK_SIZE);
+                let min_y = segment
+                    .ay
+                    .min(segment.by)
+                    .saturating_sub(segment.half_width)
+                    .div_euclid(CHUNK_SIZE);
+                let max_y = segment
+                    .ay
+                    .max(segment.by)
+                    .saturating_add(segment.half_width)
+                    .div_euclid(CHUNK_SIZE);
+                for chunk_y in min_y..=max_y {
+                    for chunk_x in min_x..=max_x {
+                        coords.insert((chunk_x, chunk_y));
+                    }
+                }
+            }
+
+            for (chunk_x, chunk_y) in coords {
+                let origin_x = chunk_x * CHUNK_SIZE;
+                let origin_y = chunk_y * CHUNK_SIZE;
+                if origin_x.div_euclid(REGION_SIZE) != region_x
+                    || origin_y.div_euclid(REGION_SIZE) != region_y
+                {
+                    continue;
+                }
+                let expected: Vec<_> = map
+                    .rivers
+                    .iter()
+                    .copied()
+                    .filter(|segment| river_intersects_chunk(*segment, origin_x, origin_y))
+                    .collect();
+                assert!(expected.len() <= MAX_CHUNK_RIVERS);
+                let context = ChunkContext::new(seed, origin_x, origin_y);
+                assert_eq!(
+                    &context.rivers[..context.river_len],
+                    expected.as_slice(),
+                    "river index lost a segment in region {region_x},{region_y} chunk {chunk_x},{chunk_y}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn clearing_region_cache_does_not_change_chunk_output() {
+        use crate::{ChunkCoord, World};
+
+        let seed = 73;
+        let target = ChunkCoord { x: -1, y: -1 };
+        REGION_CACHE.with(|cache| cache.borrow_mut().clear());
+        let expected = World::generate_chunk_at(seed, target).expect("target is representable");
+        REGION_CACHE.with(|cache| cache.borrow_mut().clear());
+        let regenerated = World::generate_chunk_at(seed, target).expect("target is representable");
+        assert_eq!(regenerated, expected);
+    }
+
+    #[test]
+    fn feature_density_varies_regionally() {
+        // Sixteen 256x256 blocks spread across a 32k window: biome-driven
+        // vegetation must cluster instead of scattering uniformly.
+        let mut counts = [0_u32; 16];
+        for (block, count) in counts.iter_mut().enumerate() {
+            let base_x = (block % 4) as i64 * 8_192 + 2_048;
+            let base_y = (block / 4) as i64 * 8_192 + 2_048;
+            for chunk_y in 0..4 {
+                for chunk_x in 0..4 {
+                    let origin_x = base_x + chunk_x * crate::world::CHUNK_SIZE;
+                    let origin_y = base_y + chunk_y * crate::world::CHUNK_SIZE;
+                    let context = ChunkContext::new(PROBE_SEED, origin_x, origin_y);
+                    for y in origin_y..origin_y + crate::world::CHUNK_SIZE {
+                        for x in origin_x..origin_x + crate::world::CHUNK_SIZE {
+                            if context.generate(x, y).1.is_some() {
+                                *count += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let max = *counts.iter().max().unwrap();
+        let min = *counts.iter().min().unwrap();
+        assert!(max > 0, "no features generated in any probe block");
+        assert!(
+            max >= min * 2 + 16,
+            "feature density is uniform: min {min} max {max}"
+        );
+    }
+}

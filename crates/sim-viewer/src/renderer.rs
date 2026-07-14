@@ -173,17 +173,30 @@ impl Renderer {
         requested: WorldRect,
         scale: f32,
         allow_world_sync: bool,
+        changed_bounds: Option<WorldRect>,
     ) {
         let step = terrain_sample_step(scale);
         let cache_contains_view = self
             .cached_bounds
             .is_some_and(|cached| cached.contains_rect(requested));
         let revision_changed = self.world_revision != world.revision();
-        if cache_contains_view
-            && self.cached_step == step
-            && (!revision_changed || !allow_world_sync)
-        {
-            return;
+        let changed_affects_cache = changed_bounds.is_none_or(|changed| {
+            self.cached_bounds
+                .is_none_or(|cached| cached.intersects(changed))
+        });
+        match cache_sync_action(
+            cache_contains_view,
+            self.cached_step == step,
+            revision_changed,
+            allow_world_sync,
+            changed_affects_cache,
+        ) {
+            CacheSyncAction::Skip => return,
+            CacheSyncAction::AdvanceRevision => {
+                self.world_revision = world.revision();
+                return;
+            }
+            CacheSyncAction::Rebuild => {}
         }
         let cached = requested.expanded(cache_margin(scale));
         let (terrain, features) = build_world_instances(world, cached, step);
@@ -199,6 +212,7 @@ impl Renderer {
         world: &World,
         state: RenderState,
         allow_world_sync: bool,
+        changed_bounds: Option<WorldRect>,
     ) -> Result<(), wgpu::SurfaceError> {
         let view = state.camera.view(
             self.config.width,
@@ -211,6 +225,7 @@ impl Renderer {
             view.world_bounds(),
             view.scale() as f32,
             allow_world_sync,
+            changed_bounds,
         );
         self.world_camera.write(
             &self.queue,
@@ -555,30 +570,46 @@ fn cache_margin(scale: f32) -> i64 {
 }
 
 fn terrain_block_size(world: &World, position: WorldPosition, step: u32) -> [f32; 2] {
-    let inside_initial = position.x >= 0
-        && position.y >= 0
-        && position.x < i64::from(world.width())
-        && position.y < i64::from(world.height());
-    let limit = if inside_initial {
-        WorldPosition {
-            x: i64::from(world.width()),
-            y: i64::from(world.height()),
-        }
-    } else {
-        let mut chunk_limit = WorldPosition {
-            x: position.x.div_euclid(CHUNK_SIZE) * CHUNK_SIZE + CHUNK_SIZE,
-            y: position.y.div_euclid(CHUNK_SIZE) * CHUNK_SIZE + CHUNK_SIZE,
-        };
-        if position.y >= 0 && position.y < i64::from(world.height()) {
-            chunk_limit.y = chunk_limit.y.min(i64::from(world.height()));
-        }
-        chunk_limit
-    };
+    let limit = world
+        .loaded_bounds_at(position)
+        .expect("visited terrain cells must have loaded coverage")
+        .max;
     let step = i64::from(step);
     [
         (limit.x - position.x).min(step) as f32,
         (limit.y - position.y).min(step) as f32,
     ]
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CacheSyncAction {
+    Rebuild,
+    Skip,
+    AdvanceRevision,
+}
+
+fn cache_sync_action(
+    cache_contains_view: bool,
+    step_matches: bool,
+    revision_changed: bool,
+    allow_world_sync: bool,
+    changed_affects_cache: bool,
+) -> CacheSyncAction {
+    if !cache_contains_view || !step_matches {
+        return CacheSyncAction::Rebuild;
+    }
+    if !revision_changed || !changed_affects_cache {
+        return if revision_changed {
+            CacheSyncAction::AdvanceRevision
+        } else {
+            CacheSyncAction::Skip
+        };
+    }
+    if allow_world_sync {
+        CacheSyncAction::Rebuild
+    } else {
+        CacheSyncAction::Skip
+    }
 }
 
 fn static_instance_chunks(instances: &[Instance]) -> std::slice::Chunks<'_, Instance> {
@@ -610,6 +641,9 @@ fn chunk_outline(inspection: ChunkInspection, scale: f32) -> Option<[Instance; 4
     let line = (1.0 / scale.max(f32::EPSILON)).clamp(1.0, MAX_CHUNK_OUTLINE_WORLD_WIDTH);
     let color = match inspection.presence {
         ChunkPresence::Missing => rgba(235, 70, 70, 190),
+        ChunkPresence::InitialUnloaded | ChunkPresence::PartialInitialUnloaded => {
+            rgba(145, 145, 145, 190)
+        }
         ChunkPresence::PartialInitial => rgba(255, 205, 55, 190),
         ChunkPresence::Initial => rgba(80, 180, 255, 180),
         ChunkPresence::Retained => rgba(85, 225, 135, 190),
@@ -664,7 +698,7 @@ mod tests {
     }
 
     #[test]
-    fn coarse_blocks_stop_at_initial_and_generated_edges() {
+    fn coarse_blocks_follow_exact_loaded_tile_coverage() {
         let initial = World::generate(1, WorldConfig::new(96, 64).unwrap());
         let (initial_instances, _) = build_world_instances(
             &initial,
@@ -696,7 +730,7 @@ mod tests {
         );
         assert!(
             boundary_instances.iter().any(|instance| {
-                instance.position == [96.0, 0.0] && instance.size == [32.0, 64.0]
+                instance.position == [64.0, 0.0] && instance.size == [64.0, 64.0]
             })
         );
 
@@ -715,10 +749,7 @@ mod tests {
             64,
         );
         assert!(corner_instances.iter().any(|instance| {
-            instance.position == [96.0, 64.0] && instance.size == [32.0, 36.0]
-        }));
-        assert!(corner_instances.iter().any(|instance| {
-            instance.position == [64.0, 100.0] && instance.size == [64.0, 28.0]
+            instance.position == [64.0, 64.0] && instance.size == [64.0, 64.0]
         }));
 
         let mut expanded = World::generate(1, WorldConfig::new(64, 64).unwrap());
@@ -737,6 +768,35 @@ mod tests {
             generated_instances
                 .iter()
                 .any(|instance| instance.position[0] == 191.0 && instance.size[0] == 1.0)
+        );
+    }
+
+    #[test]
+    fn unloaded_bootstrap_has_no_terrain_instances() {
+        let world = World::new(1, WorldConfig::new(64, 64).unwrap());
+        let (terrain, features) = build_world_instances(&world, world.initial_bounds(), 1);
+
+        assert!(terrain.is_empty());
+        assert!(features.is_empty());
+    }
+
+    #[test]
+    fn cache_sync_rebuilds_streamed_visible_work_without_offscreen_uploads() {
+        assert_eq!(
+            cache_sync_action(true, true, true, false, true),
+            CacheSyncAction::Skip
+        );
+        assert_eq!(
+            cache_sync_action(true, true, true, true, true),
+            CacheSyncAction::Rebuild
+        );
+        assert_eq!(
+            cache_sync_action(true, true, true, false, false),
+            CacheSyncAction::AdvanceRevision
+        );
+        assert_eq!(
+            cache_sync_action(false, true, false, false, false),
+            CacheSyncAction::Rebuild
         );
     }
 

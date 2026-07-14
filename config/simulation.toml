@@ -3,6 +3,7 @@ seed = 1
 ticks_per_second = 60
 
 [world]
-# This is the initially generated area, not the maximum extent of the world.
+# Deterministic bootstrap extent: the viewer streams it after opening, while
+# headless explicitly materializes it before ticks. It is not the world maximum.
 initial_width = 4096
 initial_height = 4096

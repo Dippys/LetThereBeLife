@@ -28,6 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         engine_config.seed = seed;
     }
     let mut engine = Engine::new(engine_config);
+    engine.materialize_initial_area()?;
     for _ in 0..ticks {
         engine.tick();
     }
