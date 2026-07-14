@@ -8,6 +8,7 @@ use std::{
     thread,
 };
 
+use rayon::{Scope, ThreadPool, ThreadPoolBuilder};
 use sim_core::{
     ChunkCoord, ChunkLoadRequest, GenerateAreaError, World, WorldChunkLoad, WorldPosition,
     WorldRect,
@@ -53,8 +54,16 @@ pub struct GenerationPoll {
     pub outcome: Option<GenerationOutcome>,
 }
 
-/// One persistent worker that produces immutable world payloads. It never owns
-/// or mutates `Engine`; only the viewer event loop applies completed loads.
+struct TaskCompletion {
+    index: usize,
+    load: Option<WorldChunkLoad>,
+}
+
+const COMPLETED_CHANNEL_CAPACITY: usize = 64;
+const TASKS_PER_WORKER: usize = 2;
+
+/// One persistent coordinator backed by a fixed computation pool. Workers
+/// produce immutable world payloads; only the viewer event loop applies them.
 pub struct WorldGenerator {
     jobs: SyncSender<GenerationJob>,
     completed: Receiver<WorkerMessage>,
@@ -64,35 +73,26 @@ pub struct WorldGenerator {
 
 impl WorldGenerator {
     pub fn new() -> Self {
+        Self::with_worker_count(default_worker_count())
+    }
+
+    fn with_worker_count(worker_count: usize) -> Self {
+        assert!(worker_count > 0, "generation needs at least one worker");
         let (jobs_tx, jobs_rx) = mpsc::sync_channel::<GenerationJob>(1);
-        let (completed_tx, completed_rx) = mpsc::sync_channel::<WorkerMessage>(64);
+        let (completed_tx, completed_rx) =
+            mpsc::sync_channel::<WorkerMessage>(COMPLETED_CHANNEL_CAPACITY);
         let cancelled_job = Arc::new(AtomicU64::new(0));
         let worker_cancelled_job = Arc::clone(&cancelled_job);
+        let pool = ThreadPoolBuilder::new()
+            .num_threads(worker_count)
+            .thread_name(|index| format!("world-generator-{index}"))
+            .build()
+            .expect("build world generation pool");
         thread::Builder::new()
-            .name("world-generator".to_owned())
+            .name("world-generator-coordinator".to_owned())
             .spawn(move || {
                 while let Ok(job) = jobs_rx.recv() {
-                    let mut outcome = GenerationOutcome::Completed;
-                    for request in job.requests {
-                        if worker_cancelled_job.load(Ordering::Acquire) == job.id {
-                            outcome = GenerationOutcome::Cancelled;
-                            break;
-                        }
-                        let load = World::generate_chunk_load(job.seed, request);
-                        if completed_tx
-                            .send(WorkerMessage::Load { id: job.id, load })
-                            .is_err()
-                        {
-                            return;
-                        }
-                    }
-                    if completed_tx
-                        .send(WorkerMessage::Done {
-                            id: job.id,
-                            outcome,
-                        })
-                        .is_err()
-                    {
+                    if !run_generation_job(&pool, job, &worker_cancelled_job, &completed_tx) {
                         return;
                     }
                 }
@@ -186,6 +186,134 @@ impl WorldGenerator {
             outcome: None,
         }
     }
+}
+
+fn default_worker_count() -> usize {
+    thread::available_parallelism()
+        .map(|parallelism| parallelism.get().saturating_sub(1).max(1))
+        .unwrap_or(1)
+}
+
+fn spawn_generation_task<'scope>(
+    scope: &Scope<'scope>,
+    completed: SyncSender<TaskCompletion>,
+    cancelled_job: Arc<AtomicU64>,
+    id: GenerationId,
+    seed: u64,
+    index: usize,
+    request: ChunkLoadRequest,
+) {
+    scope.spawn(move |_| {
+        let load = (cancelled_job.load(Ordering::Acquire) != id)
+            .then(|| World::generate_chunk_load(seed, request));
+        let _ = completed.send(TaskCompletion { index, load });
+    });
+}
+
+fn run_generation_job(
+    pool: &ThreadPool,
+    job: GenerationJob,
+    cancelled_job: &Arc<AtomicU64>,
+    completed: &SyncSender<WorkerMessage>,
+) -> bool {
+    let id = job.id;
+    let seed = job.seed;
+    let request_count = job.requests.len();
+    let task_window = (pool.current_num_threads() * TASKS_PER_WORKER)
+        .min(COMPLETED_CHANNEL_CAPACITY)
+        .min(request_count)
+        .max(1);
+    let (task_tx, task_rx) = mpsc::sync_channel::<TaskCompletion>(task_window);
+    let (output_connected, cancelled, next_output) = pool.in_place_scope(move |scope| {
+        let mut output_connected = true;
+        let mut cancelled = false;
+        let mut next_request = 0;
+        let mut next_output = 0;
+        let mut active = 0;
+        let mut buffered = 0;
+        let mut ready: Vec<Option<WorldChunkLoad>> = std::iter::repeat_with(|| None)
+            .take(request_count)
+            .collect();
+        while active + buffered < task_window && next_request < request_count {
+            spawn_generation_task(
+                scope,
+                task_tx.clone(),
+                Arc::clone(cancelled_job),
+                id,
+                seed,
+                next_request,
+                job.requests[next_request],
+            );
+            next_request += 1;
+            active += 1;
+        }
+
+        while active > 0 {
+            let Ok(task) = task_rx.recv() else {
+                output_connected = false;
+                break;
+            };
+            active -= 1;
+            if cancelled_job.load(Ordering::Acquire) == id {
+                cancelled = true;
+                ready.iter_mut().for_each(|load| {
+                    load.take();
+                });
+                buffered = 0;
+            } else if let Some(load) = task.load {
+                ready[task.index] = Some(load);
+                buffered += 1;
+            } else {
+                cancelled = true;
+            }
+
+            while output_connected && !cancelled && next_output < request_count {
+                let Some(load) = ready[next_output].take() else {
+                    break;
+                };
+                buffered -= 1;
+                if completed.send(WorkerMessage::Load { id, load }).is_err() {
+                    output_connected = false;
+                    break;
+                }
+                next_output += 1;
+                if cancelled_job.load(Ordering::Acquire) == id {
+                    cancelled = true;
+                    ready.iter_mut().for_each(|load| {
+                        load.take();
+                    });
+                    buffered = 0;
+                }
+            }
+
+            if output_connected && !cancelled {
+                while active + buffered < task_window && next_request < request_count {
+                    spawn_generation_task(
+                        scope,
+                        task_tx.clone(),
+                        Arc::clone(cancelled_job),
+                        id,
+                        seed,
+                        next_request,
+                        job.requests[next_request],
+                    );
+                    next_request += 1;
+                    active += 1;
+                }
+            }
+        }
+        (output_connected, cancelled, next_output)
+    });
+
+    if !output_connected {
+        return false;
+    }
+    let outcome = if cancelled || next_output < request_count {
+        GenerationOutcome::Cancelled
+    } else {
+        GenerationOutcome::Completed
+    };
+    completed.send(WorkerMessage::Done { id, outcome }).is_ok()
 }
 
 /// A bounded, deterministic center-out sequence of chunk pages for automatic
@@ -422,6 +550,7 @@ fn page_bounds(page_x: i64, page_y: i64, bounds: WorldRect) -> Option<WorldRect>
 mod tests {
     use super::*;
     use sim_core::WorldConfig;
+    use std::time::{Duration, Instant};
 
     fn test_job(id: GenerationId) -> GenerationJob {
         let world = World::new(1, WorldConfig::new(64, 64).unwrap());
@@ -434,6 +563,28 @@ mod tests {
             id,
             seed: 1,
             requests: vec![request],
+        }
+    }
+
+    fn wait_for_job(
+        generator: &WorldGenerator,
+        id: GenerationId,
+        expected_limit: usize,
+    ) -> (Vec<WorldChunkLoad>, GenerationOutcome) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut loads = Vec::new();
+        loop {
+            let poll = generator.drain(id, expected_limit.max(1), false);
+            loads.extend(poll.loads);
+            if let Some(outcome) = poll.outcome {
+                return (loads, outcome);
+            }
+            assert!(
+                Instant::now() < deadline,
+                "generation job {id} produced {} loads but did not finish before the test deadline",
+                loads.len()
+            );
+            thread::yield_now();
         }
     }
 
@@ -461,6 +612,92 @@ mod tests {
             !second
                 .iter()
                 .any(|request| request.coord() == ChunkCoord { x: 0, y: 0 })
+        );
+    }
+
+    #[test]
+    fn worker_pool_sizes_preserve_request_order_and_exact_output() {
+        let seed = 91;
+        let world = World::new(seed, WorldConfig::new(256, 256).unwrap());
+        let requests = world
+            .missing_chunk_load_requests(world.initial_bounds())
+            .unwrap();
+        let expected: Vec<_> = requests
+            .iter()
+            .copied()
+            .map(|request| World::generate_chunk_load(seed, request))
+            .collect();
+        for (worker_count, id) in [(1, 40), (4, 41)] {
+            let generator = WorldGenerator::with_worker_count(worker_count);
+            generator
+                .request(GenerationJob {
+                    id,
+                    seed,
+                    requests: requests.clone(),
+                })
+                .unwrap();
+
+            let (actual, outcome) = wait_for_job(&generator, id, expected.len());
+            assert_eq!(outcome, GenerationOutcome::Completed);
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn cancelled_pool_job_does_not_start_queued_chunk_work() {
+        let seed = 92;
+        let world = World::new(seed, WorldConfig::new(512, 512).unwrap());
+        let requests = world
+            .missing_chunk_load_requests(world.initial_bounds())
+            .unwrap();
+        let request_count = requests.len();
+        let generator = WorldGenerator::with_worker_count(4);
+        generator.cancel(42);
+        generator
+            .request(GenerationJob {
+                id: 42,
+                seed,
+                requests,
+            })
+            .unwrap();
+
+        let (loads, outcome) = wait_for_job(&generator, 42, request_count);
+        assert!(loads.is_empty());
+        assert_eq!(outcome, GenerationOutcome::Cancelled);
+    }
+
+    #[test]
+    #[ignore = "manual release throughput measurement"]
+    fn release_generation_pool_throughput() {
+        const SEED: u64 = 10_001;
+        let worker_count = std::env::var("SIM_GENERATION_BENCH_WORKERS")
+            .ok()
+            .map(|value| {
+                value
+                    .parse()
+                    .expect("benchmark worker count must be an integer")
+            })
+            .unwrap_or_else(default_worker_count);
+        let world = World::new(SEED, WorldConfig::new(4_096, 4_096).unwrap());
+        let requests = world
+            .missing_chunk_load_requests(world.initial_bounds())
+            .unwrap();
+        let request_count = requests.len();
+        let generator = WorldGenerator::with_worker_count(worker_count);
+        let started = Instant::now();
+        generator
+            .request(GenerationJob {
+                id: SEED,
+                seed: SEED,
+                requests,
+            })
+            .unwrap();
+        let (loads, outcome) = wait_for_job(&generator, SEED, request_count);
+        assert_eq!(outcome, GenerationOutcome::Completed);
+        assert_eq!(loads.len(), request_count);
+        println!(
+            "generation-workers={worker_count} chunks={request_count} elapsed-ms={:.1}",
+            started.elapsed().as_secs_f64() * 1_000.0,
         );
     }
 

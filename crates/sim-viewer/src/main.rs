@@ -304,31 +304,57 @@ impl ViewerApp {
         };
         let id = active.id;
         let discard_loads = active.discard_loads;
-        let poll = self
-            .generator
-            .drain(id, MAX_CHUNKS_APPLIED_PER_FRAME, discard_loads);
+        let started = Instant::now();
+        let mut applied_loads = 0;
+        let mut changed_bounds = None;
+        let mut outcome = None;
         let mut changed = false;
 
-        if !poll.loads.is_empty() {
-            let changed_bounds = union_load_bounds(&poll.loads);
-            match self.engine.apply_world_chunk_loads(poll.loads) {
-                Ok(inserted) if inserted > 0 => {
-                    if let Some(bounds) = changed_bounds {
-                        self.mark_world_changed(bounds);
+        loop {
+            let remaining = MAX_CHUNKS_APPLIED_PER_FRAME.saturating_sub(applied_loads);
+            if remaining == 0 {
+                break;
+            }
+            let limit = CHUNKS_APPLIED_PER_BATCH.min(remaining);
+            let poll = self.generator.drain(id, limit, discard_loads);
+            let received = poll.loads.len();
+            if received > 0 {
+                let batch_bounds = union_load_bounds(&poll.loads);
+                match self.engine.apply_world_chunk_loads(poll.loads) {
+                    Ok(inserted) if inserted > 0 => {
+                        if let Some(bounds) = batch_bounds {
+                            changed_bounds = Some(match changed_bounds {
+                                Some(previous) => union_bounds(previous, bounds),
+                                None => bounds,
+                            });
+                        }
+                        changed = true;
                     }
-                    self.update_hover();
-                    changed = true;
+                    Ok(_) => {}
+                    Err(error) => {
+                        eprintln!("could not apply generated chunks: {error}");
+                        self.cancel_active_generation();
+                        changed = true;
+                        break;
+                    }
                 }
-                Ok(_) => {}
-                Err(error) => {
-                    eprintln!("could not apply generated chunks: {error}");
-                    self.cancel_active_generation();
-                    changed = true;
-                }
+                applied_loads += received;
+            }
+            if poll.outcome.is_some() {
+                outcome = poll.outcome;
+                break;
+            }
+            if received < limit || discard_loads || started.elapsed() >= WORLD_APPLY_TIME_BUDGET {
+                break;
             }
         }
 
-        if let Some(outcome) = poll.outcome {
+        if let Some(bounds) = changed_bounds {
+            self.mark_world_changed(bounds);
+            self.update_hover();
+        }
+
+        if let Some(outcome) = outcome {
             let active = self
                 .active_generation
                 .take()
@@ -899,7 +925,9 @@ fn selection_is_valid(world: &World, selection: Option<WorldRect>) -> bool {
     selection.is_none_or(|bounds| world.validate_generation_request(bounds).is_ok())
 }
 
-const MAX_CHUNKS_APPLIED_PER_FRAME: usize = 16;
+const CHUNKS_APPLIED_PER_BATCH: usize = 16;
+const MAX_CHUNKS_APPLIED_PER_FRAME: usize = 64;
+const WORLD_APPLY_TIME_BUDGET: Duration = Duration::from_millis(2);
 const FRAME_TIME: Duration = Duration::from_nanos(16_666_667);
 const SMOKE_TIMEOUT: Duration = Duration::from_secs(30);
 const WORLD_SYNC_INTERVAL: Duration = Duration::from_millis(125);

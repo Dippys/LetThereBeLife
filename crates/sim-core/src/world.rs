@@ -11,7 +11,7 @@ use crate::worldgen::{ChunkContext, REGION_SIZE};
 
 /// Default side length of the initially generated area.
 pub const DEFAULT_INITIAL_WORLD_SIZE: u32 = 1_024;
-const MAX_INITIAL_CELLS: u64 = 16_777_216;
+const MAX_INITIAL_CELLS: u64 = 268_435_456; // 16,384 x 16,384
 /// Largest possible number of clipped tiles within the initial-cell safety budget.
 ///
 /// A one-cell-wide, 16,777,216-cell bootstrap is valid and spans one tile for
@@ -20,8 +20,8 @@ const MAX_INITIAL_CELLS: u64 = 16_777_216;
 pub const MAX_INITIAL_CHUNKS: usize = (MAX_INITIAL_CELLS / CHUNK_SIZE as u64) as usize;
 pub const CHUNK_SIZE: i64 = 64;
 /// Maximum number of previously missing chunks materialized by one request.
-pub const MAX_CHUNKS_PER_GENERATION: u64 = 4_096;
-pub const MAX_GENERATED_CHUNKS: usize = 16_384;
+pub const MAX_CHUNKS_PER_GENERATION: u64 = 65_536;
+pub const MAX_GENERATED_CHUNKS: usize = 4_194_304; // 256 x 256 regions, 64 x 64 chunks each
 const CHUNKS_PER_REGION: i64 = REGION_SIZE / CHUNK_SIZE;
 
 /// Validated initial generation dimensions, not a maximum world extent.

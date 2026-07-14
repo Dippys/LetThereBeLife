@@ -19,10 +19,11 @@ Last synchronized: 2026-07-14.
 - Deferred bootstrap coverage with clipped non-aligned tiles, explicit eager headless materialization, opaque seed/coverage-validated worker loads, job-ID cancellation, center-out paged viewport streaming, and progressive GPU cache synchronization.
 - Three-tier integer world generation: analytic tectonic/climate fields, cached 4,096-cell regional drainage, and local chunk synthesis with static lakes, rivers, biomes, and sparse features.
 - Region-aware chunk traversal, bounded regional caches, validated developer map sampling, and regression coverage for drainage borders, rasterized water, and complete chunk river indexing.
+- Deterministic multi-threaded chunk generation with a fixed computation pool, bounded ordered result streaming, generation-ID cancellation, build-once shared regional caching, adaptive bounded main-thread insertion, and a same-seed release throughput harness.
 
 ## Next
 
-- Record controlled release measurements for first window, first streamed terrain, full-bootstrap throughput, frame hitches, and resident memory; use them to set explicit runtime budgets.
+- Extend the focused generation-pool throughput harness into controlled first-window, first-terrain, full-bootstrap-completion, frame-hitch, resident-memory, and allocation measurements; use them to set explicit runtime budgets.
 - Add stable generator versioning before any persisted world output, then define chunk unloading and persistence policies around the deduplicated chunk store.
 - Extend the current region-local static drainage into cross-region basins, tributaries, local streams, wetlands, erosion, and dynamic water only when their ownership, persistence, and performance budgets are specified.
 
@@ -33,4 +34,4 @@ Follow the phases described in `InitialDocumentation/16_IMPLEMENTATION_ROADMAP.m
 ## Open
 
 - Texture/sprite asset strategy beyond the current instanced GPU terrain renderer.
-- Exact Phase 0 benchmark harness and reporting format.
+- Exact Phase 0 benchmark reporting format and resident-memory/frame-time instrumentation beyond the focused generation-pool harness.

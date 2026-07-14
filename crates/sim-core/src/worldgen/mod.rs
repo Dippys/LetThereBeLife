@@ -14,8 +14,7 @@ mod hydrology;
 mod noise;
 mod plates;
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use crate::world::{CHUNK_SIZE, FeatureKind, GroundType, TerrainCell};
 use hydrology::{
@@ -48,34 +47,50 @@ const BUSH_SEED: u64 = 0x4255_5348_434c_5553;
 const REGION_CACHE_CAPACITY: usize = 40;
 
 type RegionKey = (u64, i64, i64);
+type RegionSlot = Arc<OnceLock<Arc<RegionMap>>>;
 
-thread_local! {
-    static REGION_CACHE: RefCell<Vec<(RegionKey, Rc<RegionMap>)>> =
-        const { RefCell::new(Vec::new()) };
+static REGION_CACHE: OnceLock<Mutex<Vec<(RegionKey, RegionSlot)>>> = OnceLock::new();
+
+fn region_cache() -> &'static Mutex<Vec<(RegionKey, RegionSlot)>> {
+    REGION_CACHE.get_or_init(|| Mutex::new(Vec::new()))
 }
 
-fn region(seed: u64, region_x: i64, region_y: i64) -> Rc<RegionMap> {
-    let key = (seed, region_x, region_y);
-    if let Some(map) = REGION_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        cache
-            .iter()
-            .position(|(entry, _)| *entry == key)
-            .map(|position| {
-                let entry = cache.remove(position);
-                let map = entry.1.clone();
-                cache.insert(0, entry);
-                map
-            })
-    }) {
-        return map;
+fn lock_region_cache() -> MutexGuard<'static, Vec<(RegionKey, RegionSlot)>> {
+    region_cache()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn trim_region_cache(cache: &mut Vec<(RegionKey, RegionSlot)>) {
+    while cache.len() > REGION_CACHE_CAPACITY {
+        let Some(position) = cache.iter().rposition(|(_, slot)| slot.get().is_some()) else {
+            // More than 40 distinct regions may briefly be building at once on
+            // a large machine. Never evict an in-flight build: doing so could
+            // let another worker duplicate the same expensive regional solve.
+            break;
+        };
+        cache.remove(position);
     }
-    let map = Rc::new(RegionMap::build(seed, region_x, region_y));
-    REGION_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        cache.insert(0, (key, map.clone()));
-        cache.truncate(REGION_CACHE_CAPACITY);
-    });
+}
+
+fn region(seed: u64, region_x: i64, region_y: i64) -> Arc<RegionMap> {
+    let key = (seed, region_x, region_y);
+    let slot = {
+        let mut cache = lock_region_cache();
+        if let Some(position) = cache.iter().position(|(entry, _)| *entry == key) {
+            let entry = cache.remove(position);
+            let slot = Arc::clone(&entry.1);
+            cache.insert(0, entry);
+            slot
+        } else {
+            let slot = Arc::new(OnceLock::new());
+            cache.insert(0, (key, Arc::clone(&slot)));
+            trim_region_cache(&mut cache);
+            slot
+        }
+    };
+    let map = Arc::clone(slot.get_or_init(|| Arc::new(RegionMap::build(seed, region_x, region_y))));
+    trim_region_cache(&mut lock_region_cache());
     map
 }
 
@@ -308,6 +323,7 @@ mod tests {
     use super::*;
     use std::cmp::Reverse;
     use std::collections::BTreeSet;
+    use std::sync::{Arc as SyncArc, Barrier};
 
     /// Overview lattice used by the structural checks: `SIDE` x `SIDE` samples
     /// spaced `STEP` cells apart (a 65,536-cell-wide window).
@@ -656,11 +672,37 @@ mod tests {
 
         let seed = 73;
         let target = ChunkCoord { x: -1, y: -1 };
-        REGION_CACHE.with(|cache| cache.borrow_mut().clear());
+        lock_region_cache().clear();
         let expected = World::generate_chunk_at(seed, target).expect("target is representable");
-        REGION_CACHE.with(|cache| cache.borrow_mut().clear());
+        lock_region_cache().clear();
         let regenerated = World::generate_chunk_at(seed, target).expect("target is representable");
         assert_eq!(regenerated, expected);
+    }
+
+    #[test]
+    fn concurrent_region_requests_share_one_build() {
+        const WORKERS: usize = 8;
+        let seed = 0x5348_4152_4544_4341;
+        lock_region_cache().clear();
+        let barrier = SyncArc::new(Barrier::new(WORKERS));
+        let handles: Vec<_> = (0..WORKERS)
+            .map(|_| {
+                let barrier = SyncArc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    region(seed, 17, -23)
+                })
+            })
+            .collect();
+        let maps: Vec<_> = handles
+            .into_iter()
+            .map(|handle| handle.join().expect("region requester must not panic"))
+            .collect();
+
+        assert!(
+            maps.iter().all(|map| Arc::ptr_eq(map, &maps[0])),
+            "concurrent requests for one region must share its materialization"
+        );
     }
 
     #[test]
