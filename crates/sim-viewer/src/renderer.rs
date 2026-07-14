@@ -2,8 +2,9 @@ use std::{borrow::Cow, fmt::Write, sync::Arc};
 
 use bytemuck::{Pod, Zeroable};
 use sim_core::{
-    CHUNK_SIZE, ChunkInspection, ChunkPresence, FeatureKind, GenerateAreaError, GroundType,
-    PrevailingWind, SimulationSnapshot, WORLD_GENERATION_BOUNDS, World, WorldPosition, WorldRect,
+    BiomeType, CHUNK_SIZE, ChunkInspection, ChunkPresence, FeatureKind, GenerateAreaError,
+    PrevailingWind, SimulationSnapshot, SurfaceType, WORLD_GENERATION_BOUNDS, World, WorldPosition,
+    WorldRect,
 };
 use wgpu::util::DeviceExt;
 use winit::window::Window;
@@ -624,14 +625,24 @@ fn static_instance_chunks(instances: &[Instance]) -> std::slice::Chunks<'_, Inst
 
 fn terrain_color(cell: sim_core::TerrainCell) -> u32 {
     let shade = (cell.elevation >> 12) as u8;
-    match cell.ground {
-        GroundType::DeepWater => rgba(16, 48 + shade, 94 + shade, 255),
-        GroundType::ShallowWater => rgba(28, 84 + shade, 126 + shade, 255),
-        GroundType::Sand => rgba(184 + shade, 166 + shade, 105, 255),
-        GroundType::Grass => rgba(50 + shade, 112 + shade, 51, 255),
-        GroundType::ForestFloor => rgba(37, 86 + shade, 39, 255),
-        GroundType::Hill => rgba(100 + shade, 108 + shade, 72, 255),
-        GroundType::BareRock => rgba(125 + shade, 124 + shade, 119 + shade, 255),
+    match (cell.surface(), cell.biome()) {
+        (SurfaceType::DeepWater, BiomeType::Ocean) => rgba(16, 48 + shade, 94 + shade, 255),
+        (SurfaceType::ShallowWater, BiomeType::Ocean) => rgba(28, 84 + shade, 126 + shade, 255),
+        (SurfaceType::DeepWater, BiomeType::Lake) => rgba(24, 66 + shade, 112 + shade, 255),
+        (SurfaceType::ShallowWater, BiomeType::Lake) => rgba(40, 102 + shade, 142 + shade, 255),
+        (SurfaceType::DeepWater, BiomeType::River) => rgba(20, 74 + shade, 128 + shade, 255),
+        (SurfaceType::ShallowWater, BiomeType::River) => rgba(38, 116 + shade, 154 + shade, 255),
+        (SurfaceType::Sand, BiomeType::Beach) => rgba(210 + shade, 190 + shade, 126, 255),
+        (SurfaceType::Sand, BiomeType::Desert) => rgba(184 + shade, 150 + shade, 75, 255),
+        (SurfaceType::Soil, BiomeType::Grassland) => rgba(50 + shade, 112 + shade, 51, 255),
+        (SurfaceType::Soil, BiomeType::Savanna) => rgba(118 + shade, 126 + shade, 55, 255),
+        (SurfaceType::Soil, BiomeType::Forest) => rgba(37, 86 + shade, 39, 255),
+        (SurfaceType::Soil, BiomeType::Wetland) => rgba(48, 94 + shade, 74 + shade, 255),
+        (SurfaceType::Soil, BiomeType::Tundra) => rgba(105 + shade, 119 + shade, 105 + shade, 255),
+        (SurfaceType::Hill, _) => rgba(100 + shade, 108 + shade, 72, 255),
+        (SurfaceType::Rock, _) => rgba(125 + shade, 124 + shade, 119 + shade, 255),
+        (SurfaceType::SnowIce, _) => rgba(220 + shade, 229 + shade, 234 + shade, 255),
+        _ => rgba(255, 0, 255, 255),
     }
 }
 
@@ -752,8 +763,13 @@ fn write_hud_text(output: &mut String, world: &World, state: &RenderState) {
             writeln!(output, "COVERAGE {}", coverage_label(inspection.presence))
                 .expect("writing to String cannot fail");
             if let Some(cell) = world.cell(position) {
-                writeln!(output, "TERRAIN {}", ground_label(cell.ground))
-                    .expect("writing to String cannot fail");
+                writeln!(
+                    output,
+                    "SURFACE {}  BIOME {}",
+                    surface_label(cell.surface()),
+                    biome_label(cell.biome())
+                )
+                .expect("writing to String cannot fail");
                 if let Some(climate) = world.climate_at(position) {
                     writeln!(
                         output,
@@ -806,15 +822,31 @@ const fn coverage_label(presence: ChunkPresence) -> &'static str {
     }
 }
 
-const fn ground_label(ground: GroundType) -> &'static str {
-    match ground {
-        GroundType::DeepWater => "DEEP WATER",
-        GroundType::ShallowWater => "SHALLOW WATER",
-        GroundType::Sand => "SAND",
-        GroundType::Grass => "GRASS",
-        GroundType::ForestFloor => "FOREST FLOOR",
-        GroundType::Hill => "HILL",
-        GroundType::BareRock => "BARE ROCK",
+const fn surface_label(surface: SurfaceType) -> &'static str {
+    match surface {
+        SurfaceType::DeepWater => "DEEP WATER",
+        SurfaceType::ShallowWater => "SHALLOW WATER",
+        SurfaceType::Sand => "SAND",
+        SurfaceType::Soil => "SOIL",
+        SurfaceType::Hill => "HILL",
+        SurfaceType::Rock => "ROCK",
+        SurfaceType::SnowIce => "SNOW/ICE",
+    }
+}
+
+const fn biome_label(biome: BiomeType) -> &'static str {
+    match biome {
+        BiomeType::Ocean => "OCEAN",
+        BiomeType::Lake => "LAKE",
+        BiomeType::River => "RIVER",
+        BiomeType::Beach => "BEACH",
+        BiomeType::Desert => "DESERT",
+        BiomeType::Grassland => "GRASSLAND",
+        BiomeType::Savanna => "SAVANNA",
+        BiomeType::Forest => "FOREST",
+        BiomeType::Wetland => "WETLAND",
+        BiomeType::Tundra => "TUNDRA",
+        BiomeType::Alpine => "ALPINE",
     }
 }
 
@@ -1252,7 +1284,8 @@ mod tests {
         assert!(text.contains("CURSOR X 0  Y 0"));
         assert!(text.contains("CHUNK X 0 Y 0  LOCAL 0,0"));
         assert!(text.contains("COVERAGE "));
-        assert!(text.contains("TERRAIN "));
+        assert!(text.contains("SURFACE "));
+        assert!(text.contains("  BIOME "));
         assert!(text.contains("ELEV "));
         assert!(text.contains("TEMP "));
         assert!(text.contains("MOIST "));

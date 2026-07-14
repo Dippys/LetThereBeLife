@@ -26,7 +26,7 @@ Minimize runtime work, memory, allocations, cache misses, and stored data while 
 
 ## Current measurements
 
-The current terrain layout intentionally uses `u16` elevation, `u8` moisture, and a byte-represented `GroundType`; a unit assertion fixes `TerrainCell` at 4 bytes. The 16,777,216-cell bootstrap ceiling therefore permits a 64 MiB logical cell payload before tile metadata and sparse features. `Engine::new` owns zero terrain cells; the viewer retains only streamed clipped bootstrap/full expansion tiles, while headless explicitly chooses the cost of completely materializing its configured rectangle. Stage 2 keeps temperature derived rather than adding it to every cell: the public `ClimateSample` is four bytes and is built allocation-free from four analytic temperature nodes, the retained moisture byte, and one wind-direction byte. It adds no retained per-cell, chunk, or regional payload.
+The current terrain layout intentionally uses `u16` elevation, `u8` moisture, and a one-byte `TerrainClass` packing a `SurfaceType` low nibble with a `BiomeType` high nibble; unit assertions fix `TerrainClass` at 1 byte and `TerrainCell` at 4 bytes. The 16,777,216-cell bootstrap ceiling therefore still permits a 64 MiB logical cell payload before tile metadata and sparse features, and the complete 4,294,967,296-cell envelope remains exactly 16 GiB of raw terrain. `Engine::new` owns zero terrain cells; the viewer retains only streamed clipped bootstrap/full expansion tiles, while headless explicitly chooses the cost of completely materializing its configured rectangle. Temperature remains derived rather than adding it to every cell: the public `ClimateSample` is four bytes and is built allocation-free from four analytic temperature nodes, the retained moisture byte, and one wind-direction byte. Slice 3 adds no retained per-cell, chunk, or regional payload.
 
 ### World-quality baseline
 
@@ -57,7 +57,7 @@ Each full-envelope view samples 262,144 fixed coordinates at a 128-cell step. Th
 | 42 | 49.85% | 4.67% | 12.72% | 25.76% | 5.15% | 0.94% | 0.92% | 34.71 |
 | 10,001 | 57.04% | 3.94% | 8.80% | 23.22% | 5.31% | 1.39% | 0.30% | 35.78 |
 
-The generated `representation.tsv` currently records: `GroundType` 1 byte/alignment 1, `TerrainCell` 4/2, `PrevailingWind` 1/1, `ClimateSample` 4/2, `FeatureKind` 1/1, `Feature` 24/8, `GeneratedCell` 6/2, and `ChunkCoord` 16/8. These are complete Rust record sizes, not sums of field widths. The existing regional-cache calculation below remains the relevant retained derivation-cache baseline.
+The review-format-2 `representation.tsv` currently records: `SurfaceType` 1 byte/alignment 1, `BiomeType` 1/1, `TerrainClass` 1/1, `TerrainCell` 4/2, `PrevailingWind` 1/1, `ClimateSample` 4/2, `FeatureKind` 1/1, `Feature` 24/8, `GeneratedCell` 6/2, and `ChunkCoord` 16/8. These are complete Rust record sizes, not sums of field widths. The existing regional-cache calculation below remains the relevant retained derivation-cache baseline.
 
 ### Cross-region drainage skeleton
 

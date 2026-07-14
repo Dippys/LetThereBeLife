@@ -2,7 +2,7 @@
 
 Last synchronized: 2026-07-14.
 
-Status: **Active**. Slices 0 through 2 are implemented; Slices 3 through 7 remain planned. This document sequences the remaining Phase 1 world-foundation work and marks implemented behavior explicitly.
+Status: **Active**. Slices 0 through 3 are implemented; Slices 4 through 7 remain planned. This document sequences the remaining Phase 1 world-foundation work and marks implemented behavior explicitly.
 
 ## Purpose
 
@@ -26,15 +26,15 @@ The implemented generator already provides:
 - a canonical 256-cell whole-envelope drainage skeleton with connected major channels, basin identities, and deterministic lake outlets;
 - analytic continents, oceans, coastlines, relief, plate-boundary mountains, temperature, and moisture;
 - whole-envelope priority-flood lakes and accumulated-flow major rivers refined through regional sampling;
-- deep water, shallow water, sand, grass, forest floor, hill, and bare-rock terrain;
+- packed surface and biome semantics covering ocean/lake/river water, beach/desert sand, soil-backed grassland/savanna/forest/wetland/tundra, alpine hill/rock, and snow/ice;
 - sparse deterministic trees, rocks, and berry bushes;
 - bounded parallel generation and camera-bounded `wgpu` rectangle rendering.
 
 Known limitations that motivate this plan:
 
-- the connected drainage skeleton intentionally resolves only major channels and coarse lakes; tributary hierarchy, local streams, wetlands, and transition detail remain later slices;
-- the latitude cycle is four times the height of the finite world envelope, so playable lowlands never reach the intended polar end of the climate function;
-- most moderate land collapses into grass or forest floor, while substrate, soil, wetland, tundra, snow, dry grassland, fertility, and traversal meaning are absent or conflated;
+- the connected drainage skeleton intentionally resolves only major channels and coarse lakes; tributary hierarchy, local streams, drainage-grounded wetlands, and transition detail remain later slices;
+- the provisional wetland class uses saturated lowland climate/elevation rather than water-table, floodplain, basin-edge, or poor-drainage evidence;
+- traversal, fertility, resource yield, and settlement suitability are not yet exposed as derived query contracts;
 - sparse features have only a kind and position, with no resource quantity, species, lifecycle, or modification state;
 - zoomed-out terrain expands one sampled cell over each coarse block, while features survive only at coordinates aligned to the sample step;
 - world-quality tests check structural properties but do not yet enforce a representative multi-seed, multi-scale review contract.
@@ -154,7 +154,7 @@ Status: **Implemented** on 2026-07-14. The finite vertical envelope is one styli
 
 The provisional physical interpretation is approximately 2 metres per cell, making the envelope about 131 km square. The climate zones are intentionally compressed for readable gameplay geography rather than claimed as an Earth-scale latitude model: cold lowland shoulders occupy roughly the outer 7,000 cells of each side before variation, temperate transitions roughly the next 12,000 cells per side, and the central warm band roughly 26,000 cells wide. This scale remains a world-foundation convention, not a persistence or movement-resolution commitment.
 
-`World::climate_at` exposes a four-byte `ClimateSample` for resident-cell inspection without growing the four-byte `TerrainCell` or materializing a regional cache. Temperature exactly reproduces the generator's 32-cell lattice interpolation from four analytic nodes; moisture is the retained eight-bit cell value and prevailing wind is derived directly. Complete-envelope multi-seed tests enforce cold, temperate, and warm lowland coverage, signed-edge inspection equality, wobbled circulation transitions, and existing worker/cache determinism. Tundra, snow, and other cold terrain meanings remain Slice 3.
+`World::climate_at` exposes a four-byte `ClimateSample` for resident-cell inspection without growing the four-byte `TerrainCell` or materializing a regional cache. Temperature exactly reproduces the generator's 32-cell lattice interpolation from four analytic nodes; moisture is the retained eight-bit cell value and prevailing wind is derived directly. Complete-envelope multi-seed tests enforce cold, temperate, and warm lowland coverage, signed-edge inspection equality, wobbled circulation transitions, and existing worker/cache determinism. Slice 3 consumes this contract for tundra, snow, wetland, and other biome meanings.
 
 ### Objective
 
@@ -187,6 +187,12 @@ The choice must also define approximate tile scale, expected climate-zone widths
 - Changing thread count or cache state does not change climate output.
 
 ## Slice 3: Terrain and biome semantics
+
+Status: **Implemented** on 2026-07-14. `TerrainCell` still occupies four bytes: its former one-byte ground enum is now a private packed `TerrainClass` whose low nibble is exposed as `SurfaceType` and high nibble as `BiomeType`. The safe `TerrainCell::surface`, `TerrainCell::biome`, and `TerrainCell::classification` accessors distinguish deep/shallow water, sand, soil, hill, rock, and snow/ice surfaces from ocean, lake, river, beach, desert, grassland, savanna, forest, wetland, tundra, and alpine environments.
+
+Classification uses the existing broad interpolated elevation, temperature, and moisture fields, so the new meanings form regional bands rather than independent cell scatter. Lake identity survives overlapping river segments while deep-water precedence remains order independent. Wetland currently means saturated warm/temperate lowland; Slice 4 must replace or refine that provisional climate/elevation rule with water-table, floodplain, basin-edge, or drainage evidence. Traversal, fertility, resource yield, and settlement suitability remain derived future rules rather than stored cell flags.
+
+The viewer HUD and both viewer/developer palettes expose the split semantics. World-quality review format 2 records seven surface and eleven biome distributions plus the packed semantic byte in its stable hash. The four canonical complete-envelope hashes are `a2373a6b276fcb06`, `a3bef667d00b0691`, `0c174931efc451af`, and `7ce7b66e324e6cb6` for seeds 1, 7, 42, and 10,001 respectively.
 
 ### Objective
 
@@ -415,12 +421,9 @@ The following are outside this plan unless a measured or gameplay-critical depen
 
 These must be resolved in the owning slice rather than silently assumed:
 
-- physical tile scale and the geographic meaning of the complete envelope;
-- cold-warm-cold world latitude versus a narrower regional climate slice;
-- coarse drainage-skeleton resolution and cache lifetime;
-- explicit water-body identity representation;
-- expanded `GroundType` versus separate compact surface and biome classifications;
-- which terrain properties are stored versus derived on query;
+- whether the provisional physical tile scale should become a durable movement/persistence contract;
+- hydrologic wetland inputs and local stream/transition ownership;
+- the first derived traversal, fertility, resource, and settlement query contract;
 - stable feature identity and sparse mutable-state keying;
 - renderer summary representation and residency budget;
 - quantitative world-quality thresholds that generalize across representative seeds.

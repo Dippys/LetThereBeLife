@@ -23,7 +23,8 @@ use std::{
 use rayon::prelude::*;
 
 use crate::world::{
-    CHUNK_SIZE, ChunkLoadRequest, ClimateSample, FeatureKind, GroundType, TerrainCell,
+    BiomeType, CHUNK_SIZE, ChunkLoadRequest, ClimateSample, FeatureKind, SurfaceType, TerrainCell,
+    TerrainClass,
 };
 use hydrology::{
     GRID, LAKE_MIN_DEPTH, NODE_STEP, RegionMap, RiverSegment, point_segment_distance_ratio,
@@ -42,9 +43,14 @@ const DEEP_WATER_FILL: i32 = 24_500;
 const SHALLOW_WATER_FILL: i32 = 27_800;
 const DESERT_MOISTURE_MAX: i32 = 12_000;
 const DESERT_TEMPERATURE_MIN: i32 = 30_000;
-const FOREST_MOISTURE_MIN: i32 = 31_000;
+const FOREST_MOISTURE_MIN: i32 = 30_000;
 const FOREST_TEMPERATURE_MIN: i32 = 13_000;
-const FROZEN_TEMPERATURE_MAX: i32 = 9_000;
+const WETLAND_MOISTURE_MIN: i32 = 48_000;
+const WETLAND_ELEVATION_MAX: i32 = 39_000;
+const SAVANNA_MOISTURE_MAX: i32 = 24_000;
+const TUNDRA_TEMPERATURE_MAX: i32 = 13_000;
+const SNOW_TEMPERATURE_MAX: i32 = 6_500;
+const MOUNTAIN_SNOW_TEMPERATURE_MAX: i32 = 9_000;
 
 const DETAIL_SEED_A: u64 = 0x4445_5441_494c_4131;
 const DETAIL_SEED_B: u64 = 0x4445_5441_494c_4232;
@@ -259,15 +265,17 @@ impl ChunkContext {
         let amplitude = roughness * coast_damp / 2_600;
         let mut elevation = (macro_elevation + detail * amplitude / NOISE_HALF) as i32;
 
-        let mut water_ground = None;
+        let mut water_surface = None;
+        let mut water_biome = None;
         if water_depth >= LAKE_MIN_DEPTH {
             let surface = macro_elevation + i64::from(water_depth - LAKE_MIN_DEPTH);
             elevation = surface.clamp(0, 65_535) as i32;
-            water_ground = Some(if water_depth >= LAKE_MIN_DEPTH + LAKE_DEEP_DEPTH {
-                GroundType::DeepWater
+            water_surface = Some(if water_depth >= LAKE_MIN_DEPTH + LAKE_DEEP_DEPTH {
+                SurfaceType::DeepWater
             } else {
-                GroundType::ShallowWater
+                SurfaceType::ShallowWater
             });
+            water_biome = Some(BiomeType::Lake);
         }
         for segment in &self.rivers[..self.river_len] {
             let (distance_sq, denominator) = point_segment_distance_ratio(
@@ -282,25 +290,33 @@ impl ChunkContext {
             let core = half_width * 5 / 8;
             if segment.half_width >= 8 && distance_sq <= i128::from(core * core) * denominator {
                 elevation = elevation.min(DEEP_WATER_FILL);
-                water_ground = Some(GroundType::DeepWater);
+                water_surface = Some(SurfaceType::DeepWater);
+                water_biome.get_or_insert(BiomeType::River);
             } else if distance_sq <= i128::from(half_width * half_width) * denominator {
                 elevation = elevation.min(SHALLOW_WATER_FILL);
-                if water_ground != Some(GroundType::DeepWater) {
-                    water_ground = Some(GroundType::ShallowWater);
+                if water_surface != Some(SurfaceType::DeepWater) {
+                    water_surface = Some(SurfaceType::ShallowWater);
                 }
+                water_biome.get_or_insert(BiomeType::River);
             }
         }
 
-        let ground = water_ground.unwrap_or_else(|| classify(elevation, moisture, temperature));
-        let cell = TerrainCell {
-            elevation: elevation.clamp(0, 65_535) as u16,
-            moisture: (moisture.clamp(0, 65_535) >> 8) as u8,
-            ground,
-        };
-        (
-            cell,
-            feature(self.seed, x, y, ground, moisture, temperature),
-        )
+        let class = water_surface.map_or_else(
+            || classify(elevation, moisture, temperature),
+            |surface| {
+                TerrainClass::new(
+                    surface,
+                    water_biome.expect("generated water has an owned water-body class"),
+                )
+            },
+        );
+        let cell = TerrainCell::new(
+            elevation.clamp(0, 65_535) as u16,
+            (moisture.clamp(0, 65_535) >> 8) as u8,
+            class.surface(),
+            class.biome(),
+        );
+        (cell, feature(self.seed, x, y, class, moisture, temperature))
     }
 }
 
@@ -316,27 +332,41 @@ fn river_intersects_chunk(segment: RiverSegment, origin_x: i64, origin_y: i64) -
             < max_y
 }
 
-fn classify(elevation: i32, moisture: i32, temperature: i32) -> GroundType {
+fn classify(elevation: i32, moisture: i32, temperature: i32) -> TerrainClass {
     if elevation <= DEEP_WATER_MAX {
-        GroundType::DeepWater
+        TerrainClass::new(SurfaceType::DeepWater, BiomeType::Ocean)
     } else if elevation <= SEA_LEVEL {
-        GroundType::ShallowWater
+        TerrainClass::new(SurfaceType::ShallowWater, BiomeType::Ocean)
     } else if elevation <= BEACH_MAX {
-        GroundType::Sand
+        TerrainClass::new(SurfaceType::Sand, BiomeType::Beach)
+    } else if temperature < SNOW_TEMPERATURE_MAX {
+        TerrainClass::new(SurfaceType::SnowIce, BiomeType::Tundra)
     } else if elevation > ROCK_MIN {
-        GroundType::BareRock
-    } else if elevation > HILL_MIN {
-        if temperature < FROZEN_TEMPERATURE_MAX {
-            GroundType::BareRock
+        let surface = if temperature < MOUNTAIN_SNOW_TEMPERATURE_MAX {
+            SurfaceType::SnowIce
         } else {
-            GroundType::Hill
-        }
+            SurfaceType::Rock
+        };
+        TerrainClass::new(surface, BiomeType::Alpine)
+    } else if elevation > HILL_MIN {
+        let surface = if temperature < MOUNTAIN_SNOW_TEMPERATURE_MAX {
+            SurfaceType::SnowIce
+        } else {
+            SurfaceType::Hill
+        };
+        TerrainClass::new(surface, BiomeType::Alpine)
+    } else if temperature < TUNDRA_TEMPERATURE_MAX {
+        TerrainClass::new(SurfaceType::Soil, BiomeType::Tundra)
     } else if moisture < DESERT_MOISTURE_MAX && temperature > DESERT_TEMPERATURE_MIN {
-        GroundType::Sand
+        TerrainClass::new(SurfaceType::Sand, BiomeType::Desert)
+    } else if moisture > WETLAND_MOISTURE_MIN && elevation <= WETLAND_ELEVATION_MAX {
+        TerrainClass::new(SurfaceType::Soil, BiomeType::Wetland)
     } else if moisture > FOREST_MOISTURE_MIN && temperature > FOREST_TEMPERATURE_MIN {
-        GroundType::ForestFloor
+        TerrainClass::new(SurfaceType::Soil, BiomeType::Forest)
+    } else if moisture < SAVANNA_MOISTURE_MAX && temperature > DESERT_TEMPERATURE_MIN {
+        TerrainClass::new(SurfaceType::Soil, BiomeType::Savanna)
     } else {
-        GroundType::Grass
+        TerrainClass::new(SurfaceType::Soil, BiomeType::Grassland)
     }
 }
 
@@ -344,30 +374,36 @@ fn feature(
     seed: u64,
     x: i64,
     y: i64,
-    ground: GroundType,
+    class: TerrainClass,
     moisture: i32,
     temperature: i32,
 ) -> Option<FeatureKind> {
-    if !matches!(
-        ground,
-        GroundType::Grass | GroundType::ForestFloor | GroundType::Hill | GroundType::BareRock
+    if matches!(
+        class.surface(),
+        SurfaceType::DeepWater
+            | SurfaceType::ShallowWater
+            | SurfaceType::Sand
+            | SurfaceType::SnowIce
     ) {
         return None;
     }
     let roll = (hash(seed ^ FEATURE_SEED, x, y) % 10_000) as i64;
-    match ground {
-        GroundType::ForestFloor => {
+    match (class.surface(), class.biome()) {
+        (SurfaceType::Soil, BiomeType::Forest) => {
             // Canopy noise opens clearings instead of uniform tree spam.
             let canopy = value_noise(seed ^ CANOPY_SEED, x, y, 176);
             (canopy > 16_000 && roll < 640).then_some(FeatureKind::Tree)
         }
-        GroundType::Grass if moisture > 30_000 && temperature > FOREST_TEMPERATURE_MIN => {
+        (SurfaceType::Soil, BiomeType::Grassland)
+            if moisture > 30_000 && temperature > FOREST_TEMPERATURE_MIN =>
+        {
             (roll < 55).then_some(FeatureKind::Tree)
         }
-        GroundType::Grass if moisture > 18_000 => (roll < 70
-            && value_noise(seed ^ BUSH_SEED, x, y, 96) > 39_000)
-            .then_some(FeatureKind::BerryBush),
-        GroundType::Hill | GroundType::BareRock => (roll < 170).then_some(FeatureKind::Rock),
+        (SurfaceType::Soil, BiomeType::Grassland | BiomeType::Savanna) if moisture > 18_000 => {
+            (roll < 70 && value_noise(seed ^ BUSH_SEED, x, y, 96) > 39_000)
+                .then_some(FeatureKind::BerryBush)
+        }
+        (SurfaceType::Hill | SurfaceType::Rock, _) => (roll < 170).then_some(FeatureKind::Rock),
         _ => None,
     }
 }
@@ -535,10 +571,10 @@ mod tests {
                 land += 1;
                 let temperature = temperature_field(PROBE_SEED, x, y, elevation);
                 let moisture = moisture_field(PROBE_SEED, x, y, elevation);
-                match classify(elevation, moisture, temperature) {
-                    GroundType::Sand if elevation > BEACH_MAX => desert[j * SIDE + i] = true,
-                    GroundType::ForestFloor => forest[j * SIDE + i] = true,
-                    GroundType::Grass => grass += 1,
+                match classify(elevation, moisture, temperature).biome() {
+                    BiomeType::Desert => desert[j * SIDE + i] = true,
+                    BiomeType::Forest => forest[j * SIDE + i] = true,
+                    BiomeType::Grassland | BiomeType::Savanna => grass += 1,
                     _ => {}
                 }
             }
@@ -561,6 +597,30 @@ mod tests {
         // must be much larger than single samples.
         assert!(component_sizes(&desert, SIDE)[0] >= 30);
         assert!(component_sizes(&forest, SIDE)[0] >= 30);
+    }
+
+    #[test]
+    fn terrain_semantics_separate_equal_surfaces_by_environment() {
+        let beach = classify(32_000, 8_000, 38_000);
+        let desert = classify(38_000, 8_000, 38_000);
+        assert_eq!(beach.surface(), SurfaceType::Sand);
+        assert_eq!(desert.surface(), SurfaceType::Sand);
+        assert_eq!(beach.biome(), BiomeType::Beach);
+        assert_eq!(desert.biome(), BiomeType::Desert);
+
+        let grassland = classify(38_000, 30_000, 22_000);
+        let wetland = classify(38_000, 52_000, 22_000);
+        assert_eq!(grassland.surface(), SurfaceType::Soil);
+        assert_eq!(wetland.surface(), SurfaceType::Soil);
+        assert_eq!(grassland.biome(), BiomeType::Grassland);
+        assert_eq!(wetland.biome(), BiomeType::Wetland);
+
+        let cold_lowland = classify(38_000, 24_000, 5_000);
+        let cold_mountain = classify(58_000, 24_000, 7_500);
+        assert_eq!(cold_lowland.surface(), SurfaceType::SnowIce);
+        assert_eq!(cold_lowland.biome(), BiomeType::Tundra);
+        assert_eq!(cold_mountain.surface(), SurfaceType::SnowIce);
+        assert_eq!(cold_mountain.biome(), BiomeType::Alpine);
     }
 
     #[test]
@@ -704,14 +764,11 @@ mod tests {
                         let origin_y = y.div_euclid(CHUNK_SIZE) * CHUNK_SIZE;
                         let context = ChunkContext::new(seed, origin_x, origin_y);
                         let (cell, feature) = context.generate(x, y);
-                        assert!(
-                            matches!(
-                                cell.ground,
-                                GroundType::DeepWater | GroundType::ShallowWater
-                            ),
-                            "flooded node {node} rendered as {:?}",
-                            cell.ground
-                        );
+                        assert!(matches!(
+                            cell.surface(),
+                            SurfaceType::DeepWater | SurfaceType::ShallowWater
+                        ));
+                        assert_eq!(cell.biome(), BiomeType::Lake);
                         assert!(feature.is_none(), "water node {node} emitted a feature");
                         checked += 1;
                     }
@@ -760,7 +817,8 @@ mod tests {
             };
 
             let (cell, feature) = context.generate(16, 16);
-            assert_eq!(cell.ground, GroundType::DeepWater);
+            assert_eq!(cell.surface(), SurfaceType::DeepWater);
+            assert_eq!(cell.biome(), BiomeType::River);
             assert_eq!(cell.elevation, DEEP_WATER_FILL as u16);
             assert!(feature.is_none());
         }
@@ -924,8 +982,8 @@ mod tests {
         // vegetation must cluster instead of scattering uniformly.
         let mut counts = [0_u32; 16];
         for (block, count) in counts.iter_mut().enumerate() {
-            let base_x = (block % 4) as i64 * 8_192 + 2_048;
-            let base_y = (block / 4) as i64 * 8_192 + 2_048;
+            let base_x = (block % 4) as i64 * 16_384 - 30_720;
+            let base_y = (block / 4) as i64 * 16_384 - 30_720;
             for chunk_y in 0..4 {
                 for chunk_x in 0..4 {
                     let origin_x = base_x + chunk_x * crate::world::CHUNK_SIZE;

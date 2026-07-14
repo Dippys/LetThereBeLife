@@ -194,14 +194,80 @@ impl WorldRect {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
-pub enum GroundType {
+pub enum SurfaceType {
     DeepWater,
     ShallowWater,
     Sand,
-    Grass,
-    ForestFloor,
+    Soil,
     Hill,
-    BareRock,
+    Rock,
+    SnowIce,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum BiomeType {
+    Ocean,
+    Lake,
+    River,
+    Beach,
+    Desert,
+    Grassland,
+    Savanna,
+    Forest,
+    Wetland,
+    Tundra,
+    Alpine,
+}
+
+/// Packed rendered surface and environmental biome classification.
+///
+/// The low nibble stores [`SurfaceType`] and the high nibble stores
+/// [`BiomeType`]. Construction is private to this crate, so every bit pattern
+/// held by a public [`TerrainCell`] resolves to valid enums through safe
+/// accessors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct TerrainClass(u8);
+
+impl TerrainClass {
+    pub(crate) const fn new(surface: SurfaceType, biome: BiomeType) -> Self {
+        Self((biome as u8) << 4 | surface as u8)
+    }
+
+    pub fn surface(self) -> SurfaceType {
+        match self.0 & 0x0f {
+            0 => SurfaceType::DeepWater,
+            1 => SurfaceType::ShallowWater,
+            2 => SurfaceType::Sand,
+            3 => SurfaceType::Soil,
+            4 => SurfaceType::Hill,
+            5 => SurfaceType::Rock,
+            6 => SurfaceType::SnowIce,
+            _ => unreachable!("TerrainClass is constructed from SurfaceType"),
+        }
+    }
+
+    pub fn biome(self) -> BiomeType {
+        match self.0 >> 4 {
+            0 => BiomeType::Ocean,
+            1 => BiomeType::Lake,
+            2 => BiomeType::River,
+            3 => BiomeType::Beach,
+            4 => BiomeType::Desert,
+            5 => BiomeType::Grassland,
+            6 => BiomeType::Savanna,
+            7 => BiomeType::Forest,
+            8 => BiomeType::Wetland,
+            9 => BiomeType::Tundra,
+            10 => BiomeType::Alpine,
+            _ => unreachable!("TerrainClass is constructed from BiomeType"),
+        }
+    }
+
+    pub const fn packed(self) -> u8 {
+        self.0
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -227,7 +293,34 @@ pub struct ClimateSample {
 pub struct TerrainCell {
     pub elevation: u16,
     pub moisture: u8,
-    pub ground: GroundType,
+    class: TerrainClass,
+}
+
+impl TerrainCell {
+    pub(crate) const fn new(
+        elevation: u16,
+        moisture: u8,
+        surface: SurfaceType,
+        biome: BiomeType,
+    ) -> Self {
+        Self {
+            elevation,
+            moisture,
+            class: TerrainClass::new(surface, biome),
+        }
+    }
+
+    pub fn surface(self) -> SurfaceType {
+        self.class.surface()
+    }
+
+    pub fn biome(self) -> BiomeType {
+        self.class.biome()
+    }
+
+    pub const fn classification(self) -> TerrainClass {
+        self.class
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1313,21 +1406,61 @@ mod tests {
         let world = World::generate_square(7, 256);
         let terrain: Vec<_> = world.cells().map(|(_, cell)| cell).collect();
         let features: Vec<_> = world.all_features().copied().collect();
-        let first = terrain[0].ground;
-        assert!(terrain.iter().any(|cell| cell.ground != first));
+        let first = terrain[0].classification();
+        assert!(terrain.iter().any(|cell| cell.classification() != first));
         assert!(!features.is_empty());
         assert!(features.len() < terrain.len() / 4);
-        assert!(features.iter().all(|feature| matches!(
-            world.cell(feature.position).unwrap().ground,
-            GroundType::Grass | GroundType::ForestFloor | GroundType::Hill | GroundType::BareRock
+        assert!(features.iter().all(|feature| !matches!(
+            world.cell(feature.position).unwrap().surface(),
+            SurfaceType::DeepWater
+                | SurfaceType::ShallowWater
+                | SurfaceType::Sand
+                | SurfaceType::SnowIce
         )));
     }
 
     #[test]
     fn terrain_records_keep_their_compact_layout() {
-        assert_eq!(std::mem::size_of::<GroundType>(), 1);
+        assert_eq!(std::mem::size_of::<SurfaceType>(), 1);
+        assert_eq!(std::mem::size_of::<BiomeType>(), 1);
+        assert_eq!(std::mem::size_of::<TerrainClass>(), 1);
         assert_eq!(std::mem::size_of::<TerrainCell>(), 4);
         assert_eq!(std::mem::size_of::<ClimateSample>(), 4);
+    }
+
+    #[test]
+    fn packed_terrain_classes_round_trip_every_public_semantic() {
+        let surfaces = [
+            SurfaceType::DeepWater,
+            SurfaceType::ShallowWater,
+            SurfaceType::Sand,
+            SurfaceType::Soil,
+            SurfaceType::Hill,
+            SurfaceType::Rock,
+            SurfaceType::SnowIce,
+        ];
+        let biomes = [
+            BiomeType::Ocean,
+            BiomeType::Lake,
+            BiomeType::River,
+            BiomeType::Beach,
+            BiomeType::Desert,
+            BiomeType::Grassland,
+            BiomeType::Savanna,
+            BiomeType::Forest,
+            BiomeType::Wetland,
+            BiomeType::Tundra,
+            BiomeType::Alpine,
+        ];
+        let mut packed = BTreeSet::new();
+        for surface in surfaces {
+            for biome in biomes {
+                let class = TerrainClass::new(surface, biome);
+                assert_eq!(class.surface(), surface);
+                assert_eq!(class.biome(), biome);
+                assert!(packed.insert(class.packed()));
+            }
+        }
     }
 
     #[test]

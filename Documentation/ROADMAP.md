@@ -25,6 +25,7 @@ Last synchronized: 2026-07-14.
 - World-foundation Slice 0: a repeatable four-seed, 12-view quality baseline with full-envelope, regional, both-axis drainage-seam, coastline, river-mouth, lake, mountain, and close-up evidence; deterministic metadata/distribution/type reports; focused tooling tests; and recorded release timing and peak working set.
 - World-foundation Slice 1: a bounded seed-keyed whole-envelope drainage skeleton with canonical basin/lake outlets, channel identities and confluences, continuous major rivers across signed 4,096-cell region seams, shared regional water sampling, deterministic pool/order regressions, compact layout bounds, and measured 128-versus-256-cell resolution evidence.
 - World-foundation Slice 2: a finite cold-to-warm-to-cold latitude contract fitted to the complete envelope, four alternating wobbled prevailing-wind bands, complete-envelope multi-seed climate coverage, and allocation-free resident-cell temperature/moisture/wind inspection while retaining the four-byte terrain cell.
+- World-foundation Slice 3: a one-byte packed surface/biome classification exposed through typed accessors, with distinct ocean/lake/river, beach/desert, grassland/savanna/forest/wetland, tundra/alpine, and snow/ice semantics; updated HUD/map palettes and review-format distributions; and no growth beyond the four-byte terrain cell.
 
 ## Active
 
@@ -35,8 +36,8 @@ Last synchronized: 2026-07-14.
 
 Detailed sequencing, implementation areas, acceptance criteria, performance checkpoints, and explicit deferrals for the remaining world work are maintained in [WORLD_FOUNDATION_PLAN.md](WORLD_FOUNDATION_PLAN.md).
 
-- Implement world-foundation Slice 3 by separating the compact terrain/biome meanings needed for traversal, resources, settlement suitability, and rendering, including distinct beach/arid, wetland, tundra, and snow semantics without uncontrolled type growth.
-- After terrain/biome semantics, refine coastlines, tributaries, local streams, wetlands, and sparse feature placement within explicit deterministic and performance bounds. Keep erosion and dynamic water for the point where their ownership and runtime budgets are defined.
+- Implement world-foundation Slice 4 by refining coastlines, adding tributaries and local streams, and replacing the provisional saturated-lowland wetland rule with drainage-grounded water-table, floodplain, basin-edge, or poor-drainage evidence. Keep erosion and dynamic water for the point where their ownership and runtime budgets are defined.
+- After local hydrology and transitions, refine sparse feature ecology and resource readiness within explicit deterministic and performance bounds.
 - Use the implemented representative-seed review set when changing world generation, and turn durable multi-seed findings into deterministic quality thresholds only when they express intended world behavior rather than preserve the current repository seed.
 - Extend the focused generation measurements where needed to protect world-generation iteration, including first terrain, bootstrap completion, frame hitches, resident memory, and allocations; use measured results to set explicit runtime budgets.
 

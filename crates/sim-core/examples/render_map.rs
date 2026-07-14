@@ -16,9 +16,9 @@ use std::{
 };
 
 use sim_core::{
-    CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkLocalPosition, ClimateSample, Feature,
-    FeatureKind, GeneratedCell, GroundType, PrevailingWind, TerrainCell, WORLD_GENERATION_BOUNDS,
-    WorldPosition, WorldRect,
+    BiomeType, CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkLocalPosition, ClimateSample, Feature,
+    FeatureKind, GeneratedCell, PrevailingWind, SurfaceType, TerrainCell, TerrainClass,
+    WORLD_GENERATION_BOUNDS, WorldPosition, WorldRect,
 };
 
 const DEFAULT_WIDTH: i64 = 4_096;
@@ -26,7 +26,7 @@ const DEFAULT_HEIGHT: i64 = 4_096;
 const DEFAULT_STEP: i64 = 8;
 const DEFAULT_REVIEW_DIRECTORY: &str = "target/world-quality";
 const MAX_PIXELS: usize = 16_777_216;
-const REVIEW_FORMAT_VERSION: u32 = 1;
+const REVIEW_FORMAT_VERSION: u32 = 2;
 const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
@@ -154,7 +154,8 @@ enum Mode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SampleStats {
-    terrain: [u64; 7],
+    surfaces: [u64; 7],
+    biomes: [u64; 11],
     features: [u64; 3],
     samples: u64,
     sample_hash: u64,
@@ -163,7 +164,8 @@ struct SampleStats {
 impl Default for SampleStats {
     fn default() -> Self {
         Self {
-            terrain: [0; 7],
+            surfaces: [0; 7],
+            biomes: [0; 11],
             features: [0; 3],
             samples: 0,
             sample_hash: FNV_OFFSET_BASIS,
@@ -173,8 +175,10 @@ impl Default for SampleStats {
 
 impl SampleStats {
     fn record(&mut self, x: i64, y: i64, cell: GeneratedCell) {
-        let ground = ground_index(cell.terrain.ground);
-        self.terrain[ground] += 1;
+        let surface = surface_index(cell.terrain.surface());
+        let biome = biome_index(cell.terrain.biome());
+        self.surfaces[surface] += 1;
+        self.biomes[biome] += 1;
         if let Some(feature) = cell.feature {
             self.features[feature_index(feature)] += 1;
         }
@@ -183,7 +187,10 @@ impl SampleStats {
         self.hash_bytes(&x.to_le_bytes());
         self.hash_bytes(&y.to_le_bytes());
         self.hash_bytes(&cell.terrain.elevation.to_le_bytes());
-        self.hash_bytes(&[cell.terrain.moisture, ground as u8]);
+        self.hash_bytes(&[
+            cell.terrain.moisture,
+            cell.terrain.classification().packed(),
+        ]);
         self.hash_bytes(&[cell
             .feature
             .map_or(0, |feature| feature_index(feature) as u8 + 1)]);
@@ -525,24 +532,43 @@ fn review_manifest(source_revision: &str, rendered: &[RenderedView]) -> String {
 
 fn distribution_report(rendered: &[RenderedView]) -> String {
     let mut report = String::from(
-        "view\tseed\tsamples\tdeep_water\tshallow_water\tsand\tgrass\tforest_floor\thill\tbare_rock\ttrees\trocks\tberry_bushes\tfeatures\tfeature_ppm\tsample_hash\n",
+        "view\tseed\tsamples\tdeep_water\tshallow_water\tsand\tsoil\thill\trock\tsnow_ice\tocean\tlake\triver\tbeach\tdesert\tgrassland\tsavanna\tforest\twetland\ttundra\talpine\ttrees\trocks\tberry_bushes\tfeatures\tfeature_ppm\tsample_hash\n",
     );
     for output in rendered {
-        let terrain = &output.stats.terrain;
+        let surfaces = &output.stats.surfaces;
+        let biomes = &output.stats.biomes;
         let features = &output.stats.features;
         writeln!(
             report,
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:016x}",
+            concat!(
+                "{}\t{}\t{}",
+                "\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                "\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                "\t{}\t{}\t{}",
+                "\t{}\t{}",
+                "\t{:016x}"
+            ),
             output.view.name,
             output.view.seed,
             output.stats.samples,
-            terrain[0],
-            terrain[1],
-            terrain[2],
-            terrain[3],
-            terrain[4],
-            terrain[5],
-            terrain[6],
+            surfaces[0],
+            surfaces[1],
+            surfaces[2],
+            surfaces[3],
+            surfaces[4],
+            surfaces[5],
+            surfaces[6],
+            biomes[0],
+            biomes[1],
+            biomes[2],
+            biomes[3],
+            biomes[4],
+            biomes[5],
+            biomes[6],
+            biomes[7],
+            biomes[8],
+            biomes[9],
+            biomes[10],
             features[0],
             features[1],
             features[2],
@@ -558,7 +584,9 @@ fn distribution_report(rendered: &[RenderedView]) -> String {
 fn representation_report() -> String {
     let mut report = String::from("type\tsize_bytes\talign_bytes\n");
     for (name, size, align) in [
-        type_layout::<GroundType>("GroundType"),
+        type_layout::<SurfaceType>("SurfaceType"),
+        type_layout::<BiomeType>("BiomeType"),
+        type_layout::<TerrainClass>("TerrainClass"),
         type_layout::<TerrainCell>("TerrainCell"),
         type_layout::<PrevailingWind>("PrevailingWind"),
         type_layout::<ClimateSample>("ClimateSample"),
@@ -644,15 +672,31 @@ fn align_up(value: i64, origin: i64, step: i64) -> Result<i64, String> {
         .ok_or("sample alignment exceeds i64 coordinates".to_owned())
 }
 
-fn ground_index(ground: GroundType) -> usize {
-    match ground {
-        GroundType::DeepWater => 0,
-        GroundType::ShallowWater => 1,
-        GroundType::Sand => 2,
-        GroundType::Grass => 3,
-        GroundType::ForestFloor => 4,
-        GroundType::Hill => 5,
-        GroundType::BareRock => 6,
+fn surface_index(surface: SurfaceType) -> usize {
+    match surface {
+        SurfaceType::DeepWater => 0,
+        SurfaceType::ShallowWater => 1,
+        SurfaceType::Sand => 2,
+        SurfaceType::Soil => 3,
+        SurfaceType::Hill => 4,
+        SurfaceType::Rock => 5,
+        SurfaceType::SnowIce => 6,
+    }
+}
+
+fn biome_index(biome: BiomeType) -> usize {
+    match biome {
+        BiomeType::Ocean => 0,
+        BiomeType::Lake => 1,
+        BiomeType::River => 2,
+        BiomeType::Beach => 3,
+        BiomeType::Desert => 4,
+        BiomeType::Grassland => 5,
+        BiomeType::Savanna => 6,
+        BiomeType::Forest => 7,
+        BiomeType::Wetland => 8,
+        BiomeType::Tundra => 9,
+        BiomeType::Alpine => 10,
     }
 }
 
@@ -679,14 +723,24 @@ fn sample_color(cell: GeneratedCell, show_features: bool) -> [u8; 3] {
 fn terrain_color(cell: TerrainCell) -> [u8; 3] {
     let shade = (cell.elevation >> 12) as u8;
     let rgb = |r: u8, g: u8, b: u8| [r, g, b];
-    match cell.ground {
-        GroundType::DeepWater => rgb(16, 48 + shade, 94 + shade),
-        GroundType::ShallowWater => rgb(28, 84 + shade, 126 + shade),
-        GroundType::Sand => rgb(184 + shade, 166 + shade, 105),
-        GroundType::Grass => rgb(50 + shade, 112 + shade, 51),
-        GroundType::ForestFloor => rgb(37, 86 + shade, 39),
-        GroundType::Hill => rgb(100 + shade, 108 + shade, 72),
-        GroundType::BareRock => rgb(125 + shade, 124 + shade, 119 + shade),
+    match (cell.surface(), cell.biome()) {
+        (SurfaceType::DeepWater, BiomeType::Ocean) => rgb(16, 48 + shade, 94 + shade),
+        (SurfaceType::ShallowWater, BiomeType::Ocean) => rgb(28, 84 + shade, 126 + shade),
+        (SurfaceType::DeepWater, BiomeType::Lake) => rgb(24, 66 + shade, 112 + shade),
+        (SurfaceType::ShallowWater, BiomeType::Lake) => rgb(40, 102 + shade, 142 + shade),
+        (SurfaceType::DeepWater, BiomeType::River) => rgb(20, 74 + shade, 128 + shade),
+        (SurfaceType::ShallowWater, BiomeType::River) => rgb(38, 116 + shade, 154 + shade),
+        (SurfaceType::Sand, BiomeType::Beach) => rgb(210 + shade, 190 + shade, 126),
+        (SurfaceType::Sand, BiomeType::Desert) => rgb(184 + shade, 150 + shade, 75),
+        (SurfaceType::Soil, BiomeType::Grassland) => rgb(50 + shade, 112 + shade, 51),
+        (SurfaceType::Soil, BiomeType::Savanna) => rgb(118 + shade, 126 + shade, 55),
+        (SurfaceType::Soil, BiomeType::Forest) => rgb(37, 86 + shade, 39),
+        (SurfaceType::Soil, BiomeType::Wetland) => rgb(48, 94 + shade, 74 + shade),
+        (SurfaceType::Soil, BiomeType::Tundra) => rgb(105 + shade, 119 + shade, 105 + shade),
+        (SurfaceType::Hill, _) => rgb(100 + shade, 108 + shade, 72),
+        (SurfaceType::Rock, _) => rgb(125 + shade, 124 + shade, 119 + shade),
+        (SurfaceType::SnowIce, _) => rgb(220 + shade, 229 + shade, 234 + shade),
+        _ => rgb(255, 0, 255),
     }
 }
 
@@ -829,7 +883,8 @@ mod tests {
             view: ReviewView::new("fixture", 7, (-64, -32, 128, 64), 4, true),
             relative_path: PathBuf::from("seed-7/fixture.bmp"),
             stats: SampleStats {
-                terrain: [1, 2, 3, 4, 5, 6, 7],
+                surfaces: [1, 2, 3, 4, 5, 6, 7],
+                biomes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
                 features: [8, 9, 10],
                 samples: 28,
                 sample_hash: 0x1234_5678_9abc_def0,
@@ -841,20 +896,16 @@ mod tests {
         assert_eq!(left, right);
         assert_eq!(
             left,
-            "review_format\tsource_revision\tview\tseed\tmin_x\tmin_y\tmax_x\tmax_y\tstep\tcolumns\trows\tfeatures\tsample_hash\tpath\n1\tabc123+dirty\tfixture\t7\t-64\t-32\t64\t32\t4\t32\t16\ttrue\t123456789abcdef0\tseed-7/fixture.bmp\n"
+            "review_format\tsource_revision\tview\tseed\tmin_x\tmin_y\tmax_x\tmax_y\tstep\tcolumns\trows\tfeatures\tsample_hash\tpath\n2\tabc123+dirty\tfixture\t7\t-64\t-32\t64\t32\t4\t32\t16\ttrue\t123456789abcdef0\tseed-7/fixture.bmp\n"
         );
     }
 
     #[test]
     fn semantic_sample_hash_is_deterministic_and_coordinate_sensitive() {
-        let cell = GeneratedCell {
-            terrain: TerrainCell {
-                elevation: 42_000,
-                moisture: 127,
-                ground: GroundType::Grass,
-            },
-            feature: Some(FeatureKind::BerryBush),
-        };
+        let cell = ChunkGenerator::new(1, ChunkCoord { x: 0, y: 0 })
+            .unwrap()
+            .sample(ChunkLocalPosition { x: 0, y: 0 })
+            .unwrap();
         let mut left = SampleStats::default();
         let mut right = SampleStats::default();
         left.record(-1, 2, cell);
