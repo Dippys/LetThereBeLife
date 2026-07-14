@@ -281,3 +281,25 @@ Date: 2026-07-14
 **Reason:** A fixed 1/8x floor displayed only half the full world's height. Cursor anchoring plus center-only clamping could also leave an edge off-screen at minimum zoom. Deriving the floor from both rectangles guarantees the complete red boundary fits regardless of window aspect ratio or valid bootstrap dimensions.
 
 **Consequences:** Startup framing remains unchanged. Ordinary wheel zoom remains cursor-anchored, while world-edge clamping may move the camera as necessary; at maximum zoom-out the full envelope is centered and visible. Extremely wide or tall windows may show empty presentation space outside the square on the surplus axis, but automatic generation remains clipped to authoritative world bounds.
+
+## D-026: Viewer expansion generation is explicit right-drag only
+
+Date: 2026-07-14
+
+**Supersedes:** D-021, D-023, D-024, and D-025 only where they schedule or describe automatic current-viewport generation and view-change cancellation.
+
+**Decision:** Keep startup bootstrap streaming through the bounded center-out 32 x 32 `ChunkPager`, but remove automatic visible-area generation from `sim-viewer`. Camera movement, resize, zoom, hover, and redraw never create or cancel terrain requests. After bootstrap, only releasing a valid right-button drag queues missing terrain. Manual work continues to preempt active bootstrap work, and the persistent coordinator, deterministic request ordering, generation IDs, load validation, and insertion budgets remain unchanged.
+
+**Reason:** Viewpoint-triggered generation performs CPU work and retains terrain merely because the user navigated the camera. Explicit right-drag requests make expansion intentional, predictable, and bounded by the existing selection preview and core validation rules.
+
+**Consequences:** Panning or zooming over missing terrain leaves it unloaded until selected with the right mouse button. `GenerationKind::Automatic`, the automatic pager/pending state, viewpoint-dirty flag, and automatic error title state are removed. The remaining pager is named `ChunkPager` because it serves bootstrap rather than the viewport. `C` permanently drops remaining bootstrap work for that process, while later valid right-drag selections can still queue manual generation.
+
+## D-027: In-game diagnostic HUD and retained time-square
+
+Date: 2026-07-14
+
+**Decision:** Keep the native window title static and move simulation, generation, and hover-inspection data into a DPI-scaled in-game HUD owned by `sim-viewer`. When no world position is under the pointer, use the inspection area for a compact control guide. Preserve the bottom moving square as the passage-of-time motif, add a subtle rail, and derive its traversal from a repeating 60 simulated-second interval. Render HUD text with a built-in 5 x 7 bitmap alphabet encoded as horizontal rectangle runs in the existing screen-space pipeline.
+
+**Reason:** Dynamic title text is visually detached from the simulation and the old top-left bars expose little actionable information. A self-contained HUD makes status, time, generation, and terrain inspection legible in the same visual context while retaining the requested time-square identity. Reusing rectangle instances avoids a font/runtime dependency for the current diagnostic UI.
+
+**Consequences:** `sim-viewer` gains presentation-only cursor position and generation-status views; no HUD value becomes simulation truth. The reusable HUD string and fixed CPU/GPU screen-overlay capacities bound allocation and upload size, with regression coverage for supported layouts. The bitmap alphabet is intentionally utilitarian; richer typography or interactive widgets would require a later UI/rendering decision.

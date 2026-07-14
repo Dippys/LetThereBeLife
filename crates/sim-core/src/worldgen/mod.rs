@@ -245,7 +245,9 @@ impl ChunkContext {
                 <= i128::from(segment.half_width * segment.half_width) * denominator
             {
                 elevation = elevation.min(SHALLOW_WATER_FILL);
-                water_ground = Some(GroundType::ShallowWater);
+                if water_ground != Some(GroundType::DeepWater) {
+                    water_ground = Some(GroundType::ShallowWater);
+                }
             }
         }
 
@@ -634,6 +636,46 @@ mod tests {
             checked >= 16,
             "expected representative flooded lattice nodes"
         );
+    }
+
+    #[test]
+    fn river_core_wins_over_overlapping_bank_in_any_segment_order() {
+        let core = RiverSegment {
+            ax: 0,
+            ay: 16,
+            bx: 32,
+            by: 16,
+            half_width: 8,
+        };
+        let bank = RiverSegment {
+            ax: 23,
+            ay: 0,
+            bx: 23,
+            by: 32,
+            half_width: 8,
+        };
+
+        for ordered in [[core, bank], [bank, core]] {
+            let mut rivers = [EMPTY_SEGMENT; MAX_CHUNK_RIVERS];
+            rivers[..ordered.len()].copy_from_slice(&ordered);
+            let context = ChunkContext {
+                seed: PROBE_SEED,
+                origin_x: 0,
+                origin_y: 0,
+                elevation: [40_000; 9],
+                water_depth: [0; 9],
+                temperature: [20_000; 9],
+                moisture: [20_000; 9],
+                roughness: [0; 9],
+                rivers,
+                river_len: ordered.len(),
+            };
+
+            let (cell, feature) = context.generate(16, 16);
+            assert_eq!(cell.ground, GroundType::DeepWater);
+            assert_eq!(cell.elevation, DEEP_WATER_FILL as u16);
+            assert!(feature.is_none());
+        }
     }
 
     #[test]

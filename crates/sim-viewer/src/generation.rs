@@ -14,15 +14,14 @@ use sim_core::{
     WorldRect,
 };
 
-pub const AUTOMATIC_PAGE_CHUNKS: i64 = 32;
-const AUTOMATIC_PAGE_HALF: i64 = AUTOMATIC_PAGE_CHUNKS / 2;
+pub const PAGE_CHUNKS: i64 = 32;
+const PAGE_HALF: i64 = PAGE_CHUNKS / 2;
 
 pub type GenerationId = u64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GenerationKind {
     Bootstrap,
-    Automatic,
     Manual,
 }
 
@@ -347,10 +346,9 @@ fn prepare_request_window(
     *prepared_until = end;
 }
 
-/// A bounded, deterministic center-out sequence of chunk pages for automatic
-/// demand. It holds only the current page-ring iterator, never one entry per
-/// chunk in an extreme zoomed-out viewport.
-pub struct ViewportPager {
+/// A bounded, deterministic center-out sequence of chunk pages. It holds only
+/// the current page-ring iterator, never one entry per chunk in a large area.
+pub struct ChunkPager {
     bounds: WorldRect,
     min_page_x: i64,
     max_page_x: i64,
@@ -363,7 +361,7 @@ pub struct ViewportPager {
     ring: Option<PageRing>,
 }
 
-impl ViewportPager {
+impl ChunkPager {
     pub fn new(bounds: WorldRect, focus: WorldPosition) -> Result<Self, GenerateAreaError> {
         if bounds.max.x <= bounds.min.x || bounds.max.y <= bounds.min.y {
             return Err(GenerateAreaError::Empty);
@@ -450,9 +448,7 @@ impl ViewportPager {
 }
 
 fn chunk_page(chunk: i64) -> i64 {
-    chunk
-        .saturating_add(AUTOMATIC_PAGE_HALF)
-        .div_euclid(AUTOMATIC_PAGE_CHUNKS)
+    chunk.saturating_add(PAGE_HALF).div_euclid(PAGE_CHUNKS)
 }
 
 struct PageRing {
@@ -553,16 +549,12 @@ impl PageRing {
 
 fn page_bounds(page_x: i64, page_y: i64, bounds: WorldRect) -> Option<WorldRect> {
     let min_chunk = ChunkCoord {
-        x: page_x
-            .checked_mul(AUTOMATIC_PAGE_CHUNKS)?
-            .checked_sub(AUTOMATIC_PAGE_HALF)?,
-        y: page_y
-            .checked_mul(AUTOMATIC_PAGE_CHUNKS)?
-            .checked_sub(AUTOMATIC_PAGE_HALF)?,
+        x: page_x.checked_mul(PAGE_CHUNKS)?.checked_sub(PAGE_HALF)?,
+        y: page_y.checked_mul(PAGE_CHUNKS)?.checked_sub(PAGE_HALF)?,
     };
     let max_chunk = ChunkCoord {
-        x: min_chunk.x.checked_add(AUTOMATIC_PAGE_CHUNKS - 1)?,
-        y: min_chunk.y.checked_add(AUTOMATIC_PAGE_CHUNKS - 1)?,
+        x: min_chunk.x.checked_add(PAGE_CHUNKS - 1)?,
+        y: min_chunk.y.checked_add(PAGE_CHUNKS - 1)?,
     };
     let page = WorldRect {
         min: min_chunk.bounds().ok()?.min,
@@ -632,10 +624,10 @@ mod tests {
             },
             max: WorldPosition { x: 8_192, y: 8_192 },
         };
-        let mut pager = ViewportPager::new(bounds, WorldPosition { x: 0, y: 0 }).unwrap();
+        let mut pager = ChunkPager::new(bounds, WorldPosition { x: 0, y: 0 }).unwrap();
         let world = World::new(1, WorldConfig::new(64, 64).unwrap());
         let first = pager.next_requests(&world).unwrap().unwrap();
-        assert!(first.len() <= (AUTOMATIC_PAGE_CHUNKS * AUTOMATIC_PAGE_CHUNKS) as usize);
+        assert!(first.len() <= (PAGE_CHUNKS * PAGE_CHUNKS) as usize);
         assert!(
             first
                 .iter()
@@ -647,7 +639,7 @@ mod tests {
         assert_eq!(coords.iter().map(|coord| coord.y).min(), Some(-16));
         assert_eq!(coords.iter().map(|coord| coord.y).max(), Some(15));
         let second = pager.next_requests(&world).unwrap().unwrap();
-        assert!(second.len() <= (AUTOMATIC_PAGE_CHUNKS * AUTOMATIC_PAGE_CHUNKS) as usize);
+        assert!(second.len() <= (PAGE_CHUNKS * PAGE_CHUNKS) as usize);
         assert!(
             !second
                 .iter()

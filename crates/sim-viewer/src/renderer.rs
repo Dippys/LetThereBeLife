@@ -1,9 +1,9 @@
-use std::{borrow::Cow, sync::Arc};
+use std::{borrow::Cow, fmt::Write, sync::Arc};
 
 use bytemuck::{Pod, Zeroable};
 use sim_core::{
-    CHUNK_SIZE, ChunkInspection, ChunkPresence, FeatureKind, GroundType, SimulationSnapshot,
-    WORLD_GENERATION_BOUNDS, World, WorldPosition, WorldRect,
+    CHUNK_SIZE, ChunkInspection, ChunkPresence, FeatureKind, GenerateAreaError, GroundType,
+    SimulationSnapshot, WORLD_GENERATION_BOUNDS, World, WorldPosition, WorldRect,
 };
 use wgpu::util::DeviceExt;
 use winit::window::Window;
@@ -13,10 +13,22 @@ use crate::camera::Camera;
 pub struct RenderState {
     pub snapshot: SimulationSnapshot,
     pub camera: Camera,
+    pub ui_scale: f32,
+    pub cursor_world: Option<WorldPosition>,
     pub inspected: Option<ChunkInspection>,
     pub hovered: Option<WorldPosition>,
     pub selection: Option<WorldRect>,
     pub selection_valid: bool,
+    pub generation_status: GenerationStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GenerationStatus {
+    Idle,
+    Bootstrap,
+    Manual,
+    Cancelling,
+    WorkerUnavailable,
 }
 
 pub struct Renderer {
@@ -32,6 +44,8 @@ pub struct Renderer {
     world_overlay: InstanceBuffer,
     world_overlay_instances: Vec<Instance>,
     screen_overlay: InstanceBuffer,
+    screen_overlay_instances: Vec<Instance>,
+    hud_text: String,
     world_revision: u64,
     cached_bounds: Option<WorldRect>,
     cached_step: u32,
@@ -145,7 +159,13 @@ impl Renderer {
                 WORLD_OVERLAY_CAPACITY,
             ),
             world_overlay_instances: Vec::with_capacity(WORLD_OVERLAY_CAPACITY),
-            screen_overlay: InstanceBuffer::dynamic(&device, "screen overlay", 4),
+            screen_overlay: InstanceBuffer::dynamic(
+                &device,
+                "screen overlay",
+                SCREEN_OVERLAY_CAPACITY,
+            ),
+            screen_overlay_instances: Vec::with_capacity(SCREEN_OVERLAY_CAPACITY),
+            hud_text: String::with_capacity(HUD_TEXT_CAPACITY),
             world_revision: world.revision(),
             cached_bounds: None,
             cached_step: 1,
@@ -276,38 +296,20 @@ impl Renderer {
         debug_assert!(world_overlay.len() <= WORLD_OVERLAY_CAPACITY);
         self.world_overlay.write(&self.queue, world_overlay);
 
-        let pulse = ((state.snapshot.tick / 12) % 80) as f32;
-        let marker_x = ((state.snapshot.tick / 2)
-            % u64::from(self.config.width.saturating_sub(32).max(1))) as f32;
-        let screen_overlay = [
-            Instance::new(28.0, 28.0, 260.0, 92.0, rgba(9, 16, 20, 255)),
-            Instance::new(
-                44.0,
-                48.0,
-                12.0 + pulse,
-                12.0,
-                if state.snapshot.paused {
-                    rgba(210, 150, 55, 255)
-                } else {
-                    rgba(75, 205, 125, 255)
-                },
-            ),
-            Instance::new(
-                44.0,
-                72.0,
-                state.snapshot.speed * 24.0,
-                8.0,
-                rgba(78, 145, 220, 255),
-            ),
-            Instance::new(
-                marker_x,
-                self.config.height.saturating_sub(28) as f32,
-                16.0,
-                16.0,
-                rgba(235, 216, 130, 255),
-            ),
-        ];
-        self.screen_overlay.write(&self.queue, &screen_overlay);
+        write_hud_text(&mut self.hud_text, world, &state);
+        build_screen_overlay(
+            &mut self.screen_overlay_instances,
+            &self.hud_text,
+            &state,
+            self.config.width,
+            self.config.height,
+        );
+        assert!(
+            self.screen_overlay_instances.len() <= SCREEN_OVERLAY_CAPACITY,
+            "HUD instance budget must cover every supported status layout"
+        );
+        self.screen_overlay
+            .write(&self.queue, &self.screen_overlay_instances);
 
         let output = self.surface.get_current_texture()?;
         let texture_view = output
@@ -450,6 +452,8 @@ const MAX_INSTANCES_PER_BUFFER: usize = 1_000_000;
 const MIN_TERRAIN_SAMPLE_PIXELS: f32 = 2.0;
 const CACHE_MARGIN_PIXELS: f32 = 128.0;
 const WORLD_OVERLAY_CAPACITY: usize = 10;
+const SCREEN_OVERLAY_CAPACITY: usize = 4_096;
+const HUD_TEXT_CAPACITY: usize = 512;
 const MIN_CHUNK_OUTLINE_PIXELS: f32 = 4.0;
 const MAX_CHUNK_OUTLINE_WORLD_WIDTH: f32 = 8.0;
 const MAX_WORLD_BORDER_WIDTH: f32 = 32.0;
@@ -675,6 +679,336 @@ fn world_border(scale: f32) -> [Instance; 4] {
     ]
 }
 
+fn write_hud_text(output: &mut String, world: &World, state: &RenderState) {
+    output.clear();
+    let activity = if state.snapshot.paused {
+        "PAUSED"
+    } else {
+        "RUNNING"
+    };
+    let speed = state.snapshot.speed;
+    let total_tenths = (state.snapshot.simulated_seconds.max(0.0) * 10.0) as u64;
+    let hours = total_tenths / 36_000;
+    let minutes = total_tenths / 600 % 60;
+    let seconds = total_tenths / 10 % 60;
+    let tenths = total_tenths % 10;
+
+    writeln!(output, "LET THERE BE LIFE").expect("writing to String cannot fail");
+    if speed.fract() == 0.0 {
+        writeln!(output, "{activity}  SPEED {speed:.0}X").expect("writing to String cannot fail");
+    } else {
+        writeln!(output, "{activity}  SPEED {speed:.1}X").expect("writing to String cannot fail");
+    }
+    writeln!(
+        output,
+        "SIM {hours:04}:{minutes:02}:{seconds:02}.{tenths}  TICK {}",
+        state.snapshot.tick
+    )
+    .expect("writing to String cannot fail");
+    writeln!(
+        output,
+        "SEED {}  LOADED {}  REV {}",
+        state.snapshot.seed,
+        world.loaded_chunk_count(),
+        world.revision()
+    )
+    .expect("writing to String cannot fail");
+    writeln!(output, "GEN {}", generation_label(state.generation_status))
+        .expect("writing to String cannot fail");
+
+    if let Some(selection) = state.selection {
+        writeln!(
+            output,
+            "SELECT {} X {}  {}",
+            selection.max.x - selection.min.x,
+            selection.max.y - selection.min.y,
+            if state.selection_valid {
+                "VALID"
+            } else {
+                "INVALID"
+            }
+        )
+        .expect("writing to String cannot fail");
+    }
+
+    let Some(position) = state.cursor_world else {
+        writeln!(output, "CURSOR  MOVE OVER MAP TO INSPECT")
+            .expect("writing to String cannot fail");
+        writeln!(output, "L-DRAG PAN  R-DRAG GENERATE").expect("writing to String cannot fail");
+        write!(output, "SPACE PAUSE  1-4 SPEED  C CANCEL").expect("writing to String cannot fail");
+        return;
+    };
+
+    writeln!(output, "CURSOR X {}  Y {}", position.x, position.y)
+        .expect("writing to String cannot fail");
+    match world.inspect_chunk_at(position) {
+        Ok(inspection) => {
+            writeln!(
+                output,
+                "CHUNK X {} Y {}  LOCAL {},{}",
+                inspection.coord.x, inspection.coord.y, inspection.local.x, inspection.local.y
+            )
+            .expect("writing to String cannot fail");
+            writeln!(output, "COVERAGE {}", coverage_label(inspection.presence))
+                .expect("writing to String cannot fail");
+            if let Some(cell) = world.cell(position) {
+                writeln!(output, "TERRAIN {}", ground_label(cell.ground))
+                    .expect("writing to String cannot fail");
+                write!(
+                    output,
+                    "ELEV {}  MOIST {}  FEATURE {}",
+                    cell.elevation,
+                    cell.moisture,
+                    world
+                        .feature_at(position)
+                        .map_or("NONE", |feature| feature_label(feature.kind))
+                )
+                .expect("writing to String cannot fail");
+            } else {
+                write!(output, "CELL UNLOADED").expect("writing to String cannot fail");
+            }
+        }
+        Err(GenerateAreaError::OutsideWorldBounds) => {
+            write!(output, "OUTSIDE WORLD BOUNDARY").expect("writing to String cannot fail");
+        }
+        Err(_) => {
+            write!(output, "CHUNK COORDINATES UNAVAILABLE").expect("writing to String cannot fail");
+        }
+    }
+}
+
+const fn generation_label(status: GenerationStatus) -> &'static str {
+    match status {
+        GenerationStatus::Idle => "READY",
+        GenerationStatus::Bootstrap => "LOADING WORLD",
+        GenerationStatus::Manual => "GENERATING SELECTION",
+        GenerationStatus::Cancelling => "CANCELLING",
+        GenerationStatus::WorkerUnavailable => "WORKER OFFLINE",
+    }
+}
+
+const fn coverage_label(presence: ChunkPresence) -> &'static str {
+    match presence {
+        ChunkPresence::Missing => "MISSING",
+        ChunkPresence::InitialUnloaded => "INITIAL UNLOADED",
+        ChunkPresence::PartialInitialUnloaded => "PARTIAL INITIAL UNLOADED",
+        ChunkPresence::PartialInitial => "PARTIAL INITIAL",
+        ChunkPresence::Initial => "INITIAL",
+        ChunkPresence::Retained => "RETAINED",
+        ChunkPresence::RetainedPartialInitial => "PARTIAL INITIAL RETAINED",
+    }
+}
+
+const fn ground_label(ground: GroundType) -> &'static str {
+    match ground {
+        GroundType::DeepWater => "DEEP WATER",
+        GroundType::ShallowWater => "SHALLOW WATER",
+        GroundType::Sand => "SAND",
+        GroundType::Grass => "GRASS",
+        GroundType::ForestFloor => "FOREST FLOOR",
+        GroundType::Hill => "HILL",
+        GroundType::BareRock => "BARE ROCK",
+    }
+}
+
+const fn feature_label(feature: FeatureKind) -> &'static str {
+    match feature {
+        FeatureKind::Tree => "TREE",
+        FeatureKind::Rock => "ROCK",
+        FeatureKind::BerryBush => "BERRY BUSH",
+    }
+}
+
+fn build_screen_overlay(
+    instances: &mut Vec<Instance>,
+    text: &str,
+    state: &RenderState,
+    width: u32,
+    height: u32,
+) {
+    instances.clear();
+    let scale = state.ui_scale.clamp(1.0, 3.0);
+    let pixel = 2.0 * scale;
+    let advance = 6.0 * pixel;
+    let line_height = 9.0 * pixel;
+    let margin = 14.0 * scale;
+    let text_x = margin + 14.0 * scale;
+    let text_y = margin + 10.0 * scale;
+    let line_count = text.lines().count().max(1);
+    let longest_line = text.lines().map(str::len).max().unwrap_or(1) as f32;
+    let panel_width = longest_line * advance + 28.0 * scale;
+    let panel_height = line_count as f32 * line_height + 20.0 * scale;
+
+    instances.push(Instance::new(
+        margin + 3.0 * scale,
+        margin + 3.0 * scale,
+        panel_width,
+        panel_height,
+        rgba(0, 0, 0, 105),
+    ));
+    instances.push(Instance::new(
+        margin,
+        margin,
+        panel_width,
+        panel_height,
+        rgba(8, 15, 20, 232),
+    ));
+    instances.push(Instance::new(
+        margin,
+        margin,
+        4.0 * scale,
+        panel_height,
+        rgba(71, 190, 194, 255),
+    ));
+    instances.push(Instance::new(
+        text_x,
+        text_y + line_height - 3.0 * scale,
+        panel_width - 28.0 * scale,
+        scale,
+        rgba(71, 190, 194, 100),
+    ));
+    instances.push(Instance::new(
+        text_x,
+        text_y + 5.0 * line_height - 3.0 * scale,
+        panel_width - 28.0 * scale,
+        scale,
+        rgba(120, 145, 150, 75),
+    ));
+
+    for (line_index, line) in text.lines().enumerate() {
+        let color = match line_index {
+            0 => rgba(151, 232, 229, 255),
+            1 if state.snapshot.paused => rgba(240, 183, 78, 255),
+            1 => rgba(100, 220, 145, 255),
+            4 if state.generation_status == GenerationStatus::WorkerUnavailable => {
+                rgba(245, 96, 86, 255)
+            }
+            4 if state.generation_status != GenerationStatus::Idle => rgba(236, 196, 84, 255),
+            _ => rgba(218, 229, 226, 255),
+        };
+        push_bitmap_text(
+            instances,
+            line,
+            text_x,
+            text_y + line_index as f32 * line_height,
+            pixel,
+            color,
+        );
+    }
+
+    let rail_margin = 28.0 * scale;
+    let square = 14.0 * scale;
+    let rail_width = (width as f32 - rail_margin * 2.0).max(square);
+    let rail_y = height as f32 - 19.0 * scale;
+    let cycle = (state.snapshot.simulated_seconds.max(0.0) % 60.0) as f32 / 60.0;
+    let travel = (rail_width - square).max(0.0);
+    let marker_x = rail_margin + travel * cycle;
+    instances.push(Instance::new(
+        rail_margin,
+        rail_y - scale,
+        rail_width,
+        2.0 * scale,
+        rgba(224, 220, 191, 70),
+    ));
+    instances.push(Instance::new(
+        rail_margin,
+        rail_y - scale,
+        travel * cycle + square * 0.5,
+        2.0 * scale,
+        rgba(235, 216, 130, 155),
+    ));
+    instances.push(Instance::new(
+        marker_x,
+        rail_y - square * 0.5,
+        square,
+        square,
+        rgba(235, 216, 130, 255),
+    ));
+}
+
+fn push_bitmap_text(
+    instances: &mut Vec<Instance>,
+    text: &str,
+    x: f32,
+    y: f32,
+    pixel: f32,
+    color: u32,
+) {
+    for (character_index, character) in text.chars().enumerate() {
+        let glyph = glyph_rows(character);
+        let glyph_x = x + character_index as f32 * pixel * 6.0;
+        for (row_index, row) in glyph.into_iter().enumerate() {
+            let mut column = 0;
+            while column < 5 {
+                if row & (1 << (4 - column)) == 0 {
+                    column += 1;
+                    continue;
+                }
+                let start = column;
+                while column < 5 && row & (1 << (4 - column)) != 0 {
+                    column += 1;
+                }
+                instances.push(Instance::new(
+                    glyph_x + start as f32 * pixel,
+                    y + row_index as f32 * pixel,
+                    (column - start) as f32 * pixel,
+                    pixel,
+                    color,
+                ));
+            }
+        }
+    }
+}
+
+const fn glyph_rows(character: char) -> [u8; 7] {
+    match character {
+        'A' => [14, 17, 17, 31, 17, 17, 17],
+        'B' => [30, 17, 17, 30, 17, 17, 30],
+        'C' => [14, 17, 16, 16, 16, 17, 14],
+        'D' => [30, 17, 17, 17, 17, 17, 30],
+        'E' => [31, 16, 16, 30, 16, 16, 31],
+        'F' => [31, 16, 16, 30, 16, 16, 16],
+        'G' => [14, 17, 16, 23, 17, 17, 15],
+        'H' => [17, 17, 17, 31, 17, 17, 17],
+        'I' => [31, 4, 4, 4, 4, 4, 31],
+        'J' => [7, 2, 2, 2, 18, 18, 12],
+        'K' => [17, 18, 20, 24, 20, 18, 17],
+        'L' => [16, 16, 16, 16, 16, 16, 31],
+        'M' => [17, 27, 21, 21, 17, 17, 17],
+        'N' => [17, 25, 21, 19, 17, 17, 17],
+        'O' => [14, 17, 17, 17, 17, 17, 14],
+        'P' => [30, 17, 17, 30, 16, 16, 16],
+        'Q' => [14, 17, 17, 17, 21, 18, 13],
+        'R' => [30, 17, 17, 30, 20, 18, 17],
+        'S' => [15, 16, 16, 14, 1, 1, 30],
+        'T' => [31, 4, 4, 4, 4, 4, 4],
+        'U' => [17, 17, 17, 17, 17, 17, 14],
+        'V' => [17, 17, 17, 17, 17, 10, 4],
+        'W' => [17, 17, 17, 21, 21, 21, 10],
+        'X' => [17, 17, 10, 4, 10, 17, 17],
+        'Y' => [17, 17, 10, 4, 4, 4, 4],
+        'Z' => [31, 1, 2, 4, 8, 16, 31],
+        '0' => [14, 17, 19, 21, 25, 17, 14],
+        '1' => [4, 12, 4, 4, 4, 4, 14],
+        '2' => [14, 17, 1, 2, 4, 8, 31],
+        '3' => [30, 1, 1, 14, 1, 1, 30],
+        '4' => [2, 6, 10, 18, 31, 2, 2],
+        '5' => [31, 16, 16, 30, 1, 1, 30],
+        '6' => [14, 16, 16, 30, 17, 17, 14],
+        '7' => [31, 1, 2, 4, 8, 8, 8],
+        '8' => [14, 17, 17, 14, 17, 17, 14],
+        '9' => [14, 17, 17, 15, 1, 1, 14],
+        ':' => [0, 4, 4, 0, 4, 4, 0],
+        ',' => [0, 0, 0, 0, 4, 4, 8],
+        '.' => [0, 0, 0, 0, 0, 4, 4],
+        '-' => [0, 0, 0, 31, 0, 0, 0],
+        '+' => [0, 4, 4, 31, 4, 4, 0],
+        '/' => [1, 1, 2, 4, 8, 16, 16],
+        ' ' => [0; 7],
+        _ => [31, 1, 2, 4, 0, 4, 0],
+    }
+}
+
 const fn selection_color(valid: bool) -> u32 {
     if valid {
         rgba(255, 220, 35, 72)
@@ -691,6 +1025,26 @@ const fn rgba(red: u8, green: u8, blue: u8, alpha: u8) -> u32 {
 mod tests {
     use super::*;
     use sim_core::WorldConfig;
+
+    fn test_render_state(cursor_world: Option<WorldPosition>) -> RenderState {
+        RenderState {
+            snapshot: SimulationSnapshot {
+                tick: 3_721,
+                simulated_seconds: 62.0,
+                paused: false,
+                speed: 4.0,
+                seed: 7,
+            },
+            camera: Camera::at_origin(),
+            ui_scale: 1.0,
+            cursor_world,
+            inspected: None,
+            hovered: None,
+            selection: None,
+            selection_valid: true,
+            generation_status: GenerationStatus::Idle,
+        }
+    }
 
     #[test]
     fn coarse_view_reduces_terrain_instances() {
@@ -867,5 +1221,78 @@ mod tests {
             .unwrap();
         assert!(chunk_outline(inspection, 0.01).is_none());
         assert!(chunk_outline(inspection, 0.1).is_some());
+    }
+
+    #[test]
+    fn hud_contains_simulation_and_loaded_cell_inspection_data() {
+        let world = World::generate(7, WorldConfig::new(64, 64).unwrap());
+        let state = test_render_state(Some(WorldPosition { x: 0, y: 0 }));
+        let mut text = String::new();
+
+        write_hud_text(&mut text, &world, &state);
+
+        assert!(text.contains("RUNNING  SPEED 4X"));
+        assert!(text.contains("SIM 0000:01:02.0  TICK 3721"));
+        assert!(text.contains("SEED 7  LOADED "));
+        assert!(text.contains("  REV "));
+        assert!(text.contains("CURSOR X 0  Y 0"));
+        assert!(text.contains("CHUNK X 0 Y 0  LOCAL 0,0"));
+        assert!(text.contains("COVERAGE "));
+        assert!(text.contains("TERRAIN "));
+        assert!(text.contains("ELEV "));
+        assert!(text.contains("MOIST "));
+        assert!(text.contains("FEATURE "));
+    }
+
+    #[test]
+    fn hud_reports_unloaded_coverage_and_worker_failure_in_game() {
+        let world = World::new(7, WorldConfig::new(96, 64).unwrap());
+        let mut state = test_render_state(Some(WorldPosition { x: 47, y: 0 }));
+        state.generation_status = GenerationStatus::WorkerUnavailable;
+        let mut text = String::new();
+
+        write_hud_text(&mut text, &world, &state);
+
+        assert!(text.contains("GEN WORKER OFFLINE"));
+        assert!(text.contains("COVERAGE PARTIAL INITIAL UNLOADED"));
+        assert!(text.contains("CELL UNLOADED"));
+    }
+
+    #[test]
+    fn every_hud_layout_fits_the_fixed_gpu_instance_budget() {
+        let world = World::generate(u64::MAX, WorldConfig::new(64, 64).unwrap());
+        let mut state = test_render_state(None);
+        state.snapshot.tick = u64::MAX;
+        state.snapshot.simulated_seconds = u64::MAX as f64 / 60.0;
+        state.snapshot.seed = u64::MAX;
+        state.snapshot.speed = 64.0;
+        state.selection = Some(WORLD_GENERATION_BOUNDS);
+        state.selection_valid = false;
+        let mut text = String::new();
+        let mut instances = Vec::new();
+
+        for cursor in [
+            None,
+            Some(WorldPosition { x: 0, y: 0 }),
+            Some(WorldPosition {
+                x: 32_768,
+                y: 32_768,
+            }),
+        ] {
+            state.cursor_world = cursor;
+            for status in [
+                GenerationStatus::Idle,
+                GenerationStatus::Bootstrap,
+                GenerationStatus::Manual,
+                GenerationStatus::Cancelling,
+                GenerationStatus::WorkerUnavailable,
+            ] {
+                state.generation_status = status;
+                write_hud_text(&mut text, &world, &state);
+                assert!(text.len() <= HUD_TEXT_CAPACITY);
+                build_screen_overlay(&mut instances, &text, &state, 1_920, 1_080);
+                assert!(instances.len() <= SCREEN_OVERLAY_CAPACITY);
+            }
+        }
     }
 }

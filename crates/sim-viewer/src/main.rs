@@ -10,11 +10,11 @@ use std::{
 
 use camera::{Camera, Viewport};
 use generation::{
-    GenerationId, GenerationJob, GenerationKind, GenerationOutcome, ViewportPager, WorldGenerator,
+    ChunkPager, GenerationId, GenerationJob, GenerationKind, GenerationOutcome, WorldGenerator,
 };
 use sim_config::{AppConfig, DEFAULT_CONFIG_PATH};
 use sim_core::{
-    ChunkInspection, ChunkLoadRequest, ChunkPresence, Engine, EngineCommand, GenerateAreaError,
+    ChunkInspection, ChunkLoadRequest, Engine, EngineCommand, GenerateAreaError,
     WORLD_GENERATION_BOUNDS, World, WorldChunkLoad, WorldPosition, WorldRect,
 };
 use winit::{
@@ -92,6 +92,7 @@ struct ViewerApp {
     accumulator: f64,
     camera: Camera,
     cursor: Option<(f64, f64)>,
+    cursor_world: Option<WorldPosition>,
     inspected: Option<ChunkInspection>,
     hovered: Option<WorldPosition>,
     dragging: bool,
@@ -101,12 +102,8 @@ struct ViewerApp {
     generator: WorldGenerator,
     active_generation: Option<ActiveGeneration>,
     pending_manual: Option<Vec<ChunkLoadRequest>>,
-    pending_automatic: Option<Vec<ChunkLoadRequest>>,
     pending_bootstrap: Option<Vec<ChunkLoadRequest>>,
-    bootstrap_pager: Option<ViewportPager>,
-    automatic_pager: Option<ViewportPager>,
-    automatic_generation_needed: bool,
-    automatic_generation_blocked: Option<GenerateAreaError>,
+    bootstrap_pager: Option<ChunkPager>,
     next_generation_id: GenerationId,
     pending_world_changes: Option<WorldRect>,
     next_world_sync: Instant,
@@ -120,7 +117,7 @@ impl ViewerApp {
     fn new(engine: Engine, smoke_frames: Option<u32>) -> Self {
         let camera = Camera::at_origin();
         let bootstrap_focus = WorldPosition { x: 0, y: 0 };
-        let bootstrap_pager = ViewportPager::new(engine.world().initial_bounds(), bootstrap_focus)
+        let bootstrap_pager = ChunkPager::new(engine.world().initial_bounds(), bootstrap_focus)
             .expect("validated configured bootstrap bounds create pages");
         Self {
             window: None,
@@ -130,6 +127,7 @@ impl ViewerApp {
             accumulator: 0.0,
             camera,
             cursor: None,
+            cursor_world: None,
             inspected: None,
             hovered: None,
             dragging: false,
@@ -139,12 +137,8 @@ impl ViewerApp {
             generator: WorldGenerator::new(),
             active_generation: None,
             pending_manual: None,
-            pending_automatic: None,
             pending_bootstrap: None,
             bootstrap_pager: Some(bootstrap_pager),
-            automatic_pager: None,
-            automatic_generation_needed: true,
-            automatic_generation_blocked: None,
             next_generation_id: 1,
             pending_world_changes: None,
             next_world_sync: Instant::now(),
@@ -188,6 +182,7 @@ impl ViewerApp {
 
     fn render(&mut self) -> bool {
         let selection_valid = self.selection_preview_is_valid();
+        let generation_status = self.generation_status();
         let (Some(window), Some(renderer)) = (&self.window, &mut self.renderer) else {
             return false;
         };
@@ -203,10 +198,13 @@ impl ViewerApp {
             renderer::RenderState {
                 snapshot: self.engine.snapshot(),
                 camera: self.camera,
+                ui_scale: window.scale_factor() as f32,
+                cursor_world: self.cursor_world,
                 inspected: self.inspected,
                 hovered: self.hovered,
                 selection: self.selection,
                 selection_valid,
+                generation_status,
             },
             allow_world_sync,
             self.pending_world_changes,
@@ -256,7 +254,6 @@ impl ViewerApp {
     }
 
     fn run_smoke(&mut self, event_loop: &ActiveEventLoop) {
-        self.refresh_visible_generation();
         self.schedule_generation();
         while self.smoke_frames.is_some() {
             self.poll_generation();
@@ -352,18 +349,12 @@ impl ViewerApp {
         }
 
         if let Some(outcome) = outcome {
-            let active = self
-                .active_generation
+            self.active_generation
                 .take()
                 .expect("worker outcomes always belong to an active job");
             if matches!(outcome, GenerationOutcome::WorkerStopped) {
                 eprintln!("world generation worker stopped unexpectedly");
                 self.update_hover();
-            }
-            if matches!(active.kind, GenerationKind::Automatic)
-                && matches!(outcome, GenerationOutcome::Completed)
-            {
-                self.automatic_generation_blocked = None;
             }
             if self.pending_world_changes.is_some() {
                 self.next_world_sync = Instant::now();
@@ -382,66 +373,37 @@ impl ViewerApp {
             self.camera
                 .screen_to_world_position(x, y, self.viewport(size.width, size.height))
         });
+        self.cursor_world = position;
         self.inspected =
             position.and_then(|position| self.engine.world().inspect_chunk_at(position).ok());
         self.hovered = position.filter(|position| self.engine.world().cell(*position).is_some());
-
-        let title = inspection_title(
-            self.engine.world(),
-            position,
-            self.automatic_generation_blocked,
-            !self.generator.is_available(),
-        );
-        window.set_title(&title);
     }
 
-    fn refresh_visible_generation(&mut self) -> bool {
-        if !self.automatic_generation_needed || self.selection_start.is_some() || self.dragging {
-            return false;
+    fn generation_status(&self) -> renderer::GenerationStatus {
+        if !self.generator.is_available() {
+            return renderer::GenerationStatus::WorkerUnavailable;
         }
-        let Some(window) = &self.window else {
-            return false;
-        };
-        let size = window.inner_size();
-        if size.width == 0 || size.height == 0 {
-            return false;
+        if self
+            .active_generation
+            .as_ref()
+            .is_some_and(|active| active.discard_loads)
+        {
+            return renderer::GenerationStatus::Cancelling;
         }
-        let visible_bounds = self
-            .camera
-            .view(
-                size.width,
-                size.height,
-                self.engine.world().width(),
-                self.engine.world().height(),
-            )
-            .world_bounds();
-        let Some(bounds) = visible_bounds.intersection(WORLD_GENERATION_BOUNDS) else {
-            return false;
-        };
-        let previous_block = self.automatic_generation_blocked;
-        let focus = self.camera.screen_to_world_position(
-            f64::from(size.width) / 2.0,
-            f64::from(size.height) / 2.0,
-            self.viewport(size.width, size.height),
-        );
-        self.automatic_generation_needed = false;
-        self.pending_automatic = None;
-        match ViewportPager::new(bounds, focus) {
-            Ok(pager) => {
-                self.automatic_pager = Some(pager);
-                self.automatic_generation_blocked = None;
-                self.cancel_background_generation();
-            }
-            Err(error) => {
-                self.automatic_pager = None;
-                self.automatic_generation_blocked = Some(error);
-            }
+        let kind = self
+            .active_generation
+            .as_ref()
+            .map(|active| active.kind)
+            .or_else(|| self.pending_manual.as_ref().map(|_| GenerationKind::Manual))
+            .or_else(|| {
+                (self.pending_bootstrap.is_some() || self.bootstrap_pager.is_some())
+                    .then_some(GenerationKind::Bootstrap)
+            });
+        match kind {
+            Some(GenerationKind::Manual) => renderer::GenerationStatus::Manual,
+            Some(GenerationKind::Bootstrap) => renderer::GenerationStatus::Bootstrap,
+            None => renderer::GenerationStatus::Idle,
         }
-        let changed = previous_block != self.automatic_generation_blocked;
-        if changed {
-            self.update_hover();
-        }
-        changed
     }
 
     fn schedule_generation(&mut self) -> bool {
@@ -451,25 +413,10 @@ impl ViewerApp {
         if let Some(requests) = self.pending_manual.take() {
             return self.start_generation(GenerationKind::Manual, requests);
         }
-        if let Some(requests) = self.pending_automatic.take() {
-            return self.start_generation(GenerationKind::Automatic, requests);
-        }
-        match self.take_next_paged_requests(GenerationKind::Automatic) {
-            Ok(Some(requests)) => {
-                return self.start_generation(GenerationKind::Automatic, requests);
-            }
-            Ok(None) => {}
-            Err(error) => {
-                self.automatic_generation_blocked = Some(error);
-                self.automatic_pager = None;
-                self.update_hover();
-                return true;
-            }
-        }
         if let Some(requests) = self.pending_bootstrap.take() {
             return self.start_generation(GenerationKind::Bootstrap, requests);
         }
-        match self.take_next_paged_requests(GenerationKind::Bootstrap) {
+        match self.take_next_bootstrap_requests() {
             Ok(Some(requests)) => self.start_generation(GenerationKind::Bootstrap, requests),
             Ok(None) => false,
             Err(error) => {
@@ -480,31 +427,17 @@ impl ViewerApp {
         }
     }
 
-    fn take_next_paged_requests(
+    fn take_next_bootstrap_requests(
         &mut self,
-        kind: GenerationKind,
     ) -> Result<Option<Vec<ChunkLoadRequest>>, GenerateAreaError> {
-        let requests = match kind {
-            GenerationKind::Automatic => self
-                .automatic_pager
-                .as_mut()
-                .map(|pager| pager.next_requests(self.engine.world()))
-                .transpose()?
-                .flatten(),
-            GenerationKind::Bootstrap => self
-                .bootstrap_pager
-                .as_mut()
-                .map(|pager| pager.next_requests(self.engine.world()))
-                .transpose()?
-                .flatten(),
-            GenerationKind::Manual => None,
-        };
+        let requests = self
+            .bootstrap_pager
+            .as_mut()
+            .map(|pager| pager.next_requests(self.engine.world()))
+            .transpose()?
+            .flatten();
         if requests.is_none() {
-            match kind {
-                GenerationKind::Automatic => self.automatic_pager = None,
-                GenerationKind::Bootstrap => self.bootstrap_pager = None,
-                GenerationKind::Manual => {}
-            }
+            self.bootstrap_pager = None;
         }
         Ok(requests)
     }
@@ -542,7 +475,6 @@ impl ViewerApp {
     fn requeue_generation(&mut self, kind: GenerationKind, requests: Vec<ChunkLoadRequest>) {
         let slot = match kind {
             GenerationKind::Manual => &mut self.pending_manual,
-            GenerationKind::Automatic => &mut self.pending_automatic,
             GenerationKind::Bootstrap => &mut self.pending_bootstrap,
         };
         debug_assert!(slot.is_none(), "only one unsent page per priority exists");
@@ -552,10 +484,7 @@ impl ViewerApp {
     fn generation_is_pending(&self) -> bool {
         self.generator.is_available()
             && (self.pending_manual.is_some()
-                || self.pending_automatic.is_some()
                 || self.pending_bootstrap.is_some()
-                || self.automatic_generation_needed
-                || self.automatic_pager.is_some()
                 || self.bootstrap_pager.is_some())
     }
 
@@ -581,12 +510,8 @@ impl ViewerApp {
     fn cancel_pending_generation(&mut self) {
         self.cancel_active_generation();
         self.pending_manual = None;
-        self.pending_automatic = None;
         self.pending_bootstrap = None;
-        self.automatic_pager = None;
         self.bootstrap_pager = None;
-        self.automatic_generation_needed = false;
-        self.automatic_generation_blocked = None;
         self.selection_start = None;
         self.selection = None;
         self.selection_validation = None;
@@ -620,8 +545,6 @@ impl ViewerApp {
                 world_height: self.engine.world().height(),
             },
         );
-        self.automatic_generation_needed = true;
-        self.cancel_background_generation();
         self.update_hover();
     }
 
@@ -693,12 +616,9 @@ impl ApplicationHandler for ViewerApp {
                 }
                 self.camera
                     .constrain_to_viewport(self.viewport(size.width, size.height));
-                self.automatic_generation_needed = true;
-                self.cancel_background_generation();
                 self.dirty = true;
             }
             WindowEvent::CursorMoved { position, .. } => {
-                let mut camera_moved = false;
                 if self.dragging
                     && let Some((previous_x, previous_y)) = self.cursor
                 {
@@ -709,14 +629,9 @@ impl ApplicationHandler for ViewerApp {
                             position.y - previous_y,
                             self.viewport(size.width, size.height),
                         );
-                        camera_moved = position.x != previous_x || position.y != previous_y;
                     }
                 }
                 self.cursor = Some((position.x, position.y));
-                if camera_moved {
-                    self.automatic_generation_needed = true;
-                    self.cancel_background_generation();
-                }
                 if let Some(start) = self.selection_start {
                     let size = self.window.as_ref().expect("window exists").inner_size();
                     let current = self.camera.screen_to_world_position(
@@ -724,30 +639,19 @@ impl ApplicationHandler for ViewerApp {
                         position.y,
                         self.viewport(size.width, size.height),
                     );
-                    self.selection = Some(WorldRect::from_inclusive_points(start, current));
+                    self.selection = bounded_selection(start, current);
                 }
                 self.update_hover();
                 self.dirty = true;
             }
             WindowEvent::CursorLeft { .. } => {
                 self.cursor = None;
+                self.cursor_world = None;
                 self.inspected = None;
                 self.hovered = None;
-                if self.dragging {
-                    self.automatic_generation_needed = true;
-                    self.cancel_background_generation();
-                }
                 self.dragging = false;
                 self.selection_start = None;
                 self.selection = None;
-                if let Some(window) = &self.window {
-                    window.set_title(&inspection_title(
-                        self.engine.world(),
-                        None,
-                        self.automatic_generation_blocked,
-                        !self.generator.is_available(),
-                    ));
-                }
                 self.dirty = true;
             }
             WindowEvent::MouseInput {
@@ -755,10 +659,6 @@ impl ApplicationHandler for ViewerApp {
                 button: MouseButton::Left,
                 ..
             } => {
-                if state == ElementState::Released && self.dragging {
-                    self.automatic_generation_needed = true;
-                    self.cancel_background_generation();
-                }
                 self.dragging = state == ElementState::Pressed;
                 self.dirty = true;
             }
@@ -782,8 +682,10 @@ impl ApplicationHandler for ViewerApp {
                                 y,
                                 self.viewport(size.width, size.height),
                             );
-                            self.selection_start = Some(start);
-                            self.selection = Some(WorldRect::from_inclusive_points(start, start));
+                            if let Some(selection) = bounded_selection(start, start) {
+                                self.selection_start = Some(start);
+                                self.selection = Some(selection);
+                            }
                         }
                     }
                     ElementState::Released => {
@@ -828,7 +730,6 @@ impl ApplicationHandler for ViewerApp {
         self.update();
         if frame_due {
             self.dirty |= self.poll_generation();
-            self.dirty |= self.refresh_visible_generation();
             self.dirty |= self.schedule_generation();
         }
         let snapshot = self.engine.snapshot();
@@ -867,68 +768,15 @@ impl ApplicationHandler for ViewerApp {
     }
 }
 
-fn inspection_title(
-    world: &World,
-    position: Option<WorldPosition>,
-    automatic_generation_blocked: Option<GenerateAreaError>,
-    generation_worker_unavailable: bool,
-) -> String {
-    let mut title = "Let There Be Life".to_owned();
-    if let Some(position) = position {
-        match world.inspect_chunk_at(position) {
-            Ok(inspection) => {
-                let presence = match inspection.presence {
-                    ChunkPresence::Missing => "missing",
-                    ChunkPresence::InitialUnloaded => "initial-unloaded",
-                    ChunkPresence::PartialInitialUnloaded => "partial-initial-unloaded",
-                    ChunkPresence::PartialInitial => "partial-initial",
-                    ChunkPresence::Initial => "initial",
-                    ChunkPresence::Retained => "retained",
-                    ChunkPresence::RetainedPartialInitial => "partial-initial+retained",
-                };
-                title.push_str(&format!(
-                    " | ({}, {}) | chunk=({}, {}) local=({}, {}) coverage={presence}",
-                    position.x,
-                    position.y,
-                    inspection.coord.x,
-                    inspection.coord.y,
-                    inspection.local.x,
-                    inspection.local.y,
-                ));
-                if let Some(cell) = world.cell(position) {
-                    let feature = world.feature_at(position).map_or_else(
-                        || "none".to_owned(),
-                        |feature| format!("{:?}", feature.kind),
-                    );
-                    title.push_str(&format!(
-                        " | {:?} elevation={} moisture={} feature={feature}",
-                        cell.ground, cell.elevation, cell.moisture,
-                    ));
-                } else {
-                    title.push_str(" | cell=unloaded");
-                }
-            }
-            Err(GenerateAreaError::OutsideWorldBounds) => title.push_str(&format!(
-                " | ({}, {}) | outside world boundary",
-                position.x, position.y
-            )),
-            Err(_) => title.push_str(&format!(
-                " | ({}, {}) | chunk coordinates unavailable",
-                position.x, position.y
-            )),
-        }
-    }
-    if let Some(error) = automatic_generation_blocked {
-        title.push_str(&format!(" | automatic generation paused: {error}"));
-    }
-    if generation_worker_unavailable {
-        title.push_str(" | generation worker unavailable");
-    }
-    title
-}
-
 fn selection_is_valid(world: &World, selection: Option<WorldRect>) -> bool {
     selection.is_none_or(|bounds| world.validate_generation_request(bounds).is_ok())
+}
+
+fn bounded_selection(start: WorldPosition, current: WorldPosition) -> Option<WorldRect> {
+    WORLD_GENERATION_BOUNDS
+        .contains(start)
+        .then(|| WorldRect::from_inclusive_points(start, current))?
+        .intersection(WORLD_GENERATION_BOUNDS)
 }
 
 const CHUNKS_APPLIED_PER_BATCH: usize = 16;
@@ -961,7 +809,9 @@ fn union_bounds(left: WorldRect, right: WorldRect) -> WorldRect {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sim_core::{CHUNK_SIZE, EngineConfig, MAX_CHUNKS_PER_GENERATION, WorldConfig};
+    use sim_core::{
+        CHUNK_SIZE, ChunkPresence, EngineConfig, MAX_CHUNKS_PER_GENERATION, WorldConfig,
+    };
 
     fn engine_with_world(width: u32, height: u32) -> Engine {
         Engine::new(EngineConfig {
@@ -998,7 +848,7 @@ mod tests {
     fn bootstrap_pager_materializes_once_then_releases_its_queue() {
         let mut app = ViewerApp::new(engine_with_world(64, 64), None);
         let requests = app
-            .take_next_paged_requests(GenerationKind::Bootstrap)
+            .take_next_bootstrap_requests()
             .expect("bootstrap request is valid")
             .expect("unloaded bootstrap area has work");
         assert_eq!(requests.len(), 4);
@@ -1017,7 +867,7 @@ mod tests {
         assert_eq!(app.engine.apply_world_chunk_loads(loads), Ok(4));
 
         assert_eq!(
-            app.take_next_paged_requests(GenerationKind::Bootstrap)
+            app.take_next_bootstrap_requests()
                 .expect("loaded bootstrap page is valid"),
             None
         );
@@ -1054,13 +904,23 @@ mod tests {
     }
 
     #[test]
-    fn requeued_background_page_is_preserved_until_higher_priority_manual_work_runs() {
+    fn no_generation_is_scheduled_without_bootstrap_or_manual_work() {
         let mut app = ViewerApp::new(engine_with_world(64, 64), None);
-        let automatic = app
+        app.bootstrap_pager = None;
+
+        assert!(!app.schedule_generation());
+        assert!(app.active_generation.is_none());
+        assert!(!app.generation_is_pending());
+    }
+
+    #[test]
+    fn requeued_bootstrap_page_is_preserved_until_higher_priority_manual_work_runs() {
+        let mut app = ViewerApp::new(engine_with_world(64, 64), None);
+        let bootstrap = app
             .engine
             .world()
             .missing_chunk_load_requests(app.engine.world().initial_bounds())
-            .expect("automatic page is valid");
+            .expect("bootstrap page is valid");
         let manual_bounds = WorldRect {
             min: WorldPosition { x: 64, y: 0 },
             max: WorldPosition { x: 128, y: 64 },
@@ -1071,7 +931,7 @@ mod tests {
             .missing_chunk_load_requests(manual_bounds)
             .expect("manual selection is valid");
 
-        app.requeue_generation(GenerationKind::Automatic, automatic);
+        app.requeue_generation(GenerationKind::Bootstrap, bootstrap);
         app.pending_manual = Some(manual);
 
         assert!(app.schedule_generation());
@@ -1079,7 +939,7 @@ mod tests {
             app.active_generation.as_ref().map(|active| active.kind),
             Some(GenerationKind::Manual)
         ));
-        assert!(app.pending_automatic.is_some());
+        assert!(app.pending_bootstrap.is_some());
     }
 
     #[test]
@@ -1099,7 +959,7 @@ mod tests {
 
         app.active_generation = Some(ActiveGeneration {
             id: 11,
-            kind: GenerationKind::Automatic,
+            kind: GenerationKind::Bootstrap,
             discard_loads: false,
         });
         app.cancel_background_generation();
@@ -1119,11 +979,10 @@ mod tests {
         };
         app.active_generation = Some(ActiveGeneration {
             id: 12,
-            kind: GenerationKind::Automatic,
+            kind: GenerationKind::Bootstrap,
             discard_loads: false,
         });
         app.pending_manual = Some(Vec::new());
-        app.pending_automatic = Some(Vec::new());
         app.pending_bootstrap = Some(Vec::new());
         app.selection_start = Some(selection.min);
         app.selection = Some(selection);
@@ -1141,12 +1000,10 @@ mod tests {
                 .is_some_and(|active| active.discard_loads)
         );
         assert!(app.pending_manual.is_none());
-        assert!(app.pending_automatic.is_none());
         assert!(app.pending_bootstrap.is_none());
         assert!(app.selection_start.is_none());
         assert!(app.selection.is_none());
         assert!(app.selection_validation.is_none());
-        assert!(app.automatic_pager.is_none());
         assert!(app.bootstrap_pager.is_none());
     }
 
@@ -1194,11 +1051,55 @@ mod tests {
         assert!(selection_is_valid(&world, Some(world.initial_bounds())));
         assert!(!selection_is_valid(&world, Some(oversized)));
 
-        let title = inspection_title(&world, Some(WorldPosition { x: 47, y: 0 }), None, false);
-        assert!(title.contains("coverage=partial-initial-unloaded"));
-        assert!(title.contains("cell=unloaded"));
-        assert!(
-            inspection_title(&world, None, None, true).contains("generation worker unavailable")
+        let inspection = world
+            .inspect_chunk_at(WorldPosition { x: 47, y: 0 })
+            .expect("configured position is inspectable");
+        assert_eq!(inspection.presence, ChunkPresence::PartialInitialUnloaded);
+        assert!(world.cell(WorldPosition { x: 47, y: 0 }).is_none());
+    }
+
+    #[test]
+    fn right_drag_selection_caps_at_the_world_boundary() {
+        let world = World::new(7, WorldConfig::new(64, 64).expect("test world is valid"));
+        let start = WorldPosition {
+            x: WORLD_GENERATION_BOUNDS.max.x - 2,
+            y: WORLD_GENERATION_BOUNDS.min.y + 2,
+        };
+        let expected = WorldRect {
+            min: WorldPosition {
+                x: WORLD_GENERATION_BOUNDS.max.x - 2,
+                y: WORLD_GENERATION_BOUNDS.min.y,
+            },
+            max: WorldPosition {
+                x: WORLD_GENERATION_BOUNDS.max.x,
+                y: WORLD_GENERATION_BOUNDS.min.y + 3,
+            },
+        };
+
+        assert_eq!(
+            bounded_selection(
+                start,
+                WorldPosition {
+                    x: WORLD_GENERATION_BOUNDS.max.x + 1_000,
+                    y: WORLD_GENERATION_BOUNDS.min.y - 1_000,
+                },
+            ),
+            Some(expected)
+        );
+        assert!(world.missing_chunk_load_requests(expected).is_ok());
+    }
+
+    #[test]
+    fn right_drag_selection_does_not_start_outside_the_world_boundary() {
+        assert_eq!(
+            bounded_selection(
+                WorldPosition {
+                    x: WORLD_GENERATION_BOUNDS.max.x,
+                    y: 0,
+                },
+                WorldPosition { x: 0, y: 0 },
+            ),
+            None
         );
     }
 }
