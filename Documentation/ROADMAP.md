@@ -29,19 +29,21 @@ Last synchronized: 2026-07-15.
 - World-foundation Slice 4: sparse explicit lake-fed river sources with moisture-gated runoff, complete ocean/world-edge routes, bounded curved refinement, downstream water-surface grades, non-crossing geometry, hydrologic wetlands, riparian banks, bounded coherent coast/biome/snowline/treeline transitions, and a safe arbitrary-seed chunk-index overflow path.
 - World-foundation Slice 5: deterministic canopy, grove, berry-patch, riparian, slope, and outcrop feature ecology; stone availability beyond mountain surfaces; derived compact food/wood/stone base capacities; an explicit future sparse depletion boundary; and full-resolution forest/outcrop/berry review evidence with record-footprint accounting.
 - World-foundation Slice 6: viewer-owned power-of-two per-chunk summaries with dominant terrain, minority river/lake/coast/mountain preservation, density-scaled feature markers, bounded camera-margin residency, authoritative change-bound invalidation, deterministic parallel construction, and release cache/build/upload-enqueue measurements.
+- World-foundation Slice 7: explicit residency-aware cardinal traversal, fresh/salt-water, and immutable resource queries; stable generated feature identity; a public-only deterministic settlement-candidate scenario; and a documented immutable-base, future sparse-delta, dynamic-entity handoff.
 
 ## Active
 
-- Keep Phase 1 world foundation as the project focus until the generated world is coherent and convincing at full-map, regional, chunk-boundary, and close inspection scales. This intentionally extends world-generation work beyond the initial baseline described in `InitialDocumentation/16_IMPLEMENTATION_ROADMAP.md` before moving into agents or another simulation domain.
-- Treat generated terrain as intentionally unstable while there is no save/load or other persisted world output. Seed output may change as world generation improves; generator versioning is not current work.
+- Begin the Phase 2 physical-agent loop with 20-100 headless agents using the implemented resident traversal, drinkable-water, and immutable resource contracts. The first coherent slice should establish compact agent identity/position, deterministic movement scheduling, and understandable failure on unavailable terrain without adding cognition or presentation ownership.
+- Treat generated terrain as intentionally unstable while there is no save/load or other persisted world output. Seed output may still change if an observed physical-agent failure proves a foundational correction necessary; generator versioning is not current work.
 
 ## Next
 
-Detailed sequencing, implementation areas, acceptance criteria, performance checkpoints, and explicit deferrals for the remaining world work are maintained in [WORLD_FOUNDATION_PLAN.md](WORLD_FOUNDATION_PLAN.md).
+The completed world-foundation sequence, acceptance criteria, performance checkpoints, and explicit deferrals remain recorded in [WORLD_FOUNDATION_PLAN.md](WORLD_FOUNDATION_PLAN.md).
 
-- Implement world-foundation Slice 7 by exposing the smallest deterministic passability, drinkable-water, resource-availability, and settlement-input query contract needed to hand the generated world to the first physical agents.
-- Use the implemented representative-seed review set when changing world generation, and turn durable multi-seed findings into deterministic quality thresholds only when they express intended world behavior rather than preserve the current repository seed.
-- Extend the focused generation measurements where needed to protect world-generation iteration, including first terrain, bootstrap completion, frame hitches, resident memory, and allocations; use measured results to set explicit runtime budgets.
+- Define the smallest compact physical-agent record and stable ID for the 20-100-agent loop.
+- Add deterministic scheduled movement that consumes `World::traversal_step` and handles unloaded/outside terrain explicitly.
+- Add thirst and gathering behavior through `World::water_at` and `World::resource_at`, keeping mutable depletion in a sparse simulation-owned layer rather than generated features.
+- Use the representative-seed review set only when an observed agent-loop failure requires another generator change.
 
 ## Deferred
 

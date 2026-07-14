@@ -8,9 +8,10 @@ pub use world::{
     ChunkLoadRequest, ChunkLocalPosition, ChunkPresence, ClimateSample, DEFAULT_INITIAL_WORLD_SIZE,
     Feature, FeatureKind, GenerateAreaError, GeneratedCell, MAX_CHUNKS_PER_GENERATION,
     MAX_GENERATED_CELLS, MAX_GENERATED_CHUNKS, MAX_GENERATED_TERRAIN_BYTES, MAX_INITIAL_CHUNKS,
-    PrevailingWind, ResourceKind, SurfaceType, TerrainCell, TerrainClass, WORLD_GENERATION_BOUNDS,
-    WORLD_HALF_EXTENT, WORLD_SIDE_CELLS, World, WorldChunk, WorldChunkLoad, WorldConfig,
-    WorldConfigError, WorldPosition, WorldRect,
+    MAX_TRAVERSABLE_ELEVATION_DELTA, PrevailingWind, ResourceKind, SurfaceType, TerrainCell,
+    TerrainClass, TraversalKind, TraversalStep, WORLD_GENERATION_BOUNDS, WORLD_HALF_EXTENT,
+    WORLD_SIDE_CELLS, WaterSource, World, WorldChunk, WorldChunkLoad, WorldConfig,
+    WorldConfigError, WorldPosition, WorldQueryError, WorldRect,
 };
 
 use std::time::Duration;

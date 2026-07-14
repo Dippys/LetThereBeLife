@@ -127,7 +127,7 @@ impl fmt::Display for WorldConfigError {
 
 impl Error for WorldConfigError {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct WorldPosition {
     pub x: i64,
     pub y: i64,
@@ -352,6 +352,91 @@ pub struct BaseResource {
     pub kind: ResourceKind,
 }
 
+/// Generated water-body identity at one resident cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum WaterSource {
+    Ocean,
+    Lake,
+    River,
+}
+
+impl WaterSource {
+    /// The first physical-agent loop can drink untreated lake and river water;
+    /// ocean water is deliberately not drinkable.
+    pub const fn is_drinkable(self) -> bool {
+        matches!(self, Self::Lake | Self::River)
+    }
+}
+
+/// Outcome of one cardinal movement query.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum TraversalKind {
+    Passable,
+    BlockedByWater,
+    BlockedBySlope,
+    BlockedByFeature,
+}
+
+/// Allocation-free derived movement information for two adjacent resident cells.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+pub struct TraversalStep {
+    elevation_delta: i32,
+    cost: u16,
+    kind: TraversalKind,
+}
+
+impl TraversalStep {
+    pub const fn kind(self) -> TraversalKind {
+        self.kind
+    }
+
+    pub const fn is_passable(self) -> bool {
+        matches!(self.kind, TraversalKind::Passable)
+    }
+
+    /// Relative movement cost in stable integer units, or `None` when blocked.
+    pub const fn cost(self) -> Option<u16> {
+        if self.is_passable() {
+            Some(self.cost)
+        } else {
+            None
+        }
+    }
+
+    /// Signed target elevation minus source elevation.
+    pub const fn elevation_delta(self) -> i32 {
+        self.elevation_delta
+    }
+}
+
+/// Explicit failure modes for terrain-dependent simulation queries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorldQueryError {
+    OutsideWorldBounds,
+    Unloaded,
+    NonCardinalStep,
+}
+
+impl fmt::Display for WorldQueryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::OutsideWorldBounds => formatter.write_str("query is outside the world envelope"),
+            Self::Unloaded => formatter.write_str("query requires terrain that is not resident"),
+            Self::NonCardinalStep => {
+                formatter.write_str("movement query requires one cardinal-cell step")
+            }
+        }
+    }
+}
+
+impl Error for WorldQueryError {}
+
+/// Largest adjacent elevation difference the first walking contract can cross.
+pub const MAX_TRAVERSABLE_ELEVATION_DELTA: u16 = 512;
+
 impl FeatureKind {
     pub const fn base_resource(self) -> BaseResource {
         match self {
@@ -378,6 +463,14 @@ pub struct Feature {
 }
 
 impl Feature {
+    /// Stable generated identity within one seed and generator revision.
+    ///
+    /// Future persisted sparse deltas must additionally record the generator
+    /// version; the world position itself is the current feature key.
+    pub const fn identity(self) -> WorldPosition {
+        self.position
+    }
+
     pub const fn base_resource(self) -> BaseResource {
         self.kind.base_resource()
     }
@@ -1244,11 +1337,80 @@ impl World {
         self.feature_at(position).map(Feature::base_resource)
     }
 
+    /// Queries immutable generated resource capacity with explicit residency.
+    pub fn resource_at(
+        &self,
+        position: WorldPosition,
+    ) -> Result<Option<BaseResource>, WorldQueryError> {
+        self.resident_cell(position)?;
+        Ok(self.base_resource_at(position))
+    }
+
+    /// Returns the generated water-body identity at one resident cell.
+    pub fn water_at(
+        &self,
+        position: WorldPosition,
+    ) -> Result<Option<WaterSource>, WorldQueryError> {
+        let cell = self.resident_cell(position)?;
+        Ok(water_source(cell))
+    }
+
+    /// Derives one cardinal walking step without storing pathfinding flags.
+    ///
+    /// Deep and shallow water are blocked until a later movement mode explicitly
+    /// supports swimming, wading, boats, or bridges. Trees and rocks block their
+    /// occupied target cell; berry bushes do not. A passable step uses the target
+    /// surface cost plus the absolute elevation change in 32-unit bands.
+    pub fn traversal_step(
+        &self,
+        from: WorldPosition,
+        to: WorldPosition,
+    ) -> Result<TraversalStep, WorldQueryError> {
+        let dx = i128::from(to.x) - i128::from(from.x);
+        let dy = i128::from(to.y) - i128::from(from.y);
+        if dx.abs() + dy.abs() != 1 {
+            return Err(WorldQueryError::NonCardinalStep);
+        }
+        let source = self.resident_cell(from)?;
+        let target = self.resident_cell(to)?;
+        let elevation_delta = i32::from(target.elevation) - i32::from(source.elevation);
+        let kind = if water_source(source).is_some() || water_source(target).is_some() {
+            TraversalKind::BlockedByWater
+        } else if elevation_delta.unsigned_abs() > u32::from(MAX_TRAVERSABLE_ELEVATION_DELTA) {
+            TraversalKind::BlockedBySlope
+        } else if self
+            .feature_at(to)
+            .is_some_and(|feature| matches!(feature.kind, FeatureKind::Tree | FeatureKind::Rock))
+        {
+            TraversalKind::BlockedByFeature
+        } else {
+            TraversalKind::Passable
+        };
+        let cost = if kind == TraversalKind::Passable {
+            surface_traversal_cost(target.surface())
+                + (elevation_delta.unsigned_abs() as u16).div_ceil(32)
+        } else {
+            0
+        };
+        Ok(TraversalStep {
+            elevation_delta,
+            cost,
+            kind,
+        })
+    }
+
     pub fn cell(&self, position: WorldPosition) -> Option<TerrainCell> {
         let coord = chunk_coord(position);
         self.chunks
             .get(&coord)
             .and_then(|chunk| chunk.cell(coord, position))
+    }
+
+    fn resident_cell(&self, position: WorldPosition) -> Result<TerrainCell, WorldQueryError> {
+        if !WORLD_GENERATION_BOUNDS.contains(position) {
+            return Err(WorldQueryError::OutsideWorldBounds);
+        }
+        self.cell(position).ok_or(WorldQueryError::Unloaded)
     }
 
     /// Returns classification climate for a resident cell without allocating
@@ -1369,6 +1531,26 @@ fn intersection(left: WorldRect, right: WorldRect) -> Option<WorldRect> {
         },
     };
     (bounds.max.x > bounds.min.x && bounds.max.y > bounds.min.y).then_some(bounds)
+}
+
+fn water_source(cell: TerrainCell) -> Option<WaterSource> {
+    match cell.biome() {
+        BiomeType::Ocean => Some(WaterSource::Ocean),
+        BiomeType::Lake => Some(WaterSource::Lake),
+        BiomeType::River => Some(WaterSource::River),
+        _ => None,
+    }
+}
+
+fn surface_traversal_cost(surface: SurfaceType) -> u16 {
+    match surface {
+        SurfaceType::Sand => 14,
+        SurfaceType::Soil => 10,
+        SurfaceType::Hill => 18,
+        SurfaceType::Rock => 22,
+        SurfaceType::SnowIce => 20,
+        SurfaceType::DeepWater | SurfaceType::ShallowWater => 0,
+    }
 }
 
 fn visit_loaded_chunk_region(
@@ -1541,7 +1723,172 @@ mod tests {
         assert_eq!(std::mem::size_of::<FeatureKind>(), 1);
         assert_eq!(std::mem::size_of::<ResourceKind>(), 1);
         assert_eq!(std::mem::size_of::<BaseResource>(), 4);
+        assert_eq!(std::mem::size_of::<WaterSource>(), 1);
+        assert_eq!(std::mem::size_of::<TraversalKind>(), 1);
+        assert_eq!(std::mem::size_of::<TraversalStep>(), 8);
         assert_eq!(std::mem::size_of::<Feature>(), 24);
+    }
+
+    #[test]
+    fn physical_world_queries_are_explicit_and_derived_from_resident_base_data() {
+        let mut world = World::new(3, WorldConfig::new(128, 64).unwrap());
+        let coord = ChunkCoord { x: 0, y: 0 };
+        let mut terrain = vec![
+            TerrainCell::new(10_000, 80, SurfaceType::Soil, BiomeType::Grassland);
+            (CHUNK_SIZE * CHUNK_SIZE) as usize
+        ];
+        let index = |x: usize, y: usize| y * CHUNK_SIZE as usize + x;
+        terrain[index(1, 0)] =
+            TerrainCell::new(10_000, 80, SurfaceType::ShallowWater, BiomeType::Lake);
+        terrain[index(2, 0)] =
+            TerrainCell::new(10_000, 80, SurfaceType::DeepWater, BiomeType::River);
+        terrain[index(3, 0)] =
+            TerrainCell::new(10_000, 80, SurfaceType::ShallowWater, BiomeType::Ocean);
+        terrain[index(0, 1)] = TerrainCell::new(
+            10_000 + MAX_TRAVERSABLE_ELEVATION_DELTA,
+            80,
+            SurfaceType::Hill,
+            BiomeType::Alpine,
+        );
+        terrain[index(0, 2)] = TerrainCell::new(
+            10_001 + 2 * MAX_TRAVERSABLE_ELEVATION_DELTA,
+            80,
+            SurfaceType::Hill,
+            BiomeType::Alpine,
+        );
+        terrain[index(1, 1)] = terrain[index(0, 1)];
+        terrain[index(2, 1)] = terrain[index(0, 1)];
+        terrain[index(3, 1)] = terrain[index(0, 1)];
+        let features = vec![
+            Feature {
+                position: WorldPosition { x: 1, y: 1 },
+                kind: FeatureKind::Tree,
+            },
+            Feature {
+                position: WorldPosition { x: 2, y: 1 },
+                kind: FeatureKind::BerryBush,
+            },
+            Feature {
+                position: WorldPosition { x: 3, y: 1 },
+                kind: FeatureKind::Rock,
+            },
+        ];
+        world
+            .insert_chunks(vec![WorldChunk {
+                coord,
+                terrain,
+                features,
+            }])
+            .unwrap();
+
+        assert_eq!(world.water_at(WorldPosition { x: 0, y: 0 }), Ok(None));
+        for (x, source, drinkable) in [
+            (1, WaterSource::Lake, true),
+            (2, WaterSource::River, true),
+            (3, WaterSource::Ocean, false),
+        ] {
+            assert_eq!(world.water_at(WorldPosition { x, y: 0 }), Ok(Some(source)));
+            assert_eq!(source.is_drinkable(), drinkable);
+        }
+
+        let slope_limit = world
+            .traversal_step(WorldPosition { x: 0, y: 0 }, WorldPosition { x: 0, y: 1 })
+            .unwrap();
+        assert_eq!(slope_limit.kind(), TraversalKind::Passable);
+        assert_eq!(
+            slope_limit.elevation_delta(),
+            i32::from(MAX_TRAVERSABLE_ELEVATION_DELTA)
+        );
+        assert!(slope_limit.cost().is_some());
+        assert_eq!(
+            world
+                .traversal_step(WorldPosition { x: 0, y: 1 }, WorldPosition { x: 0, y: 2 })
+                .unwrap()
+                .kind(),
+            TraversalKind::BlockedBySlope
+        );
+        assert_eq!(
+            world
+                .traversal_step(WorldPosition { x: 0, y: 0 }, WorldPosition { x: 1, y: 0 })
+                .unwrap()
+                .kind(),
+            TraversalKind::BlockedByWater
+        );
+        assert_eq!(
+            world
+                .traversal_step(WorldPosition { x: 2, y: 1 }, WorldPosition { x: 2, y: 0 })
+                .unwrap()
+                .kind(),
+            TraversalKind::BlockedByWater
+        );
+        assert_eq!(
+            world
+                .traversal_step(WorldPosition { x: 3, y: 1 }, WorldPosition { x: 3, y: 0 })
+                .unwrap()
+                .kind(),
+            TraversalKind::BlockedByWater
+        );
+        assert_eq!(
+            world
+                .traversal_step(WorldPosition { x: 0, y: 1 }, WorldPosition { x: 1, y: 1 })
+                .unwrap()
+                .kind(),
+            TraversalKind::BlockedByFeature
+        );
+        assert!(
+            world
+                .traversal_step(WorldPosition { x: 1, y: 1 }, WorldPosition { x: 2, y: 1 })
+                .unwrap()
+                .is_passable()
+        );
+        assert_eq!(
+            world
+                .traversal_step(WorldPosition { x: 2, y: 1 }, WorldPosition { x: 3, y: 1 })
+                .unwrap()
+                .kind(),
+            TraversalKind::BlockedByFeature
+        );
+
+        assert_eq!(world.resource_at(WorldPosition { x: 0, y: 0 }), Ok(None));
+        assert_eq!(
+            world.resource_at(WorldPosition { x: 2, y: 1 }),
+            Ok(Some(FeatureKind::BerryBush.base_resource()))
+        );
+        let berry = world.feature_at(WorldPosition { x: 2, y: 1 }).unwrap();
+        assert_eq!(berry.identity(), berry.position);
+
+        assert_eq!(
+            world.resource_at(WorldPosition { x: -1, y: 0 }),
+            Err(WorldQueryError::Unloaded)
+        );
+        assert_eq!(
+            world.water_at(WorldPosition {
+                x: WORLD_HALF_EXTENT,
+                y: 0
+            }),
+            Err(WorldQueryError::OutsideWorldBounds)
+        );
+        assert_eq!(
+            world.traversal_step(WorldPosition { x: 0, y: 0 }, WorldPosition { x: 0, y: 0 }),
+            Err(WorldQueryError::NonCardinalStep)
+        );
+        assert_eq!(
+            world.traversal_step(WorldPosition { x: -1, y: 0 }, WorldPosition { x: -2, y: 0 }),
+            Err(WorldQueryError::Unloaded)
+        );
+        assert_eq!(
+            world.traversal_step(
+                WorldPosition {
+                    x: WORLD_HALF_EXTENT,
+                    y: 0,
+                },
+                WorldPosition {
+                    x: WORLD_HALF_EXTENT - 1,
+                    y: 0,
+                }
+            ),
+            Err(WorldQueryError::OutsideWorldBounds)
+        );
     }
 
     #[test]

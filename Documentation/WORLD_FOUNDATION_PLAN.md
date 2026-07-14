@@ -2,7 +2,7 @@
 
 Last synchronized: 2026-07-15.
 
-Status: **Active**. Slices 0 through 6 are implemented; Slice 7 remains planned. This document sequences the remaining Phase 1 world-foundation work and marks implemented behavior explicitly.
+Status: **Implemented**. Slices 0 through 7 are complete; the next observed work belongs to the first physical-agent loop. This document remains the record of the Phase 1 world-foundation sequence.
 
 ## Purpose
 
@@ -33,7 +33,7 @@ The implemented generator already provides:
 Known limitations that motivate this plan:
 
 - current rivers are deliberately lake-fed only; spring, snowmelt, and finer-than-256-cell catchment sources are not yet modeled;
-- traversal, fertility, resource yield, and settlement suitability are not yet exposed as derived query contracts;
+- traversal, water identity/drinkability, and immutable resource yield are exposed as derived resident queries; fertility and a universal settlement score remain intentionally undefined;
 - sparse features have only a kind and position, with no resource quantity, species, lifecycle, or modification state;
 - world-quality tests check structural properties but do not yet enforce a representative multi-seed, multi-scale review contract.
 
@@ -188,7 +188,7 @@ The choice must also define approximate tile scale, expected climate-zone widths
 
 Status: **Implemented** on 2026-07-14. `TerrainCell` still occupies four bytes: its former one-byte ground enum is now a private packed `TerrainClass` whose low nibble is exposed as `SurfaceType` and high nibble as `BiomeType`. The safe `TerrainCell::surface`, `TerrainCell::biome`, and `TerrainCell::classification` accessors distinguish deep/shallow water, sand, soil, hill, rock, and snow/ice surfaces from ocean, lake, river, beach, desert, grassland, savanna, forest, wetland, tundra, and alpine environments.
 
-Classification uses the existing broad interpolated elevation, temperature, and moisture fields, so the new meanings form regional bands rather than independent cell scatter. Lake identity survives overlapping river segments while deep-water precedence remains order independent. Slice 4 subsequently replaced the provisional moisture/elevation-only wetland rule with low-slope floodplain and basin-edge evidence. Traversal, fertility, resource yield, and settlement suitability remain derived future rules rather than stored cell flags.
+Classification uses the existing broad interpolated elevation, temperature, and moisture fields, so the new meanings form regional bands rather than independent cell scatter. Lake identity survives overlapping river segments while deep-water precedence remains order independent. Slice 4 subsequently replaced the provisional moisture/elevation-only wetland rule with low-slope floodplain and basin-edge evidence. Slice 7 subsequently derived traversal, drinkability, and immutable resource yield without stored cell flags; fertility and a universal settlement score remain deferred.
 
 The viewer HUD and both viewer/developer palettes expose the split semantics. World-quality review format 2 records seven surface and eleven biome distributions plus the packed semantic byte in its stable hash. The four canonical complete-envelope hashes are `a2373a6b276fcb06`, `a3bef667d00b0691`, `0c174931efc451af`, and `7ce7b66e324e6cb6` for seeds 1, 7, 42, and 10,001 respectively.
 
@@ -346,6 +346,10 @@ Terrain summaries should preserve important minority structure such as water cha
 
 ## Slice 7: Phase 1 exit contract
 
+Status: **Implemented** on 2026-07-15. `sim-core` exposes allocation-free, residency-aware `World::traversal_step`, `World::water_at`, and `World::resource_at` queries. Cardinal walking reports an eight-byte derived result with signed elevation change, integer cost, and explicit water, slope, or feature blocking; the provisional maximum adjacent elevation change is 512 generator elevation units. All current deep and shallow water blocks walking, while lake and river cells are drinkable and ocean cells are not. Trees and rocks block their occupied target cells; berry bushes remain traversable.
+
+`WorldQueryError` distinguishes outside-envelope, unloaded, and non-cardinal requests. Generated terrain identity is seed plus `WorldPosition`; `Feature::identity` makes position the stable feature key within a seed and eventual generator version. Base resources remain immutable derivation, future depletion/removal remains a sparse delta, and dynamic entities remain separate. The headless `world_foundation_exit` integration scenario composes only public queries to select a deterministic dry canonical river-mouth candidate whose bounded reachable component provides fresh-water adjacency and resource access, without adding a core settlement score or retained terrain flags.
+
 ### Objective
 
 Define the smallest stable world API needed by the first physical-agent loop and verify that the improved generator is ready to stop expanding in scope.
@@ -431,14 +435,14 @@ The following are outside this plan unless a measured or gameplay-critical depen
 - generator versioning, unloading, and persistence implementation, although their future boundaries must not be blocked;
 - mutable resource depletion itself until the physical-agent slice needs it.
 
-## Open decisions
+## Remaining decisions after Phase 1
 
 These must be resolved in the owning slice rather than silently assumed:
 
 - whether the provisional physical tile scale should become a durable movement/persistence contract;
 - hydrologic wetland inputs and sourced-river/transition ownership;
-- the first derived traversal, fertility, resource, and settlement query contract;
-- stable feature identity and sparse mutable-state keying;
+- fertility meaning and any domain-specific settlement score beyond the implemented traversal/water/resource inputs;
+- generator-version participation in persisted terrain/feature identity and the sparse mutable-state store implementation;
 - quantitative world-quality thresholds that generalize across representative seeds.
 
 ## Definition of done
