@@ -30,6 +30,8 @@ Last synchronized: 2026-07-14.
 
 ## Next
 
+Detailed sequencing, implementation areas, acceptance criteria, performance checkpoints, and explicit deferrals for the remaining world work are maintained in [WORLD_FOUNDATION_PLAN.md](WORLD_FOUNDATION_PLAN.md).
+
 - Improve large-scale world coherence, starting with cross-region drainage and basins so rivers, lakes, and watersheds do not stop at regional implementation boundaries.
 - Refine terrain, climate, biome transitions, coastlines, tributaries, local streams, wetlands, and sparse feature placement within explicit deterministic and performance bounds. Keep erosion and dynamic water for the point where their ownership and runtime budgets are defined.
 - Establish a repeatable representative-seed world-quality review at full-map, regional, seam, and close-up scales, then turn durable findings into deterministic regression tests instead of relying only on visual iteration.
