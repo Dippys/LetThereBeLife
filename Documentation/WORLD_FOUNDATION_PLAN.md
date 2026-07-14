@@ -2,7 +2,7 @@
 
 Last synchronized: 2026-07-15.
 
-Status: **Active**. Slices 0 through 5 are implemented; Slices 6 and 7 remain planned. This document sequences the remaining Phase 1 world-foundation work and marks implemented behavior explicitly.
+Status: **Active**. Slices 0 through 6 are implemented; Slice 7 remains planned. This document sequences the remaining Phase 1 world-foundation work and marks implemented behavior explicitly.
 
 ## Purpose
 
@@ -33,10 +33,8 @@ The implemented generator already provides:
 Known limitations that motivate this plan:
 
 - current rivers are deliberately lake-fed only; spring, snowmelt, and finer-than-256-cell catchment sources are not yet modeled;
-- zoomed-out sampled rendering can miss minority terrain and features beyond the explicit step-4 river sampling guarantee until Slice 6 adds summaries;
 - traversal, fertility, resource yield, and settlement suitability are not yet exposed as derived query contracts;
 - sparse features have only a kind and position, with no resource quantity, species, lifecycle, or modification state;
-- zoomed-out terrain expands one sampled cell over each coarse block, while features survive only at coordinates aligned to the sample step;
 - world-quality tests check structural properties but do not yet enforce a representative multi-seed, multi-scale review contract.
 
 ## Non-negotiable constraints
@@ -316,6 +314,10 @@ Do not put depletion, damage, ownership, growth, or fire state into the immutabl
 
 ## Slice 6: Multi-scale renderer summaries
 
+Status: **Implemented** on 2026-07-15. `sim-viewer` now retains one active power-of-two summary level for each resident chunk intersecting the camera rectangle plus its approximately 128-screen-pixel reuse margin. Close step-1 rendering visits authoritative cells and sparse features exactly. Coarser blocks scan every resident cell once when a chunk summary is built, render the dominant ordinary terrain as a base rectangle, and add at most one bounded minority rectangle with deterministic priority for rivers, lakes, mixed coastlines, snow, rock, or hills. A continuous river therefore survives even when none of its cells lies on the old sample coordinate. Sparse features produce at most one marker per block; marker kind is the deterministic local majority and marker area grows with total feature density, so forests and other feature-rich regions remain legible without individual rectangles.
+
+The summary cache is presentation-only and owns no simulation truth. It stores only the active zoom step, evicts chunks outside the renderer reuse margin, invalidates chunks intersecting authoritative change bounds, and builds missing independent chunk summaries in parallel before deterministic `ChunkCoord` insertion. `World::visit_loaded_regions_in`, `visit_cells_in_chunk`, and `visit_features_in_chunk` expose exact read-only clipped/full resident coverage without exposing storage or scanning the complete chunk map for every summary. Existing revision/change-bound synchronization still skips uploads for off-cache changes and ordinary camera motion inside the margin. `SIM_VIEWER_SUMMARY_METRICS=1` reports cache bytes, instance counts, build time, and CPU upload-enqueue time; the ignored release benchmark is documented in `PERFORMANCE.md`.
+
 ### Objective
 
 Keep terrain structure and feature density legible from close view through maximum zoom-out without scanning every full-resolution cell every frame or promoting presentation data into `sim-core` truth.
@@ -437,7 +439,6 @@ These must be resolved in the owning slice rather than silently assumed:
 - hydrologic wetland inputs and sourced-river/transition ownership;
 - the first derived traversal, fertility, resource, and settlement query contract;
 - stable feature identity and sparse mutable-state keying;
-- renderer summary representation and residency budget;
 - quantitative world-quality thresholds that generalize across representative seeds.
 
 ## Definition of done

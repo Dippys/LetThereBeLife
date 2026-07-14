@@ -820,6 +820,61 @@ impl World {
         }
     }
 
+    /// Visits exact resident chunk coverage intersecting `bounds` in stable
+    /// chunk-coordinate order without exposing world storage.
+    ///
+    /// Presentation caches can use this to derive chunk-local data once and
+    /// invalidate it from world change bounds. A clipped bootstrap chunk
+    /// reports only its resident rectangle; a later full expansion reports the
+    /// complete canonical chunk rectangle.
+    pub fn visit_loaded_regions_in(
+        &self,
+        bounds: WorldRect,
+        mut visitor: impl FnMut(ChunkCoord, WorldRect),
+    ) {
+        if bounds.max.x <= bounds.min.x || bounds.max.y <= bounds.min.y {
+            return;
+        }
+        for (&coord, chunk) in &self.chunks {
+            let coverage = chunk.bounds(coord);
+            if coverage.intersects(bounds) {
+                visitor(coord, coverage);
+            }
+        }
+    }
+
+    /// Visits every resident cell in one known chunk without scanning other
+    /// chunk-map entries. Returns its exact clipped or full coverage.
+    pub fn visit_cells_in_chunk(
+        &self,
+        coord: ChunkCoord,
+        mut visitor: impl FnMut(WorldPosition, TerrainCell),
+    ) -> Option<WorldRect> {
+        let chunk = self.chunks.get(&coord)?;
+        let coverage = chunk.bounds(coord);
+        visit_loaded_chunk_region(chunk, coord, coverage, 1, &mut visitor);
+        Some(coverage)
+    }
+
+    /// Visits sparse features in one known resident chunk without scanning
+    /// other chunk-map entries. Returns its exact clipped or full coverage.
+    pub fn visit_features_in_chunk(
+        &self,
+        coord: ChunkCoord,
+        mut visitor: impl FnMut(&Feature),
+    ) -> Option<WorldRect> {
+        let chunk = self.chunks.get(&coord)?;
+        let coverage = chunk.bounds(coord);
+        for feature in chunk
+            .features()
+            .iter()
+            .filter(|feature| coverage.contains(feature.position))
+        {
+            visitor(feature);
+        }
+        Some(coverage)
+    }
+
     /// Eagerly completes the configured bootstrap rectangle.
     pub fn materialize_initial_area(&mut self) -> Result<(), GenerateAreaError> {
         self.materialize_initial_area_in_batches(MAX_CHUNKS_PER_GENERATION as usize)
@@ -2321,6 +2376,62 @@ mod tests {
             positions
                 .iter()
                 .all(|position| position.x.rem_euclid(4) == 0 && position.y.rem_euclid(4) == 0)
+        );
+    }
+
+    #[test]
+    fn loaded_region_visit_reports_exact_clipped_coverage_in_chunk_order() {
+        let mut world = World::generate(5, WorldConfig::new(96, 100).unwrap());
+        world
+            .generate_area(WorldRect {
+                min: WorldPosition { x: 128, y: 0 },
+                max: WorldPosition { x: 192, y: 64 },
+            })
+            .unwrap();
+        let mut regions = Vec::new();
+        world.visit_loaded_regions_in(
+            WorldRect {
+                min: WorldPosition { x: 0, y: -64 },
+                max: WorldPosition { x: 192, y: 64 },
+            },
+            |coord, bounds| regions.push((coord, bounds)),
+        );
+
+        assert_eq!(
+            regions,
+            [
+                (
+                    ChunkCoord { x: 0, y: -1 },
+                    WorldRect {
+                        min: WorldPosition { x: 0, y: -50 },
+                        max: WorldPosition { x: 48, y: 0 },
+                    },
+                ),
+                (
+                    ChunkCoord { x: 0, y: 0 },
+                    WorldRect {
+                        min: WorldPosition { x: 0, y: 0 },
+                        max: WorldPosition { x: 48, y: 50 },
+                    },
+                ),
+                (
+                    ChunkCoord { x: 2, y: 0 },
+                    WorldRect {
+                        min: WorldPosition { x: 128, y: 0 },
+                        max: WorldPosition { x: 192, y: 64 },
+                    },
+                ),
+            ]
+        );
+        let mut cell_count = 0;
+        assert_eq!(
+            world.visit_cells_in_chunk(ChunkCoord { x: 0, y: -1 }, |_, _| cell_count += 1),
+            Some(regions[0].1)
+        );
+        assert_eq!(cell_count, 48 * 50);
+        assert_eq!(
+            world.visit_cells_in_chunk(ChunkCoord { x: 1, y: 0 }, |_, _| {}),
+            None
         );
     }
 

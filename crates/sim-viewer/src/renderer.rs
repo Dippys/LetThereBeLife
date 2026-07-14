@@ -1,10 +1,11 @@
-use std::{borrow::Cow, fmt::Write, sync::Arc};
+use std::{borrow::Cow, collections::BTreeMap, fmt::Write, sync::Arc, time::Instant};
 
 use bytemuck::{Pod, Zeroable};
+use rayon::prelude::*;
 use sim_core::{
-    BiomeType, CHUNK_SIZE, ChunkInspection, ChunkPresence, FeatureKind, GenerateAreaError,
-    PrevailingWind, ResourceKind, SimulationSnapshot, SurfaceType, WORLD_GENERATION_BOUNDS, World,
-    WorldPosition, WorldRect,
+    BiomeType, CHUNK_SIZE, ChunkCoord, ChunkInspection, ChunkPresence, FeatureKind,
+    GenerateAreaError, PrevailingWind, ResourceKind, SimulationSnapshot, SurfaceType, TerrainCell,
+    WORLD_GENERATION_BOUNDS, World, WorldPosition, WorldRect,
 };
 use wgpu::util::DeviceExt;
 use winit::window::Window;
@@ -50,6 +51,7 @@ pub struct Renderer {
     world_revision: u64,
     cached_bounds: Option<WorldRect>,
     cached_step: u32,
+    summaries: WorldSummaryCache,
 }
 
 impl Renderer {
@@ -170,6 +172,7 @@ impl Renderer {
             world_revision: world.revision(),
             cached_bounds: None,
             cached_step: 1,
+            summaries: WorldSummaryCache::default(),
             device,
             queue,
             config,
@@ -220,9 +223,31 @@ impl Renderer {
             CacheSyncAction::Rebuild => {}
         }
         let cached = requested.expanded(cache_margin(scale));
-        let (terrain, features) = build_world_instances(world, cached, step);
+        let build_started = Instant::now();
+        let (terrain, features) = self.summaries.sync(
+            world,
+            cached,
+            step,
+            revision_changed.then_some(changed_bounds).flatten(),
+        );
+        let build_elapsed = build_started.elapsed();
+        let upload_started = Instant::now();
         self.terrain = StaticInstanceBuffers::new(&self.device, "terrain instances", &terrain);
         self.features = StaticInstanceBuffers::new(&self.device, "feature instances", &features);
+        let upload_enqueue_elapsed = upload_started.elapsed();
+        if std::env::var_os("SIM_VIEWER_SUMMARY_METRICS").is_some() {
+            eprintln!(
+                "renderer-summary step={step} chunks={} cache_bytes={} terrain_instances={} feature_instances={} gpu_instance_bytes={} build_ms={:.3} upload_enqueue_ms={:.3} sync_cpu_ms={:.3}",
+                self.summaries.chunks.len(),
+                self.summaries.logical_bytes(),
+                terrain.len(),
+                features.len(),
+                (terrain.len() + features.len()) * size_of::<Instance>(),
+                build_elapsed.as_secs_f64() * 1_000.0,
+                upload_enqueue_elapsed.as_secs_f64() * 1_000.0,
+                (build_elapsed + upload_enqueue_elapsed).as_secs_f64() * 1_000.0,
+            );
+        }
         self.world_revision = world.revision();
         self.cached_bounds = Some(cached);
         self.cached_step = step;
@@ -403,7 +428,7 @@ impl CameraBinding {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
+#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
 struct Instance {
     position: [f32; 2],
     size: [f32; 2],
@@ -524,43 +549,433 @@ impl InstanceBuffer {
     }
 }
 
+#[cfg(test)]
 fn build_world_instances(
     world: &World,
     bounds: WorldRect,
     step: u32,
 ) -> (Vec<Instance>, Vec<Instance>) {
+    let mut summaries = WorldSummaryCache::default();
+    summaries.sync(world, bounds, step, None)
+}
+
+fn build_exact_world_instances(world: &World, bounds: WorldRect) -> (Vec<Instance>, Vec<Instance>) {
     let mut terrain = Vec::new();
-    world.visit_cells_in_step(bounds, step, |position, cell| {
-        let size = terrain_block_size(world, position, step);
+    world.visit_cells_in(bounds, |position, cell| {
         terrain.push(Instance::new(
             position.x as f32,
             position.y as f32,
-            size[0],
-            size[1],
+            1.0,
+            1.0,
             terrain_color(cell),
         ));
     });
     let mut features = Vec::new();
     world.visit_features_in(bounds, |feature| {
-        if feature.position.x.rem_euclid(i64::from(step)) != 0
-            || feature.position.y.rem_euclid(i64::from(step)) != 0
-        {
-            return;
-        }
-        let color = match feature.kind {
-            FeatureKind::Tree => rgba(24, 72, 28, 255),
-            FeatureKind::Rock => rgba(118, 116, 108, 255),
-            FeatureKind::BerryBush => rgba(112, 42, 74, 255),
-        };
         features.push(Instance::new(
             feature.position.x as f32,
             feature.position.y as f32,
             1.0,
             1.0,
-            color,
+            feature_color(feature.kind),
         ));
     });
     (terrain, features)
+}
+
+#[derive(Default)]
+struct WorldSummaryCache {
+    step: u32,
+    chunks: BTreeMap<ChunkCoord, ChunkRenderSummary>,
+}
+
+impl WorldSummaryCache {
+    fn sync(
+        &mut self,
+        world: &World,
+        bounds: WorldRect,
+        step: u32,
+        changed_bounds: Option<WorldRect>,
+    ) -> (Vec<Instance>, Vec<Instance>) {
+        if step == 1 {
+            self.step = 1;
+            self.chunks.clear();
+            return build_exact_world_instances(world, bounds);
+        }
+        debug_assert!(step.is_power_of_two() && step <= CHUNK_SIZE as u32);
+        if self.step != step {
+            self.step = step;
+            self.chunks.clear();
+        }
+        self.chunks.retain(|coord, _| {
+            coord
+                .bounds()
+                .is_ok_and(|chunk_bounds| chunk_bounds.intersects(bounds))
+        });
+        if let Some(changed) = changed_bounds {
+            self.chunks.retain(|coord, _| {
+                coord
+                    .bounds()
+                    .is_ok_and(|chunk_bounds| !chunk_bounds.intersects(changed))
+            });
+        }
+
+        let mut missing = Vec::new();
+        world.visit_loaded_regions_in(bounds, |coord, coverage| {
+            if !self.chunks.contains_key(&coord) {
+                missing.push((coord, coverage));
+            }
+        });
+        let built: Vec<_> = missing
+            .into_par_iter()
+            .map(|(coord, coverage)| (coord, build_chunk_summary(world, coord, coverage, step)))
+            .collect();
+        self.chunks.extend(built);
+
+        let terrain_len = self
+            .chunks
+            .values()
+            .map(|summary| summary.terrain.len())
+            .sum();
+        let feature_len = self
+            .chunks
+            .values()
+            .map(|summary| summary.features.len())
+            .sum();
+        let mut terrain = Vec::with_capacity(terrain_len);
+        let mut features = Vec::with_capacity(feature_len);
+        for summary in self.chunks.values() {
+            terrain.extend_from_slice(&summary.terrain);
+            features.extend_from_slice(&summary.features);
+        }
+        (terrain, features)
+    }
+
+    fn logical_bytes(&self) -> usize {
+        self.chunks.values().fold(0, |bytes, summary| {
+            bytes
+                + summary.terrain.capacity() * size_of::<Instance>()
+                + summary.features.capacity() * size_of::<Instance>()
+        })
+    }
+}
+
+struct ChunkRenderSummary {
+    terrain: Vec<Instance>,
+    features: Vec<Instance>,
+}
+
+const TERRAIN_VISUAL_COUNT: usize = 15;
+const OCEAN_DEEP: usize = 0;
+const OCEAN_SHALLOW: usize = 1;
+const LAKE_VISUAL: usize = 2;
+const RIVER_VISUAL: usize = 3;
+const BEACH_VISUAL: usize = 4;
+const DESERT_VISUAL: usize = 5;
+const GRASS_VISUAL: usize = 6;
+const SAVANNA_VISUAL: usize = 7;
+const FOREST_VISUAL: usize = 8;
+const WETLAND_VISUAL: usize = 9;
+const TUNDRA_VISUAL: usize = 10;
+const HILL_VISUAL: usize = 11;
+const ROCK_VISUAL: usize = 12;
+const SNOW_VISUAL: usize = 13;
+const FALLBACK_VISUAL: usize = 14;
+
+#[derive(Clone, Copy, Default)]
+struct VisualSample {
+    count: u16,
+    representative: Option<TerrainCell>,
+    min_x: u8,
+    min_y: u8,
+    max_x: u8,
+    max_y: u8,
+}
+
+impl VisualSample {
+    fn observe(&mut self, position: WorldPosition, origin: WorldPosition, cell: TerrainCell) {
+        let x = (position.x - origin.x) as u8;
+        let y = (position.y - origin.y) as u8;
+        if self.count == 0 {
+            self.min_x = x;
+            self.min_y = y;
+            self.max_x = x + 1;
+            self.max_y = y + 1;
+        } else {
+            self.min_x = self.min_x.min(x);
+            self.min_y = self.min_y.min(y);
+            self.max_x = self.max_x.max(x + 1);
+            self.max_y = self.max_y.max(y + 1);
+        }
+        self.count = self.count.saturating_add(1);
+        self.representative.get_or_insert(cell);
+    }
+
+    fn world_bounds(self, origin: WorldPosition) -> WorldRect {
+        debug_assert!(self.count > 0);
+        WorldRect {
+            min: WorldPosition {
+                x: origin.x + i64::from(self.min_x),
+                y: origin.y + i64::from(self.min_y),
+            },
+            max: WorldPosition {
+                x: origin.x + i64::from(self.max_x),
+                y: origin.y + i64::from(self.max_y),
+            },
+        }
+    }
+}
+
+#[derive(Clone)]
+struct SummaryAccumulator {
+    visuals: [VisualSample; TERRAIN_VISUAL_COUNT],
+    feature_counts: [u16; 3],
+}
+
+impl Default for SummaryAccumulator {
+    fn default() -> Self {
+        Self {
+            visuals: [VisualSample::default(); TERRAIN_VISUAL_COUNT],
+            feature_counts: [0; 3],
+        }
+    }
+}
+
+impl SummaryAccumulator {
+    fn observe_cell(&mut self, position: WorldPosition, origin: WorldPosition, cell: TerrainCell) {
+        self.visuals[terrain_visual(cell)].observe(position, origin, cell);
+    }
+
+    fn observe_feature(&mut self, kind: FeatureKind) {
+        let index = match kind {
+            FeatureKind::Tree => 0,
+            FeatureKind::Rock => 1,
+            FeatureKind::BerryBush => 2,
+        };
+        self.feature_counts[index] = self.feature_counts[index].saturating_add(1);
+    }
+
+    fn instances(
+        &self,
+        block: WorldRect,
+        chunk_origin: WorldPosition,
+        terrain: &mut Vec<Instance>,
+        features: &mut Vec<Instance>,
+    ) {
+        let Some(base_index) = self.base_visual() else {
+            return;
+        };
+        let base = self.visuals[base_index]
+            .representative
+            .expect("observed visual retains a representative cell");
+        terrain.push(rect_instance(block, terrain_color(base)));
+        if let Some(detail_index) = self.detail_visual(base_index) {
+            let detail = self.visuals[detail_index];
+            let detail_cell = detail
+                .representative
+                .expect("observed detail retains a representative cell");
+            terrain.push(rect_instance(
+                visible_detail_bounds(detail.world_bounds(chunk_origin), block),
+                terrain_color(detail_cell),
+            ));
+        }
+
+        let total_features: u16 = self.feature_counts.iter().copied().sum();
+        if total_features == 0 {
+            return;
+        }
+        let feature_index = self
+            .feature_counts
+            .iter()
+            .enumerate()
+            .max_by_key(|&(index, count)| (*count, std::cmp::Reverse(index)))
+            .map(|(index, _)| index)
+            .expect("fixed feature count array is nonempty");
+        let area = ((block.max.x - block.min.x) * (block.max.y - block.min.y)).max(1) as f32;
+        let density = f32::from(total_features) / area;
+        let fraction = (0.2 + density.sqrt() * 1.6).clamp(0.25, 0.8);
+        let width = ((block.max.x - block.min.x) as f32 * fraction).max(1.0);
+        let height = ((block.max.y - block.min.y) as f32 * fraction).max(1.0);
+        let x = block.min.x as f32 + ((block.max.x - block.min.x) as f32 - width) * 0.5;
+        let y = block.min.y as f32 + ((block.max.y - block.min.y) as f32 - height) * 0.5;
+        let kind = [FeatureKind::Tree, FeatureKind::Rock, FeatureKind::BerryBush][feature_index];
+        features.push(Instance::new(
+            x,
+            y,
+            width,
+            height,
+            summary_feature_color(kind),
+        ));
+    }
+
+    fn base_visual(&self) -> Option<usize> {
+        let dominant = |indices: &[usize]| {
+            indices
+                .iter()
+                .copied()
+                .filter(|&index| self.visuals[index].count > 0)
+                .max_by_key(|&index| (self.visuals[index].count, std::cmp::Reverse(index)))
+        };
+        let ordinary = [
+            OCEAN_DEEP,
+            OCEAN_SHALLOW,
+            BEACH_VISUAL,
+            DESERT_VISUAL,
+            GRASS_VISUAL,
+            SAVANNA_VISUAL,
+            FOREST_VISUAL,
+            WETLAND_VISUAL,
+            TUNDRA_VISUAL,
+            HILL_VISUAL,
+            ROCK_VISUAL,
+            SNOW_VISUAL,
+            FALLBACK_VISUAL,
+        ];
+        dominant(&ordinary).or_else(|| dominant(&[LAKE_VISUAL, RIVER_VISUAL]))
+    }
+
+    fn detail_visual(&self, base: usize) -> Option<usize> {
+        for index in [RIVER_VISUAL, LAKE_VISUAL] {
+            if index != base && self.visuals[index].count > 0 {
+                return Some(index);
+            }
+        }
+        let ocean = self.visuals[OCEAN_DEEP].count + self.visuals[OCEAN_SHALLOW].count;
+        let land: u16 = self.visuals[BEACH_VISUAL..]
+            .iter()
+            .map(|sample| sample.count)
+            .sum();
+        if ocean > 0 && land > 0 {
+            if base == OCEAN_DEEP || base == OCEAN_SHALLOW {
+                return (BEACH_VISUAL..TERRAIN_VISUAL_COUNT)
+                    .filter(|&index| self.visuals[index].count > 0)
+                    .max_by_key(|&index| (self.visuals[index].count, std::cmp::Reverse(index)));
+            }
+            return [OCEAN_DEEP, OCEAN_SHALLOW]
+                .into_iter()
+                .filter(|&index| self.visuals[index].count > 0)
+                .max_by_key(|&index| (self.visuals[index].count, std::cmp::Reverse(index)));
+        }
+        [SNOW_VISUAL, ROCK_VISUAL, HILL_VISUAL]
+            .into_iter()
+            .find(|&index| index != base && self.visuals[index].count > 0)
+    }
+}
+
+fn build_chunk_summary(
+    world: &World,
+    coord: ChunkCoord,
+    coverage: WorldRect,
+    step: u32,
+) -> ChunkRenderSummary {
+    let chunk_bounds = coord
+        .bounds()
+        .expect("resident chunks always have representable bounds");
+    let blocks_per_axis = CHUNK_SIZE as usize / step as usize;
+    let mut blocks = vec![SummaryAccumulator::default(); blocks_per_axis * blocks_per_axis];
+    let block_index = |position: WorldPosition| {
+        let x = (position.x - chunk_bounds.min.x) as usize / step as usize;
+        let y = (position.y - chunk_bounds.min.y) as usize / step as usize;
+        y * blocks_per_axis + x
+    };
+    assert_eq!(
+        world.visit_cells_in_chunk(coord, |position, cell| {
+            blocks[block_index(position)].observe_cell(position, chunk_bounds.min, cell);
+        }),
+        Some(coverage)
+    );
+    assert_eq!(
+        world.visit_features_in_chunk(coord, |feature| {
+            blocks[block_index(feature.position)].observe_feature(feature.kind);
+        }),
+        Some(coverage)
+    );
+
+    let mut terrain = Vec::with_capacity(blocks.len() * 2);
+    let mut features = Vec::with_capacity(blocks.len());
+    for (index, block) in blocks.iter().enumerate() {
+        let x = index % blocks_per_axis;
+        let y = index / blocks_per_axis;
+        let block_min = WorldPosition {
+            x: chunk_bounds.min.x + (x * step as usize) as i64,
+            y: chunk_bounds.min.y + (y * step as usize) as i64,
+        };
+        let block_bounds = WorldRect {
+            min: block_min,
+            max: WorldPosition {
+                x: block_min.x + i64::from(step),
+                y: block_min.y + i64::from(step),
+            },
+        };
+        if let Some(clipped) = block_bounds.intersection(coverage) {
+            block.instances(clipped, chunk_bounds.min, &mut terrain, &mut features);
+        }
+    }
+    terrain.shrink_to_fit();
+    features.shrink_to_fit();
+    ChunkRenderSummary { terrain, features }
+}
+
+fn terrain_visual(cell: TerrainCell) -> usize {
+    match (cell.surface(), cell.biome()) {
+        (SurfaceType::DeepWater, BiomeType::Ocean) => OCEAN_DEEP,
+        (SurfaceType::ShallowWater, BiomeType::Ocean) => OCEAN_SHALLOW,
+        (_, BiomeType::Lake) => LAKE_VISUAL,
+        (_, BiomeType::River) => RIVER_VISUAL,
+        (SurfaceType::Sand, BiomeType::Beach) => BEACH_VISUAL,
+        (SurfaceType::Sand, BiomeType::Desert) => DESERT_VISUAL,
+        (SurfaceType::Soil, BiomeType::Grassland) => GRASS_VISUAL,
+        (SurfaceType::Soil, BiomeType::Savanna) => SAVANNA_VISUAL,
+        (SurfaceType::Soil, BiomeType::Forest) => FOREST_VISUAL,
+        (SurfaceType::Soil, BiomeType::Wetland) => WETLAND_VISUAL,
+        (_, BiomeType::Tundra) => TUNDRA_VISUAL,
+        (SurfaceType::Hill, _) => HILL_VISUAL,
+        (SurfaceType::Rock, _) => ROCK_VISUAL,
+        (SurfaceType::SnowIce, _) => SNOW_VISUAL,
+        _ => FALLBACK_VISUAL,
+    }
+}
+
+fn visible_detail_bounds(detail: WorldRect, block: WorldRect) -> WorldRect {
+    let minimum = ((block.max.x - block.min.x).min(block.max.y - block.min.y) / 4).max(1);
+    let inflate_axis = |min: i64, max: i64, block_min: i64, block_max: i64| {
+        let missing = minimum.saturating_sub(max - min);
+        let before = missing / 2;
+        let after = missing - before;
+        ((min - before).max(block_min), (max + after).min(block_max))
+    };
+    let (min_x, max_x) = inflate_axis(detail.min.x, detail.max.x, block.min.x, block.max.x);
+    let (min_y, max_y) = inflate_axis(detail.min.y, detail.max.y, block.min.y, block.max.y);
+    WorldRect {
+        min: WorldPosition { x: min_x, y: min_y },
+        max: WorldPosition { x: max_x, y: max_y },
+    }
+}
+
+fn rect_instance(bounds: WorldRect, color: u32) -> Instance {
+    Instance::new(
+        bounds.min.x as f32,
+        bounds.min.y as f32,
+        (bounds.max.x - bounds.min.x) as f32,
+        (bounds.max.y - bounds.min.y) as f32,
+        color,
+    )
+}
+
+const fn feature_color(kind: FeatureKind) -> u32 {
+    match kind {
+        FeatureKind::Tree => rgba(24, 72, 28, 255),
+        FeatureKind::Rock => rgba(118, 116, 108, 255),
+        FeatureKind::BerryBush => rgba(112, 42, 74, 255),
+    }
+}
+
+const fn summary_feature_color(kind: FeatureKind) -> u32 {
+    match kind {
+        FeatureKind::Tree => rgba(24, 72, 28, 230),
+        FeatureKind::Rock => rgba(118, 116, 108, 230),
+        FeatureKind::BerryBush => rgba(112, 42, 74, 230),
+    }
 }
 
 fn terrain_sample_step(scale: f32) -> u32 {
@@ -574,18 +989,6 @@ fn cache_margin(scale: f32) -> i64 {
     (CACHE_MARGIN_PIXELS / scale.max(f32::EPSILON))
         .ceil()
         .max(1.0) as i64
-}
-
-fn terrain_block_size(world: &World, position: WorldPosition, step: u32) -> [f32; 2] {
-    let limit = world
-        .loaded_bounds_at(position)
-        .expect("visited terrain cells must have loaded coverage")
-        .max;
-    let step = i64::from(step);
-    [
-        (limit.x - position.x).min(step) as f32,
-        (limit.y - position.y).min(step) as f32,
-    ]
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1114,12 +1517,181 @@ mod tests {
         let (coarse, _) = build_world_instances(&world, bounds, 4);
 
         assert_eq!(full.len(), 4_096);
-        assert_eq!(coarse.len(), 256);
-        assert!(coarse.iter().all(|instance| instance.size == [4.0, 4.0]));
+        assert!((256..=512).contains(&coarse.len()));
+        assert_eq!(
+            coarse
+                .iter()
+                .filter(|instance| instance.size == [4.0, 4.0])
+                .count(),
+            256
+        );
+    }
+
+    #[test]
+    fn coarse_summary_preserves_unaligned_features_as_density_markers() {
+        let world = World::generate(42, WorldConfig::new(128, 128).unwrap());
+        let bounds = world.initial_bounds();
+        let (_, exact) = build_world_instances(&world, bounds, 1);
+        assert!(!exact.is_empty(), "probe must contain generated features");
+        assert!(exact.iter().any(|instance| {
+            instance.position[0] as i64 % 64 != 0 || instance.position[1] as i64 % 64 != 0
+        }));
+
+        let (_, coarse) = build_world_instances(&world, bounds, 64);
+        assert!(!coarse.is_empty());
+        assert!(coarse.len() <= 4, "one marker per coarse block");
+    }
+
+    #[test]
+    fn summary_priority_preserves_water_coasts_and_mountain_minorities() {
+        let detail = |base: usize, minority: usize| {
+            let mut summary = SummaryAccumulator::default();
+            summary.visuals[base].count = 100;
+            summary.visuals[minority].count = 1;
+            (summary.base_visual(), summary.detail_visual(base))
+        };
+        assert_eq!(
+            detail(GRASS_VISUAL, RIVER_VISUAL),
+            (Some(GRASS_VISUAL), Some(RIVER_VISUAL))
+        );
+        assert_eq!(
+            detail(GRASS_VISUAL, LAKE_VISUAL),
+            (Some(GRASS_VISUAL), Some(LAKE_VISUAL))
+        );
+        assert_eq!(
+            detail(GRASS_VISUAL, OCEAN_SHALLOW),
+            (Some(GRASS_VISUAL), Some(OCEAN_SHALLOW))
+        );
+        assert_eq!(
+            detail(FOREST_VISUAL, SNOW_VISUAL),
+            (Some(FOREST_VISUAL), Some(SNOW_VISUAL))
+        );
+    }
+
+    #[test]
+    fn feature_summary_marker_area_increases_with_density() {
+        let world = World::generate(1, WorldConfig::new(64, 64).unwrap());
+        let position = WorldPosition { x: 0, y: 0 };
+        let cell = world.cell(position).expect("origin is resident");
+        let block = WorldRect {
+            min: position,
+            max: WorldPosition { x: 64, y: 64 },
+        };
+        let marker = |count| {
+            let mut summary = SummaryAccumulator::default();
+            summary.observe_cell(position, position, cell);
+            summary.feature_counts[0] = count;
+            let mut terrain = Vec::new();
+            let mut features = Vec::new();
+            summary.instances(block, position, &mut terrain, &mut features);
+            features[0]
+        };
+        let sparse = marker(1);
+        let dense = marker(100);
+        assert!(dense.size[0] > sparse.size[0]);
+        assert!(dense.size[1] > sparse.size[1]);
+    }
+
+    #[test]
+    fn coarse_summary_preserves_a_major_river_that_misses_block_origins() {
+        let mut world = World::generate(1, WorldConfig::new(64, 64).unwrap());
+        let river_probe = WorldRect {
+            min: WorldPosition {
+                x: -14_592,
+                y: -14_976,
+            },
+            max: WorldPosition {
+                x: -14_336,
+                y: -14_720,
+            },
+        };
+        world.generate_area(river_probe).unwrap();
+        let mut river_colors = Vec::new();
+        let mut has_unaligned_river = false;
+        world.visit_cells_in(river_probe, |position, cell| {
+            if cell.biome() == BiomeType::River {
+                river_colors.push(terrain_color(cell));
+                has_unaligned_river |=
+                    position.x.rem_euclid(64) != 0 || position.y.rem_euclid(64) != 0;
+            }
+        });
+        river_colors.sort_unstable();
+        river_colors.dedup();
+        assert!(
+            has_unaligned_river,
+            "canonical probe must contain an unaligned river"
+        );
+
+        let (coarse, _) = build_world_instances(&world, river_probe, 64);
+        assert!(
+            coarse
+                .iter()
+                .any(|instance| river_colors.binary_search(&instance.color).is_ok()),
+            "minority river color disappeared from coarse summaries"
+        );
+    }
+
+    #[test]
+    fn summary_cache_retains_only_the_active_step_and_resident_margin() {
+        let mut world = World::generate(7, WorldConfig::new(128, 64).unwrap());
+        let distant = WorldRect {
+            min: WorldPosition { x: 512, y: 0 },
+            max: WorldPosition { x: 576, y: 64 },
+        };
+        world.generate_area(distant).unwrap();
+        let mut cache = WorldSummaryCache::default();
+        let initial = world.initial_bounds();
+        let _ = cache.sync(&world, initial, 16, None);
+        assert_eq!(cache.step, 16);
+        assert_eq!(cache.chunks.len(), 4);
+        assert!(cache.logical_bytes() > 0);
+
+        let _ = cache.sync(&world, distant, 16, None);
+        assert_eq!(cache.chunks.len(), 1);
+        assert!(cache.chunks.contains_key(&ChunkCoord { x: 8, y: 0 }));
+
+        let _ = cache.sync(&world, distant, 32, None);
+        assert_eq!(cache.step, 32);
+        assert_eq!(cache.chunks.len(), 1);
+
+        let mut repeated = WorldSummaryCache::default();
+        assert_eq!(
+            cache.sync(&world, distant, 32, Some(distant)),
+            repeated.sync(&world, distant, 32, None),
+            "parallel summary construction and change-bound invalidation must be deterministic"
+        );
+    }
+
+    #[test]
+    #[ignore = "release-only renderer summary measurement"]
+    fn release_summary_cache_measurement() {
+        let side = std::env::var("SIM_SUMMARY_BENCH_SIZE")
+            .ok()
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(1_024);
+        let world = World::generate(1, WorldConfig::new(side, side).unwrap());
+        let bounds = world.initial_bounds();
+        for step in [2, 4, 8, 16, 32, 64] {
+            let mut cache = WorldSummaryCache::default();
+            let started = Instant::now();
+            let (terrain, features) = cache.sync(&world, bounds, step, None);
+            let elapsed = started.elapsed();
+            println!(
+                "summary-bench side={side} step={step} chunks={} cache_bytes={} terrain_instances={} feature_instances={} gpu_instance_bytes={} build_ms={:.3}",
+                cache.chunks.len(),
+                cache.logical_bytes(),
+                terrain.len(),
+                features.len(),
+                (terrain.len() + features.len()) * size_of::<Instance>(),
+                elapsed.as_secs_f64() * 1_000.0,
+            );
+        }
     }
 
     #[test]
     fn sample_step_targets_two_pixel_blocks_and_chunk_divisors() {
+        assert_eq!(size_of::<VisualSample>(), 12);
+        assert_eq!(size_of::<SummaryAccumulator>(), 186);
         assert_eq!(terrain_sample_step(4.0), 1);
         assert_eq!(terrain_sample_step(1.1), 2);
         assert_eq!(terrain_sample_step(0.5), 4);
@@ -1187,7 +1759,7 @@ mod tests {
             max: WorldPosition { x: 192, y: 64 },
         };
         expanded.generate_area(generated_bounds).unwrap();
-        let (generated_instances, _) = build_world_instances(&expanded, generated_bounds, 3);
+        let (generated_instances, _) = build_world_instances(&expanded, generated_bounds, 4);
         assert!(generated_instances.iter().all(|instance| {
             instance.position[0] >= 128.0
                 && instance.position[0] + instance.size[0] <= 192.0
@@ -1196,7 +1768,7 @@ mod tests {
         assert!(
             generated_instances
                 .iter()
-                .any(|instance| instance.position[0] == 191.0 && instance.size[0] == 1.0)
+                .any(|instance| instance.position[0] == 188.0 && instance.size[0] == 4.0)
         );
     }
 

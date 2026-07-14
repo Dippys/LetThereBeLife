@@ -84,6 +84,25 @@ The focused release pool workload compared the final Stage 5 tree with an isolat
 
 The one-worker median improved 2.6% and the 15-worker median regressed 4.3%, both within the observed local run spread rather than evidence of a material Stage 5 cost. The important implementation constraint is structural: feature patching reuses the two local-detail samples already required for terrain and collapses the three kind rolls into different bit ranges of one coordinate hash. The workload includes canonical drainage/regional preparation and chunk payload construction, so it is not feature-only attribution.
 
+### Multi-scale renderer summaries
+
+Slice 6 replaces coarse coordinate sampling with one active viewer-owned per-chunk summary level. Each retained block owns one 20-byte base `Instance`, optionally one 20-byte minority-terrain detail, and optionally one 20-byte density-scaled feature marker. Retained CPU summary vectors request `shrink_to_fit`; on the recorded allocator their measured capacities equal their instance lengths and the same logical byte count is uploaded to GPU buffers. The table reports that per-copy payload, not the combined CPU-plus-GPU total. It excludes each chunk's two `Vec` headers, `BTreeMap` nodes, allocator metadata, wgpu buffer metadata/alignment, and driver allocations. Summary construction uses a transient 12-byte `VisualSample` for each of 15 terrain classes; the complete per-block `SummaryAccumulator` is size-asserted at 186 bytes and released after the chunk's instances are built. Only one step is retained, and only chunks intersecting the camera rectangle plus its approximately 128-screen-pixel margin remain cached.
+
+The focused release command is documented in `TESTING.md`. On 2026-07-15, a fully resident 4,096 x 4,096 seed-1 rectangle on the recorded 16-logical-CPU machine produced:
+
+| Step | Chunks | Terrain instances | Feature instances | Logical payload per CPU/GPU copy | Summary build |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 2 | 4,096 | 4,194,663 | 20,482 | 84,302,900 bytes | 523.499 ms |
+| 4 | 4,096 | 1,048,840 | 18,652 | 21,349,840 bytes | 23.660 ms |
+| 8 | 4,096 | 262,289 | 13,517 | 5,516,120 bytes | 17.494 ms |
+| 16 | 4,096 | 65,615 | 6,011 | 1,432,520 bytes | 16.883 ms |
+| 32 | 4,096 | 16,423 | 2,137 | 371,200 bytes | 15.240 ms |
+| 64 | 4,096 | 4,117 | 839 | 99,120 bytes | 15.020 ms |
+
+The test deliberately rebuilds the complete resident rectangle at every step. Step 2 is not a realistic complete-rectangle camera workload: at that scale, the viewport and margin cover only a fraction of 4,096 cells per axis. It is retained as a high-volume allocation/upload ceiling and also pays the first large parallel-pool use in this ordered run. Steps 8-16 approximate initial-fit levels for common windows; independent chunk construction reduces the previous sequential step-16 observation from 139.257 ms to 16.883 ms while preserving deterministic map insertion and exact output counts.
+
+The real hidden-window release command `SIM_VIEWER_SUMMARY_METRICS=1 target/release/sim-viewer.exe --config config/simulation.toml --smoke-frames 8` observed one streamed step-16 synchronization after 64 chunks arrived: 1,024 terrain instances, 114 feature instances, 22,760 bytes in the CPU cache and the same logical GPU instance payload, 3.305 ms summary construction, 0.040 ms CPU upload enqueue, and 3.345 ms combined synchronization. Buffer creation/upload enqueue timing is a CPU observation, not GPU completion. Timestamp-query completion, allocator attribution, full bootstrap completion, and long interactive frame-hitch distributions remain open; the instrumentation makes repeated representative collection possible without changing authoritative state.
+
 ### Cross-region drainage skeleton
 
 The candidate command is the ignored release test documented in `TESTING.md`, run in a fresh process for each `SIM_DRAINAGE_STEP`. Seed 1 on 2026-07-14 produced:
@@ -136,7 +155,7 @@ Each cached 129 x 129 region still retains five `i32` lattices for elevation, ca
 
 Manual requests are capped at 65,536 missing chunks (268,435,456 terrain cells, or 1 GiB logical `TerrainCell` payload). The complete centered envelope contains 1,048,576 chunks and 4,294,967,296 cells: exactly 16 GiB of logical `TerrainCell` payload if every cell is resident. That number is a raw-terrain-area definition, not a process-memory promise; sparse features, `BTreeMap` nodes, chunk metadata, regional derivation caches, and allocator overhead are additional. All generation paths reject coordinates outside `[-32,768, 32,768)` before allocating work, so generating heavily toward one side cannot move or consume a separate count-only boundary.
 
-The viewer no longer rasterizes every framebuffer pixel on the CPU. `wgpu` draws compact 20-byte rectangle instances, with a size-asserted 32-byte camera uniform transformed in the vertex shader. Terrain and feature buffers contain only a camera-bounded rectangle plus a scale-relative reuse margin of approximately 128 screen pixels; camera motion inside that margin updates only the uniform. Zoomed-out extraction deterministically uses power-of-two steps that divide a 64-cell chunk and target roughly two screen pixels per terrain block. Edge blocks are clipped to actual initial/chunk coverage, and static uploads are segmented at 1,000,000 instances per GPU buffer instead of relying on one potentially oversized allocation.
+The viewer no longer rasterizes every framebuffer pixel on the CPU. `wgpu` draws compact 20-byte rectangle instances, with a size-asserted 32-byte camera uniform transformed in the vertex shader. Terrain and feature buffers contain only a camera-bounded rectangle plus a scale-relative reuse margin of approximately 128 screen pixels; camera motion inside that margin updates only the uniform. Close rendering remains exact. Zoomed-out extraction uses the active power-of-two chunk-summary level targeting roughly two screen pixels per block, preserving bounded minority terrain and feature density rather than sampling one coordinate. Edge blocks are clipped to actual initial/chunk coverage, and static uploads are segmented at 1,000,000 instances per GPU buffer instead of relying on one potentially oversized allocation.
 
 Generated world data is stored in deterministic chunk-keyed tiles. Cell lookup performs a `BTreeMap` lookup rather than scanning every generated patch. Camera extraction visits only intersecting resident tiles, avoiding traversal across configured-but-unloaded or otherwise empty coordinate rectangles. Exact clipped bootstrap generation samples only retained edge cells rather than first materializing a full 64 x 64 tile; it prevents a boundary tile from leaking cells beyond a non-aligned configured edge, and a later full expansion safely replaces that tile.
 
