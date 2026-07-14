@@ -324,16 +324,63 @@ impl TerrainCell {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum FeatureKind {
     Tree,
     Rock,
     BerryBush,
 }
 
+/// Gatherable material exposed by an immutable generated surface feature.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ResourceKind {
+    Food,
+    Wood,
+    Stone,
+}
+
+/// Generated maximum yield before any future sparse depletion state is applied.
+///
+/// Capacities are abstract gathering units. They belong to the versioned base
+/// generator; remaining quantity, removal, and regrowth must live in a sparse
+/// mutable layer keyed by feature position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+pub struct BaseResource {
+    pub capacity: u16,
+    pub kind: ResourceKind,
+}
+
+impl FeatureKind {
+    pub const fn base_resource(self) -> BaseResource {
+        match self {
+            Self::Tree => BaseResource {
+                capacity: 120,
+                kind: ResourceKind::Wood,
+            },
+            Self::Rock => BaseResource {
+                capacity: 80,
+                kind: ResourceKind::Stone,
+            },
+            Self::BerryBush => BaseResource {
+                capacity: 12,
+                kind: ResourceKind::Food,
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Feature {
     pub position: WorldPosition,
     pub kind: FeatureKind,
+}
+
+impl Feature {
+    pub const fn base_resource(self) -> BaseResource {
+        self.kind.base_resource()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -1137,6 +1184,11 @@ impl World {
         })
     }
 
+    /// Returns immutable generated capacity without inventing depletion state.
+    pub fn base_resource_at(&self, position: WorldPosition) -> Option<BaseResource> {
+        self.feature_at(position).map(Feature::base_resource)
+    }
+
     pub fn cell(&self, position: WorldPosition) -> Option<TerrainCell> {
         let coord = chunk_coord(position);
         self.chunks
@@ -1417,6 +1469,11 @@ mod tests {
                 | SurfaceType::Sand
                 | SurfaceType::SnowIce
         )));
+        let first_feature = features[0];
+        assert_eq!(
+            world.base_resource_at(first_feature.position),
+            Some(first_feature.base_resource())
+        );
     }
 
     #[test]
@@ -1426,6 +1483,32 @@ mod tests {
         assert_eq!(std::mem::size_of::<TerrainClass>(), 1);
         assert_eq!(std::mem::size_of::<TerrainCell>(), 4);
         assert_eq!(std::mem::size_of::<ClimateSample>(), 4);
+        assert_eq!(std::mem::size_of::<FeatureKind>(), 1);
+        assert_eq!(std::mem::size_of::<ResourceKind>(), 1);
+        assert_eq!(std::mem::size_of::<BaseResource>(), 4);
+        assert_eq!(std::mem::size_of::<Feature>(), 24);
+    }
+
+    #[test]
+    fn feature_resources_are_derived_without_mutating_generated_base() {
+        let cases = [
+            (FeatureKind::Tree, ResourceKind::Wood, 120),
+            (FeatureKind::Rock, ResourceKind::Stone, 80),
+            (FeatureKind::BerryBush, ResourceKind::Food, 12),
+        ];
+        for (kind, resource_kind, capacity) in cases {
+            let feature = Feature {
+                position: WorldPosition { x: -7, y: 11 },
+                kind,
+            };
+            assert_eq!(
+                feature.base_resource(),
+                BaseResource {
+                    capacity,
+                    kind: resource_kind,
+                }
+            );
+        }
     }
 
     #[test]

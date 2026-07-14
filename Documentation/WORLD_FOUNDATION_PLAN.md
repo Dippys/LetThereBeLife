@@ -2,7 +2,7 @@
 
 Last synchronized: 2026-07-15.
 
-Status: **Active**. Slices 0 through 4 are implemented; Slices 5 through 7 remain planned. This document sequences the remaining Phase 1 world-foundation work and marks implemented behavior explicitly.
+Status: **Active**. Slices 0 through 5 are implemented; Slices 6 and 7 remain planned. This document sequences the remaining Phase 1 world-foundation work and marks implemented behavior explicitly.
 
 ## Purpose
 
@@ -269,6 +269,12 @@ Make visible water sparse, sourced, graded, and believable after major drainage 
 - Per-chunk river lookup remains finite and deterministic; representative generation stays inside the 13-segment allocation-free fast path and arbitrary-seed overflow remains safe.
 
 ## Slice 5: Surface-feature ecology and resource readiness
+
+Status: **Implemented** on 2026-07-15. Tree, rock, and berry placement now interprets the already-computed coherent local-detail sample as bounded canopy, grove, berry-patch, and outcrop bands, combined with slope, biome, climate, and water proximity. Forest canopy contains coherent clearings and dense patches; grassland and savanna can contain groves; riparian suitable ground increases berry-patch availability; and soil outcrops make stone available outside hill/rock terrain. Water, sand, and snow/ice remain excluded. Reusing local detail avoids another noise field or retained value.
+
+`FeatureKind::base_resource`, `Feature::base_resource`, and `World::base_resource_at` expose immutable generated capacities of 120 wood, 80 stone, or 12 food units through the four-byte `BaseResource`. These are abstract base capacities, not mutable inventory. Future depletion, removal, regrowth timing, ownership, damage, and persistence remain a sparse delta layer keyed by the stable feature position plus generator identity; none is stored in or allowed to alter generated base features. Species remain deferred because no implemented rule needs them.
+
+World-quality review format 3 adds full-resolution 512 x 512 forest and outcrop probes to the existing berry-bearing close-up. The three 64-chunk probes retain 18,894, 10,164, and 2,412 features respectively, averaging 295.22, 158.81, and 37.69 24-byte records per chunk before vector capacity and allocator metadata. Exact measurements and tests are recorded in `PERFORMANCE.md` and `TESTING.md`.
 
 ### Objective
 

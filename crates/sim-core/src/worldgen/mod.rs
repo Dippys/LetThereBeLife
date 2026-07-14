@@ -30,7 +30,7 @@ use drainage::FLOODPLAIN_RADIUS;
 use hydrology::{
     GRID, LAKE_MIN_DEPTH, NODE_STEP, RegionMap, RiverSegment, point_segment_distance_ratio,
 };
-use noise::{NOISE_HALF, centered_noise, hash, value_noise};
+use noise::{NOISE_HALF, centered_noise, hash};
 use plates::{SEA_LEVEL, macro_sample};
 
 pub(crate) use hydrology::REGION_SIZE;
@@ -59,8 +59,6 @@ const MOUNTAIN_SNOW_TEMPERATURE_MAX: i32 = 9_000;
 const DETAIL_SEED_A: u64 = 0x4445_5441_494c_4131;
 const DETAIL_SEED_B: u64 = 0x4445_5441_494c_4232;
 const FEATURE_SEED: u64 = 0x4654_5253;
-const CANOPY_SEED: u64 = 0x4341_4e4f_5059_4e4f;
-const BUSH_SEED: u64 = 0x4255_5348_434c_5553;
 
 const REGION_CACHE_CAPACITY: usize = 64;
 
@@ -281,9 +279,7 @@ impl ChunkContext {
         // Local detail is the last tier: its amplitude comes from the regional
         // roughness budget and is damped near sea level so coasts stay ragged
         // without dissolving into speckle.
-        let detail = (centered_noise(self.seed ^ DETAIL_SEED_A, x, y, 160) * 5
-            + centered_noise(self.seed ^ DETAIL_SEED_B, x, y, 40) * 2)
-            / 7;
+        let detail = local_detail(self.seed, x, y);
         let coast_damp = 300 + (macro_elevation - i64::from(SEA_LEVEL)).abs().min(2_300);
         let amplitude = roughness * coast_damp / 2_600;
         let mut elevation = (macro_elevation + detail * amplitude / NOISE_HALF) as i32;
@@ -337,11 +333,11 @@ impl ChunkContext {
             elevation = river_grade.expect("river water has a longitudinal grade");
         }
 
+        let basin_edge = water_depth > 0 && water_depth < LAKE_MIN_DEPTH;
+        let hydrologic_wetland = (basin_edge || floodplain) && slope <= WETLAND_SLOPE_MAX;
+        let riparian_bank = (basin_edge || riverbank) && slope <= RIPARIAN_SLOPE_MAX;
         let class = water_surface.map_or_else(
             || {
-                let basin_edge = water_depth > 0 && water_depth < LAKE_MIN_DEPTH;
-                let hydrologic_wetland = (basin_edge || floodplain) && slope <= WETLAND_SLOPE_MAX;
-                let riparian_bank = (basin_edge || riverbank) && slope <= RIPARIAN_SLOPE_MAX;
                 classify(
                     elevation,
                     moisture,
@@ -364,7 +360,22 @@ impl ChunkContext {
             class.surface(),
             class.biome(),
         );
-        (cell, feature(self.seed, x, y, class, moisture, temperature))
+        (
+            cell,
+            feature(
+                self.seed,
+                x,
+                y,
+                FeatureEnvironment {
+                    class,
+                    moisture,
+                    temperature,
+                    slope,
+                    near_water: basin_edge || riverbank,
+                    ecology: detail,
+                },
+            ),
+        )
     }
 
     fn local_slope(&self, local_x: i64, local_y: i64) -> i64 {
@@ -465,14 +476,31 @@ fn classify(
     }
 }
 
-fn feature(
-    seed: u64,
-    x: i64,
-    y: i64,
+fn local_detail(seed: u64, x: i64, y: i64) -> i64 {
+    (centered_noise(seed ^ DETAIL_SEED_A, x, y, 160) * 5
+        + centered_noise(seed ^ DETAIL_SEED_B, x, y, 40) * 2)
+        / 7
+}
+
+#[derive(Clone, Copy)]
+struct FeatureEnvironment {
     class: TerrainClass,
     moisture: i32,
     temperature: i32,
-) -> Option<FeatureKind> {
+    slope: i64,
+    near_water: bool,
+    ecology: i64,
+}
+
+fn feature(seed: u64, x: i64, y: i64, environment: FeatureEnvironment) -> Option<FeatureKind> {
+    let FeatureEnvironment {
+        class,
+        moisture,
+        temperature,
+        slope,
+        near_water,
+        ecology,
+    } = environment;
     if matches!(
         class.surface(),
         SurfaceType::DeepWater
@@ -482,23 +510,48 @@ fn feature(
     ) {
         return None;
     }
-    let roll = (hash(seed ^ FEATURE_SEED, x, y) % 10_000) as i64;
+    let rolls = hash(seed ^ FEATURE_SEED, x, y);
+    let tree_roll = (rolls % 10_000) as i64;
+    let berry_roll = ((rolls >> 21) % 10_000) as i64;
+    let rock_roll = ((rolls >> 42) % 10_000) as i64;
     match (class.surface(), class.biome()) {
         (SurfaceType::Soil, BiomeType::Forest) => {
-            // Canopy noise opens clearings instead of uniform tree spam.
-            let canopy = value_noise(seed ^ CANOPY_SEED, x, y, 176);
-            (canopy > 16_000 && roll < 640).then_some(FeatureKind::Tree)
+            if ecology < -18_000 && rock_roll < 180 {
+                Some(FeatureKind::Rock)
+            } else if ecology > -7_000 && tree_roll < 820 {
+                Some(FeatureKind::Tree)
+            } else {
+                (ecology > -20_000 && berry_roll < 120).then_some(FeatureKind::BerryBush)
+            }
         }
-        (SurfaceType::Soil, BiomeType::Grassland)
-            if moisture > 30_000 && temperature > FOREST_TEMPERATURE_MIN =>
-        {
-            (roll < 55).then_some(FeatureKind::Tree)
+        (SurfaceType::Soil, biome) => {
+            let tree_threshold = match biome {
+                BiomeType::Grassland if moisture > 28_000 => 9_000,
+                BiomeType::Savanna if moisture > 17_000 => 15_000,
+                _ => i64::MAX,
+            };
+            if ecology > tree_threshold && temperature > FOREST_TEMPERATURE_MIN && tree_roll < 360 {
+                return Some(FeatureKind::Tree);
+            }
+
+            let berry_patch_min = if near_water { -11_000 } else { -3_000 };
+            if matches!(
+                biome,
+                BiomeType::Grassland | BiomeType::Savanna | BiomeType::Wetland
+            ) && moisture > 17_000
+                && temperature > 9_000
+                && ecology > berry_patch_min
+                && ecology <= tree_threshold
+                && berry_roll < 160
+            {
+                return Some(FeatureKind::BerryBush);
+            }
+
+            ((slope >= 70 || ecology < -14_000) && rock_roll < 150).then_some(FeatureKind::Rock)
         }
-        (SurfaceType::Soil, BiomeType::Grassland | BiomeType::Savanna) if moisture > 18_000 => {
-            (roll < 70 && value_noise(seed ^ BUSH_SEED, x, y, 96) > 39_000)
-                .then_some(FeatureKind::BerryBush)
+        (SurfaceType::Hill | SurfaceType::Rock, _) => {
+            (ecology > -14_000 && rock_roll < 430).then_some(FeatureKind::Rock)
         }
-        (SurfaceType::Hill | SurfaceType::Rock, _) => (roll < 170).then_some(FeatureKind::Rock),
         _ => None,
     }
 }
@@ -1218,5 +1271,158 @@ mod tests {
             max >= min * 2 + 16,
             "feature density is uniform: min {min} max {max}"
         );
+    }
+
+    fn synthetic_feature_counts(
+        class: TerrainClass,
+        moisture: i32,
+        temperature: i32,
+        slope: i64,
+        near_water: bool,
+    ) -> [u32; 3] {
+        let mut counts = [0; 3];
+        for y in -256..256 {
+            for x in -256..256 {
+                if let Some(kind) = feature(
+                    PROBE_SEED,
+                    x,
+                    y,
+                    FeatureEnvironment {
+                        class,
+                        moisture,
+                        temperature,
+                        slope,
+                        near_water,
+                        ecology: local_detail(PROBE_SEED, x, y),
+                    },
+                ) {
+                    counts[match kind {
+                        FeatureKind::Tree => 0,
+                        FeatureKind::Rock => 1,
+                        FeatureKind::BerryBush => 2,
+                    }] += 1;
+                }
+            }
+        }
+        counts
+    }
+
+    #[test]
+    fn surface_feature_ecology_varies_by_environment_and_water_proximity() {
+        let forest = synthetic_feature_counts(
+            TerrainClass::new(SurfaceType::Soil, BiomeType::Forest),
+            42_000,
+            28_000,
+            20,
+            false,
+        );
+        let grass = synthetic_feature_counts(
+            TerrainClass::new(SurfaceType::Soil, BiomeType::Grassland),
+            32_000,
+            28_000,
+            20,
+            false,
+        );
+        let riparian_grass = synthetic_feature_counts(
+            TerrainClass::new(SurfaceType::Soil, BiomeType::Grassland),
+            32_000,
+            28_000,
+            20,
+            true,
+        );
+        let hill = synthetic_feature_counts(
+            TerrainClass::new(SurfaceType::Hill, BiomeType::Alpine),
+            20_000,
+            18_000,
+            140,
+            false,
+        );
+
+        assert!(
+            forest[0] > grass[0] * 2,
+            "forest {forest:?} grass {grass:?}"
+        );
+        assert!(
+            riparian_grass[2] > grass[2],
+            "dry {grass:?} riparian {riparian_grass:?}"
+        );
+        assert!(grass[1] > 0, "ordinary soil never exposes stone: {grass:?}");
+        assert!(hill[1] > grass[1] * 2, "hill {hill:?} grass {grass:?}");
+        assert!(
+            riparian_grass[2] >= 128,
+            "insufficient berry access: {riparian_grass:?}"
+        );
+    }
+
+    #[test]
+    fn forest_canopy_contains_deterministic_clearings_and_dense_patches() {
+        let class = TerrainClass::new(SurfaceType::Soil, BiomeType::Forest);
+        let mut blocks = [0_u16; 256];
+        for y in 0..512 {
+            for x in 0..512 {
+                if feature(
+                    PROBE_SEED,
+                    x,
+                    y,
+                    FeatureEnvironment {
+                        class,
+                        moisture: 42_000,
+                        temperature: 28_000,
+                        slope: 20,
+                        near_water: false,
+                        ecology: local_detail(PROBE_SEED, x, y),
+                    },
+                ) == Some(FeatureKind::Tree)
+                {
+                    blocks[(y / 32 * 16 + x / 32) as usize] += 1;
+                }
+            }
+        }
+        assert!(
+            blocks.iter().any(|&count| count <= 4),
+            "no clearing: {blocks:?}"
+        );
+        assert!(
+            blocks.iter().any(|&count| count >= 40),
+            "no dense canopy: {blocks:?}"
+        );
+
+        let repeated = synthetic_feature_counts(class, 42_000, 28_000, 20, false);
+        assert_eq!(
+            repeated,
+            synthetic_feature_counts(class, 42_000, 28_000, 20, false)
+        );
+    }
+
+    #[test]
+    fn incompatible_surfaces_never_emit_features() {
+        for surface in [
+            SurfaceType::DeepWater,
+            SurfaceType::ShallowWater,
+            SurfaceType::Sand,
+            SurfaceType::SnowIce,
+        ] {
+            let class = TerrainClass::new(surface, BiomeType::Tundra);
+            for y in -32..32 {
+                for x in -32..32 {
+                    assert_eq!(
+                        feature(
+                            PROBE_SEED,
+                            x,
+                            y,
+                            FeatureEnvironment {
+                                class,
+                                moisture: 65_535,
+                                temperature: 32_000,
+                                slope: 0,
+                                near_water: true,
+                                ecology: local_detail(PROBE_SEED, x, y),
+                            },
+                        ),
+                        None
+                    );
+                }
+            }
+        }
     }
 }

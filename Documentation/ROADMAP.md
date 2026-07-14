@@ -27,6 +27,7 @@ Last synchronized: 2026-07-15.
 - World-foundation Slice 2: a finite cold-to-warm-to-cold latitude contract fitted to the complete envelope, four alternating wobbled prevailing-wind bands, complete-envelope multi-seed climate coverage, and allocation-free resident-cell temperature/moisture/wind inspection while retaining the four-byte terrain cell.
 - World-foundation Slice 3: a one-byte packed surface/biome classification exposed through typed accessors, with distinct ocean/lake/river, beach/desert, grassland/savanna/forest/wetland, tundra/alpine, and snow/ice semantics; updated HUD/map palettes and review-format distributions; and no growth beyond the four-byte terrain cell.
 - World-foundation Slice 4: sparse explicit lake-fed river sources with moisture-gated runoff, complete ocean/world-edge routes, bounded curved refinement, downstream water-surface grades, non-crossing geometry, hydrologic wetlands, riparian banks, bounded coherent coast/biome/snowline/treeline transitions, and a safe arbitrary-seed chunk-index overflow path.
+- World-foundation Slice 5: deterministic canopy, grove, berry-patch, riparian, slope, and outcrop feature ecology; stone availability beyond mountain surfaces; derived compact food/wood/stone base capacities; an explicit future sparse depletion boundary; and full-resolution forest/outcrop/berry review evidence with record-footprint accounting.
 
 ## Active
 
@@ -37,7 +38,7 @@ Last synchronized: 2026-07-15.
 
 Detailed sequencing, implementation areas, acceptance criteria, performance checkpoints, and explicit deferrals for the remaining world work are maintained in [WORLD_FOUNDATION_PLAN.md](WORLD_FOUNDATION_PLAN.md).
 
-- Implement world-foundation Slice 5 by refining sparse feature ecology and resource readiness within explicit deterministic and performance bounds.
+- Implement world-foundation Slice 6 by adding simulation-independent multi-scale renderer summaries that preserve minority terrain and feature legibility without becoming authoritative world state.
 - Use the implemented representative-seed review set when changing world generation, and turn durable multi-seed findings into deterministic quality thresholds only when they express intended world behavior rather than preserve the current repository seed.
 - Extend the focused generation measurements where needed to protect world-generation iteration, including first terrain, bootstrap completion, frame hitches, resident memory, and allocations; use measured results to set explicit runtime budgets.
 

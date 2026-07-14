@@ -251,9 +251,7 @@ impl DrainageSkeleton {
             self.sources
                 .iter()
                 .all(|source| self.lakes.iter().any(|lake| {
-                    lake.id == source.lake_id
-                        && lake.outlet_node == source.node
-                        && !lake.terminal
+                    lake.id == source.lake_id && lake.outlet_node == source.node && !lake.terminal
                 }))
         );
         debug_assert_eq!(self.fill_surface.len(), self.lake_depth.len());
@@ -561,7 +559,6 @@ fn extract_channels(
     );
     let mut channel_ids = vec![0_u32; elevation.len()];
     let mut strongest_flow = vec![0_u64; elevation.len()];
-    let mut primary_upstream = vec![NO_TARGET; elevation.len()];
     let stream_orders = derive_stream_orders(target, &selected, &order);
     for &index in &order {
         let index = index as usize;
@@ -577,7 +574,6 @@ fn extract_channels(
         if candidate > current {
             strongest_flow[downstream] = accumulation[index];
             channel_ids[downstream] = channel_ids[index];
-            primary_upstream[downstream] = index as u32;
         }
     }
 
@@ -626,24 +622,16 @@ fn extract_channels(
         let half_width = channel_half_width(accumulation[from], stream_order);
         let start = node_position(from, grid, step);
         let end = node_position(to, grid, step);
-        let previous = (primary_upstream[from] != NO_TARGET).then(|| {
-            node_position(primary_upstream[from] as usize, grid, step)
-        });
-        let next = (selected[to] && target[to] != NO_TARGET)
-            .then(|| node_position(target[to] as usize, grid, step));
-        let refined = [(true, 100), (true, 50), (false, 0)]
+        let refined = [100, 50, 0]
             .into_iter()
-            .map(|(smooth, strength)| {
+            .map(|strength| {
                 refine_channel_link(
                     seed,
-                    previous,
                     start,
                     end,
-                    next,
                     fill[from],
                     fill[to],
                     subdivisions,
-                    smooth,
                     strength,
                     channel_id,
                     half_width,
@@ -655,14 +643,11 @@ fn extract_channels(
                 rebuild_straight = true;
                 refine_channel_link(
                     seed,
-                    None,
                     start,
                     end,
-                    None,
                     fill[from],
                     fill[to],
                     subdivisions,
-                    false,
                     0,
                     channel_id,
                     half_width,
@@ -678,14 +663,11 @@ fn extract_channels(
             let to = link.to as usize;
             rivers.extend(refine_channel_link(
                 seed,
-                None,
                 node_position(from, grid, step),
                 node_position(to, grid, step),
-                None,
                 fill[from],
                 fill[to],
                 subdivisions,
-                false,
                 0,
                 link.channel_id,
                 channel_half_width(u64::from(link.flow), link.stream_order),
@@ -716,44 +698,21 @@ fn channel_half_width(flow: u64, stream_order: u8) -> u8 {
 #[allow(clippy::too_many_arguments)]
 fn refine_channel_link(
     seed: u64,
-    previous_node: Option<(i64, i64)>,
     start: (i64, i64),
     end: (i64, i64),
-    next_node: Option<(i64, i64)>,
     surface_start: i32,
     surface_end: i32,
     subdivisions: usize,
-    smooth: bool,
     strength: i64,
     channel_id: u32,
     half_width: u8,
     stream_order: u8,
 ) -> Vec<DrainageSegment> {
     let mut segments = Vec::with_capacity(subdivisions);
-    let mut previous = channel_point_with_strength(
-        seed,
-        previous_node,
-        start,
-        end,
-        next_node,
-        0,
-        subdivisions,
-        smooth,
-        strength,
-    );
+    let mut previous = channel_point_with_strength(seed, start, end, 0, subdivisions, strength);
     let mut previous_surface = channel_surface(surface_start, surface_end, 0, subdivisions);
     for part in 1..=subdivisions {
-        let next = channel_point_with_strength(
-            seed,
-            previous_node,
-            start,
-            end,
-            next_node,
-            part,
-            subdivisions,
-            smooth,
-            strength,
-        );
+        let next = channel_point_with_strength(seed, start, end, part, subdivisions, strength);
         let next_surface = channel_surface(surface_start, surface_end, part, subdivisions);
         if next != previous {
             segments.push(DrainageSegment {
@@ -1204,16 +1163,9 @@ mod tests {
                 assert!(drainage.channels.iter().any(|link| {
                     link.from == source.node && u64::from(link.flow) >= RIVER_SOURCE_FLOW_THRESHOLD
                 }));
-                assert!(
-                    drainage
-                        .lakes
-                        .iter()
-                        .any(|lake| {
-                            lake.id == source.lake_id
-                                && lake.outlet_node == source.node
-                                && !lake.terminal
-                        })
-                );
+                assert!(drainage.lakes.iter().any(|lake| {
+                    lake.id == source.lake_id && lake.outlet_node == source.node && !lake.terminal
+                }));
                 let point = node_position(source.node as usize, drainage.grid, drainage.step);
                 for other in &drainage.sources[offset + 1..] {
                     let other = node_position(other.node as usize, drainage.grid, drainage.step);

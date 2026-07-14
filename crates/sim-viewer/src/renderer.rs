@@ -3,8 +3,8 @@ use std::{borrow::Cow, fmt::Write, sync::Arc};
 use bytemuck::{Pod, Zeroable};
 use sim_core::{
     BiomeType, CHUNK_SIZE, ChunkInspection, ChunkPresence, FeatureKind, GenerateAreaError,
-    PrevailingWind, SimulationSnapshot, SurfaceType, WORLD_GENERATION_BOUNDS, World, WorldPosition,
-    WorldRect,
+    PrevailingWind, ResourceKind, SimulationSnapshot, SurfaceType, WORLD_GENERATION_BOUNDS, World,
+    WorldPosition, WorldRect,
 };
 use wgpu::util::DeviceExt;
 use winit::window::Window;
@@ -777,15 +777,21 @@ fn write_hud_text(output: &mut String, world: &World, state: &RenderState) {
                         cell.elevation, climate.temperature, climate.moisture
                     )
                     .expect("writing to String cannot fail");
-                    write!(
-                        output,
-                        "WIND {}  FEATURE {}",
-                        wind_label(climate.wind),
-                        world
-                            .feature_at(position)
-                            .map_or("NONE", |feature| feature_label(feature.kind))
-                    )
-                    .expect("writing to String cannot fail");
+                    write!(output, "WIND {}  FEATURE ", wind_label(climate.wind))
+                        .expect("writing to String cannot fail");
+                    if let Some(feature) = world.feature_at(position) {
+                        let resource = feature.base_resource();
+                        write!(
+                            output,
+                            "{}  {} CAP {}",
+                            feature_label(feature.kind),
+                            resource_label(resource.kind),
+                            resource.capacity
+                        )
+                        .expect("writing to String cannot fail");
+                    } else {
+                        output.push_str("NONE");
+                    }
                 }
             } else {
                 write!(output, "CELL UNLOADED").expect("writing to String cannot fail");
@@ -862,6 +868,14 @@ const fn feature_label(feature: FeatureKind) -> &'static str {
         FeatureKind::Tree => "TREE",
         FeatureKind::Rock => "ROCK",
         FeatureKind::BerryBush => "BERRY BUSH",
+    }
+}
+
+const fn resource_label(resource: ResourceKind) -> &'static str {
+    match resource {
+        ResourceKind::Food => "FOOD",
+        ResourceKind::Wood => "WOOD",
+        ResourceKind::Stone => "STONE",
     }
 }
 

@@ -4,13 +4,13 @@ mod world;
 mod worldgen;
 
 pub use world::{
-    BiomeType, CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkInspection, ChunkLoadRequest,
-    ChunkLocalPosition, ChunkPresence, ClimateSample, DEFAULT_INITIAL_WORLD_SIZE, Feature,
-    FeatureKind, GenerateAreaError, GeneratedCell, MAX_CHUNKS_PER_GENERATION, MAX_GENERATED_CELLS,
-    MAX_GENERATED_CHUNKS, MAX_GENERATED_TERRAIN_BYTES, MAX_INITIAL_CHUNKS, PrevailingWind,
-    SurfaceType, TerrainCell, TerrainClass, WORLD_GENERATION_BOUNDS, WORLD_HALF_EXTENT,
-    WORLD_SIDE_CELLS, World, WorldChunk, WorldChunkLoad, WorldConfig, WorldConfigError,
-    WorldPosition, WorldRect,
+    BaseResource, BiomeType, CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkInspection,
+    ChunkLoadRequest, ChunkLocalPosition, ChunkPresence, ClimateSample, DEFAULT_INITIAL_WORLD_SIZE,
+    Feature, FeatureKind, GenerateAreaError, GeneratedCell, MAX_CHUNKS_PER_GENERATION,
+    MAX_GENERATED_CELLS, MAX_GENERATED_CHUNKS, MAX_GENERATED_TERRAIN_BYTES, MAX_INITIAL_CHUNKS,
+    PrevailingWind, ResourceKind, SurfaceType, TerrainCell, TerrainClass, WORLD_GENERATION_BOUNDS,
+    WORLD_HALF_EXTENT, WORLD_SIDE_CELLS, World, WorldChunk, WorldChunkLoad, WorldConfig,
+    WorldConfigError, WorldPosition, WorldRect,
 };
 
 use std::time::Duration;

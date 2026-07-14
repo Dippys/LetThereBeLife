@@ -1,6 +1,6 @@
 # Performance and Footprint
 
-Last synchronized: 2026-07-14.
+Last synchronized: 2026-07-15.
 
 ## Principle
 
@@ -57,7 +57,32 @@ Each full-envelope view samples 262,144 fixed coordinates at a 128-cell step. Th
 | 42 | 49.85% | 4.67% | 12.72% | 25.76% | 5.15% | 0.94% | 0.92% | 34.71 |
 | 10,001 | 57.04% | 3.94% | 8.80% | 23.22% | 5.31% | 1.39% | 0.30% | 35.78 |
 
-The review-format-2 `representation.tsv` currently records: `SurfaceType` 1 byte/alignment 1, `BiomeType` 1/1, `TerrainClass` 1/1, `TerrainCell` 4/2, `PrevailingWind` 1/1, `ClimateSample` 4/2, `FeatureKind` 1/1, `Feature` 24/8, `GeneratedCell` 6/2, and `ChunkCoord` 16/8. These are complete Rust record sizes, not sums of field widths. The existing regional-cache calculation below remains the relevant retained derivation-cache baseline.
+The review-format-3 `representation.tsv` currently records: `SurfaceType` 1 byte/alignment 1, `BiomeType` 1/1, `TerrainClass` 1/1, `TerrainCell` 4/2, `PrevailingWind` 1/1, `ClimateSample` 4/2, `FeatureKind` 1/1, `Feature` 24/8, `ResourceKind` 1/1, `BaseResource` 4/2, `GeneratedCell` 6/2, and `ChunkCoord` 16/8. `BaseResource` is derived and returned by value, so Stage 5 adds no retained bytes per feature. These are complete Rust record sizes, not sums of field widths. The existing regional-cache calculation below remains the relevant retained derivation-cache baseline.
+
+### Surface-feature ecology
+
+The Stage 5 review extends the canonical workload from 12 to 14 views by adding two full-resolution 512 x 512 probes. One already-built release run on 2026-07-15 rendered the 14 views in 16.39 seconds; this is a visual-review observation, not a benchmark distribution or regression limit. The four 128-cell full-envelope samples retained 812, 723, 1,355, and 1,356 features for seeds 1, 7, 42, and 10,001, or 30.97, 27.58, 51.68, and 51.72 features per 10,000 sampled coordinates. Coarse aligned sampling is not an estimate of full-resolution density.
+
+The three full-resolution 512 x 512 feature probes each cover 64 chunks and provide the record-footprint measurement required by Slice 5:
+
+| Probe | Trees | Rocks | Berry bushes | Features | Average records/chunk | Average logical feature bytes/chunk |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Forest, seed 42 | 15,877 | 69 | 2,948 | 18,894 | 295.22 | 7,085.25 |
+| Outcrop, seed 7 | 0 | 10,164 | 0 | 10,164 | 158.81 | 3,811.50 |
+| Berry coast, seed 1 | 0 | 46 | 2,366 | 2,412 | 37.69 | 904.50 |
+
+Logical bytes multiply the asserted 24-byte `Feature` size by exact retained records and divide by 64. They exclude `Vec` capacity, allocator metadata, and tile/map metadata; actual chunks vary because patches are intentionally spatially uneven. Canopy, grove, berry-patch, and outcrop bands reuse the local-detail value already computed for terrain synthesis, so Stage 5 adds no noise call or retained patch field. Future sparse depletion records remain unimplemented and therefore have no measured payload yet.
+
+The focused release pool workload compared the final Stage 5 tree with an isolated archive of the immediately preceding revision. That revision's mismatched D-033 refinement helper signature was adapted to its callers in the archive only so it would compile; no feature code changed there. The final tree removes the same unused helper context and dead `primary_upstream` scratch while preserving its curve strengths and output. Both sides used seed 10,001, a cold 2,048 x 2,048 footprint (1,024 chunks), the same release profile, and three fresh test processes per worker count:
+
+| Revision | Workers | Runs (ms) | Median |
+| --- | ---: | ---: | ---: |
+| Pre-Stage-5 feature placement plus compile repair | 1 | 329.1, 323.4, 327.3 | 327.3 ms |
+| Stage 5 | 1 | 318.7, 315.0, 319.9 | 318.7 ms |
+| Pre-Stage-5 feature placement plus compile repair | 15 | 114.4, 110.7, 130.8 | 114.4 ms |
+| Stage 5 | 15 | 117.0, 119.3, 122.3 | 119.3 ms |
+
+The one-worker median improved 2.6% and the 15-worker median regressed 4.3%, both within the observed local run spread rather than evidence of a material Stage 5 cost. The important implementation constraint is structural: feature patching reuses the two local-detail samples already required for terrain and collapses the three kind rolls into different bit ranges of one coordinate hash. The workload includes canonical drainage/regional preparation and chunk payload construction, so it is not feature-only attribution.
 
 ### Cross-region drainage skeleton
 

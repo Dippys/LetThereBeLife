@@ -16,9 +16,9 @@ use std::{
 };
 
 use sim_core::{
-    BiomeType, CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkLocalPosition, ClimateSample, Feature,
-    FeatureKind, GeneratedCell, PrevailingWind, SurfaceType, TerrainCell, TerrainClass,
-    WORLD_GENERATION_BOUNDS, WorldPosition, WorldRect,
+    BaseResource, BiomeType, CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkLocalPosition,
+    ClimateSample, Feature, FeatureKind, GeneratedCell, PrevailingWind, ResourceKind, SurfaceType,
+    TerrainCell, TerrainClass, WORLD_GENERATION_BOUNDS, WorldPosition, WorldRect,
 };
 
 const DEFAULT_WIDTH: i64 = 4_096;
@@ -26,7 +26,7 @@ const DEFAULT_HEIGHT: i64 = 4_096;
 const DEFAULT_STEP: i64 = 8;
 const DEFAULT_REVIEW_DIRECTORY: &str = "target/world-quality";
 const MAX_PIXELS: usize = 16_777_216;
-const REVIEW_FORMAT_VERSION: u32 = 2;
+const REVIEW_FORMAT_VERSION: u32 = 3;
 const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
@@ -49,7 +49,7 @@ const REPRESENTATIVE_SEEDS: [SeedCase; 4] = [
     },
 ];
 
-const FOCUSED_VIEWS: [ReviewView; 8] = [
+const FOCUSED_VIEWS: [ReviewView; 10] = [
     ReviewView::new("regional", 1, (-4_096, -4_096, 8_192, 8_192), 16, false),
     ReviewView::new(
         "drainage-seam-x",
@@ -75,6 +75,8 @@ const FOCUSED_VIEWS: [ReviewView; 8] = [
         false,
     ),
     ReviewView::new("mountain", 7, (-16_384, -4_096, 8_192, 8_192), 16, false),
+    ReviewView::new("forest-features", 42, (1_024, -512, 512, 512), 1, true),
+    ReviewView::new("outcrop-features", 7, (-10_240, 2_048, 512, 512), 1, true),
     ReviewView::new("close-up", 1, (-25_088, 14_848, 512, 512), 1, true),
 ];
 
@@ -598,6 +600,8 @@ fn representation_report() -> String {
         type_layout::<ClimateSample>("ClimateSample"),
         type_layout::<FeatureKind>("FeatureKind"),
         type_layout::<Feature>("Feature"),
+        type_layout::<ResourceKind>("ResourceKind"),
+        type_layout::<BaseResource>("BaseResource"),
         type_layout::<GeneratedCell>("GeneratedCell"),
         type_layout::<ChunkCoord>("ChunkCoord"),
     ] {
@@ -873,6 +877,25 @@ mod tests {
     }
 
     #[test]
+    fn feature_ecology_views_are_full_resolution_and_visible() {
+        let views: Vec<_> = FOCUSED_VIEWS
+            .into_iter()
+            .filter(|view| {
+                matches!(
+                    view.name,
+                    "forest-features" | "outcrop-features" | "close-up"
+                )
+            })
+            .collect();
+        assert_eq!(views.len(), 3);
+        assert!(
+            views
+                .iter()
+                .all(|view| view.step == 1 && view.show_features)
+        );
+    }
+
+    #[test]
     fn representative_seed_contract_is_multi_seed_and_keeps_repository_seed() {
         assert_eq!(REPRESENTATIVE_SEEDS[0].seed, 1);
         assert!(REPRESENTATIVE_SEEDS.len() >= 4);
@@ -902,7 +925,7 @@ mod tests {
         assert_eq!(left, right);
         assert_eq!(
             left,
-            "review_format\tsource_revision\tview\tseed\tmin_x\tmin_y\tmax_x\tmax_y\tstep\tcolumns\trows\tfeatures\tsample_hash\tpath\n2\tabc123+dirty\tfixture\t7\t-64\t-32\t64\t32\t4\t32\t16\ttrue\t123456789abcdef0\tseed-7/fixture.bmp\n"
+            "review_format\tsource_revision\tview\tseed\tmin_x\tmin_y\tmax_x\tmax_y\tstep\tcolumns\trows\tfeatures\tsample_hash\tpath\n3\tabc123+dirty\tfixture\t7\t-64\t-32\t64\t32\t4\t32\t16\ttrue\t123456789abcdef0\tseed-7/fixture.bmp\n"
         );
     }
 
