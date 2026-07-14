@@ -221,7 +221,7 @@ These are simulation-facing meanings, not a requirement for separate art assets 
 
 ### Implementation area
 
-- `GroundType`, `TerrainCell`, and inspection APIs in `crates/sim-core/src/world.rs`
+- terrain records and inspection APIs under `crates/sim-core/src/world.rs` and `crates/sim-core/src/world/`
 - classification in `crates/sim-core/src/worldgen/mod.rs`
 - renderer palette and HUD labels in `crates/sim-viewer/src/renderer.rs`
 - developer map palette in `crates/sim-core/examples/render_map.rs`
@@ -297,7 +297,7 @@ Do not put depletion, damage, ownership, growth, or fire state into the immutabl
 
 ### Implementation area
 
-- `FeatureKind` and `Feature` in `crates/sim-core/src/world.rs`
+- `FeatureKind` and `Feature` in the private `sim-core::world` module
 - feature placement in `crates/sim-core/src/worldgen/mod.rs`
 - renderer feature views in `crates/sim-viewer/src/renderer.rs`
 - future sparse resource/delta ownership in `sim-core`

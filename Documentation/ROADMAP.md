@@ -30,6 +30,7 @@ Last synchronized: 2026-07-15.
 - World-foundation Slice 5: deterministic canopy, grove, berry-patch, riparian, slope, and outcrop feature ecology; stone availability beyond mountain surfaces; derived compact food/wood/stone base capacities; an explicit future sparse depletion boundary; and full-resolution forest/outcrop/berry review evidence with record-footprint accounting.
 - World-foundation Slice 6: viewer-owned power-of-two per-chunk summaries with dominant terrain, minority river/lake/coast/mountain preservation, density-scaled feature markers, bounded camera-margin residency, authoritative change-bound invalidation, deterministic parallel construction, and release cache/build/upload-enqueue measurements.
 - World-foundation Slice 7: explicit residency-aware cardinal traversal, fresh/salt-water, and immutable resource queries; stable generated feature identity; a public-only deterministic settlement-candidate scenario; and a documented immutable-base, future sparse-delta, dynamic-entity handoff.
+- `sim-core` maintainability pass: split world queries and deterministic visitation into responsibility-focused private modules, and move the large world/worldgen unit suites out of production entry files without changing public APIs or test paths.
 
 ## Active
 
@@ -48,11 +49,11 @@ The completed world-foundation sequence, acceptance criteria, performance checkp
 ## Deferred
 
 - Generator versioning, save/load, chunk persistence, and unloading policy are deferred until persisted world output is about to be introduced and the generator is ready to stabilize. Version identifiers must still be added before the first durable world format ships.
-- Physical agents and later simulation phases remain deferred until the active world-foundation quality bar is met.
+- Later cognition, society, and presentation phases remain deferred until the active physical-agent loop establishes their concrete requirements.
 
 ## Planned
 
-After the active world-foundation focus is complete, resume the phases described in `InitialDocumentation/16_IMPLEMENTATION_ROADMAP.md`, using that file only as immutable design input. Record implementation status here as milestones land.
+Continue Phase 2 from the active physical-agent slice, using `InitialDocumentation/16_IMPLEMENTATION_ROADMAP.md` only as immutable design input. Record implementation status here as milestones land.
 
 ## Open
 

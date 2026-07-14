@@ -19,6 +19,7 @@ sim-viewer
 
 ## Current contracts
 
+- `sim-core::world` is organized by responsibility without widening the crate API: `world.rs` owns world configuration, compact domain records, chunk residency, and materialization; `world/queries.rs` owns resident physical/resource/climate lookup; and `world/visits.rs` owns deterministic read-only iteration. Large private unit suites live beside their owning modules. `sim-core::lib` remains the only downstream-facing re-export boundary.
 - Interactive presentation actions mutate simulation state through `EngineCommand`; viewer worker payloads enter through the explicit, capacity-checked `Engine::apply_world_chunk_loads` boundary.
 - Presentation reads engine state through `SimulationSnapshot`.
 - `Engine::tick` advances one deterministic simulation step when not paused.
