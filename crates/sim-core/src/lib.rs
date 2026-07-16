@@ -1,6 +1,7 @@
 //! Engine-independent deterministic simulation foundation.
 
 mod agent;
+mod health;
 mod needs;
 mod policy;
 mod resources;
@@ -18,6 +19,10 @@ pub use agent::{
     PerceivedResource, PerceivedWater, PerceptionError, PhysicalPerception, PopulationInit,
     PopulationInitError, PopulationInitOutcome, RouteEventOutcome, RouteOutcomeKind,
     RouteScheduled, SimTime, SpawnInvalidReason,
+};
+pub use health::{
+    DeathCause, DeathRecord, HEALTH_CONSEQUENCE_INTERVAL_TICKS, HEALTH_INCAPACITATION_THRESHOLD,
+    HEALTH_MAX, HealthDiagnostic, HealthDiagnosticKind, HealthStatus, HealthView,
 };
 pub use needs::{
     NEED_MAX, NEED_RATE_PERIOD_TICKS, NeedKind, NeedLevelView, NeedQueryError, NeedThreshold,
@@ -129,6 +134,9 @@ pub struct SimulationSnapshot {
     pub speed: f32,
     pub seed: u64,
     pub agent_count: u32,
+    pub living_agent_count: u32,
+    pub active_agent_count: u32,
+    pub death_count: u32,
     pub scheduled_event_count: u32,
     pub structure_count: u32,
 }
@@ -149,6 +157,8 @@ pub struct Engine {
     policy_diagnostics: Vec<PolicyDiagnostic>,
     sleep_diagnostics: Vec<SleepDiagnostic>,
     structure_diagnostics: Vec<StructureDiagnostic>,
+    health_diagnostics: Vec<HealthDiagnostic>,
+    death_records: Vec<DeathRecord>,
     policy_active: bool,
     resource_deltas: ResourceDeltas,
     structures: StructureStore,
@@ -176,6 +186,8 @@ impl Engine {
             policy_diagnostics: Vec::new(),
             sleep_diagnostics: Vec::new(),
             structure_diagnostics: Vec::new(),
+            health_diagnostics: Vec::new(),
+            death_records: Vec::new(),
             policy_active: false,
             resource_deltas: ResourceDeltas::default(),
             structures: StructureStore::default(),
@@ -210,6 +222,8 @@ impl Engine {
                 self.policy_diagnostics.clear();
                 self.sleep_diagnostics.clear();
                 self.structure_diagnostics.clear();
+                self.health_diagnostics.clear();
+                self.death_records.clear();
                 self.policy_active = false;
                 self.resource_deltas = ResourceDeltas::default();
                 self.structures = StructureStore::default();
@@ -241,6 +255,7 @@ impl Engine {
         self.policy_diagnostics.clear();
         self.sleep_diagnostics.clear();
         self.structure_diagnostics.clear();
+        self.health_diagnostics.clear();
         let mut processed = 0_usize;
         while processed < MAX_DUE_EVENTS_PER_TICK {
             let Some(event) = self.scheduler.pop_due(self.time) else {
@@ -303,6 +318,31 @@ impl Engine {
                     }
                 }
                 self.need_outcomes.push(outcome);
+                processed += 1;
+                continue;
+            }
+            if event.class == EventClass::HealthConsequence {
+                let outcome = self
+                    .population
+                    .apply_health_consequence(&mut self.scheduler, event);
+                match outcome.kind {
+                    HealthDiagnosticKind::Incapacitated => {
+                        self.cancel_construction(outcome.agent);
+                        self.population.incapacitate(outcome.at, outcome.agent);
+                    }
+                    HealthDiagnosticKind::Died => {
+                        self.cancel_construction(outcome.agent);
+                        if let Some(cause) = outcome.cause
+                            && let Some(record) =
+                                self.population
+                                    .finalize_death(outcome.at, outcome.agent, cause)
+                        {
+                            self.death_records.push(record);
+                        }
+                    }
+                    HealthDiagnosticKind::Deteriorated | HealthDiagnosticKind::StaleEvent => {}
+                }
+                self.health_diagnostics.push(outcome);
                 processed += 1;
                 continue;
             }
@@ -410,7 +450,7 @@ impl Engine {
         let mut population = Population::default();
         let outcome = population.initialize(&self.world, self.time, init, requested_positions)?;
         let scheduler_capacity = (init.population as usize)
-            .checked_mul(4)
+            .checked_mul(5)
             .ok_or(PopulationInitError::AllocationFailed)?;
         let mut scheduler = Scheduler::try_with_capacity(scheduler_capacity)
             .map_err(|_| PopulationInitError::AllocationFailed)?;
@@ -438,6 +478,8 @@ impl Engine {
         self.movement_outcomes = movement_outcomes;
         self.need_outcomes = need_outcomes;
         self.policy_diagnostics = policy_diagnostics;
+        self.health_diagnostics.clear();
+        self.death_records.clear();
         self.policy_active = false;
         self.route_outcomes.clear();
         self.route_planner = RoutePlanner::default();
@@ -572,6 +614,21 @@ impl Engine {
         self.population.needs_view(agent, self.time)
     }
 
+    /// Returns compact current health for a retained stable agent identity.
+    pub fn health(&self, agent: AgentId) -> Option<HealthView> {
+        self.population.health_view(agent)
+    }
+
+    /// Health deterioration, incapacitation, death, and stale outcomes from the latest tick.
+    pub fn health_diagnostics(&self) -> &[HealthDiagnostic] {
+        &self.health_diagnostics
+    }
+
+    /// Persistent terminal records in deterministic death-application order.
+    pub fn death_records(&self) -> &[DeathRecord] {
+        &self.death_records
+    }
+
     /// Returns compact carried resource amounts for one living agent.
     pub fn inventory(&self, agent: AgentId) -> Option<InventoryView> {
         self.population.inventory(agent)
@@ -700,6 +757,9 @@ impl Engine {
             speed: self.speed,
             seed: self.config.seed,
             agent_count: self.population.len() as u32,
+            living_agent_count: self.population.living_count() as u32,
+            active_agent_count: self.population.active_count() as u32,
+            death_count: self.death_records.len() as u32,
             scheduled_event_count: self.scheduler.len() as u32,
             structure_count: self.structures.len() as u32,
         }
@@ -2331,6 +2391,90 @@ mod tests {
         }
         assert_eq!(found.len(), count);
         found
+    }
+
+    #[test]
+    fn lethal_health_consequence_precedes_movement_and_releases_occupancy() {
+        let mut engine = resident_engine(64);
+        let (from, target) = standable_steps(&engine, 1)[0];
+        engine
+            .initialize_population(
+                PopulationInit {
+                    active_area: engine.world().initial_bounds(),
+                    population: 1,
+                },
+                &[from],
+            )
+            .unwrap();
+        engine.population.set_need_value_for_test(
+            AgentId::new(0),
+            NeedKind::Thirst,
+            8_000,
+            SimTime::ZERO,
+        );
+        engine.request_move(AgentId::new(0), target).unwrap();
+        engine.population.prepare_health_consequence_for_test(
+            &mut engine.scheduler,
+            AgentId::new(0),
+            HEALTH_INCAPACITATION_THRESHOLD,
+            SimTime::ZERO,
+        );
+
+        engine.tick();
+
+        assert_eq!(engine.death_records().len(), 1);
+        assert_eq!(engine.death_records()[0].cause, DeathCause::Dehydration);
+        assert_eq!(engine.death_records()[0].at, SimTime::ZERO);
+        assert_eq!(engine.population.spatial().occupant(from), None);
+        assert_eq!(engine.population.spatial().occupant(target), None);
+        assert_eq!(engine.snapshot().living_agent_count, 0);
+        assert_eq!(
+            engine.health_diagnostics().last().unwrap().kind,
+            HealthDiagnosticKind::Died
+        );
+    }
+
+    #[test]
+    fn terminal_health_cancels_construction_and_makes_completion_stale() {
+        let mut engine = resident_engine(64);
+        let (access, site) = standable_shelter_site(&engine);
+        engine
+            .initialize_population(
+                PopulationInit {
+                    active_area: engine.world().initial_bounds(),
+                    population: 1,
+                },
+                &[access],
+            )
+            .unwrap();
+        engine
+            .population
+            .add_inventory(AgentId::new(0), ResourceKind::Wood, SHELTER_WOOD_COST);
+        let build = engine.request_build_shelter(AgentId::new(0), site).unwrap();
+        engine.population.set_need_value_for_test(
+            AgentId::new(0),
+            NeedKind::Thirst,
+            8_000,
+            SimTime::ZERO,
+        );
+        engine.population.prepare_health_consequence_for_test(
+            &mut engine.scheduler,
+            AgentId::new(0),
+            HEALTH_INCAPACITATION_THRESHOLD,
+            SimTime::ZERO,
+        );
+
+        engine.tick();
+        assert_eq!(engine.snapshot().structure_count, 0);
+        assert!(engine.structure_diagnostics().iter().any(|diagnostic| {
+            diagnostic.structure.id == build.id
+                && diagnostic.kind == StructureDiagnosticKind::Cancelled
+        }));
+        while engine.snapshot().tick <= build.completes_at.ticks() {
+            engine.tick();
+        }
+        assert_eq!(engine.snapshot().structure_count, 0);
+        assert_eq!(engine.death_records().len(), 1);
     }
 
     fn blocked_step(engine: &Engine) -> (WorldPosition, WorldPosition, TraversalKind) {

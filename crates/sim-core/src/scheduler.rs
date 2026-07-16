@@ -9,20 +9,22 @@ pub(crate) const MAX_DUE_EVENTS_PER_TICK: usize = 4_096;
 #[repr(u8)]
 pub(crate) enum EventClass {
     NeedThreshold = 0,
-    Wake = 1,
-    ActionCompletion = 2,
-    Movement = 3,
-    Decision = 4,
+    HealthConsequence = 1,
+    Wake = 2,
+    ActionCompletion = 3,
+    Movement = 4,
+    Decision = 5,
 }
 
 impl EventClass {
     const fn rank(self) -> u8 {
         match self {
             Self::NeedThreshold => 0,
-            Self::Wake => 1,
-            Self::ActionCompletion => 2,
-            Self::Movement => 3,
-            Self::Decision => 4,
+            Self::HealthConsequence => 1,
+            Self::Wake => 2,
+            Self::ActionCompletion => 3,
+            Self::Movement => 4,
+            Self::Decision => 5,
         }
     }
 }
@@ -62,7 +64,7 @@ impl PartialOrd for ScheduledEvent {
 impl ScheduledEvent {
     const fn detail_rank(self) -> u8 {
         match self.class {
-            EventClass::NeedThreshold => self.need as u8,
+            EventClass::NeedThreshold | EventClass::HealthConsequence => self.need as u8,
             EventClass::Wake | EventClass::ActionCompletion | EventClass::Decision => {
                 self.goal as u8
             }
@@ -150,6 +152,31 @@ impl Scheduler {
             need,
             goal: PhysicalGoal::Wait,
             class: EventClass::NeedThreshold,
+        });
+        Ok(sequence)
+    }
+
+    pub(crate) fn schedule_health_consequence(
+        &mut self,
+        due: SimTime,
+        agent: AgentId,
+        generation: u32,
+        need: NeedKind,
+    ) -> Result<u64, ScheduleError> {
+        let sequence = self.next_sequence;
+        self.next_sequence = self
+            .next_sequence
+            .checked_add(1)
+            .ok_or(ScheduleError::SequenceExhausted)?;
+        self.events.push(ScheduledEvent {
+            due,
+            sequence,
+            agent,
+            generation,
+            target: CompactPosition { x: 0, y: 0 },
+            need,
+            goal: PhysicalGoal::Incapacitated,
+            class: EventClass::HealthConsequence,
         });
         Ok(sequence)
     }
@@ -329,6 +356,14 @@ mod tests {
                 .schedule_need_threshold(SimTime::from_ticks(8), AgentId::new(0), 0, need)
                 .unwrap();
         }
+        scheduler
+            .schedule_health_consequence(
+                SimTime::from_ticks(8),
+                AgentId::new(0),
+                0,
+                NeedKind::Thirst,
+            )
+            .unwrap();
         let keys: Vec<_> = std::iter::from_fn(|| scheduler.pop_due(SimTime::from_ticks(8)))
             .map(|event| (event.class, event.need))
             .collect();
@@ -339,6 +374,7 @@ mod tests {
                 (EventClass::NeedThreshold, NeedKind::Thirst),
                 (EventClass::NeedThreshold, NeedKind::Rest),
                 (EventClass::NeedThreshold, NeedKind::Exposure),
+                (EventClass::HealthConsequence, NeedKind::Thirst),
                 (EventClass::Movement, NeedKind::Hunger),
             ]
         );

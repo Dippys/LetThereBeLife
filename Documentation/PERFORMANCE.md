@@ -299,6 +299,24 @@ One optimized run on 2026-07-16 recorded:
 
 The timings include deterministic `BTreeMap` footprint/builder insertion plus binary-heap scheduling, or due extraction respectively. They are single-run observations, not regression limits. Slot bytes include geometric spare `Vec` capacity; index bytes are only the eight-byte logical key/value payload and exclude tree nodes and allocation overhead. The public seed-42 Slice 6 scenario also established the algorithmic recipe boundary: an 8-wood/4-stone candidate could not satisfy bounded radius-eight gathering even with a 512 x 512 bootstrap because tree and outcrop regions were separated, while the implemented eight-wood lean-to completes through two local four-unit gathers without a global search.
 
+### Phase 2 Slice 7 health and terminal consequences
+
+The health path remains event-driven: each stable agent owns one parallel 16-byte `HealthState`, while only projected severe boundaries and persistent 600-tick deterioration intervals occupy the unchanged 32-byte scheduler record. The six-byte hot `AgentRecord` does not grow. Terminal `DeathRecord` values are appended only for actual deaths and are excluded from the always-live table below.
+
+Command:
+
+```powershell
+cargo test --release -p sim-core health::tests::release_physical_agent_slice_seven_measurement -- --ignored --nocapture
+```
+
+| Agents | Health capacity | Health bytes | Consequence events | Event bytes | Combined logical bytes | Schedule time | Due extraction |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 20 | 20 | 320 | 20 | 640 | 960 | 5.5 us | 1.6 us |
+| 100 | 100 | 1,600 | 100 | 3,200 | 4,800 | 9.4 us | 3.3 us |
+| 10,000 | 10,000 | 160,000 | 10,000 | 320,000 | 480,000 | 1.036 ms | 0.554 ms |
+
+The harness uses exact vector and heap capacities, places every synthetic agent at the dehydration-severity boundary, schedules one equal-time consequence per agent, and drains the complete due set. Timings are one optimized machine-local observation, not regression thresholds. Combined bytes exclude `Vec`/`BinaryHeap` headers, allocator metadata, the existing 32-byte need state, and sparse terminal records. Normal runs distribute projected boundaries over time; the equal-time harness intentionally measures a concentrated worst-shaped due batch. Slice 8 must measure integrated mixed policy, route, sleep, build, health, and stale-event distributions before any scheduler replacement.
+
 ## Required measurement conditions
 
 - Use release builds and a recorded compiler version.

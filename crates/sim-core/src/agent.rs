@@ -4,6 +4,9 @@ use crate::{
     BaseResource, NeedKind, NeedQueryError, NeedThresholdEventOutcome, NeedThresholdOutcomeKind,
     PhysicalNeedsView, Standability, TraversalKind, WORLD_GENERATION_BOUNDS, WaterSource, World,
     WorldPosition, WorldQueryError, WorldRect,
+    health::{
+        DeathCause, DeathRecord, HealthDiagnostic, HealthDiagnosticKind, HealthState, HealthView,
+    },
     needs::NeedState,
     policy::{
         PhysicalGoal, PhysicalPolicyView, PolicyAction, PolicyPhase, PolicyReason, PolicyState,
@@ -74,7 +77,14 @@ pub enum AgentActivity {
     Gathering = 2,
     Building = 3,
     Sleeping = 4,
-    Dead = 5,
+    Incapacitated = 5,
+    Dead = 6,
+}
+
+impl AgentActivity {
+    pub(crate) const fn is_terminal(self) -> bool {
+        matches!(self, Self::Incapacitated | Self::Dead)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -391,7 +401,10 @@ pub(crate) struct Population {
     policies: Vec<PolicyState>,
     inventories: Vec<InventoryView>,
     sleeps: Vec<SleepState>,
+    health: Vec<HealthState>,
     spatial: SpatialIndex,
+    living_count: u32,
+    active_count: u32,
     active_area: Option<WorldRect>,
     initialized: bool,
 }
@@ -515,6 +528,11 @@ impl Population {
             .try_reserve_exact(capacity)
             .map_err(|_| PopulationInitError::AllocationFailed)?;
         sleeps.resize(capacity, SleepState::default());
+        let mut health = Vec::new();
+        health
+            .try_reserve_exact(capacity)
+            .map_err(|_| PopulationInitError::AllocationFailed)?;
+        health.resize(capacity, HealthState::default());
         let spatial = SpatialIndex::from_positions(
             records
                 .iter()
@@ -529,7 +547,10 @@ impl Population {
         self.policies = policies;
         self.inventories = inventories;
         self.sleeps = sleeps;
+        self.health = health;
         self.spatial = spatial;
+        self.living_count = init.population;
+        self.active_count = init.population;
         self.active_area = Some(init.active_area);
         self.initialized = true;
         Ok(PopulationInitOutcome {
@@ -565,11 +586,11 @@ impl Population {
             .records
             .get(index)
             .ok_or(MoveRequestError::MissingAgent)?;
-        if record.activity == AgentActivity::Dead {
+        if record.activity.is_terminal() {
             return Err(MoveRequestError::DeadAgent);
         }
         let activity_changes = record.activity != AgentActivity::Moving;
-        if !scheduler.can_schedule(if activity_changes { 5 } else { 1 }) {
+        if !scheduler.can_schedule(if activity_changes { 6 } else { 1 }) {
             return Err(MoveRequestError::EventSequenceExhausted);
         }
         if !WORLD_GENERATION_BOUNDS.contains(target) {
@@ -649,7 +670,7 @@ impl Population {
             return movement_outcome(event, None, target, MovementOutcomeKind::MissingAgent);
         };
         let from = record.position.world();
-        if record.activity == AgentActivity::Dead {
+        if record.activity.is_terminal() {
             return movement_outcome(event, Some(from), target, MovementOutcomeKind::DeadAgent);
         }
         if self.movement_generations[index] != event.generation
@@ -657,7 +678,7 @@ impl Population {
         {
             return movement_outcome(event, Some(from), target, MovementOutcomeKind::StaleEvent);
         }
-        if !scheduler.can_schedule(4) {
+        if !scheduler.can_schedule(5) {
             self.settle_activity_without_events(event.due, event.agent, AgentActivity::Idle);
             return movement_outcome(
                 event,
@@ -731,7 +752,7 @@ impl Population {
         let Some(record) = self.records.get(agent.0 as usize) else {
             return Err(MoveRequestError::MissingAgent);
         };
-        if matches!(record.activity, AgentActivity::Idle | AgentActivity::Dead) {
+        if record.activity == AgentActivity::Idle || record.activity.is_terminal() {
             return Ok(());
         }
         match self.transition_activity(scheduler, now, agent, AgentActivity::Idle) {
@@ -744,14 +765,116 @@ impl Population {
     }
 
     pub(crate) fn initialize_need_events(
-        &self,
+        &mut self,
         scheduler: &mut Scheduler,
         now: SimTime,
     ) -> Result<(), ScheduleError> {
-        for (index, state) in self.needs.iter().copied().enumerate() {
-            self.schedule_need_thresholds(scheduler, AgentId(index as u32), state, now)?;
+        for index in 0..self.needs.len() {
+            let agent = AgentId(index as u32);
+            let state = self.needs[index];
+            self.schedule_need_thresholds(scheduler, agent, state, now)?;
+            self.reschedule_health(scheduler, agent, state, now)?;
         }
         Ok(())
+    }
+
+    pub(crate) fn apply_health_consequence(
+        &mut self,
+        scheduler: &mut Scheduler,
+        event: ScheduledEvent,
+    ) -> HealthDiagnostic {
+        let index = event.agent.0 as usize;
+        let Some(health) = self.health.get_mut(index) else {
+            return HealthDiagnostic {
+                agent: event.agent,
+                at: event.due,
+                cause: None,
+                before: 0,
+                after: 0,
+                kind: HealthDiagnosticKind::StaleEvent,
+            };
+        };
+        let outcome = health.apply(event.generation, self.needs[index], event.due, event.agent);
+        if outcome.kind != HealthDiagnosticKind::Died
+            && outcome.kind != HealthDiagnosticKind::StaleEvent
+            && let Some(due) = health.schedule_next_interval(event.due)
+        {
+            let _ = scheduler.schedule_health_consequence(
+                due,
+                event.agent,
+                health.generation(),
+                event.need,
+            );
+        }
+        outcome
+    }
+
+    pub(crate) fn health_view(&self, agent: AgentId) -> Option<HealthView> {
+        self.health
+            .get(agent.0 as usize)
+            .copied()
+            .map(|state| state.view(agent))
+    }
+
+    pub(crate) fn living_count(&self) -> usize {
+        self.living_count as usize
+    }
+
+    pub(crate) fn active_count(&self) -> usize {
+        self.active_count as usize
+    }
+
+    pub(crate) fn incapacitate(&mut self, now: SimTime, agent: AgentId) {
+        let index = agent.0 as usize;
+        if !self
+            .records
+            .get(index)
+            .is_some_and(|record| record.activity != AgentActivity::Dead)
+        {
+            return;
+        }
+        if self.records[index].activity == AgentActivity::Incapacitated {
+            return;
+        }
+        self.routes[index] = None;
+        self.movement_generations[index] = self.movement_generations[index].wrapping_add(1);
+        self.policies[index].phase = PolicyPhase::Dormant;
+        self.policies[index].generation = self.policies[index].generation.wrapping_add(1);
+        self.sleeps[index] = SleepState::default();
+        self.active_count = self.active_count.saturating_sub(1);
+        self.settle_activity_without_events(now, agent, AgentActivity::Incapacitated);
+    }
+
+    pub(crate) fn finalize_death(
+        &mut self,
+        at: SimTime,
+        agent: AgentId,
+        cause: DeathCause,
+    ) -> Option<DeathRecord> {
+        let index = agent.0 as usize;
+        let record = self.records.get(index)?;
+        if record.activity == AgentActivity::Dead {
+            return None;
+        }
+        let position = record.position.world();
+        let was_active = !record.activity.is_terminal();
+        self.routes[index] = None;
+        self.movement_generations[index] = self.movement_generations[index].wrapping_add(1);
+        self.policies[index].phase = PolicyPhase::Dormant;
+        self.policies[index].generation = self.policies[index].generation.wrapping_add(1);
+        self.sleeps[index] = SleepState::default();
+        self.spatial.remove(agent, position);
+        self.living_count = self.living_count.saturating_sub(1);
+        if was_active {
+            self.active_count = self.active_count.saturating_sub(1);
+        }
+        self.settle_activity_without_events(at, agent, AgentActivity::Dead);
+        Some(DeathRecord {
+            agent,
+            cause,
+            at,
+            position,
+        })
     }
 
     pub(crate) fn needs_view(
@@ -763,7 +886,7 @@ impl Population {
             .records
             .get(agent.0 as usize)
             .ok_or(NeedQueryError::MissingAgent)?;
-        if record.activity == AgentActivity::Dead {
+        if record.activity.is_terminal() {
             return Err(NeedQueryError::DeadAgent);
         }
         Ok(self.needs[agent.0 as usize].view(agent, now))
@@ -777,7 +900,7 @@ impl Population {
         let Some(record) = self.records.get(index) else {
             return need_outcome(event, None, NeedThresholdOutcomeKind::MissingAgent);
         };
-        if record.activity == AgentActivity::Dead {
+        if record.activity.is_terminal() {
             return need_outcome(event, None, NeedThresholdOutcomeKind::DeadAgent);
         }
         let (outcome, value) =
@@ -822,9 +945,11 @@ impl Population {
     }
 
     pub(crate) fn policy_event_is_current(&self, event: ScheduledEvent) -> bool {
-        self.policies
-            .get(event.agent.0 as usize)
-            .is_some_and(|state| state.event_is_current(event.generation))
+        let index = event.agent.0 as usize;
+        self.records
+            .get(index)
+            .is_some_and(|record| !record.activity.is_terminal())
+            && self.policies[index].event_is_current(event.generation)
     }
 
     pub(crate) fn policy_context(
@@ -833,7 +958,7 @@ impl Population {
         now: SimTime,
     ) -> Option<(AgentView, PhysicalNeedsView, InventoryView)> {
         let view = self.view(agent)?;
-        (view.activity != AgentActivity::Dead).then(|| {
+        (!view.activity.is_terminal()).then(|| {
             (
                 view,
                 self.needs[agent.0 as usize].view(agent, now),
@@ -913,7 +1038,7 @@ impl Population {
             .records
             .get(index)
             .ok_or(MoveRequestError::MissingAgent)?;
-        if record.activity == AgentActivity::Dead {
+        if record.activity.is_terminal() {
             return Err(MoveRequestError::DeadAgent);
         }
         let interrupted_sleep = self.sleeps[index].is_active().then_some(self.sleeps[index]);
@@ -933,7 +1058,7 @@ impl Population {
             return Err(MoveRequestError::RescheduleLimit);
         }
         let transition_events = if self.needs[index].requires_transition(AgentActivity::Idle) {
-            4
+            5
         } else {
             0
         };
@@ -975,7 +1100,7 @@ impl Population {
 
     pub(crate) fn force_settle_idle(&mut self, now: SimTime, agent: AgentId) {
         let index = agent.0 as usize;
-        if index >= self.records.len() || self.records[index].activity == AgentActivity::Dead {
+        if index >= self.records.len() || self.records[index].activity.is_terminal() {
             return;
         }
         self.settle_activity_without_events(now, agent, AgentActivity::Idle);
@@ -997,7 +1122,7 @@ impl Population {
             .records
             .get(index)
             .ok_or(SleepRequestError::MissingAgent)?;
-        if record.activity == AgentActivity::Dead {
+        if record.activity.is_terminal() {
             return Err(SleepRequestError::DeadAgent);
         }
         if record.activity != AgentActivity::Idle {
@@ -1066,7 +1191,7 @@ impl Population {
             return Err(SleepRequestError::RescheduleLimit);
         }
         let transition_events = if self.needs[index].requires_transition(AgentActivity::Sleeping) {
-            4
+            5
         } else {
             0
         };
@@ -1076,6 +1201,8 @@ impl Population {
         if self.needs[index].transition_sleep(quality, now) {
             let state = self.needs[index];
             self.schedule_need_thresholds(scheduler, agent, state, now)
+                .expect("event sequence capacity was prechecked");
+            self.reschedule_health(scheduler, agent, state, now)
                 .expect("event sequence capacity was prechecked");
         }
         self.records[index].activity = AgentActivity::Sleeping;
@@ -1133,11 +1260,11 @@ impl Population {
             | PhysicalGoal::Eat
             | PhysicalGoal::SeekShelter
             | PhysicalGoal::Wait => AgentActivity::Idle,
-            PhysicalGoal::Incapacitated => AgentActivity::Dead,
+            PhysicalGoal::Incapacitated => AgentActivity::Incapacitated,
         };
         if !scheduler.can_schedule(
             if self.needs[agent.0 as usize].requires_transition(activity) {
-                5
+                6
             } else {
                 1
             },
@@ -1187,7 +1314,7 @@ impl Population {
         let index = agent.0 as usize;
         self.records
             .get(index)
-            .is_some_and(|record| record.activity != AgentActivity::Dead)
+            .is_some_and(|record| !record.activity.is_terminal())
             .then(|| self.inventories[index])
     }
 
@@ -1246,12 +1373,14 @@ impl Population {
         if consume_food && self.inventories[index].food < FOOD_CONSUMPTION {
             return Err(ActionEffectError::NoEdibleInventory);
         }
-        if !scheduler.can_schedule(4) {
+        if !scheduler.can_schedule(5) {
             return Err(ActionEffectError::EventSequenceExhausted);
         }
         let mut next = self.needs[index];
         next.relieve(kind, amount, now);
         self.schedule_need_thresholds(scheduler, agent, next, now)
+            .map_err(|_| ActionEffectError::EventSequenceExhausted)?;
+        self.reschedule_health(scheduler, agent, next, now)
             .map_err(|_| ActionEffectError::EventSequenceExhausted)?;
         if consume_food {
             self.inventories[index].food -= FOOD_CONSUMPTION;
@@ -1274,12 +1403,14 @@ impl Population {
         activity: AgentActivity,
     ) -> Result<(), MoveRequestError> {
         let index = agent.0 as usize;
-        if self.needs[index].requires_transition(activity) && !scheduler.can_schedule(4) {
+        if self.needs[index].requires_transition(activity) && !scheduler.can_schedule(5) {
             return Err(MoveRequestError::EventSequenceExhausted);
         }
         if self.needs[index].transition(activity, now) {
             let state = self.needs[index];
             self.schedule_need_thresholds(scheduler, agent, state, now)
+                .map_err(|_| MoveRequestError::EventSequenceExhausted)?;
+            self.reschedule_health(scheduler, agent, state, now)
                 .map_err(|_| MoveRequestError::EventSequenceExhausted)?;
         }
         self.records[index].activity = activity;
@@ -1308,6 +1439,20 @@ impl Population {
             if let Some(due) = state.threshold_due(kind, now) {
                 scheduler.schedule_need_threshold(due, agent, state.generation(), kind)?;
             }
+        }
+        Ok(())
+    }
+
+    fn reschedule_health(
+        &mut self,
+        scheduler: &mut Scheduler,
+        agent: AgentId,
+        needs: NeedState,
+        now: SimTime,
+    ) -> Result<(), ScheduleError> {
+        let health = &mut self.health[agent.0 as usize];
+        if let Some((due, need)) = health.reschedule(needs, now) {
+            scheduler.schedule_health_consequence(due, agent, health.generation(), need)?;
         }
         Ok(())
     }
@@ -1341,7 +1486,7 @@ impl Population {
             .records
             .get(agent.0 as usize)
             .ok_or(RouteRequestError::MissingAgent)?;
-        if record.activity == AgentActivity::Dead {
+        if record.activity.is_terminal() {
             return Err(RouteRequestError::DeadAgent);
         }
         Ok((
@@ -1390,7 +1535,7 @@ impl Population {
             });
         }
         let view = self.view(agent).ok_or(PerceptionError::MissingAgent)?;
-        if view.activity == AgentActivity::Dead {
+        if view.activity.is_terminal() {
             return Err(PerceptionError::DeadAgent);
         }
         let active = self.active_area.expect("initialized population");
@@ -1420,7 +1565,7 @@ impl Population {
         area: WorldRect,
     ) -> Result<PhysicalPerception, PerceptionError> {
         let view = self.view(agent).ok_or(PerceptionError::MissingAgent)?;
-        if view.activity == AgentActivity::Dead {
+        if view.activity.is_terminal() {
             return Err(PerceptionError::DeadAgent);
         }
         if area.max.x <= area.min.x || area.max.y <= area.min.y {
@@ -1527,11 +1672,15 @@ impl Population {
                         && self.movement_generations[index] == event.generation
                 }
                 EventClass::NeedThreshold => {
-                    record.activity != AgentActivity::Dead
+                    !record.activity.is_terminal()
                         && self.needs[index].event_is_current(event.generation, event.need)
                 }
-                EventClass::Decision | EventClass::Wake | EventClass::ActionCompletion => {
+                EventClass::HealthConsequence => {
                     record.activity != AgentActivity::Dead
+                        && self.health[index].event_is_current(event.generation)
+                }
+                EventClass::Decision | EventClass::Wake | EventClass::ActionCompletion => {
+                    !record.activity.is_terminal()
                         && self.policies[index].event_is_current(event.generation)
                 }
             })
@@ -1568,6 +1717,21 @@ impl Population {
         now: SimTime,
     ) {
         self.needs[agent.0 as usize].set_value_for_test(kind, value, now);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn prepare_health_consequence_for_test(
+        &mut self,
+        scheduler: &mut Scheduler,
+        agent: AgentId,
+        value: u16,
+        now: SimTime,
+    ) {
+        let index = agent.0 as usize;
+        self.health[index].set_value_for_test(value);
+        let needs = self.needs[index];
+        self.reschedule_health(scheduler, agent, needs, now)
+            .unwrap();
     }
 
     #[cfg(test)]

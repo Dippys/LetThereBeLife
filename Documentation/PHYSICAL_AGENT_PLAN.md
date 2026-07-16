@@ -2,7 +2,7 @@
 
 Last synchronized: 2026-07-16.
 
-Status: **Active plan**. Phase 1 world foundation and Phase 2 Slices 0-6 are complete. Slice 7 is the next implementation target; later slices are planned and must be completed in order unless this document records a reviewed dependency change.
+Status: **Active plan**. Phase 1 world foundation and Phase 2 Slices 0-7 are complete. Slice 8 is the next implementation target; later work must remain in dependency order unless this document records a reviewed dependency change.
 
 ## Purpose
 
@@ -39,7 +39,7 @@ The repository already provides the world-side contracts needed to begin:
 - deterministic resident cell/feature visitation and the Phase 1 settlement-candidate scenario provide bounded search building blocks.
 - `sim-headless` eagerly materializes the configured bootstrap area before ticking; `sim-viewer` streams terrain asynchronously and currently has no agent presentation.
 
-Slices 0-6 now provide compact agent storage and inventory, scheduled movement, one-agent-per-cell occupancy, bounded objective perception, deterministic local routes, analytical physical needs, an explicitly activated deterministic physical policy, effective gather/eat/drink actions, sparse permanent generated-resource depletion, scheduled interruptible sleep, and sparse minimal shelters with adjacent sheltered sleep. Not yet implemented are health, death, or richer agent-specific snapshots.
+Slices 0-7 now provide compact agent storage and inventory, scheduled movement, one-agent-per-cell occupancy, bounded objective perception, deterministic local routes, analytical physical needs, an explicitly activated deterministic physical policy, effective gather/eat/drink actions, sparse permanent generated-resource depletion, scheduled interruptible sleep, sparse minimal shelters with adjacent sheltered sleep, compact scheduled health deterioration, incapacitation, terminal physical death, and causal reporting. The integrated 20-100-agent survival proof and richer phase-exit report remain Slice 8.
 
 ## Non-negotiable constraints
 
@@ -386,7 +386,7 @@ Focused unit coverage fixes layout and exposure arithmetic; proves overlap arbit
 
 ## Slice 7: Health, safety, and simple death
 
-Status: **Planned**. Depends on Slices 0-6.
+Status: **Implemented** on 2026-07-16. Depends on Slices 0-6.
 
 ### Objective
 
@@ -413,6 +413,14 @@ Turn prolonged physical failure into explicit health consequences and terminal d
 - Spatial occupancy and active-agent counts remain consistent after death.
 - A reproduced run yields identical death ordering, causes, times, and positions.
 - Headless reports distinguish survival, blocked progress, depletion, dehydration, starvation, exhaustion, exposure, and other implemented terminal causes.
+
+### Implemented result
+
+Private `sim-core::health` owns one 16-byte pointer-free `HealthState` per retained agent without widening the six-byte hot position/activity record. Hunger 9,000, thirst 8,000, rest 9,500, or exposure 8,500 schedules the first consequence analytically from the existing exact need state. While severe failure persists, one event every 600 ticks applies integer health loss: dehydration 2,500, exposure 2,000, starvation 1,000, or exhaustion 1,000 from a 10,000 maximum. A value at or below 2,500 incapacitates the agent; zero applies one terminal death. When several causes are severe together, the explicit stable precedence is dehydration, exposure, starvation, then exhaustion.
+
+Health consequences sort after same-time need thresholds but before wake, action completion, movement, and decision work. Need/rate/relief changes invalidate and analytically replace the projected health event; periodic deterioration preserves its established cadence rather than restarting on an activity transition. Incapacitation invalidates movement, routes, policy work, sleep, and construction. Death removes source-validated occupancy, leaves the stable dense identity and final `AgentView` resolvable, and appends one cold `DeathRecord` containing physical cause, causal due time, and position. Generated terrain is unchanged; grief, inheritance, burial, injury, disease, and archival compaction remain deferred.
+
+`Engine::health`, latest-tick `health_diagnostics`, persistent `death_records`, and snapshot total/living/active/death counts expose the read-only boundary. `sim-headless` now reports blocked/depletion failures and separate dehydration/starvation/exhaustion/exposure totals. Unit coverage fixes health/event layouts, simultaneous-cause precedence, exact repeated deterioration, health-before-movement ordering, occupancy cleanup, and stale-event behavior. Public `physical_agent_slice7` coverage reproduces an unmet-thirst death at tick 121,800, proves terminal API rejection and idempotence, and clears terminal state on reset. The release harness records 20/100/10,000 health/event capacities and insertion/extraction observations. D-044 records the durable rules and retention decision.
 
 ## Slice 8: Phase 2 integrated survival proof
 

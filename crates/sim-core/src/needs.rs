@@ -74,7 +74,7 @@ pub struct NeedThresholdEventOutcome {
 }
 
 // Deficit units gained per 60 fixed simulation ticks. Exposure is provisional physical
-// pressure; Slice 6 shelter and Slice 7 climate consequences will change it.
+// pressure; shelter quality changes its rate and Slice 7 health consumes severe exposure.
 const ACTIVITY_RATES: [[i8; 4]; 5] = [
     [2, 4, 1, 0],  // Idle
     [3, 6, 3, 1],  // Moving
@@ -189,11 +189,11 @@ impl NeedState {
 
     pub(crate) fn view(self, agent: AgentId, now: SimTime) -> PhysicalNeedsView {
         let level = |kind| NeedLevelView {
-            value: self.value(kind, now),
+            value: self.value_at(kind, now),
             rate_per_period: i16::from(self.rates[kind.index()]),
             threshold: threshold(kind),
             threshold_reached: self.crossed & kind.mask() != 0
-                || self.value(kind, now) >= threshold(kind),
+                || self.value_at(kind, now) >= threshold(kind),
         };
         let next_threshold = NeedKind::ALL
             .into_iter()
@@ -219,7 +219,7 @@ impl NeedState {
         kind: NeedKind,
         due: SimTime,
     ) -> (NeedThresholdOutcomeKind, u16) {
-        let value = self.value(kind, due);
+        let value = self.value_at(kind, due);
         if !self.event_is_current(generation, kind) || value < threshold(kind) {
             return (NeedThresholdOutcomeKind::StaleEvent, value);
         }
@@ -240,8 +240,22 @@ impl NeedState {
         self.crossed = crossed_mask(self.values);
     }
 
-    fn value(self, kind: NeedKind, now: SimTime) -> u16 {
+    pub(crate) fn value_at(self, kind: NeedKind, now: SimTime) -> u16 {
         (self.numerator(kind, now) / u128::from(NEED_RATE_PERIOD_TICKS)) as u16
+    }
+
+    pub(crate) fn due_at_value(self, kind: NeedKind, target: u16, now: SimTime) -> Option<SimTime> {
+        let current = self.numerator(kind, now);
+        let target = u128::from(target) * u128::from(NEED_RATE_PERIOD_TICKS);
+        if current >= target {
+            return Some(now);
+        }
+        let rate = i64::from(self.rates[kind.index()]);
+        if rate <= 0 {
+            return None;
+        }
+        let elapsed = (target - current).div_ceil(rate as u128);
+        now.checked_add(u64::try_from(elapsed).ok()?)
     }
 
     fn numerator(self, kind: NeedKind, now: SimTime) -> u128 {
@@ -277,6 +291,7 @@ const fn rates_for(activity: AgentActivity) -> [i8; 4] {
         AgentActivity::Gathering => ACTIVITY_RATES[2],
         AgentActivity::Building => ACTIVITY_RATES[3],
         AgentActivity::Sleeping => sleep_rates(SleepQuality::OpenGround),
+        AgentActivity::Incapacitated => ACTIVITY_RATES[0],
         AgentActivity::Dead => [0; 4],
     }
 }

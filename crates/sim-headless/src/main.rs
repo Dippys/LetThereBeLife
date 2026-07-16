@@ -1,7 +1,8 @@
 use sim_config::{AppConfig, DEFAULT_CONFIG_PATH};
 use sim_core::{
-    AgentActivity, Engine, MovementOutcomeKind, PolicyDiagnosticKind, PopulationInit,
-    RouteOutcomeKind, SleepDiagnosticKind, StructureDiagnosticKind,
+    AgentActivity, DeathCause, Engine, MovementOutcomeKind, PolicyDiagnosticKind,
+    PolicyFailureReason, PopulationInit, RouteOutcomeKind, SleepDiagnosticKind,
+    StructureDiagnosticKind,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -56,6 +57,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut shelter_starts = 0_u32;
     let mut shelter_completions = 0_u32;
     let mut shelter_cancellations = 0_u32;
+    let mut blocked_progress = 0_u32;
+    let mut depletion_failures = 0_u32;
     for _ in 0..ticks {
         engine.tick();
         completed_movements += engine
@@ -80,6 +83,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .iter()
             .filter(|diagnostic| diagnostic.failure.is_some())
             .count() as u32;
+        for diagnostic in engine.policy_diagnostics() {
+            match diagnostic.failure {
+                Some(
+                    PolicyFailureReason::Occupied
+                    | PolicyFailureReason::NoPath
+                    | PolicyFailureReason::RouteBudgetExhausted
+                    | PolicyFailureReason::TargetUnavailable,
+                ) => blocked_progress += 1,
+                Some(PolicyFailureReason::ResourceDepleted) => depletion_failures += 1,
+                _ => {}
+            }
+        }
         for diagnostic in engine.sleep_diagnostics() {
             match diagnostic.kind {
                 SleepDiagnosticKind::Started => sleep_starts += 1,
@@ -105,16 +120,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .agent_views(agent_count as usize)
         .filter(|agent| agent.activity == AgentActivity::Sleeping)
         .count();
+    let deaths = |cause| {
+        engine
+            .death_records()
+            .iter()
+            .filter(|record| record.cause == cause)
+            .count()
+    };
     println!(
-        "completed tick={} simulated_seconds={:.3} seed={} initial_world={}x{} agents={} routes={} route_failures={} movements={} moving={} policy_selections={} policy_failures={} sleep_starts={} planned_wakes={} interrupted_wakes={} sleeping={} shelter_starts={} shelter_completions={} shelter_cancellations={} structures={}",
+        "completed tick={} simulated_seconds={:.3} seed={} initial_world={}x{} agents={} living={} active={} deaths={} dehydration={} starvation={} exhaustion={} exposure={} routes={} route_failures={} blocked_progress={} depletion_failures={} movements={} moving={} policy_selections={} policy_failures={} sleep_starts={} planned_wakes={} interrupted_wakes={} sleeping={} shelter_starts={} shelter_completions={} shelter_cancellations={} structures={}",
         snapshot.tick,
         snapshot.simulated_seconds,
         snapshot.seed,
         engine.world().width(),
         engine.world().height(),
         snapshot.agent_count,
+        snapshot.living_agent_count,
+        snapshot.active_agent_count,
+        snapshot.death_count,
+        deaths(DeathCause::Dehydration),
+        deaths(DeathCause::Starvation),
+        deaths(DeathCause::Exhaustion),
+        deaths(DeathCause::Exposure),
         completed_routes,
         failed_routes,
+        blocked_progress,
+        depletion_failures,
         completed_movements,
         moving_agents,
         policy_selections,

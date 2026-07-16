@@ -173,7 +173,7 @@ fn policy_activation_is_explicit_and_initial_wait_is_one_commitment() {
     let view = engine.physical_policy(AgentId::new(0)).unwrap();
     assert_eq!(view.goal, PhysicalGoal::Wait);
     assert!(!view.committed);
-    assert_eq!(engine.snapshot().scheduled_event_count, 4);
+    assert_eq!(engine.snapshot().scheduled_event_count, 5);
 }
 
 #[test]

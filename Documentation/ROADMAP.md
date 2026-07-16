@@ -36,19 +36,21 @@ Last synchronized: 2026-07-16.
 - Physical-agent Slice 3: explicitly activated compact deterministic physical policy, single route/action commitments, bounded radius-eight decisions, typed diagnostics, need interruption, positive capped retry, public activation/drink/no-target proofs, and recorded 20/100/10,000-agent policy/event measurements.
 - Physical-agent Slice 4: three-byte fixed inventories, scheduled deterministic gather/eat/drink effects, composed resource perception, permanent sparse generated-feature depletion, equal-time contention, explicit ocean/unloaded/no-food/overflow failures, public immutable-base/depletion proof, and recorded inventory/delta measurements.
 - Physical-agent Slice 5: 24-byte parallel sleep state, explicit valid-location sleep intent, analytical quality-based rest recovery, dedicated threshold-ordered wake events, hunger/thirst/exposure interruption, public sleep diagnostics, headless counters, and recorded 20/100/10,000-agent state/event measurements.
+- Physical-agent Slice 6: sparse simulation-owned one-cell lean-to construction, atomic eight-wood reservation/refund, structure-aware perception/traversal, completed adjacent sheltered sleep, deterministic overlap arbitration, and recorded structure/index/event measurements.
+- Physical-agent Slice 7: 16-byte scheduled health state, explicit severe hunger/thirst/rest/exposure consequences, stable multi-cause precedence, incapacitation, terminal physical death with occupancy/event cleanup, retained causal records, public health/death inspection, and headless cause counts.
 - `sim-core` maintainability pass: split world queries and deterministic visitation into responsibility-focused private modules, and move the large world/worldgen unit suites out of production entry files without changing public APIs or test paths.
 
 ## Active
 
-- Execute the ordered Phase 2 [physical-agent loop implementation plan](PHYSICAL_AGENT_PLAN.md) one coherent slice at a time. Slices 0-6 are complete; Slice 7 is next: health, safety consequences, terminal death, and causal reporting.
+- Execute the ordered Phase 2 [physical-agent loop implementation plan](PHYSICAL_AGENT_PLAN.md) one coherent slice at a time. Slices 0-7 are complete; Slice 8 is next: the integrated 20-100-agent survival proof, deterministic report/hash, soak evidence, and final Phase 2 budgets.
 - Treat generated terrain as intentionally unstable while there is no save/load or other persisted world output. Seed output may still change if an observed physical-agent failure proves a foundational correction necessary; generator versioning is not current work.
 
 ## Next
 
 The completed Phase 1 sequence remains recorded in [WORLD_FOUNDATION_PLAN.md](WORLD_FOUNDATION_PLAN.md). Phase 2 scope, dependencies, per-slice deliverables, acceptance criteria, measurements, documentation duties, and explicit deferrals are canonical in [PHYSICAL_AGENT_PLAN.md](PHYSICAL_AGENT_PLAN.md).
 
-- Complete Slice 7: connect hunger, thirst, and exposure severity to health, terminal death, occupancy/event cleanup, and causal reporting.
-- Continue in dependency order through health/death and the integrated 20-100-agent survival proof.
+- Complete Slice 8: run the full physical loop in deterministic 20-agent and 100-agent scenarios, produce the compact causal report/hash, and record soak/capacity/throughput evidence.
+- Close Phase 2 only after the integrated survival proof validates all Slice 0-7 systems together.
 - Stop after each slice for review, documentation synchronization, validation, and an explicit handoff to the next slice.
 - Use the representative-seed review set only when an observed agent-loop failure requires another generator change.
 

@@ -221,11 +221,15 @@ fn route_waypoints_remain_one_moving_activity_without_need_reschedule_churn() {
             },
         )
         .unwrap();
+    let scheduled_at_route_start = engine.snapshot().scheduled_event_count;
     while engine.snapshot().tick < route.first_completion.ticks() {
         engine.tick();
     }
     assert_eq!(engine.agent_views(1).next().unwrap().position, corridor[1]);
-    assert_eq!(engine.snapshot().scheduled_event_count, 8);
+    assert_eq!(
+        engine.snapshot().scheduled_event_count,
+        scheduled_at_route_start
+    );
     assert_eq!(
         engine
             .physical_needs(AgentId::new(0))

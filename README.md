@@ -75,7 +75,7 @@ Run the headless engine smoke test with:
 cargo run -p sim-headless -- --config config/simulation.toml --ticks 600 --seed 1
 ```
 
-The headless runner accepts `--agents NUMBER` (default 20). After eager terrain materialization it atomically places that many agents in deterministic standable row-major cells, explicitly activates their physical action policy, and reports route/movement outcomes plus policy selections and typed failures. The first 600 ticks normally contain one wait decision per agent because no physical need has reached its actionable threshold yet. The viewer intentionally starts with no agents until it gains an equivalent deterministic complete-residency gate.
+The headless runner accepts `--agents NUMBER` (default 20). After eager terrain materialization it atomically places that many agents in deterministic standable row-major cells, explicitly activates their physical action policy, and reports route/movement outcomes, blocked/depleted progress, total/living/active/dead counts, separate physical death causes, policy selections, and typed failures. The first 600 ticks normally contain one wait decision per agent because no physical need has reached its actionable threshold yet. The viewer intentionally starts with no agents until it gains an equivalent deterministic complete-residency gate.
 
 Verify the workspace with `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings`.
 

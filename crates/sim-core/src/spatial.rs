@@ -77,6 +77,26 @@ impl SpatialIndex {
             .map(|index| occupants[index].agent)
     }
 
+    pub(crate) fn remove(&mut self, agent: AgentId, position: WorldPosition) -> bool {
+        let bucket = SpatialBucket::at(position);
+        let local_cell = bucket.local_cell(position);
+        let Some(occupants) = self.buckets.get_mut(&bucket) else {
+            return false;
+        };
+        let Ok(index) = occupants.binary_search_by_key(&local_cell, |entry| entry.local_cell)
+        else {
+            return false;
+        };
+        if occupants[index].agent != agent {
+            return false;
+        }
+        occupants.remove(index);
+        if occupants.is_empty() {
+            self.buckets.remove(&bucket);
+        }
+        true
+    }
+
     pub(crate) fn transfer(
         &mut self,
         agent: AgentId,
