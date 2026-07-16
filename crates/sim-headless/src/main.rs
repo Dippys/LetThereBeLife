@@ -1,8 +1,8 @@
 use sim_config::{AppConfig, DEFAULT_CONFIG_PATH};
 use sim_core::{
-    AgentActivity, Engine, MovementOutcomeKind, PopulationInit, RouteOutcomeKind, RouteRequest,
+    AgentActivity, Engine, MovementOutcomeKind, PolicyDiagnosticKind, PopulationInit,
+    RouteOutcomeKind,
 };
-use std::collections::BTreeSet;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut ticks = 600_u64;
@@ -44,33 +44,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         &[],
     )?;
-    let initial_agents: Vec<_> = engine.agent_views(agent_count as usize).collect();
-    let mut reserved: BTreeSet<_> = initial_agents.iter().map(|agent| agent.position).collect();
-    let mut scheduled_routes = 0_u32;
-    for agent in initial_agents {
-        let target = engine
-            .perceive_physical(agent.id, 1)?
-            .traversable_cells
-            .into_iter()
-            .find(|&target| {
-                (target.x - agent.position.x).abs() + (target.y - agent.position.y).abs() == 1
-                    && !reserved.contains(&target)
-            });
-        if let Some(target) = target {
-            engine.request_route(
-                agent.id,
-                RouteRequest {
-                    destination: target,
-                    max_expansions: 16,
-                },
-            )?;
-            reserved.insert(target);
-            scheduled_routes += 1;
-        }
-    }
+    engine.activate_physical_policy()?;
     let mut completed_movements = 0_u32;
     let mut completed_routes = 0_u32;
     let mut failed_routes = 0_u32;
+    let mut policy_selections = 0_u32;
+    let mut policy_failures = 0_u32;
     for _ in 0..ticks {
         engine.tick();
         completed_movements += engine
@@ -85,6 +64,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 failed_routes += 1;
             }
         }
+        policy_selections += engine
+            .policy_diagnostics()
+            .iter()
+            .filter(|diagnostic| diagnostic.kind == PolicyDiagnosticKind::Selected)
+            .count() as u32;
+        policy_failures += engine
+            .policy_diagnostics()
+            .iter()
+            .filter(|diagnostic| diagnostic.failure.is_some())
+            .count() as u32;
     }
 
     let snapshot = engine.snapshot();
@@ -93,7 +82,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .filter(|agent| agent.activity == AgentActivity::Moving)
         .count();
     println!(
-        "completed tick={} simulated_seconds={:.3} seed={} initial_world={}x{} agents={} routes={}/{} route_failures={} movements={} moving={}",
+        "completed tick={} simulated_seconds={:.3} seed={} initial_world={}x{} agents={} routes={} route_failures={} movements={} moving={} policy_selections={} policy_failures={}",
         snapshot.tick,
         snapshot.simulated_seconds,
         snapshot.seed,
@@ -101,10 +90,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         engine.world().height(),
         snapshot.agent_count,
         completed_routes,
-        scheduled_routes,
         failed_routes,
         completed_movements,
         moving_agents,
+        policy_selections,
+        policy_failures,
     );
     Ok(())
 }

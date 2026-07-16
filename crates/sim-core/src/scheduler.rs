@@ -1,6 +1,6 @@
 use std::{cmp::Ordering, collections::BinaryHeap};
 
-use crate::{AgentId, NeedKind, SimTime, agent::CompactPosition};
+use crate::{AgentId, NeedKind, SimTime, agent::CompactPosition, policy::PhysicalGoal};
 
 /// Maximum number of due events one engine tick may apply.
 pub(crate) const MAX_DUE_EVENTS_PER_TICK: usize = 4_096;
@@ -9,14 +9,18 @@ pub(crate) const MAX_DUE_EVENTS_PER_TICK: usize = 4_096;
 #[repr(u8)]
 pub(crate) enum EventClass {
     NeedThreshold = 0,
-    Movement = 1,
+    ActionCompletion = 1,
+    Movement = 2,
+    Decision = 3,
 }
 
 impl EventClass {
     const fn rank(self) -> u8 {
         match self {
             Self::NeedThreshold => 0,
-            Self::Movement => 1,
+            Self::ActionCompletion => 1,
+            Self::Movement => 2,
+            Self::Decision => 3,
         }
     }
 }
@@ -30,6 +34,7 @@ pub(crate) struct ScheduledEvent {
     pub(crate) generation: u32,
     pub(crate) target: CompactPosition,
     pub(crate) need: NeedKind,
+    pub(crate) goal: PhysicalGoal,
     pub(crate) class: EventClass,
 }
 
@@ -56,6 +61,7 @@ impl ScheduledEvent {
     const fn detail_rank(self) -> u8 {
         match self.class {
             EventClass::NeedThreshold => self.need as u8,
+            EventClass::ActionCompletion | EventClass::Decision => self.goal as u8,
             EventClass::Movement => 0,
         }
     }
@@ -113,6 +119,7 @@ impl Scheduler {
             generation,
             target,
             need: NeedKind::Hunger,
+            goal: PhysicalGoal::Wait,
             class: EventClass::Movement,
         });
         Ok(sequence)
@@ -137,7 +144,70 @@ impl Scheduler {
             generation,
             target: CompactPosition { x: 0, y: 0 },
             need,
+            goal: PhysicalGoal::Wait,
             class: EventClass::NeedThreshold,
+        });
+        Ok(sequence)
+    }
+
+    pub(crate) fn schedule_decision(
+        &mut self,
+        due: SimTime,
+        agent: AgentId,
+        generation: u32,
+        goal: PhysicalGoal,
+    ) -> Result<u64, ScheduleError> {
+        self.schedule_policy(
+            due,
+            agent,
+            generation,
+            goal,
+            CompactPosition { x: 0, y: 0 },
+            EventClass::Decision,
+        )
+    }
+
+    pub(crate) fn schedule_action_completion(
+        &mut self,
+        due: SimTime,
+        agent: AgentId,
+        generation: u32,
+        goal: PhysicalGoal,
+        target: CompactPosition,
+    ) -> Result<u64, ScheduleError> {
+        self.schedule_policy(
+            due,
+            agent,
+            generation,
+            goal,
+            target,
+            EventClass::ActionCompletion,
+        )
+    }
+
+    fn schedule_policy(
+        &mut self,
+        due: SimTime,
+        agent: AgentId,
+        generation: u32,
+        goal: PhysicalGoal,
+        target: CompactPosition,
+        class: EventClass,
+    ) -> Result<u64, ScheduleError> {
+        let sequence = self.next_sequence;
+        self.next_sequence = self
+            .next_sequence
+            .checked_add(1)
+            .ok_or(ScheduleError::SequenceExhausted)?;
+        self.events.push(ScheduledEvent {
+            due,
+            sequence,
+            agent,
+            generation,
+            target,
+            need: NeedKind::Hunger,
+            goal,
+            class,
         });
         Ok(sequence)
     }
@@ -185,6 +255,7 @@ mod tests {
             generation: 1,
             target: CompactPosition { x: 0, y: 0 },
             need: NeedKind::Hunger,
+            goal: PhysicalGoal::Wait,
             class: EventClass::Movement,
         }
     }
@@ -248,6 +319,51 @@ mod tests {
                 (EventClass::NeedThreshold, NeedKind::Rest),
                 (EventClass::NeedThreshold, NeedKind::Exposure),
                 (EventClass::Movement, NeedKind::Hunger),
+            ]
+        );
+    }
+
+    #[test]
+    fn equal_time_policy_completion_and_decision_have_explicit_boundaries() {
+        let mut scheduler = Scheduler::default();
+        scheduler
+            .schedule_decision(
+                SimTime::from_ticks(8),
+                AgentId::new(0),
+                1,
+                PhysicalGoal::Wait,
+            )
+            .unwrap();
+        scheduler
+            .schedule_movement(
+                SimTime::from_ticks(8),
+                AgentId::new(0),
+                1,
+                CompactPosition { x: 1, y: 0 },
+            )
+            .unwrap();
+        scheduler
+            .schedule_action_completion(
+                SimTime::from_ticks(8),
+                AgentId::new(0),
+                1,
+                PhysicalGoal::Drink,
+                CompactPosition { x: 0, y: 0 },
+            )
+            .unwrap();
+        scheduler
+            .schedule_need_threshold(SimTime::from_ticks(8), AgentId::new(0), 0, NeedKind::Thirst)
+            .unwrap();
+        let classes: Vec<_> = std::iter::from_fn(|| scheduler.pop_due(SimTime::from_ticks(8)))
+            .map(|event| event.class)
+            .collect();
+        assert_eq!(
+            classes,
+            [
+                EventClass::NeedThreshold,
+                EventClass::ActionCompletion,
+                EventClass::Movement,
+                EventClass::Decision,
             ]
         );
     }

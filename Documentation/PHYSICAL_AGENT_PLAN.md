@@ -2,7 +2,7 @@
 
 Last synchronized: 2026-07-16.
 
-Status: **Active plan**. Phase 1 world foundation and Phase 2 Slices 0-2 are complete. Slice 3 is the next implementation target; later slices are planned and must be completed in order unless this document records a reviewed dependency change.
+Status: **Active plan**. Phase 1 world foundation and Phase 2 Slices 0-3 are complete. Slice 4 is the next implementation target; later slices are planned and must be completed in order unless this document records a reviewed dependency change.
 
 ## Purpose
 
@@ -39,7 +39,7 @@ The repository already provides the world-side contracts needed to begin:
 - deterministic resident cell/feature visitation and the Phase 1 settlement-candidate scenario provide bounded search building blocks.
 - `sim-headless` eagerly materializes the configured bootstrap area before ticking; `sim-viewer` streams terrain asynchronously and currently has no agent presentation.
 
-Slices 0-2 now provide compact agent storage, scheduled movement, one-agent-per-cell occupancy, bounded objective perception, deterministic local routes, and analytical physical needs with scheduled threshold outcomes. Not yet implemented are action selection, inventory, resource depletion, structures, health, death, or richer agent-specific snapshots.
+Slices 0-3 now provide compact agent storage, scheduled movement, one-agent-per-cell occupancy, bounded objective perception, deterministic local routes, analytical physical needs with scheduled threshold outcomes, and an explicitly activated deterministic physical policy with typed diagnostics and bounded retry. Not yet implemented are effective inventory/resource actions, mutable depletion, full sleep behavior, structures, health, death, or richer agent-specific snapshots.
 
 ## Non-negotiable constraints
 
@@ -224,7 +224,7 @@ Add hunger, thirst, rest, and safety/exposure as compact analytically evaluated 
 
 ### Implemented result
 
-`sim-core::needs` now owns a 32-byte fixed-point `NeedState` for hunger, thirst, rest, and exposure. Values use a 0-10,000 range, signed rates per 60 fixed simulation ticks, a shared reference time, and retained sub-unit remainders, so activity rebasing is exact without floating point or per-tick population updates. Idle, moving, gathering, building, and sleeping profiles are explicit; only the already-implemented idle/moving transitions are currently reachable, while exposure remains a provisional physical pressure rather than fear or social safety.
+`sim-core::needs` now owns a 32-byte fixed-point `NeedState` for hunger, thirst, rest, and exposure. Values use a 0-10,000 range, signed rates per 60 fixed simulation ticks, a shared reference time, and retained sub-unit remainders, so activity rebasing is exact without floating point or per-tick population updates. Idle, moving, gathering, building, and sleeping profiles are explicit; at Slice 2 completion only idle/moving transitions were reachable, while exposure remained a provisional physical pressure rather than fear or social safety.
 
 Population initialization atomically creates three applicable initial thresholds per agent; neutral exposure schedules none. Activity changes advance one bounded-safe wrapping need generation, rebase all four values exactly, and schedule only future positive-rate thresholds. Reached thresholds are one-shot wake/debug outcomes until a later value or rate change crosses them back below the actionable boundary. Superseded events are typed stale outcomes and participate in the existing bounded due drain and scheduler compaction. Equal-time order is `(time, threshold before movement, AgentId, hunger/thirst/rest/exposure, sequence)`, so a threshold reached at movement completion observes the finishing activity before its rate changes. Multi-waypoint routes remain continuously moving between route start and end instead of creating zero-duration idle reschedules.
 
@@ -232,7 +232,7 @@ Population initialization atomically creates three applicable initial thresholds
 
 ## Slice 3: Deterministic physical action policy
 
-Status: **Planned**. Depends on Slices 0-2.
+Status: **Implemented** on 2026-07-16. Depends on Slices 0-2.
 
 ### Objective
 
@@ -255,6 +255,16 @@ Connect needs, perception, routes, and activities with a deliberately small dete
 - One agent cannot schedule multiple conflicting physical commitments.
 - This module reads objective physical state only and exposes no belief, memory, relationship, personality, or language type.
 - Scenario tests make every supported activity and failure reason reachable.
+
+### Implemented result
+
+Private `sim-core::policy` defines a one-byte `PhysicalGoal` domain for seeking water, seeking food, gathering material, eating, drinking, sleeping, seeking shelter, building shelter, waiting, and incapacitation. One parallel 12-byte `PolicyState` stores the current compact target, generation, goal, phase, retry count, and reason without widening the six-byte hot agent record. `Engine::activate_physical_policy` is explicit and fallible after population initialization; it requires every agent to be idle and schedules one initial decision per agent, while non-activated manual tests and the viewer retain the prior inert population boundary.
+
+Decisions read only the current analytical need view and radius-eight `PhysicalPerception`. Reached needs use normalized integer urgency and the explicit thirst, exposure, hunger, rest tie order. Water/food access targets use Manhattan distance followed by row and column coordinates; no random stream is required because every current tie has a meaningful stable physical key. Inventory-, shelter-, and health-backed candidates are not fabricated before their authoritative slices exist. Current execution can wait, seek and reach fresh-water/food access, begin drink/eat action seams, begin sleep when rest becomes urgent, or report that shelter is deferred. Gather/build/incapacitation variants are reserved compact states and become selectable only when Slices 4, 6, and 7 provide their required objective facts.
+
+The scheduler retains its 32-byte event record while adding separate action-completion and decision classes. Equal-time order is threshold, action completion, movement, decision, then `AgentId`, class detail, and sequence. One policy generation guarantees a single current commitment; activated engines reject public manual move/route requests with typed `PolicyControlled` errors. A reached need atomically interrupts a route or action, invalidates its movement/policy events, clears the route, rebases activity idle, and schedules a new decision one tick later. Missing targets plus typed perception/route failures schedule capped exponential backoff from 60 through 1,920 ticks; action completions currently emit `DeferredToLaterSlice` and back off instead of pretending that inventory, consumption, sleep completion, shelter, or death already exists. Latest-tick `PolicyDiagnostic` records selection, route/action start, deferral, retry, and stale work with typed reasons/failures for headless reporting.
+
+Unit regressions cover the 12-byte state, one-byte complete goal discriminants, normalized urgency/tie ordering, irrelevant-fact independence, row-major target lookup, positive capped backoff, and complete equal-time class order. The public `physical_agent_slice3` scenario covers activation rejection for an existing manual commitment, explicit single activation, post-activation manual move/route rejection, initial waiting, deterministic replay at the 90,000-tick thirst crossing, one drink commitment, deferred completion, no-target retry, and absence of same-time reaction loops. The ignored release harness records 20, 100, and 10,000-agent policy/event capacity, insertion, extraction, and retained logical bytes in `PERFORMANCE.md`. `sim-headless` now activates the policy and reports selections and failures. D-040 records the durable goal, activation, ordering, commitment, interruption, target, retry, and later-slice-effect boundaries.
 
 ## Slice 4: Water, gathering, inventory, and consumption
 

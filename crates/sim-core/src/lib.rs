@@ -2,6 +2,7 @@
 
 mod agent;
 mod needs;
+mod policy;
 mod routing;
 mod scheduler;
 mod spatial;
@@ -19,6 +20,12 @@ pub use needs::{
     NEED_MAX, NEED_RATE_PERIOD_TICKS, NeedKind, NeedLevelView, NeedQueryError, NeedThreshold,
     NeedThresholdEventOutcome, NeedThresholdOutcomeKind, PhysicalNeedsView,
 };
+pub use policy::{
+    PHYSICAL_POLICY_ACTION_TICKS, PHYSICAL_POLICY_IDLE_RECHECK_TICKS,
+    PHYSICAL_POLICY_MAX_BACKOFF_TICKS, PHYSICAL_POLICY_RADIUS, PHYSICAL_POLICY_ROUTE_BUDGET,
+    PhysicalGoal, PhysicalPolicyView, PolicyActivationError, PolicyDiagnostic,
+    PolicyDiagnosticKind, PolicyFailureReason, PolicyReason,
+};
 pub use routing::{MAX_ROUTE_EXPANSIONS, RouteRequest, RouteRequestError};
 pub use world::{
     BaseResource, BiomeType, CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkInspection,
@@ -34,6 +41,7 @@ pub use world::{
 use std::time::Duration;
 
 use agent::Population;
+use policy::{PolicyAction, PolicySelection, retry_delay, select};
 use routing::RoutePlanner;
 use scheduler::{EventClass, MAX_DUE_EVENTS_PER_TICK, Scheduler};
 
@@ -118,6 +126,8 @@ pub struct Engine {
     movement_outcomes: Vec<MovementEventOutcome>,
     route_outcomes: Vec<RouteEventOutcome>,
     need_outcomes: Vec<NeedThresholdEventOutcome>,
+    policy_diagnostics: Vec<PolicyDiagnostic>,
+    policy_active: bool,
     route_planner: RoutePlanner,
 }
 
@@ -139,6 +149,8 @@ impl Engine {
             movement_outcomes: Vec::new(),
             route_outcomes: Vec::new(),
             need_outcomes: Vec::new(),
+            policy_diagnostics: Vec::new(),
+            policy_active: false,
             route_planner: RoutePlanner::default(),
         }
     }
@@ -167,6 +179,8 @@ impl Engine {
                 self.movement_outcomes.clear();
                 self.route_outcomes.clear();
                 self.need_outcomes.clear();
+                self.policy_diagnostics.clear();
+                self.policy_active = false;
                 self.route_planner = RoutePlanner::default();
                 EngineCommandOutcome::Applied
             }
@@ -192,14 +206,32 @@ impl Engine {
         self.movement_outcomes.clear();
         self.route_outcomes.clear();
         self.need_outcomes.clear();
+        self.policy_diagnostics.clear();
         let mut processed = 0_usize;
         while processed < MAX_DUE_EVENTS_PER_TICK {
             let Some(event) = self.scheduler.pop_due(self.time) else {
                 break;
             };
             if event.class == EventClass::NeedThreshold {
-                self.need_outcomes
-                    .push(self.population.apply_need_threshold(event));
+                let outcome = self.population.apply_need_threshold(event);
+                if self.policy_active && outcome.outcome == NeedThresholdOutcomeKind::Reached {
+                    let _ = self.population.interrupt_for_policy_decision(
+                        &mut self.scheduler,
+                        self.time,
+                        outcome.agent,
+                    );
+                }
+                self.need_outcomes.push(outcome);
+                processed += 1;
+                continue;
+            }
+            if event.class == EventClass::Decision {
+                self.apply_policy_decision(event);
+                processed += 1;
+                continue;
+            }
+            if event.class == EventClass::ActionCompletion {
+                self.apply_policy_action_completion(event);
                 processed += 1;
                 continue;
             }
@@ -306,10 +338,20 @@ impl Engine {
         need_outcomes
             .try_reserve_exact((init.population as usize).min(MAX_DUE_EVENTS_PER_TICK))
             .map_err(|_| PopulationInitError::AllocationFailed)?;
+        let mut policy_diagnostics = Vec::new();
+        policy_diagnostics
+            .try_reserve_exact(
+                (init.population as usize)
+                    .min(MAX_DUE_EVENTS_PER_TICK)
+                    .saturating_mul(2),
+            )
+            .map_err(|_| PopulationInitError::AllocationFailed)?;
         self.population = population;
         self.scheduler = scheduler;
         self.movement_outcomes = movement_outcomes;
         self.need_outcomes = need_outcomes;
+        self.policy_diagnostics = policy_diagnostics;
+        self.policy_active = false;
         self.route_outcomes.clear();
         self.route_planner = RoutePlanner::default();
         Ok(outcome)
@@ -320,6 +362,9 @@ impl Engine {
         agent: AgentId,
         target: WorldPosition,
     ) -> Result<MovementScheduled, MoveRequestError> {
+        if self.policy_active {
+            return Err(MoveRequestError::PolicyControlled);
+        }
         self.compact_scheduler_if_needed();
         self.population.schedule_movement(
             &mut self.scheduler,
@@ -332,6 +377,17 @@ impl Engine {
 
     /// Plans a bounded deterministic minimum-travel-time local route and schedules its first step.
     pub fn request_route(
+        &mut self,
+        agent: AgentId,
+        request: RouteRequest,
+    ) -> Result<RouteScheduled, RouteRequestError> {
+        if self.policy_active {
+            return Err(RouteRequestError::PolicyControlled);
+        }
+        self.schedule_route(agent, request)
+    }
+
+    fn schedule_route(
         &mut self,
         agent: AgentId,
         request: RouteRequest,
@@ -408,6 +464,40 @@ impl Engine {
         self.population.needs_view(agent, self.time)
     }
 
+    /// Activates autonomous physical decisions after population initialization.
+    pub fn activate_physical_policy(&mut self) -> Result<(), PolicyActivationError> {
+        if !self.population.is_initialized() {
+            return Err(PolicyActivationError::PopulationNotInitialized);
+        }
+        if self.policy_active {
+            return Err(PolicyActivationError::AlreadyActive);
+        }
+        if let Some(agent) = self.population.first_non_idle_agent() {
+            return Err(PolicyActivationError::AgentCommitted { agent });
+        }
+        let due = self
+            .time
+            .checked_add(1)
+            .ok_or(PolicyActivationError::TimeOverflow)?;
+        if !self.scheduler.can_schedule(self.population.len() as u64) {
+            return Err(PolicyActivationError::EventSequenceExhausted);
+        }
+        self.population
+            .activate_policy(&mut self.scheduler, due)
+            .map_err(|_| PolicyActivationError::EventSequenceExhausted)?;
+        self.policy_active = true;
+        Ok(())
+    }
+
+    pub fn physical_policy(&self, agent: AgentId) -> Option<PhysicalPolicyView> {
+        self.population.policy_view(agent)
+    }
+
+    /// Compact policy selections, commitments, and failures from the latest advancing tick.
+    pub fn policy_diagnostics(&self) -> &[PolicyDiagnostic] {
+        &self.policy_diagnostics
+    }
+
     pub fn snapshot(&self) -> SimulationSnapshot {
         SimulationSnapshot {
             tick: self.time.ticks(),
@@ -481,6 +571,256 @@ impl Engine {
             destination: request.destination,
             kind,
         });
+        if self.policy_active
+            && let Some((goal, target, reason)) = self.population.policy_commitment(agent)
+        {
+            if kind == RouteOutcomeKind::Arrived {
+                if self
+                    .population
+                    .schedule_policy_decision(
+                        &mut self.scheduler,
+                        self.time,
+                        agent,
+                        1,
+                        PolicyReason::RouteArrived,
+                        false,
+                    )
+                    .is_err()
+                {
+                    self.policy_diagnostics.push(PolicyDiagnostic {
+                        agent,
+                        at: self.time,
+                        goal,
+                        target: Some(target),
+                        reason,
+                        kind: PolicyDiagnosticKind::RetryScheduled,
+                        failure: Some(PolicyFailureReason::EventSequenceExhausted),
+                    });
+                }
+            } else {
+                self.schedule_policy_retry(agent, goal, Some(target), reason, route_failure(kind));
+            }
+        }
+    }
+
+    fn apply_policy_decision(&mut self, event: scheduler::ScheduledEvent) {
+        if !self.population.policy_event_is_current(event) {
+            self.policy_diagnostics.push(PolicyDiagnostic {
+                agent: event.agent,
+                at: self.time,
+                goal: event.goal,
+                target: None,
+                reason: PolicyReason::Retry,
+                kind: PolicyDiagnosticKind::StaleEvent,
+                failure: None,
+            });
+            return;
+        }
+        let Some((view, needs)) = self.population.policy_context(event.agent, self.time) else {
+            return;
+        };
+        let perception = match self.perceive_physical(event.agent, PHYSICAL_POLICY_RADIUS) {
+            Ok(perception) => perception,
+            Err(error) => {
+                self.schedule_policy_retry(
+                    event.agent,
+                    event.goal,
+                    None,
+                    PolicyReason::Retry,
+                    perception_failure(error),
+                );
+                return;
+            }
+        };
+        let selection = select(view.position, needs, &perception);
+        self.policy_diagnostics.push(PolicyDiagnostic {
+            agent: event.agent,
+            at: self.time,
+            goal: selection.goal,
+            target: selection.target,
+            reason: selection.reason,
+            kind: PolicyDiagnosticKind::Selected,
+            failure: None,
+        });
+        self.apply_policy_selection(event.agent, view.position, selection);
+    }
+
+    fn apply_policy_selection(
+        &mut self,
+        agent: AgentId,
+        origin: WorldPosition,
+        selection: PolicySelection,
+    ) {
+        let Some(target) = selection.target else {
+            self.schedule_policy_retry(
+                agent,
+                selection.goal,
+                None,
+                selection.reason,
+                if selection.goal == PhysicalGoal::SeekShelter {
+                    PolicyFailureReason::DeferredToLaterSlice
+                } else {
+                    PolicyFailureReason::NoPerceivedTarget
+                },
+            );
+            return;
+        };
+        if selection.goal == PhysicalGoal::Wait {
+            self.population.clear_route(agent);
+            if let Err(error) = self.population.schedule_policy_decision(
+                &mut self.scheduler,
+                self.time,
+                agent,
+                PHYSICAL_POLICY_IDLE_RECHECK_TICKS,
+                PolicyReason::NoUrgentNeed,
+                false,
+            ) {
+                self.schedule_policy_retry(
+                    agent,
+                    selection.goal,
+                    Some(target),
+                    selection.reason,
+                    move_failure(error),
+                );
+            }
+            return;
+        }
+        if target == origin {
+            self.population.clear_route(agent);
+            let action_goal = match selection.goal {
+                PhysicalGoal::SeekWater => PhysicalGoal::Drink,
+                PhysicalGoal::SeekFood => PhysicalGoal::Eat,
+                goal => goal,
+            };
+            match self.population.schedule_policy_action(
+                &mut self.scheduler,
+                self.time,
+                agent,
+                PolicyAction {
+                    goal: action_goal,
+                    target,
+                    reason: selection.reason,
+                    duration: PHYSICAL_POLICY_ACTION_TICKS,
+                },
+            ) {
+                Ok(_) => self.policy_diagnostics.push(PolicyDiagnostic {
+                    agent,
+                    at: self.time,
+                    goal: action_goal,
+                    target: Some(target),
+                    reason: selection.reason,
+                    kind: PolicyDiagnosticKind::ActionStarted,
+                    failure: None,
+                }),
+                Err(error) => self.schedule_policy_retry(
+                    agent,
+                    action_goal,
+                    Some(target),
+                    selection.reason,
+                    move_failure(error),
+                ),
+            }
+            return;
+        }
+        match self.schedule_route(
+            agent,
+            RouteRequest {
+                destination: target,
+                max_expansions: PHYSICAL_POLICY_ROUTE_BUDGET,
+            },
+        ) {
+            Ok(_) => {
+                self.population.commit_policy_route(
+                    agent,
+                    selection.goal,
+                    target,
+                    selection.reason,
+                );
+                self.policy_diagnostics.push(PolicyDiagnostic {
+                    agent,
+                    at: self.time,
+                    goal: selection.goal,
+                    target: Some(target),
+                    reason: selection.reason,
+                    kind: PolicyDiagnosticKind::RouteScheduled,
+                    failure: None,
+                });
+            }
+            Err(error) => self.schedule_policy_retry(
+                agent,
+                selection.goal,
+                Some(target),
+                selection.reason,
+                request_failure(error),
+            ),
+        }
+    }
+
+    fn apply_policy_action_completion(&mut self, event: scheduler::ScheduledEvent) {
+        let Some((goal, target, reason)) = self
+            .population
+            .complete_policy_action(&mut self.scheduler, event)
+        else {
+            self.policy_diagnostics.push(PolicyDiagnostic {
+                agent: event.agent,
+                at: self.time,
+                goal: event.goal,
+                target: Some(event.target.world()),
+                reason: PolicyReason::Retry,
+                kind: PolicyDiagnosticKind::StaleEvent,
+                failure: None,
+            });
+            return;
+        };
+        self.policy_diagnostics.push(PolicyDiagnostic {
+            agent: event.agent,
+            at: self.time,
+            goal,
+            target: Some(target),
+            reason,
+            kind: PolicyDiagnosticKind::ActionDeferred,
+            failure: Some(PolicyFailureReason::DeferredToLaterSlice),
+        });
+        self.schedule_policy_retry(
+            event.agent,
+            goal,
+            Some(target),
+            PolicyReason::Retry,
+            PolicyFailureReason::DeferredToLaterSlice,
+        );
+    }
+
+    fn schedule_policy_retry(
+        &mut self,
+        agent: AgentId,
+        goal: PhysicalGoal,
+        target: Option<WorldPosition>,
+        reason: PolicyReason,
+        failure: PolicyFailureReason,
+    ) {
+        self.population.clear_route(agent);
+        let delay = retry_delay(self.population.policy_retries(agent));
+        let scheduling_failure = self
+            .population
+            .schedule_policy_decision(
+                &mut self.scheduler,
+                self.time,
+                agent,
+                delay,
+                PolicyReason::Retry,
+                true,
+            )
+            .err()
+            .map(move_failure);
+        self.policy_diagnostics.push(PolicyDiagnostic {
+            agent,
+            at: self.time,
+            goal,
+            target,
+            reason,
+            kind: PolicyDiagnosticKind::RetryScheduled,
+            failure: scheduling_failure.or(Some(failure)),
+        });
     }
 
     fn compact_scheduler_if_needed(&mut self) {
@@ -500,6 +840,7 @@ impl Engine {
 
 fn map_move_route_error(error: MoveRequestError) -> RouteRequestError {
     match error {
+        MoveRequestError::PolicyControlled => RouteRequestError::PolicyControlled,
         MoveRequestError::MissingAgent => RouteRequestError::MissingAgent,
         MoveRequestError::DeadAgent => RouteRequestError::DeadAgent,
         MoveRequestError::InvalidStep => RouteRequestError::NoPath { expansions: 0 },
@@ -535,7 +876,8 @@ fn map_route_failure_kind(error: RouteRequestError) -> RouteOutcomeKind {
         RouteRequestError::TimeOverflow => RouteOutcomeKind::TimeOverflow,
         RouteRequestError::RescheduleLimit => RouteOutcomeKind::RescheduleLimit,
         RouteRequestError::EventSequenceExhausted => RouteOutcomeKind::EventSequenceExhausted,
-        RouteRequestError::MissingAgent
+        RouteRequestError::PolicyControlled
+        | RouteRequestError::MissingAgent
         | RouteRequestError::DeadAgent
         | RouteRequestError::AlreadyAtDestination
         | RouteRequestError::ZeroBudget
@@ -560,6 +902,78 @@ fn map_movement_route_failure(kind: MovementOutcomeKind) -> RouteOutcomeKind {
     }
 }
 
+fn perception_failure(error: PerceptionError) -> PolicyFailureReason {
+    match error {
+        PerceptionError::Unloaded => PolicyFailureReason::Unloaded,
+        PerceptionError::OutsideWorld => PolicyFailureReason::OutsideWorld,
+        PerceptionError::AreaOutsideActive => PolicyFailureReason::OutsideActiveArea,
+        PerceptionError::MissingAgent
+        | PerceptionError::DeadAgent
+        | PerceptionError::RadiusTooLarge { .. }
+        | PerceptionError::EmptyArea
+        | PerceptionError::AreaTooLarge { .. }
+        | PerceptionError::AllocationFailed => PolicyFailureReason::InconsistentState,
+    }
+}
+
+fn request_failure(error: RouteRequestError) -> PolicyFailureReason {
+    match error {
+        RouteRequestError::Occupied(_) => PolicyFailureReason::Occupied,
+        RouteRequestError::NoPath { .. } => PolicyFailureReason::NoPath,
+        RouteRequestError::BudgetExhausted { .. } => PolicyFailureReason::RouteBudgetExhausted,
+        RouteRequestError::Unloaded => PolicyFailureReason::Unloaded,
+        RouteRequestError::OutsideWorld => PolicyFailureReason::OutsideWorld,
+        RouteRequestError::OutsideActiveArea => PolicyFailureReason::OutsideActiveArea,
+        RouteRequestError::Blocked(_) | RouteRequestError::AlreadyAtDestination => {
+            PolicyFailureReason::TargetUnavailable
+        }
+        RouteRequestError::TimeOverflow => PolicyFailureReason::TimeOverflow,
+        RouteRequestError::RescheduleLimit => PolicyFailureReason::RescheduleLimit,
+        RouteRequestError::EventSequenceExhausted => PolicyFailureReason::EventSequenceExhausted,
+        RouteRequestError::PolicyControlled
+        | RouteRequestError::MissingAgent
+        | RouteRequestError::DeadAgent
+        | RouteRequestError::ZeroBudget
+        | RouteRequestError::BudgetTooLarge { .. } => PolicyFailureReason::InconsistentState,
+    }
+}
+
+fn route_failure(kind: RouteOutcomeKind) -> PolicyFailureReason {
+    match kind {
+        RouteOutcomeKind::Occupied(_) => PolicyFailureReason::Occupied,
+        RouteOutcomeKind::NoPath { .. } => PolicyFailureReason::NoPath,
+        RouteOutcomeKind::BudgetExhausted { .. } => PolicyFailureReason::RouteBudgetExhausted,
+        RouteOutcomeKind::Unloaded => PolicyFailureReason::Unloaded,
+        RouteOutcomeKind::OutsideWorld => PolicyFailureReason::OutsideWorld,
+        RouteOutcomeKind::OutsideActiveArea => PolicyFailureReason::OutsideActiveArea,
+        RouteOutcomeKind::Blocked(_) => PolicyFailureReason::TargetUnavailable,
+        RouteOutcomeKind::TimeOverflow => PolicyFailureReason::TimeOverflow,
+        RouteOutcomeKind::RescheduleLimit => PolicyFailureReason::RescheduleLimit,
+        RouteOutcomeKind::EventSequenceExhausted => PolicyFailureReason::EventSequenceExhausted,
+        RouteOutcomeKind::InconsistentOccupancy | RouteOutcomeKind::Arrived => {
+            PolicyFailureReason::InconsistentState
+        }
+    }
+}
+
+fn move_failure(error: MoveRequestError) -> PolicyFailureReason {
+    match error {
+        MoveRequestError::Occupied(_) => PolicyFailureReason::Occupied,
+        MoveRequestError::Unloaded => PolicyFailureReason::Unloaded,
+        MoveRequestError::OutsideWorld => PolicyFailureReason::OutsideWorld,
+        MoveRequestError::OutsideActiveArea => PolicyFailureReason::OutsideActiveArea,
+        MoveRequestError::Blocked(_) | MoveRequestError::InvalidStep => {
+            PolicyFailureReason::TargetUnavailable
+        }
+        MoveRequestError::TimeOverflow => PolicyFailureReason::TimeOverflow,
+        MoveRequestError::RescheduleLimit => PolicyFailureReason::RescheduleLimit,
+        MoveRequestError::EventSequenceExhausted => PolicyFailureReason::EventSequenceExhausted,
+        MoveRequestError::PolicyControlled
+        | MoveRequestError::MissingAgent
+        | MoveRequestError::DeadAgent => PolicyFailureReason::InconsistentState,
+    }
+}
+
 impl Default for Engine {
     fn default() -> Self {
         Self::new(EngineConfig::default())
@@ -571,6 +985,46 @@ mod tests {
     use std::{mem::size_of, time::Instant};
 
     use super::*;
+
+    #[test]
+    fn policy_failure_mapping_preserves_typed_runtime_categories() {
+        assert_eq!(
+            perception_failure(PerceptionError::Unloaded),
+            PolicyFailureReason::Unloaded
+        );
+        assert_eq!(
+            request_failure(RouteRequestError::Occupied(AgentId::new(7))),
+            PolicyFailureReason::Occupied
+        );
+        assert_eq!(
+            request_failure(RouteRequestError::NoPath { expansions: 9 }),
+            PolicyFailureReason::NoPath
+        );
+        assert_eq!(
+            request_failure(RouteRequestError::BudgetExhausted { expansions: 9 }),
+            PolicyFailureReason::RouteBudgetExhausted
+        );
+        assert_eq!(
+            request_failure(RouteRequestError::OutsideActiveArea),
+            PolicyFailureReason::OutsideActiveArea
+        );
+        assert_eq!(
+            route_failure(RouteOutcomeKind::Blocked(TraversalKind::BlockedByWater)),
+            PolicyFailureReason::TargetUnavailable
+        );
+        assert_eq!(
+            move_failure(MoveRequestError::EventSequenceExhausted),
+            PolicyFailureReason::EventSequenceExhausted
+        );
+        assert_eq!(
+            move_failure(MoveRequestError::RescheduleLimit),
+            PolicyFailureReason::RescheduleLimit
+        );
+        assert_eq!(
+            move_failure(MoveRequestError::TimeOverflow),
+            PolicyFailureReason::TimeOverflow
+        );
+    }
 
     fn resident_engine(size: u32) -> Engine {
         let mut engine = Engine::new(EngineConfig {
@@ -1457,6 +1911,56 @@ mod tests {
                 "{population}\t{}\t{}\t{}\t{}\t{}\t{initial_events}\t{rescheduled_events}\t{schedule_ns}\t{due_extract_ns}\t{growth_buffers}\t{retained_logical_bytes}",
                 size_of::<needs::NeedState>(),
                 std::mem::align_of::<needs::NeedState>(),
+                size_of::<scheduler::ScheduledEvent>(),
+                states.capacity(),
+                scheduler.capacity(),
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "release-only Slice 3 physical-policy measurement"]
+    fn release_physical_agent_slice_three_measurement() {
+        assert!(
+            !std::hint::black_box(cfg!(debug_assertions)),
+            "run this measurement in release mode"
+        );
+        eprintln!(
+            "population\tpolicy_state_size\tpolicy_state_align\tdecision_event_size\tpolicy_capacity\tscheduler_capacity\tschedule_ns\tdue_extract_ns\tgrowth_buffers\tretained_logical_bytes"
+        );
+        for population in [20_usize, 100, 10_000] {
+            let mut states = Vec::with_capacity(population);
+            states.resize(population, policy::PolicyState::default());
+            let mut scheduler = Scheduler::with_capacity(population);
+            let before_capacity = scheduler.capacity();
+            let schedule_start = Instant::now();
+            for (raw, state) in states.iter_mut().enumerate() {
+                let generation = state.next_generation().unwrap();
+                state.phase = policy::PolicyPhase::DecisionPending;
+                scheduler
+                    .schedule_decision(
+                        SimTime::from_ticks(1),
+                        AgentId::new(raw as u32),
+                        generation,
+                        PhysicalGoal::Wait,
+                    )
+                    .unwrap();
+            }
+            let schedule_ns = schedule_start.elapsed().as_nanos();
+            let growth_buffers = usize::from(scheduler.capacity() != before_capacity);
+            let due_start = Instant::now();
+            let mut extracted = 0;
+            while scheduler.pop_due(SimTime::from_ticks(1)).is_some() {
+                extracted += 1;
+            }
+            let due_extract_ns = due_start.elapsed().as_nanos();
+            assert_eq!(extracted, population);
+            let retained_logical_bytes = states.capacity() * size_of::<policy::PolicyState>()
+                + scheduler.capacity() * size_of::<scheduler::ScheduledEvent>();
+            eprintln!(
+                "{population}\t{}\t{}\t{}\t{}\t{}\t{schedule_ns}\t{due_extract_ns}\t{growth_buffers}\t{retained_logical_bytes}",
+                size_of::<policy::PolicyState>(),
+                std::mem::align_of::<policy::PolicyState>(),
                 size_of::<scheduler::ScheduledEvent>(),
                 states.capacity(),
                 scheduler.capacity(),

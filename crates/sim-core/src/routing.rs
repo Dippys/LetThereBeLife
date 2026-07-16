@@ -20,6 +20,7 @@ pub struct RouteRequest {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RouteRequestError {
+    PolicyControlled,
     MissingAgent,
     DeadAgent,
     AlreadyAtDestination,

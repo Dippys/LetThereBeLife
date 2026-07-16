@@ -5,6 +5,9 @@ use crate::{
     PhysicalNeedsView, Standability, TraversalKind, WORLD_GENERATION_BOUNDS, WaterSource, World,
     WorldPosition, WorldQueryError, WorldRect,
     needs::NeedState,
+    policy::{
+        PhysicalGoal, PhysicalPolicyView, PolicyAction, PolicyPhase, PolicyReason, PolicyState,
+    },
     routing::{RouteRequest, RouteRequestError},
     scheduler::{EventClass, ScheduleError, ScheduledEvent, Scheduler},
     spatial::{SpatialIndex, TransferError},
@@ -240,6 +243,7 @@ pub struct RouteScheduled {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MoveRequestError {
+    PolicyControlled,
     MissingAgent,
     DeadAgent,
     InvalidStep,
@@ -369,6 +373,7 @@ pub(crate) struct Population {
     movement_generations: Vec<u32>,
     routes: Vec<Option<RouteState>>,
     needs: Vec<NeedState>,
+    policies: Vec<PolicyState>,
     spatial: SpatialIndex,
     active_area: Option<WorldRect>,
     initialized: bool,
@@ -478,6 +483,11 @@ impl Population {
             .try_reserve_exact(capacity)
             .map_err(|_| PopulationInitError::AllocationFailed)?;
         needs.resize(capacity, NeedState::new(now));
+        let mut policies = Vec::new();
+        policies
+            .try_reserve_exact(capacity)
+            .map_err(|_| PopulationInitError::AllocationFailed)?;
+        policies.resize(capacity, PolicyState::default());
         let spatial = SpatialIndex::from_positions(
             records
                 .iter()
@@ -489,6 +499,7 @@ impl Population {
         self.movement_generations = movement_generations;
         self.routes = routes;
         self.needs = needs;
+        self.policies = policies;
         self.spatial = spatial;
         self.active_area = Some(init.active_area);
         self.initialized = true;
@@ -737,6 +748,231 @@ impl Population {
         need_outcome(event, Some(value), outcome)
     }
 
+    pub(crate) fn policy_view(&self, agent: AgentId) -> Option<PhysicalPolicyView> {
+        self.policies
+            .get(agent.0 as usize)
+            .copied()
+            .map(|state| state.view(agent))
+    }
+
+    pub(crate) fn first_non_idle_agent(&self) -> Option<AgentId> {
+        self.records
+            .iter()
+            .position(|record| record.activity != AgentActivity::Idle)
+            .map(|index| AgentId(index as u32))
+    }
+
+    pub(crate) fn activate_policy(
+        &mut self,
+        scheduler: &mut Scheduler,
+        due: SimTime,
+    ) -> Result<(), ScheduleError> {
+        for (index, state) in self.policies.iter_mut().enumerate() {
+            let generation = state
+                .next_generation()
+                .ok_or(ScheduleError::SequenceExhausted)?;
+            state.phase = PolicyPhase::DecisionPending;
+            state.goal = PhysicalGoal::Wait;
+            state.reason = PolicyReason::InitialDecision;
+            scheduler.schedule_decision(
+                due,
+                AgentId(index as u32),
+                generation,
+                PhysicalGoal::Wait,
+            )?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn policy_event_is_current(&self, event: ScheduledEvent) -> bool {
+        self.policies
+            .get(event.agent.0 as usize)
+            .is_some_and(|state| state.event_is_current(event.generation))
+    }
+
+    pub(crate) fn policy_context(
+        &self,
+        agent: AgentId,
+        now: SimTime,
+    ) -> Option<(AgentView, PhysicalNeedsView)> {
+        let view = self.view(agent)?;
+        (view.activity != AgentActivity::Dead)
+            .then(|| (view, self.needs[agent.0 as usize].view(agent, now)))
+    }
+
+    pub(crate) fn commit_policy_route(
+        &mut self,
+        agent: AgentId,
+        goal: PhysicalGoal,
+        target: WorldPosition,
+        reason: PolicyReason,
+    ) {
+        let state = &mut self.policies[agent.0 as usize];
+        state.goal = goal;
+        state.target =
+            CompactPosition::checked(target).expect("policy target is inside active area");
+        state.reason = reason;
+        state.phase = PolicyPhase::Routing;
+    }
+
+    pub(crate) fn policy_commitment(
+        &self,
+        agent: AgentId,
+    ) -> Option<(PhysicalGoal, WorldPosition, PolicyReason)> {
+        let state = *self.policies.get(agent.0 as usize)?;
+        matches!(state.phase, PolicyPhase::Routing | PolicyPhase::Acting)
+            .then(|| (state.goal, state.target.world(), state.reason))
+    }
+
+    pub(crate) fn schedule_policy_decision(
+        &mut self,
+        scheduler: &mut Scheduler,
+        now: SimTime,
+        agent: AgentId,
+        delay: u64,
+        reason: PolicyReason,
+        retry: bool,
+    ) -> Result<SimTime, MoveRequestError> {
+        let due = now
+            .checked_add(delay)
+            .ok_or(MoveRequestError::TimeOverflow)?;
+        if !scheduler.can_schedule(1) {
+            return Err(MoveRequestError::EventSequenceExhausted);
+        }
+        let state = self
+            .policies
+            .get_mut(agent.0 as usize)
+            .ok_or(MoveRequestError::MissingAgent)?;
+        let generation = state
+            .next_generation()
+            .ok_or(MoveRequestError::RescheduleLimit)?;
+        scheduler
+            .schedule_decision(due, agent, generation, state.goal)
+            .map_err(|_| MoveRequestError::EventSequenceExhausted)?;
+        state.reason = reason;
+        state.phase = if retry {
+            state.retries = state.retries.saturating_add(1);
+            PolicyPhase::Backoff
+        } else {
+            PolicyPhase::DecisionPending
+        };
+        Ok(due)
+    }
+
+    pub(crate) fn interrupt_for_policy_decision(
+        &mut self,
+        scheduler: &mut Scheduler,
+        now: SimTime,
+        agent: AgentId,
+    ) -> Result<SimTime, MoveRequestError> {
+        let index = agent.0 as usize;
+        let record = self
+            .records
+            .get(index)
+            .ok_or(MoveRequestError::MissingAgent)?;
+        if record.activity == AgentActivity::Dead {
+            return Err(MoveRequestError::DeadAgent);
+        }
+        let due = now.checked_add(1).ok_or(MoveRequestError::TimeOverflow)?;
+        let movement_generation = if record.activity == AgentActivity::Moving {
+            self.movement_generations[index]
+                .checked_add(1)
+                .ok_or(MoveRequestError::RescheduleLimit)?
+        } else {
+            self.movement_generations[index]
+        };
+        if self.policies[index].generation == u32::MAX {
+            return Err(MoveRequestError::RescheduleLimit);
+        }
+        let transition_events = if self.needs[index].requires_transition(AgentActivity::Idle) {
+            4
+        } else {
+            0
+        };
+        if !scheduler.can_schedule(transition_events + 1) {
+            return Err(MoveRequestError::EventSequenceExhausted);
+        }
+        if record.activity == AgentActivity::Moving {
+            self.movement_generations[index] = movement_generation;
+            self.routes[index] = None;
+        }
+        self.transition_activity(scheduler, now, agent, AgentActivity::Idle)
+            .expect("event sequence capacity was prechecked");
+        self.schedule_policy_decision(scheduler, now, agent, 1, PolicyReason::Retry, false)?;
+        Ok(due)
+    }
+
+    pub(crate) fn schedule_policy_action(
+        &mut self,
+        scheduler: &mut Scheduler,
+        now: SimTime,
+        agent: AgentId,
+        action: PolicyAction,
+    ) -> Result<SimTime, MoveRequestError> {
+        let due = now
+            .checked_add(action.duration)
+            .ok_or(MoveRequestError::TimeOverflow)?;
+        let activity = match action.goal {
+            PhysicalGoal::Sleep => AgentActivity::Sleeping,
+            PhysicalGoal::GatherMaterial => AgentActivity::Gathering,
+            PhysicalGoal::BuildShelter => AgentActivity::Building,
+            PhysicalGoal::SeekWater
+            | PhysicalGoal::SeekFood
+            | PhysicalGoal::Drink
+            | PhysicalGoal::Eat
+            | PhysicalGoal::SeekShelter
+            | PhysicalGoal::Wait => AgentActivity::Idle,
+            PhysicalGoal::Incapacitated => AgentActivity::Dead,
+        };
+        if !scheduler.can_schedule(
+            if self.needs[agent.0 as usize].requires_transition(activity) {
+                5
+            } else {
+                1
+            },
+        ) {
+            return Err(MoveRequestError::EventSequenceExhausted);
+        }
+        self.transition_activity(scheduler, now, agent, activity)?;
+        let state = &mut self.policies[agent.0 as usize];
+        let generation = state
+            .next_generation()
+            .ok_or(MoveRequestError::RescheduleLimit)?;
+        let compact =
+            CompactPosition::checked(action.target).ok_or(MoveRequestError::OutsideWorld)?;
+        scheduler
+            .schedule_action_completion(due, agent, generation, action.goal, compact)
+            .map_err(|_| MoveRequestError::EventSequenceExhausted)?;
+        state.goal = action.goal;
+        state.target = compact;
+        state.reason = action.reason;
+        state.phase = PolicyPhase::Acting;
+        state.retries = 0;
+        Ok(due)
+    }
+
+    pub(crate) fn complete_policy_action(
+        &mut self,
+        scheduler: &mut Scheduler,
+        event: ScheduledEvent,
+    ) -> Option<(PhysicalGoal, WorldPosition, PolicyReason)> {
+        if !self.policy_event_is_current(event) {
+            return None;
+        }
+        let index = event.agent.0 as usize;
+        let state = self.policies[index];
+        self.transition_activity(scheduler, event.due, event.agent, AgentActivity::Idle)
+            .ok()?;
+        self.policies[index].phase = PolicyPhase::Dormant;
+        Some((state.goal, state.target.world(), state.reason))
+    }
+
+    pub(crate) fn policy_retries(&self, agent: AgentId) -> u8 {
+        self.policies
+            .get(agent.0 as usize)
+            .map_or(0, |state| state.retries)
+    }
+
     fn transition_activity(
         &mut self,
         scheduler: &mut Scheduler,
@@ -983,6 +1219,10 @@ impl Population {
                 EventClass::NeedThreshold => {
                     record.activity != AgentActivity::Dead
                         && self.needs[index].event_is_current(event.generation, event.need)
+                }
+                EventClass::Decision | EventClass::ActionCompletion => {
+                    record.activity != AgentActivity::Dead
+                        && self.policies[index].event_is_current(event.generation)
                 }
             })
     }

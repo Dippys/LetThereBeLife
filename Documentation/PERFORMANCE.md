@@ -88,6 +88,26 @@ On 2026-07-16 it created exact-capacity need arrays, reserved the temporary heap
 
 Logical bytes include retained `NeedState` and final heap capacities only. They exclude agent/spatial/route storage, need-outcome buffers, `Vec`/heap headers, and allocator metadata. The synthetic all-agent activity change proves the current heap doubles once from four to eight events per agent; normal 20-100-agent behavior remains bounded by stale compaction, while the private heap and event density are explicitly temporary before population scaling. Four new threshold records per changed agent is the current worst-case reschedule rate; representative action-policy transition distributions remain a Slice 3 measurement.
 
+### Physical-agent Slice 3
+
+The policy layout is unit-size-asserted: private pointer-free `PolicyState` is 12 bytes/alignment 4 and remains parallel to the unchanged six-byte hot `AgentRecord`. The ten public goal discriminants fit in one byte. Latest-tick `PolicyDiagnostic` is 40 bytes/alignment 8 and population initialization reserves at most two records per agent up to the due-event ceiling, covering the current selection-plus-result maximum without growth for the intended 20-100 agents. Adding distinct action-completion and decision payloads does not grow the 32-byte/alignment-8 `ScheduledEvent`. Normal decisions inspect at most the radius-eight 289-cell objective perception boundary, allocate only its bounded returned fact vectors, and schedule one commitment or one delayed reconsideration; no idle tick scans the population. Retry delay doubles from 60 ticks and caps at 1,920 ticks.
+
+The ignored release harness uses this command:
+
+```powershell
+cargo test --release -p sim-core release_physical_agent_slice_three_measurement -- --ignored --nocapture --test-threads=1
+```
+
+On 2026-07-16 it created exact-capacity policy arrays and scheduler heaps, inserted one decision per agent at tick 1, then extracted all decisions. Times are one local optimized observation, not cross-machine regression limits:
+
+| Population | Policy/event capacity | Schedule batch | Due extraction | Heap growth buffers | Retained logical bytes |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 20 | 20 / 20 | 200 ns | 1,700 ns | 0 | 880 |
+| 100 | 100 / 100 | 700 ns | 2,500 ns | 0 | 4,400 |
+| 10,000 | 10,000 / 10,000 | 149,300 ns | 650,100 ns | 0 | 440,000 |
+
+Logical bytes include retained `PolicyState` and decision-event capacities only. They exclude agent/need/spatial/route storage, heap and vector headers, allocator metadata, bounded perception results, and latest-tick diagnostics. This isolates the 44-byte per-agent policy-plus-one-event startup footprint. Real 20-100-agent mixes will also retain need thresholds and transient stale decisions/actions; scheduler compaction remains the guardrail. Representative world-dependent route/action distributions and allocator-level policy measurements remain open for the Slice 4 integrated resource loop, because this slice deliberately does not fabricate inventory or depletion effects.
+
 The current terrain layout intentionally uses `u16` elevation, `u8` moisture, and a one-byte `TerrainClass` packing a `SurfaceType` low nibble with a `BiomeType` high nibble; unit assertions fix `TerrainClass` at 1 byte and `TerrainCell` at 4 bytes. The 16,777,216-cell bootstrap ceiling therefore still permits a 64 MiB logical cell payload before tile metadata and sparse features, and the complete 4,294,967,296-cell envelope remains exactly 16 GiB of raw terrain. `Engine::new` owns zero terrain cells; the viewer retains only streamed clipped bootstrap/full expansion tiles, while headless explicitly chooses the cost of completely materializing its configured rectangle. Temperature remains derived rather than adding it to every cell: the public `ClimateSample` is four bytes and is built allocation-free from four analytic temperature nodes, the retained moisture byte, and one wind-direction byte. Slice 7 likewise adds no retained world state: `WaterSource` and `TraversalKind` are one byte, `TraversalStep` is eight bytes, and point/step queries allocate nothing. A traversal query performs two chunk-map lookups plus at most one target-feature binary search; settlement searches remain explicitly bounded caller work until the physical-agent loop provides a measured batching need.
 
 ### World-quality baseline

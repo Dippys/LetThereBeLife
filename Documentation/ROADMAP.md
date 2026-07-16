@@ -37,14 +37,14 @@ Last synchronized: 2026-07-16.
 
 ## Active
 
-- Execute the ordered Phase 2 [physical-agent loop implementation plan](PHYSICAL_AGENT_PLAN.md) one coherent slice at a time. Slice 3 is next: deterministic physical action selection and scheduling driven by objective perception and reached needs, without introducing cognition.
+- Execute the ordered Phase 2 [physical-agent loop implementation plan](PHYSICAL_AGENT_PLAN.md) one coherent slice at a time. Slices 0-3 are complete; Slice 4 is next: water, gathering, compact inventory, consumption, and sparse resource depletion.
 - Treat generated terrain as intentionally unstable while there is no save/load or other persisted world output. Seed output may still change if an observed physical-agent failure proves a foundational correction necessary; generator versioning is not current work.
 
 ## Next
 
 The completed Phase 1 sequence remains recorded in [WORLD_FOUNDATION_PLAN.md](WORLD_FOUNDATION_PLAN.md). Phase 2 scope, dependencies, per-slice deliverables, acceptance criteria, measurements, documentation duties, and explicit deferrals are canonical in [PHYSICAL_AGENT_PLAN.md](PHYSICAL_AGENT_PLAN.md).
 
-- Complete Slice 3: deterministic physical action selection and scheduling.
+- Complete Slice 4: water, gathering, compact inventory, consumption, and sparse resource depletion.
 - Continue in dependency order through consumption/gathering, sleep, shelter, health/death, and the integrated 20-100-agent survival proof.
 - Stop after each slice for review, documentation synchronization, validation, and an explicit handoff to the next slice.
 - Use the representative-seed review set only when an observed agent-loop failure requires another generator change.
