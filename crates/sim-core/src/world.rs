@@ -382,6 +382,15 @@ pub enum TraversalKind {
     BlockedByFeature,
 }
 
+/// Whether one resident cell can hold a standing physical agent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Standability {
+    Standable,
+    BlockedByWater,
+    BlockedByFeature,
+}
+
 /// Allocation-free derived movement information for two adjacent resident cells.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]

@@ -1497,6 +1497,8 @@ mod tests {
                 paused: false,
                 speed: 4.0,
                 seed: 7,
+                agent_count: 0,
+                scheduled_event_count: 0,
             },
             camera: Camera::at_origin(),
             ui_scale: 1.0,

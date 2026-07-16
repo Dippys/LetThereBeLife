@@ -1,20 +1,30 @@
 //! Engine-independent deterministic simulation foundation.
 
+mod agent;
+mod scheduler;
 mod world;
 mod worldgen;
 
+pub use agent::{
+    AgentActivity, AgentId, AgentView, EventId, MAX_POPULATION, MoveRequestError,
+    MovementEventOutcome, MovementOutcomeKind, MovementScheduled, PopulationInit,
+    PopulationInitError, PopulationInitOutcome, SimTime, SpawnInvalidReason,
+};
 pub use world::{
     BaseResource, BiomeType, CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkInspection,
     ChunkLoadRequest, ChunkLocalPosition, ChunkPresence, ClimateSample, DEFAULT_INITIAL_WORLD_SIZE,
     Feature, FeatureKind, GenerateAreaError, GeneratedCell, MAX_CHUNKS_PER_GENERATION,
     MAX_GENERATED_CELLS, MAX_GENERATED_CHUNKS, MAX_GENERATED_TERRAIN_BYTES, MAX_INITIAL_CHUNKS,
-    MAX_TRAVERSABLE_ELEVATION_DELTA, PrevailingWind, ResourceKind, SurfaceType, TerrainCell,
-    TerrainClass, TraversalKind, TraversalStep, WORLD_GENERATION_BOUNDS, WORLD_HALF_EXTENT,
-    WORLD_SIDE_CELLS, WaterSource, World, WorldChunk, WorldChunkLoad, WorldConfig,
-    WorldConfigError, WorldPosition, WorldQueryError, WorldRect,
+    MAX_TRAVERSABLE_ELEVATION_DELTA, PrevailingWind, ResourceKind, Standability, SurfaceType,
+    TerrainCell, TerrainClass, TraversalKind, TraversalStep, WORLD_GENERATION_BOUNDS,
+    WORLD_HALF_EXTENT, WORLD_SIDE_CELLS, WaterSource, World, WorldChunk, WorldChunkLoad,
+    WorldConfig, WorldConfigError, WorldPosition, WorldQueryError, WorldRect,
 };
 
 use std::time::Duration;
+
+use agent::Population;
+use scheduler::{MAX_DUE_EVENTS_PER_TICK, Scheduler};
 
 /// Immutable settings used to construct or reset a simulation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,6 +58,28 @@ pub enum EngineCommand {
     SetSpeed(f32),
     Reset,
     GenerateWorldArea(WorldRect),
+    MoveAgent {
+        agent: AgentId,
+        target: WorldPosition,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EngineCommandOutcome {
+    Applied,
+    Ignored,
+    Movement(Result<MovementScheduled, MoveRequestError>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TickOutcome {
+    Paused,
+    Advanced {
+        time: SimTime,
+        processed_events: u16,
+        due_backlog: bool,
+    },
+    TimeExhausted,
 }
 
 /// Read-only data intended for renderers, tools, and remote clients.
@@ -58,6 +90,8 @@ pub struct SimulationSnapshot {
     pub paused: bool,
     pub speed: f32,
     pub seed: u64,
+    pub agent_count: u32,
+    pub scheduled_event_count: u32,
 }
 
 /// Owns simulation state. Presentation code must not mutate its fields directly.
@@ -65,9 +99,12 @@ pub struct SimulationSnapshot {
 pub struct Engine {
     config: EngineConfig,
     world: World,
-    tick: u64,
+    time: SimTime,
     paused: bool,
     speed: f32,
+    population: Population,
+    scheduler: Scheduler,
+    movement_outcomes: Vec<MovementEventOutcome>,
 }
 
 impl Engine {
@@ -80,35 +117,72 @@ impl Engine {
         Self {
             world: World::new(config.seed, config.world),
             config,
-            tick: 0,
+            time: SimTime::ZERO,
             paused: false,
             speed: 1.0,
+            population: Population::default(),
+            scheduler: Scheduler::default(),
+            movement_outcomes: Vec::new(),
         }
     }
 
-    pub fn command(&mut self, command: EngineCommand) {
+    pub fn command(&mut self, command: EngineCommand) -> EngineCommandOutcome {
         match command {
-            EngineCommand::TogglePause => self.paused = !self.paused,
-            EngineCommand::SetPaused(paused) => self.paused = paused,
+            EngineCommand::TogglePause => {
+                self.paused = !self.paused;
+                EngineCommandOutcome::Applied
+            }
+            EngineCommand::SetPaused(paused) => {
+                self.paused = paused;
+                EngineCommandOutcome::Applied
+            }
             EngineCommand::SetSpeed(speed) if speed.is_finite() => {
                 self.speed = speed.clamp(0.0, 64.0);
+                EngineCommandOutcome::Applied
             }
-            EngineCommand::SetSpeed(_) => {}
+            EngineCommand::SetSpeed(_) => EngineCommandOutcome::Ignored,
             EngineCommand::Reset => {
-                self.tick = 0;
+                self.time = SimTime::ZERO;
                 self.paused = false;
                 self.speed = 1.0;
+                self.population = Population::default();
+                self.scheduler = Scheduler::default();
+                self.movement_outcomes.clear();
+                EngineCommandOutcome::Applied
             }
             EngineCommand::GenerateWorldArea(bounds) => {
                 let _ = self.world.generate_area(bounds);
+                EngineCommandOutcome::Applied
+            }
+            EngineCommand::MoveAgent { agent, target } => {
+                EngineCommandOutcome::Movement(self.request_move(agent, target))
             }
         }
     }
 
     /// Advances exactly one deterministic simulation tick.
-    pub fn tick(&mut self) {
-        if !self.paused {
-            self.tick = self.tick.saturating_add(1);
+    pub fn tick(&mut self) -> TickOutcome {
+        if self.paused {
+            return TickOutcome::Paused;
+        }
+        let Some(next_time) = self.time.checked_add(1) else {
+            return TickOutcome::TimeExhausted;
+        };
+        self.time = next_time;
+        self.movement_outcomes.clear();
+        let mut processed = 0_usize;
+        while processed < MAX_DUE_EVENTS_PER_TICK {
+            let Some(event) = self.scheduler.pop_due(self.time) else {
+                break;
+            };
+            self.movement_outcomes
+                .push(self.population.apply_movement(&self.world, event));
+            processed += 1;
+        }
+        TickOutcome::Advanced {
+            time: self.time,
+            processed_events: processed as u16,
+            due_backlog: self.scheduler.has_due(self.time),
         }
     }
 
@@ -146,13 +220,71 @@ impl Engine {
         self.world.materialize_initial_area()
     }
 
+    /// Atomically creates a dense population after the declared active area is resident.
+    /// Requested positions receive the first IDs in slice order; any remainder is
+    /// filled from passable cells in canonical row-major order.
+    pub fn initialize_population(
+        &mut self,
+        init: PopulationInit,
+        requested_positions: &[WorldPosition],
+    ) -> Result<PopulationInitOutcome, PopulationInitError> {
+        if self.population.is_initialized() {
+            return Err(PopulationInitError::AlreadyInitialized);
+        }
+        let mut population = Population::default();
+        let outcome = population.initialize(&self.world, init, requested_positions)?;
+        let scheduler = Scheduler::try_with_capacity(init.population as usize)
+            .map_err(|_| PopulationInitError::AllocationFailed)?;
+        let mut movement_outcomes = Vec::new();
+        movement_outcomes
+            .try_reserve_exact((init.population as usize).min(MAX_DUE_EVENTS_PER_TICK))
+            .map_err(|_| PopulationInitError::AllocationFailed)?;
+        self.population = population;
+        self.scheduler = scheduler;
+        self.movement_outcomes = movement_outcomes;
+        Ok(outcome)
+    }
+
+    pub fn request_move(
+        &mut self,
+        agent: AgentId,
+        target: WorldPosition,
+    ) -> Result<MovementScheduled, MoveRequestError> {
+        let retention_limit = self.population.len().saturating_add(4_096).max(64);
+        if self.scheduler.len() >= retention_limit {
+            let population = &self.population;
+            self.scheduler
+                .retain(|event| population.event_is_current(event));
+        }
+        self.population.schedule_movement(
+            &mut self.scheduler,
+            &self.world,
+            self.time,
+            agent,
+            target,
+        )
+    }
+
+    /// Returns at most `limit` canonical read-only views in ascending ID order.
+    pub fn agent_views(&self, limit: usize) -> impl Iterator<Item = AgentView> + '_ {
+        self.population.views(limit)
+    }
+
+    /// Outcomes from the most recent advancing tick. Paused ticks preserve them.
+    pub fn movement_outcomes(&self) -> &[MovementEventOutcome] {
+        &self.movement_outcomes
+    }
+
     pub fn snapshot(&self) -> SimulationSnapshot {
         SimulationSnapshot {
-            tick: self.tick,
-            simulated_seconds: self.tick as f64 / f64::from(self.config.ticks_per_second.max(1)),
+            tick: self.time.ticks(),
+            simulated_seconds: self.time.ticks() as f64
+                / f64::from(self.config.ticks_per_second.max(1)),
             paused: self.paused,
             speed: self.speed,
             seed: self.config.seed,
+            agent_count: self.population.len() as u32,
+            scheduled_event_count: self.scheduler.len() as u32,
         }
     }
 }
@@ -165,7 +297,79 @@ impl Default for Engine {
 
 #[cfg(test)]
 mod tests {
+    use std::{mem::size_of, time::Instant};
+
     use super::*;
+
+    fn resident_engine(size: u32) -> Engine {
+        let mut engine = Engine::new(EngineConfig {
+            seed: 42,
+            world: WorldConfig::new(size, size).unwrap(),
+            ..EngineConfig::default()
+        });
+        engine.materialize_initial_area().unwrap();
+        engine
+    }
+
+    fn standable_steps(engine: &Engine, count: usize) -> Vec<(WorldPosition, WorldPosition)> {
+        let bounds = engine.world().initial_bounds();
+        let mut found = Vec::new();
+        'rows: for y in bounds.min.y..bounds.max.y {
+            for x in bounds.min.x..bounds.max.x {
+                let from = WorldPosition { x, y };
+                if engine.world().standability_at(from) != Ok(Standability::Standable) {
+                    continue;
+                }
+                for (dx, dy) in [(1, 0), (0, 1), (-1, 0), (0, -1)] {
+                    let to = WorldPosition {
+                        x: x + dx,
+                        y: y + dy,
+                    };
+                    if bounds.contains(to)
+                        && engine
+                            .world()
+                            .traversal_step(from, to)
+                            .is_ok_and(TraversalStep::is_passable)
+                    {
+                        found.push((from, to));
+                        if found.len() == count {
+                            break 'rows;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        assert_eq!(found.len(), count);
+        found
+    }
+
+    fn blocked_step(engine: &Engine) -> (WorldPosition, WorldPosition, TraversalKind) {
+        let bounds = engine.world().initial_bounds();
+        for y in bounds.min.y..bounds.max.y {
+            for x in bounds.min.x..bounds.max.x {
+                let from = WorldPosition { x, y };
+                if engine.world().standability_at(from) != Ok(Standability::Standable) {
+                    continue;
+                }
+                for (dx, dy) in [(1, 0), (0, 1), (-1, 0), (0, -1)] {
+                    let target = WorldPosition {
+                        x: x + dx,
+                        y: y + dy,
+                    };
+                    if !bounds.contains(target) {
+                        continue;
+                    }
+                    if let Ok(step) = engine.world().traversal_step(from, target)
+                        && !step.is_passable()
+                    {
+                        return (from, target, step.kind());
+                    }
+                }
+            }
+        }
+        panic!("seeded test area should contain a blocked cardinal step");
+    }
 
     #[test]
     fn identical_inputs_produce_identical_snapshots() {
@@ -309,5 +513,452 @@ mod tests {
         );
         assert_eq!(engine.apply_world_chunks(vec![chunk]), Ok(0));
         assert_eq!(engine.world().revision(), revision);
+    }
+
+    #[test]
+    fn population_initialization_is_explicit_atomic_and_deterministic() {
+        let config = EngineConfig {
+            seed: 42,
+            world: WorldConfig::new(64, 64).unwrap(),
+            ..EngineConfig::default()
+        };
+        let mut engine = Engine::new(config);
+        let init = PopulationInit {
+            active_area: engine.world().initial_bounds(),
+            population: 2,
+        };
+        assert_eq!(
+            engine.initialize_population(init, &[]),
+            Err(PopulationInitError::IncompleteResidency)
+        );
+        assert_eq!(engine.snapshot().agent_count, 0);
+
+        engine.materialize_initial_area().unwrap();
+        let pair = standable_steps(&engine, 1)[0];
+        let blocked = engine
+            .world()
+            .cells()
+            .map(|(position, _)| position)
+            .find(|&position| {
+                engine.world().standability_at(position) != Ok(Standability::Standable)
+            })
+            .expect("seeded test area should contain a blocked spawn");
+        let blocked_reason = match engine.world().standability_at(blocked).unwrap() {
+            Standability::BlockedByWater => SpawnInvalidReason::Water,
+            Standability::BlockedByFeature => SpawnInvalidReason::BlockingFeature,
+            Standability::Standable => unreachable!(),
+        };
+        assert_eq!(
+            engine.initialize_population(init, &[blocked]),
+            Err(PopulationInitError::InvalidSpawn {
+                position: blocked,
+                reason: blocked_reason,
+            })
+        );
+        assert_eq!(engine.snapshot().agent_count, 0);
+        assert_eq!(
+            engine.initialize_population(init, &[pair.0, pair.0]),
+            Err(PopulationInitError::DuplicatePosition { position: pair.0 })
+        );
+        assert_eq!(engine.snapshot().agent_count, 0);
+
+        let one_cell = WorldRect {
+            min: pair.0,
+            max: WorldPosition {
+                x: pair.0.x + 1,
+                y: pair.0.y + 1,
+            },
+        };
+        assert_eq!(
+            engine.initialize_population(
+                PopulationInit {
+                    active_area: one_cell,
+                    population: 2,
+                },
+                &[],
+            ),
+            Err(PopulationInitError::InsufficientValidSpawnCells {
+                requested: 2,
+                found: 1,
+            })
+        );
+        assert_eq!(engine.snapshot().agent_count, 0);
+
+        let outcome = engine
+            .initialize_population(init, &[pair.0, pair.1])
+            .unwrap();
+        assert_eq!(outcome.first_id, AgentId::new(0));
+        assert_eq!(
+            engine.agent_views(10).collect::<Vec<_>>(),
+            [
+                AgentView {
+                    id: AgentId::new(0),
+                    position: pair.0,
+                    activity: AgentActivity::Idle,
+                },
+                AgentView {
+                    id: AgentId::new(1),
+                    position: pair.1,
+                    activity: AgentActivity::Idle,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn movement_completes_exactly_at_integer_cost_and_pause_holds_events() {
+        let mut engine = resident_engine(64);
+        let (from, target) = standable_steps(&engine, 1)[0];
+        let cost = engine
+            .world()
+            .traversal_step(from, target)
+            .unwrap()
+            .cost()
+            .unwrap();
+        engine
+            .initialize_population(
+                PopulationInit {
+                    active_area: engine.world().initial_bounds(),
+                    population: 1,
+                },
+                &[from],
+            )
+            .unwrap();
+        let scheduled = engine.request_move(AgentId::new(0), target).unwrap();
+        assert_eq!(scheduled.completes_at, SimTime::from_ticks(u64::from(cost)));
+        assert_eq!(
+            engine.agent_views(1).next().unwrap().activity,
+            AgentActivity::Moving
+        );
+
+        engine.command(EngineCommand::SetPaused(true));
+        assert_eq!(engine.tick(), TickOutcome::Paused);
+        assert_eq!(engine.agent_views(1).next().unwrap().position, from);
+        engine.command(EngineCommand::SetPaused(false));
+        for _ in 1..cost {
+            engine.tick();
+            assert_eq!(engine.agent_views(1).next().unwrap().position, from);
+        }
+        engine.tick();
+        assert_eq!(engine.agent_views(1).next().unwrap().position, target);
+        assert_eq!(engine.movement_outcomes().len(), 1);
+        assert_eq!(
+            engine.movement_outcomes()[0].kind,
+            MovementOutcomeKind::Moved
+        );
+    }
+
+    #[test]
+    fn superseded_equal_time_movement_is_stale_and_cannot_move_twice() {
+        let mut engine = resident_engine(64);
+        let (from, target) = standable_steps(&engine, 1)[0];
+        engine
+            .initialize_population(
+                PopulationInit {
+                    active_area: engine.world().initial_bounds(),
+                    population: 1,
+                },
+                &[from],
+            )
+            .unwrap();
+        let due = engine
+            .request_move(AgentId::new(0), target)
+            .unwrap()
+            .completes_at;
+        assert_eq!(
+            engine
+                .request_move(AgentId::new(0), target)
+                .unwrap()
+                .completes_at,
+            due
+        );
+        for _ in 0..due.ticks() {
+            engine.tick();
+        }
+        assert_eq!(
+            engine
+                .movement_outcomes()
+                .iter()
+                .map(|outcome| outcome.kind)
+                .collect::<Vec<_>>(),
+            [MovementOutcomeKind::StaleEvent, MovementOutcomeKind::Moved]
+        );
+        assert_eq!(engine.agent_views(1).next().unwrap().position, target);
+    }
+
+    #[test]
+    fn movement_rejections_are_typed_and_do_not_mutate_agent_or_world() {
+        let mut engine = resident_engine(64);
+        let (from, target, blocked_kind) = blocked_step(&engine);
+        engine
+            .initialize_population(
+                PopulationInit {
+                    active_area: engine.world().initial_bounds(),
+                    population: 1,
+                },
+                &[from],
+            )
+            .unwrap();
+        let revision = engine.world().revision();
+        assert_eq!(
+            engine.request_move(AgentId::new(0), from),
+            Err(MoveRequestError::InvalidStep)
+        );
+        assert_eq!(
+            engine.request_move(AgentId::new(99), target),
+            Err(MoveRequestError::MissingAgent)
+        );
+        assert_eq!(
+            engine.request_move(AgentId::new(0), target),
+            Err(MoveRequestError::Blocked(blocked_kind))
+        );
+        assert_eq!(
+            engine.request_move(
+                AgentId::new(0),
+                WorldPosition {
+                    x: WORLD_HALF_EXTENT,
+                    y: from.y,
+                },
+            ),
+            Err(MoveRequestError::OutsideWorld)
+        );
+        assert_eq!(engine.agent_views(1).next().unwrap().position, from);
+        assert_eq!(
+            engine.agent_views(1).next().unwrap().activity,
+            AgentActivity::Idle
+        );
+        assert_eq!(engine.world().revision(), revision);
+
+        engine.population.mark_dead(AgentId::new(0));
+        assert_eq!(
+            engine.request_move(AgentId::new(0), target),
+            Err(MoveRequestError::DeadAgent)
+        );
+
+        let mut bounded = resident_engine(64);
+        let (bounded_from, bounded_target) = standable_steps(&bounded, 1)[0];
+        bounded
+            .initialize_population(
+                PopulationInit {
+                    active_area: WorldRect {
+                        min: bounded_from,
+                        max: WorldPosition {
+                            x: bounded_from.x + 1,
+                            y: bounded_from.y + 1,
+                        },
+                    },
+                    population: 1,
+                },
+                &[bounded_from],
+            )
+            .unwrap();
+        assert_eq!(
+            bounded.request_move(AgentId::new(0), bounded_target),
+            Err(MoveRequestError::OutsideActiveArea)
+        );
+    }
+
+    #[test]
+    fn equal_time_events_apply_in_agent_id_order_not_insertion_order() {
+        let base = resident_engine(64);
+        let candidates = standable_steps(&base, 32);
+        let (first, second) = candidates
+            .iter()
+            .enumerate()
+            .find_map(|(index, &left)| {
+                let left_cost = base.world().traversal_step(left.0, left.1).ok()?.cost()?;
+                candidates[index + 1..].iter().copied().find_map(|right| {
+                    (base.world().traversal_step(right.0, right.1).ok()?.cost()? == left_cost)
+                        .then_some((left, right))
+                })
+            })
+            .expect("seeded test area should contain two equal-cost steps");
+        let steps = [first, second];
+        let origins = [steps[0].0, steps[1].0];
+        let mut forward = resident_engine(64);
+        let mut reverse = resident_engine(64);
+        for engine in [&mut forward, &mut reverse] {
+            engine
+                .initialize_population(
+                    PopulationInit {
+                        active_area: engine.world().initial_bounds(),
+                        population: 2,
+                    },
+                    &origins,
+                )
+                .unwrap();
+        }
+        forward.request_move(AgentId::new(0), steps[0].1).unwrap();
+        forward.request_move(AgentId::new(1), steps[1].1).unwrap();
+        reverse.request_move(AgentId::new(1), steps[1].1).unwrap();
+        reverse.request_move(AgentId::new(0), steps[0].1).unwrap();
+        for _ in 0..64 {
+            forward.tick();
+            reverse.tick();
+        }
+        assert_eq!(
+            forward.agent_views(10).collect::<Vec<_>>(),
+            reverse.agent_views(10).collect::<Vec<_>>()
+        );
+        assert_eq!(forward.snapshot(), reverse.snapshot());
+    }
+
+    #[test]
+    fn reset_clears_population_scheduler_and_id_sequence_but_keeps_residency() {
+        let mut engine = resident_engine(64);
+        let pair = standable_steps(&engine, 1)[0];
+        let init = PopulationInit {
+            active_area: engine.world().initial_bounds(),
+            population: 1,
+        };
+        engine.initialize_population(init, &[pair.0]).unwrap();
+        engine.request_move(AgentId::new(0), pair.1).unwrap();
+        let chunks = engine.world().loaded_chunk_count();
+        engine.command(EngineCommand::Reset);
+        assert_eq!(engine.snapshot().tick, 0);
+        assert_eq!(engine.snapshot().agent_count, 0);
+        assert_eq!(engine.snapshot().scheduled_event_count, 0);
+        assert_eq!(engine.world().loaded_chunk_count(), chunks);
+        assert_eq!(
+            engine
+                .initialize_population(init, &[pair.0])
+                .unwrap()
+                .first_id,
+            AgentId::new(0)
+        );
+    }
+
+    #[test]
+    fn due_event_drain_is_bounded_and_reports_backlog() {
+        let mut engine = Engine::default();
+        for sequence in 0..=MAX_DUE_EVENTS_PER_TICK {
+            engine
+                .scheduler
+                .schedule_movement(
+                    SimTime::from_ticks(1),
+                    AgentId::new(sequence as u32),
+                    0,
+                    agent::CompactPosition { x: 0, y: 0 },
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            engine.tick(),
+            TickOutcome::Advanced {
+                time: SimTime::from_ticks(1),
+                processed_events: MAX_DUE_EVENTS_PER_TICK as u16,
+                due_backlog: true,
+            }
+        );
+        assert_eq!(engine.movement_outcomes().len(), MAX_DUE_EVENTS_PER_TICK);
+        assert_eq!(engine.snapshot().scheduled_event_count, 1);
+    }
+
+    #[test]
+    fn simulation_time_exhaustion_is_typed_and_does_not_repeat_due_work() {
+        let mut engine = Engine {
+            time: SimTime::from_ticks(u64::MAX),
+            ..Engine::default()
+        };
+        assert_eq!(engine.tick(), TickOutcome::TimeExhausted);
+        assert_eq!(engine.snapshot().tick, u64::MAX);
+    }
+
+    #[test]
+    #[ignore = "release-only Slice 0 layout and scheduler measurement"]
+    fn release_physical_agent_slice_zero_measurement() {
+        assert!(
+            !std::hint::black_box(cfg!(debug_assertions)),
+            "run this measurement in release mode"
+        );
+        eprintln!(
+            "population\tagent_size\tagent_align\tgeneration_size\tevent_size\tevent_align\trecord_capacity\tgeneration_capacity\tscheduler_capacity\toutcome_capacity\tretained_logical_bytes\tretained_buffers\tinsert_ns\tinsert_growth_allocations\treschedule_ns\treschedule_growth_allocations\tdue_extract_ns"
+        );
+        for population in [20_u32, 100, 10_000] {
+            let mut engine = resident_engine(512);
+            engine
+                .initialize_population(
+                    PopulationInit {
+                        active_area: engine.world().initial_bounds(),
+                        population,
+                    },
+                    &[],
+                )
+                .unwrap();
+            let (record_capacity, generation_capacity) = engine.population.capacities();
+            let initial_scheduler_capacity = engine.scheduler.capacity();
+            let outcome_capacity = engine.movement_outcomes.capacity();
+
+            let repetitions = match population {
+                20 => 10_000_u128,
+                100 => 2_000,
+                _ => 50,
+            };
+            let mut insert_ns = 0_u128;
+            let mut reschedule_ns = 0_u128;
+            let mut due_ns = 0_u128;
+            let mut insert_growths = 0;
+            let mut reschedule_growths = 0;
+            for _ in 0..repetitions {
+                let mut scheduler = Scheduler::with_capacity(population as usize);
+                let before_insert_capacity = scheduler.capacity();
+                let insert_start = Instant::now();
+                for raw in 0..population {
+                    scheduler
+                        .schedule_movement(
+                            SimTime::from_ticks(10),
+                            AgentId::new(raw),
+                            1,
+                            agent::CompactPosition { x: 0, y: 0 },
+                        )
+                        .unwrap();
+                }
+                insert_ns += insert_start.elapsed().as_nanos();
+                insert_growths += usize::from(scheduler.capacity() != before_insert_capacity);
+                std::hint::black_box(scheduler.len());
+
+                let before_reschedule_capacity = scheduler.capacity();
+                let reschedule_start = Instant::now();
+                for raw in 0..population {
+                    scheduler
+                        .schedule_movement(
+                            SimTime::from_ticks(10),
+                            AgentId::new(raw),
+                            2,
+                            agent::CompactPosition { x: 1, y: 0 },
+                        )
+                        .unwrap();
+                }
+                reschedule_ns += reschedule_start.elapsed().as_nanos();
+                reschedule_growths +=
+                    usize::from(scheduler.capacity() != before_reschedule_capacity);
+
+                let due_start = Instant::now();
+                let mut extracted = 0;
+                while scheduler.pop_due(SimTime::from_ticks(10)).is_some() {
+                    extracted += 1;
+                }
+                due_ns += due_start.elapsed().as_nanos();
+                assert_eq!(extracted, population as usize * 2);
+            }
+            insert_ns /= repetitions;
+            reschedule_ns /= repetitions;
+            due_ns /= repetitions;
+            insert_growths /= repetitions as usize;
+            reschedule_growths /= repetitions as usize;
+
+            let retained_logical_bytes = record_capacity * size_of::<agent::AgentRecord>()
+                + generation_capacity * size_of::<u32>()
+                + initial_scheduler_capacity * size_of::<scheduler::ScheduledEvent>()
+                + outcome_capacity * size_of::<MovementEventOutcome>();
+            eprintln!(
+                "{population}\t{}\t{}\t{}\t{}\t{}\t{record_capacity}\t{generation_capacity}\t{initial_scheduler_capacity}\t{outcome_capacity}\t{retained_logical_bytes}\t4\t{insert_ns}\t{insert_growths}\t{reschedule_ns}\t{reschedule_growths}\t{due_ns}",
+                size_of::<agent::AgentRecord>(),
+                std::mem::align_of::<agent::AgentRecord>(),
+                size_of::<u32>(),
+                size_of::<scheduler::ScheduledEvent>(),
+                std::mem::align_of::<scheduler::ScheduledEvent>(),
+            );
+        }
     }
 }

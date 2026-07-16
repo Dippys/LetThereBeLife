@@ -1,6 +1,6 @@
 # Testing and Validation
 
-Last synchronized: 2026-07-14.
+Last synchronized: 2026-07-16.
 
 ## Required Rust baseline
 
@@ -19,17 +19,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .codex/skills/validate-rust-
 The gate also verifies that `target/debug/config/simulation.toml` exists and is byte-equivalent to the repository configuration after the workspace build.
 It launches the hidden viewer, waits for at least one asynchronously streamed terrain tile, then renders two frames, validating GPU adapter/surface creation, WGSL pipeline layout, worker-to-main-thread loading, command submission, and presentation.
 
+The final 2026-07-16 Phase 2 Slice 0 run used the canonical command with `-Runtime`. Immutable-document and eight skill checks passed; workspace tests passed with 96 `sim-core` unit tests (94 passed, two ignored release harnesses), the public `physical_agent_slice0` and `world_foundation_exit` integrations, eight `render_map` tests, 46 viewer tests (44 passed, two ignored release harnesses), and all remaining crate/doc tests. Formatting, Clippy with warnings denied, the 600-tick/20-agent headless smoke, and the two-frame hidden GPU viewer smoke all passed.
+
 ## Runtime checks
 
 ```powershell
-cargo run -p sim-headless -- --ticks 600 --seed 42
+cargo run -p sim-headless -- --ticks 600 --seed 42 --agents 20
 cargo run -p sim-viewer
 ```
 
 Expected headless result for the command above:
 
 ```text
-completed tick=600 simulated_seconds=10.000 seed=42 initial_world=4096x4096
+completed tick=600 simulated_seconds=10.000 seed=42 initial_world=4096x4096 agents=20 movements=20/20 moving=0
 ```
 
 ## Repeatable world-quality review
@@ -68,6 +70,9 @@ cargo test --release -p sim-core worldgen::drainage::tests::compare_candidate_sk
 - Identical engine inputs yield identical snapshots after 1,000 ticks.
 - A paused engine does not advance.
 - Reset restores runtime state while preserving engine configuration.
+- Physical-agent initialization rejects incomplete residency, blocked/duplicate/out-of-area positions, insufficient standable cells, and repeated initialization without publishing partial population state. Successful initialization preserves requested order, fills canonically, restarts IDs at zero after reset, and keeps terrain residency across reset.
+- `AgentId`, compact position, activity, hot agent record, and scheduled event layouts are fixed by size/alignment assertions. Scheduler tests cover the exact time/class/agent/sequence order, future-event exclusion, sequence exhaustion without insertion, and a 4,096-event per-tick drain with deterministic backlog.
+- Movement tests cover exact integer-cost completion time, pause retention, blocked/non-cardinal/missing/dead/outside-active/outside-world request outcomes, no position/world mutation on rejection, lazy stale duplicate suppression, equal-time ID ordering independent of insertion order, typed simulation-time exhaustion, and bounded read-only views. The public-only `physical_agent_slice0` integration scenario initializes 20 agents, schedules commands in forward and reverse order, and requires identical final views/snapshots and movement counts.
 - Equal seeds produce equal declared engine worlds; explicit bootstrap materialization reproduces eager deterministic terrain and features, and materializing terrain does not alter fixed tick progression.
 - World generation is deterministic and different seeds change terrain.
 - Generated samples contain terrain variation plus sparse features.

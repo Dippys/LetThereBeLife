@@ -1,11 +1,30 @@
 use super::{
     BaseResource, ClimateSample, Feature, FeatureKind, MAX_TRAVERSABLE_ELEVATION_DELTA,
-    TerrainCell, TraversalKind, TraversalStep, WORLD_GENERATION_BOUNDS, WaterSource, World,
-    WorldPosition, WorldQueryError, WorldRect, chunk_coord, climate_at, surface_traversal_cost,
-    water_source,
+    Standability, TerrainCell, TraversalKind, TraversalStep, WORLD_GENERATION_BOUNDS, WaterSource,
+    World, WorldPosition, WorldQueryError, WorldRect, chunk_coord, climate_at,
+    surface_traversal_cost, water_source,
 };
 
 impl World {
+    /// Validates one resident standing position using the same physical rules
+    /// as cardinal traversal targets, without requiring an artificial step.
+    pub fn standability_at(
+        &self,
+        position: WorldPosition,
+    ) -> Result<Standability, WorldQueryError> {
+        let cell = self.resident_cell(position)?;
+        if water_source(cell).is_some() {
+            return Ok(Standability::BlockedByWater);
+        }
+        if self
+            .feature_at(position)
+            .is_some_and(|feature| matches!(feature.kind, FeatureKind::Tree | FeatureKind::Rock))
+        {
+            return Ok(Standability::BlockedByFeature);
+        }
+        Ok(Standability::Standable)
+    }
+
     /// Finds a sparse surface feature without scanning the complete feature list.
     pub fn feature_at(&self, position: WorldPosition) -> Option<Feature> {
         let coord = chunk_coord(position);

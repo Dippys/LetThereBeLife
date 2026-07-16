@@ -53,6 +53,7 @@ fn terrain_records_keep_their_compact_layout() {
     assert_eq!(std::mem::size_of::<BaseResource>(), 4);
     assert_eq!(std::mem::size_of::<WaterSource>(), 1);
     assert_eq!(std::mem::size_of::<TraversalKind>(), 1);
+    assert_eq!(std::mem::size_of::<Standability>(), 1);
     assert_eq!(std::mem::size_of::<TraversalStep>(), 8);
     assert_eq!(std::mem::size_of::<Feature>(), 24);
 }
@@ -108,6 +109,10 @@ fn physical_world_queries_are_explicit_and_derived_from_resident_base_data() {
         .unwrap();
 
     assert_eq!(world.water_at(WorldPosition { x: 0, y: 0 }), Ok(None));
+    assert_eq!(
+        world.standability_at(WorldPosition { x: 0, y: 0 }),
+        Ok(Standability::Standable)
+    );
     for (x, source, drinkable) in [
         (1, WaterSource::Lake, true),
         (2, WaterSource::River, true),
@@ -116,6 +121,18 @@ fn physical_world_queries_are_explicit_and_derived_from_resident_base_data() {
         assert_eq!(world.water_at(WorldPosition { x, y: 0 }), Ok(Some(source)));
         assert_eq!(source.is_drinkable(), drinkable);
     }
+    assert_eq!(
+        world.standability_at(WorldPosition { x: 1, y: 0 }),
+        Ok(Standability::BlockedByWater)
+    );
+    assert_eq!(
+        world.standability_at(WorldPosition { x: 1, y: 1 }),
+        Ok(Standability::BlockedByFeature)
+    );
+    assert_eq!(
+        world.standability_at(WorldPosition { x: 2, y: 1 }),
+        Ok(Standability::Standable)
+    );
 
     let slope_limit = world
         .traversal_step(WorldPosition { x: 0, y: 0 }, WorldPosition { x: 0, y: 1 })

@@ -1,8 +1,8 @@
 # Physical Agent Loop Implementation Plan
 
-Last synchronized: 2026-07-15.
+Last synchronized: 2026-07-16.
 
-Status: **Active plan**. Phase 1 world foundation is complete. Slice 0 is the next implementation target; later slices are planned and must be completed in order unless this document records a reviewed dependency change.
+Status: **Active plan**. Phase 1 world foundation and Phase 2 Slice 0 are complete. Slice 1 is the next implementation target; later slices are planned and must be completed in order unless this document records a reviewed dependency change.
 
 ## Purpose
 
@@ -90,7 +90,7 @@ If implementation proves that a later slice depends on a missing contract, amend
 
 ## Slice 0: Compact agents and scheduled movement
 
-Status: **Next**.
+Status: **Implemented** on 2026-07-16.
 
 ### Objective
 
@@ -139,9 +139,15 @@ The first implementation may use a simple bounded scheduler if benchmarks justif
 - Type sizes, alignments, retained population capacity, event bytes, scheduler insertion/reschedule/due-extraction time, and allocation counts are recorded for 20, 100, and at least one larger synthetic population.
 - The complete validation gate passes.
 
+### Implemented result
+
+`sim-core::agent` now owns dense zero-based `AgentId` slots, six-byte compact position/activity records, parallel movement generations, atomic resident-area initialization, and bounded read-only views/outcomes. `sim-core::scheduler` owns 32-byte heap events with total `(time, class, agent, sequence)` order, checked sequence/time overflow, lazy stale-event invalidation, bounded stale retention, and a 4,096-event due-drain ceiling. `Engine` exposes explicit initialization and typed movement scheduling, keeps the viewer population-empty, and clears population/scheduler/IDs on reset while preserving resident terrain. `sim-headless` initializes 20 agents by default and executes one deterministic physical step per movable agent.
+
+Unit regressions cover initialization atomicity, invalid/duplicate/insufficient spawns, compact layouts, exact completion time, pause/reset, blocked and invalid requests, dead/missing IDs, active/world bounds, stale duplicate events, equal-time insertion reversal, overflow, and due backlog. The public-only `physical_agent_slice0` scenario replays 20 agents across forward/reverse command insertion. The ignored release harness records 20, 100, and 10,000-agent capacities, retained bytes, structural/growth allocation counts, and insertion/reschedule/extraction timings in `PERFORMANCE.md`. D-037 records the durable layout, time, ordering, cancellation, reset, and temporary heap decisions. The complete runtime validation gate passed after the final implementation and documentation synchronization.
+
 ## Slice 1: Spatial occupancy, perception, and local routes
 
-Status: **Planned**. Depends on Slice 0.
+Status: **Next**. Slice 0 implemented.
 
 ### Objective
 

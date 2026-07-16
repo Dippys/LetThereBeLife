@@ -1,6 +1,6 @@
 # Performance and Footprint
 
-Last synchronized: 2026-07-15.
+Last synchronized: 2026-07-16.
 
 ## Principle
 
@@ -25,6 +25,26 @@ Minimize runtime work, memory, allocations, cache misses, and stored data while 
 - Add size assertions for foundational records and benchmark representative distributions before committing budgets.
 
 ## Current measurements
+
+### Physical-agent Slice 0
+
+The foundational layouts are unit-size-asserted: `AgentId` is 4 bytes/alignment 4, private `CompactPosition` is 4 bytes, `AgentActivity` is 1 byte, the complete hot `AgentRecord` is 6 bytes/alignment 2, and `ScheduledEvent` is 32 bytes/alignment 8. Stable ID is implicit in dense slot order and therefore consumes no bytes in `AgentRecord`; the parallel stale-event generation costs 4 bytes per agent. `MovementEventOutcome` is a cold 64-byte diagnostic record retained only in a reusable buffer capped at 4,096 entries.
+
+The ignored release harness uses `rustc 1.96.1 (31fca3adb 2026-06-26)` and this command:
+
+```powershell
+cargo test --release -p sim-core tests::release_physical_agent_slice_zero_measurement -- --ignored --nocapture --test-threads=1
+```
+
+On 2026-07-16 it initialized seed-42 agents inside a resident 512 x 512 rectangle, then averaged fixed scheduler batches over 10,000 repetitions for 20 agents, 2,000 for 100, and 50 for 10,000. Timed insertion fills one pre-reserved event per agent; rescheduling pushes a second generation per agent; due extraction removes both generations. Nanosecond observations are local optimized CPU timings, not cross-machine regression limits:
+
+| Population | Record/gen/event/outcome capacities | Retained logical bytes | Retained buffers | Insert batch | Insert growth allocations | Reschedule batch | Reschedule growth allocations | Extract 2x events |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 20 | 20 / 20 / 20 / 20 | 2,120 | 4 | 71 ns | 0 | 161 ns | 1 | 564 ns |
+| 100 | 100 / 100 / 100 / 100 | 10,600 | 4 | 275 ns | 0 | 528 ns | 1 | 4,391 ns |
+| 10,000 | 10,000 / 10,000 / 10,000 / 4,096 | 682,144 | 4 | 28,466 ns | 0 | 46,418 ns | 1 | 1,083,352 ns |
+
+Logical bytes include reserved `AgentRecord`, `u32` generation, `ScheduledEvent`, and cold outcome payload capacities. They exclude four `Vec`/heap headers, allocator metadata, the population's active rectangle, engine/world fields, initialization scratch, and any spare capacity beyond the reported exact reservations. "Retained buffers" is the structural allocation count after initialization. Growth allocations count observed capacity changes during each timed scheduler phase; initial insertion performs none because event storage is reserved to population size, while the artificial all-agent reschedule batch grows the heap once. Normal scheduling compacts stale events before retained length exceeds population plus 4,096 (minimum 64), so repeated rescheduling cannot grow without bound.
 
 The current terrain layout intentionally uses `u16` elevation, `u8` moisture, and a one-byte `TerrainClass` packing a `SurfaceType` low nibble with a `BiomeType` high nibble; unit assertions fix `TerrainClass` at 1 byte and `TerrainCell` at 4 bytes. The 16,777,216-cell bootstrap ceiling therefore still permits a 64 MiB logical cell payload before tile metadata and sparse features, and the complete 4,294,967,296-cell envelope remains exactly 16 GiB of raw terrain. `Engine::new` owns zero terrain cells; the viewer retains only streamed clipped bootstrap/full expansion tiles, while headless explicitly chooses the cost of completely materializing its configured rectangle. Temperature remains derived rather than adding it to every cell: the public `ClimateSample` is four bytes and is built allocation-free from four analytic temperature nodes, the retained moisture byte, and one wind-direction byte. Slice 7 likewise adds no retained world state: `WaterSource` and `TraversalKind` are one byte, `TraversalStep` is eight bytes, and point/step queries allocate nothing. A traversal query performs two chunk-map lookups plus at most one target-feature binary search; settlement searches remain explicitly bounded caller work until the physical-agent loop provides a measured batching need.
 
@@ -175,10 +195,10 @@ The in-game HUD reuses a 512-byte text string and a fixed 4,096-entry CPU screen
 
 ## Open budgets
 
-- Maximum hot agent-core size.
+- Maximum later-slice hot agent-core size beyond the current six-byte Slice 0 record plus four-byte parallel generation.
 - Terrain bytes per loaded cell and per chunk.
 - Sparse feature bytes per record.
-- Event scheduler bytes per scheduled event.
+- Scheduler replacement threshold and bucket/timing-wheel budgets beyond the measured 32-byte initial event.
 - Allocations and generation time per world chunk.
 - Release binary size and startup-time targets.
 - Maximum cached visible GPU instance count and upload-time budget.

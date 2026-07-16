@@ -1,6 +1,6 @@
 # Implementation Roadmap
 
-Last synchronized: 2026-07-15.
+Last synchronized: 2026-07-16.
 
 ## Completed
 
@@ -30,19 +30,20 @@ Last synchronized: 2026-07-15.
 - World-foundation Slice 5: deterministic canopy, grove, berry-patch, riparian, slope, and outcrop feature ecology; stone availability beyond mountain surfaces; derived compact food/wood/stone base capacities; an explicit future sparse depletion boundary; and full-resolution forest/outcrop/berry review evidence with record-footprint accounting.
 - World-foundation Slice 6: viewer-owned power-of-two per-chunk summaries with dominant terrain, minority river/lake/coast/mountain preservation, density-scaled feature markers, bounded camera-margin residency, authoritative change-bound invalidation, deterministic parallel construction, and release cache/build/upload-enqueue measurements.
 - World-foundation Slice 7: explicit residency-aware cardinal traversal, fresh/salt-water, and immutable resource queries; stable generated feature identity; a public-only deterministic settlement-candidate scenario; and a documented immutable-base, future sparse-delta, dynamic-entity handoff.
+- Physical-agent Slice 0: atomic resident-area population initialization, opaque dense IDs, compact checked positions/activity, bounded totally ordered event scheduling, lazy stale-event cancellation, scheduled cardinal movement with typed outcomes, reset/replay semantics, a 20-agent public headless proof, and recorded 20/100/10,000-agent layout/scheduler measurements.
 - `sim-core` maintainability pass: split world queries and deterministic visitation into responsibility-focused private modules, and move the large world/worldgen unit suites out of production entry files without changing public APIs or test paths.
 
 ## Active
 
-- Execute the ordered Phase 2 [physical-agent loop implementation plan](PHYSICAL_AGENT_PLAN.md) one coherent slice at a time. Slice 0 is next: compact agent identity/position, deterministic event scheduling, scheduled cardinal movement, and understandable failure on unavailable terrain without cognition or presentation ownership.
+- Execute the ordered Phase 2 [physical-agent loop implementation plan](PHYSICAL_AGENT_PLAN.md) one coherent slice at a time. Slice 1 is next: engine-owned spatial occupancy, bounded physical perception, deterministic local routes, collision arbitration, and route-progress scheduling.
 - Treat generated terrain as intentionally unstable while there is no save/load or other persisted world output. Seed output may still change if an observed physical-agent failure proves a foundational correction necessary; generator versioning is not current work.
 
 ## Next
 
 The completed Phase 1 sequence remains recorded in [WORLD_FOUNDATION_PLAN.md](WORLD_FOUNDATION_PLAN.md). Phase 2 scope, dependencies, per-slice deliverables, acceptance criteria, measurements, documentation duties, and explicit deferrals are canonical in [PHYSICAL_AGENT_PLAN.md](PHYSICAL_AGENT_PLAN.md).
 
-- Complete Slice 0: compact agents and scheduled movement.
-- Continue in dependency order through spatial perception/routes, analytical needs, physical action selection, consumption/gathering, sleep, shelter, health/death, and the integrated 20-100-agent survival proof.
+- Complete Slice 1: spatial occupancy, physical perception, and bounded local routes.
+- Continue in dependency order through analytical needs, physical action selection, consumption/gathering, sleep, shelter, health/death, and the integrated 20-100-agent survival proof.
 - Stop after each slice for review, documentation synchronization, validation, and an explicit handoff to the next slice.
 - Use the representative-seed review set only when an observed agent-loop failure requires another generator change.
 
