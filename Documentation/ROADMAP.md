@@ -34,16 +34,16 @@ Last synchronized: 2026-07-15.
 
 ## Active
 
-- Begin the Phase 2 physical-agent loop with 20-100 headless agents using the implemented resident traversal, drinkable-water, and immutable resource contracts. The first coherent slice should establish compact agent identity/position, deterministic movement scheduling, and understandable failure on unavailable terrain without adding cognition or presentation ownership.
+- Execute the ordered Phase 2 [physical-agent loop implementation plan](PHYSICAL_AGENT_PLAN.md) one coherent slice at a time. Slice 0 is next: compact agent identity/position, deterministic event scheduling, scheduled cardinal movement, and understandable failure on unavailable terrain without cognition or presentation ownership.
 - Treat generated terrain as intentionally unstable while there is no save/load or other persisted world output. Seed output may still change if an observed physical-agent failure proves a foundational correction necessary; generator versioning is not current work.
 
 ## Next
 
-The completed world-foundation sequence, acceptance criteria, performance checkpoints, and explicit deferrals remain recorded in [WORLD_FOUNDATION_PLAN.md](WORLD_FOUNDATION_PLAN.md).
+The completed Phase 1 sequence remains recorded in [WORLD_FOUNDATION_PLAN.md](WORLD_FOUNDATION_PLAN.md). Phase 2 scope, dependencies, per-slice deliverables, acceptance criteria, measurements, documentation duties, and explicit deferrals are canonical in [PHYSICAL_AGENT_PLAN.md](PHYSICAL_AGENT_PLAN.md).
 
-- Define the smallest compact physical-agent record and stable ID for the 20-100-agent loop.
-- Add deterministic scheduled movement that consumes `World::traversal_step` and handles unloaded/outside terrain explicitly.
-- Add thirst and gathering behavior through `World::water_at` and `World::resource_at`, keeping mutable depletion in a sparse simulation-owned layer rather than generated features.
+- Complete Slice 0: compact agents and scheduled movement.
+- Continue in dependency order through spatial perception/routes, analytical needs, physical action selection, consumption/gathering, sleep, shelter, health/death, and the integrated 20-100-agent survival proof.
+- Stop after each slice for review, documentation synchronization, validation, and an explicit handoff to the next slice.
 - Use the representative-seed review set only when an observed agent-loop failure requires another generator change.
 
 ## Deferred
@@ -53,7 +53,7 @@ The completed world-foundation sequence, acceptance criteria, performance checkp
 
 ## Planned
 
-Continue Phase 2 from the active physical-agent slice, using `InitialDocumentation/16_IMPLEMENTATION_ROADMAP.md` only as immutable design input. Record implementation status here as milestones land.
+Continue Phase 2 only through the canonical physical-agent plan, using the relevant `InitialDocumentation/` files only as immutable design input. Phase 3 beliefs and relationships remains deferred until every Phase 2 exit criterion passes.
 
 ## Open
 
