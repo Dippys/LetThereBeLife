@@ -1,7 +1,7 @@
 use sim_config::{AppConfig, DEFAULT_CONFIG_PATH};
 use sim_core::{
     AgentActivity, Engine, MovementOutcomeKind, PolicyDiagnosticKind, PopulationInit,
-    RouteOutcomeKind,
+    RouteOutcomeKind, SleepDiagnosticKind,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -50,6 +50,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut failed_routes = 0_u32;
     let mut policy_selections = 0_u32;
     let mut policy_failures = 0_u32;
+    let mut sleep_starts = 0_u32;
+    let mut planned_wakes = 0_u32;
+    let mut interrupted_wakes = 0_u32;
     for _ in 0..ticks {
         engine.tick();
         completed_movements += engine
@@ -74,6 +77,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .iter()
             .filter(|diagnostic| diagnostic.failure.is_some())
             .count() as u32;
+        for diagnostic in engine.sleep_diagnostics() {
+            match diagnostic.kind {
+                SleepDiagnosticKind::Started => sleep_starts += 1,
+                SleepDiagnosticKind::Woke => planned_wakes += 1,
+                SleepDiagnosticKind::Interrupted => interrupted_wakes += 1,
+            }
+        }
     }
 
     let snapshot = engine.snapshot();
@@ -81,8 +91,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .agent_views(agent_count as usize)
         .filter(|agent| agent.activity == AgentActivity::Moving)
         .count();
+    let sleeping_agents = engine
+        .agent_views(agent_count as usize)
+        .filter(|agent| agent.activity == AgentActivity::Sleeping)
+        .count();
     println!(
-        "completed tick={} simulated_seconds={:.3} seed={} initial_world={}x{} agents={} routes={} route_failures={} movements={} moving={} policy_selections={} policy_failures={}",
+        "completed tick={} simulated_seconds={:.3} seed={} initial_world={}x{} agents={} routes={} route_failures={} movements={} moving={} policy_selections={} policy_failures={} sleep_starts={} planned_wakes={} interrupted_wakes={} sleeping={}",
         snapshot.tick,
         snapshot.simulated_seconds,
         snapshot.seed,
@@ -95,6 +109,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         moving_agents,
         policy_selections,
         policy_failures,
+        sleep_starts,
+        planned_wakes,
+        interrupted_wakes,
+        sleeping_agents,
     );
     Ok(())
 }

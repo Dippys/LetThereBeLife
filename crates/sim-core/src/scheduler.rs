@@ -9,18 +9,20 @@ pub(crate) const MAX_DUE_EVENTS_PER_TICK: usize = 4_096;
 #[repr(u8)]
 pub(crate) enum EventClass {
     NeedThreshold = 0,
-    ActionCompletion = 1,
-    Movement = 2,
-    Decision = 3,
+    Wake = 1,
+    ActionCompletion = 2,
+    Movement = 3,
+    Decision = 4,
 }
 
 impl EventClass {
     const fn rank(self) -> u8 {
         match self {
             Self::NeedThreshold => 0,
-            Self::ActionCompletion => 1,
-            Self::Movement => 2,
-            Self::Decision => 3,
+            Self::Wake => 1,
+            Self::ActionCompletion => 2,
+            Self::Movement => 3,
+            Self::Decision => 4,
         }
     }
 }
@@ -61,7 +63,9 @@ impl ScheduledEvent {
     const fn detail_rank(self) -> u8 {
         match self.class {
             EventClass::NeedThreshold => self.need as u8,
-            EventClass::ActionCompletion | EventClass::Decision => self.goal as u8,
+            EventClass::Wake | EventClass::ActionCompletion | EventClass::Decision => {
+                self.goal as u8
+            }
             EventClass::Movement => 0,
         }
     }
@@ -182,6 +186,23 @@ impl Scheduler {
             goal,
             target,
             EventClass::ActionCompletion,
+        )
+    }
+
+    pub(crate) fn schedule_wake(
+        &mut self,
+        due: SimTime,
+        agent: AgentId,
+        generation: u32,
+        target: CompactPosition,
+    ) -> Result<u64, ScheduleError> {
+        self.schedule_policy(
+            due,
+            agent,
+            generation,
+            PhysicalGoal::Sleep,
+            target,
+            EventClass::Wake,
         )
     }
 
@@ -324,7 +345,7 @@ mod tests {
     }
 
     #[test]
-    fn equal_time_policy_completion_and_decision_have_explicit_boundaries() {
+    fn equal_time_wake_completion_and_decision_have_explicit_boundaries() {
         let mut scheduler = Scheduler::default();
         scheduler
             .schedule_decision(
@@ -340,6 +361,14 @@ mod tests {
                 AgentId::new(0),
                 1,
                 CompactPosition { x: 1, y: 0 },
+            )
+            .unwrap();
+        scheduler
+            .schedule_wake(
+                SimTime::from_ticks(8),
+                AgentId::new(0),
+                1,
+                CompactPosition { x: 0, y: 0 },
             )
             .unwrap();
         scheduler
@@ -361,6 +390,7 @@ mod tests {
             classes,
             [
                 EventClass::NeedThreshold,
+                EventClass::Wake,
                 EventClass::ActionCompletion,
                 EventClass::Movement,
                 EventClass::Decision,

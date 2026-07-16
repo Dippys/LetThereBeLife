@@ -11,6 +11,7 @@ use crate::{
     resources::{FOOD_CONSUMPTION, InventoryView, ResourceDeltas},
     routing::{RouteRequest, RouteRequestError},
     scheduler::{EventClass, ScheduleError, ScheduledEvent, Scheduler},
+    sleep::{SleepQuality, SleepRequestError, SleepState, SleepView},
     spatial::{SpatialIndex, TransferError},
 };
 
@@ -376,6 +377,7 @@ pub(crate) struct Population {
     needs: Vec<NeedState>,
     policies: Vec<PolicyState>,
     inventories: Vec<InventoryView>,
+    sleeps: Vec<SleepState>,
     spatial: SpatialIndex,
     active_area: Option<WorldRect>,
     initialized: bool,
@@ -495,6 +497,11 @@ impl Population {
             .try_reserve_exact(capacity)
             .map_err(|_| PopulationInitError::AllocationFailed)?;
         inventories.resize(capacity, InventoryView::default());
+        let mut sleeps = Vec::new();
+        sleeps
+            .try_reserve_exact(capacity)
+            .map_err(|_| PopulationInitError::AllocationFailed)?;
+        sleeps.resize(capacity, SleepState::default());
         let spatial = SpatialIndex::from_positions(
             records
                 .iter()
@@ -508,6 +515,7 @@ impl Population {
         self.needs = needs;
         self.policies = policies;
         self.inventories = inventories;
+        self.sleeps = sleeps;
         self.spatial = spatial;
         self.active_area = Some(init.active_area);
         self.initialized = true;
@@ -877,7 +885,8 @@ impl Population {
         scheduler: &mut Scheduler,
         now: SimTime,
         agent: AgentId,
-    ) -> Result<SimTime, MoveRequestError> {
+        schedule_decision: bool,
+    ) -> Result<(SimTime, Option<SleepState>), MoveRequestError> {
         let index = agent.0 as usize;
         let record = self
             .records
@@ -886,7 +895,12 @@ impl Population {
         if record.activity == AgentActivity::Dead {
             return Err(MoveRequestError::DeadAgent);
         }
-        let due = now.checked_add(1).ok_or(MoveRequestError::TimeOverflow)?;
+        let interrupted_sleep = self.sleeps[index].is_active().then_some(self.sleeps[index]);
+        let due = if schedule_decision {
+            now.checked_add(1).ok_or(MoveRequestError::TimeOverflow)?
+        } else {
+            now
+        };
         let movement_generation = if record.activity == AgentActivity::Moving {
             self.movement_generations[index]
                 .checked_add(1)
@@ -894,7 +908,7 @@ impl Population {
         } else {
             self.movement_generations[index]
         };
-        if self.policies[index].generation == u32::MAX {
+        if schedule_decision && self.policies[index].generation == u32::MAX {
             return Err(MoveRequestError::RescheduleLimit);
         }
         let transition_events = if self.needs[index].requires_transition(AgentActivity::Idle) {
@@ -902,7 +916,7 @@ impl Population {
         } else {
             0
         };
-        if !scheduler.can_schedule(transition_events + 1) {
+        if !scheduler.can_schedule(transition_events + u64::from(schedule_decision)) {
             return Err(MoveRequestError::EventSequenceExhausted);
         }
         if record.activity == AgentActivity::Moving {
@@ -911,8 +925,151 @@ impl Population {
         }
         self.transition_activity(scheduler, now, agent, AgentActivity::Idle)
             .expect("event sequence capacity was prechecked");
-        self.schedule_policy_decision(scheduler, now, agent, 1, PolicyReason::Retry, false)?;
-        Ok(due)
+        self.sleeps[index] = SleepState::default();
+        if schedule_decision {
+            self.schedule_policy_decision(scheduler, now, agent, 1, PolicyReason::Retry, false)?;
+        } else {
+            self.policies[index].phase = PolicyPhase::Dormant;
+        }
+        Ok((due, interrupted_sleep))
+    }
+
+    pub(crate) fn force_interrupt_sleep(
+        &mut self,
+        now: SimTime,
+        agent: AgentId,
+    ) -> Option<SleepState> {
+        let index = agent.0 as usize;
+        let state = self
+            .sleeps
+            .get(index)
+            .copied()?
+            .is_active()
+            .then_some(self.sleeps[index])?;
+        self.settle_activity_without_events(now, agent, AgentActivity::Idle);
+        self.policies[index].phase = PolicyPhase::Dormant;
+        self.sleeps[index] = SleepState::default();
+        Some(state)
+    }
+
+    pub(crate) fn validate_sleep_location(
+        &self,
+        world: &World,
+        now: SimTime,
+        agent: AgentId,
+        position: WorldPosition,
+    ) -> Result<SleepQuality, SleepRequestError> {
+        let index = agent.0 as usize;
+        let record = self
+            .records
+            .get(index)
+            .ok_or(SleepRequestError::MissingAgent)?;
+        if record.activity == AgentActivity::Dead {
+            return Err(SleepRequestError::DeadAgent);
+        }
+        if record.activity != AgentActivity::Idle {
+            return Err(SleepRequestError::AgentCommitted);
+        }
+        if !self
+            .active_area
+            .expect("initialized population")
+            .contains(position)
+        {
+            return Err(SleepRequestError::OutsideActiveArea);
+        }
+        match world.standability_at(position) {
+            Ok(Standability::Standable) => {}
+            Ok(Standability::BlockedByWater) => return Err(SleepRequestError::Water),
+            Ok(Standability::BlockedByFeature) => {
+                return Err(SleepRequestError::BlockingFeature);
+            }
+            Err(WorldQueryError::Unloaded) => return Err(SleepRequestError::Unloaded),
+            Err(WorldQueryError::OutsideWorldBounds) => {
+                return Err(SleepRequestError::OutsideWorld);
+            }
+            Err(WorldQueryError::NonCardinalStep) => unreachable!("standing queries have no step"),
+        }
+        if let Some(occupant) = self.spatial.occupant(position)
+            && occupant != agent
+        {
+            return Err(SleepRequestError::Occupied(occupant));
+        }
+        if self.needs[index]
+            .view(agent, now)
+            .exposure
+            .threshold_reached
+        {
+            return Err(SleepRequestError::UnsafeExposure);
+        }
+        if record.position.world() != position {
+            return Err(SleepRequestError::NotAtLocation);
+        }
+        Ok(SleepQuality::OpenGround)
+    }
+
+    pub(crate) fn schedule_sleep(
+        &mut self,
+        scheduler: &mut Scheduler,
+        now: SimTime,
+        agent: AgentId,
+        position: WorldPosition,
+        quality: SleepQuality,
+        reason: PolicyReason,
+    ) -> Result<SleepView, SleepRequestError> {
+        let index = agent.0 as usize;
+        let compact = CompactPosition::checked(position).ok_or(SleepRequestError::OutsideWorld)?;
+        let due = self.needs[index]
+            .sleep_recovery_due(quality, now)
+            .ok_or(SleepRequestError::TimeOverflow)?;
+        if self.policies[index].generation == u32::MAX {
+            return Err(SleepRequestError::RescheduleLimit);
+        }
+        let transition_events = if self.needs[index].requires_transition(AgentActivity::Sleeping) {
+            4
+        } else {
+            0
+        };
+        if !scheduler.can_schedule(transition_events + 1) {
+            return Err(SleepRequestError::EventSequenceExhausted);
+        }
+        if self.needs[index].transition_sleep(quality, now) {
+            let state = self.needs[index];
+            self.schedule_need_thresholds(scheduler, agent, state, now)
+                .expect("event sequence capacity was prechecked");
+        }
+        self.records[index].activity = AgentActivity::Sleeping;
+        let state = &mut self.policies[index];
+        let generation = state
+            .next_generation()
+            .expect("policy generation was prechecked");
+        scheduler
+            .schedule_wake(due, agent, generation, compact)
+            .expect("event sequence capacity was prechecked");
+        state.goal = PhysicalGoal::Sleep;
+        state.target = compact;
+        state.reason = reason;
+        state.phase = PolicyPhase::Acting;
+        state.retries = 0;
+        self.sleeps[index] = SleepState::active(now, due, quality);
+        Ok(self.sleep_view(agent).expect("sleep was just activated"))
+    }
+
+    pub(crate) fn sleep_view(&self, agent: AgentId) -> Option<SleepView> {
+        let index = agent.0 as usize;
+        let state = *self.sleeps.get(index)?;
+        state.is_active().then(|| SleepView {
+            agent,
+            position: self.records[index].position.world(),
+            started_at: state.started_at,
+            planned_wake: state.planned_wake,
+            quality: state.quality,
+        })
+    }
+
+    pub(crate) fn finish_sleep(&mut self, agent: AgentId) -> Option<SleepView> {
+        let view = self.sleep_view(agent)?;
+        self.sleeps[agent.0 as usize] = SleepState::default();
+        Some(view)
     }
 
     pub(crate) fn schedule_policy_action(
@@ -1292,7 +1449,7 @@ impl Population {
                     record.activity != AgentActivity::Dead
                         && self.needs[index].event_is_current(event.generation, event.need)
                 }
-                EventClass::Decision | EventClass::ActionCompletion => {
+                EventClass::Decision | EventClass::Wake | EventClass::ActionCompletion => {
                     record.activity != AgentActivity::Dead
                         && self.policies[index].event_is_current(event.generation)
                 }
@@ -1314,6 +1471,22 @@ impl Population {
     #[cfg(test)]
     pub(crate) fn inventory_capacity(&self) -> usize {
         self.inventories.capacity()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn sleep_capacity(&self) -> usize {
+        self.sleeps.capacity()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_need_value_for_test(
+        &mut self,
+        agent: AgentId,
+        kind: NeedKind,
+        value: u16,
+        now: SimTime,
+    ) {
+        self.needs[agent.0 as usize].set_value_for_test(kind, value, now);
     }
 
     #[cfg(test)]

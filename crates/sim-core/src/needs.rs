@@ -1,4 +1,4 @@
-use crate::{AgentActivity, AgentId, EventId, SimTime};
+use crate::{AgentActivity, AgentId, EventId, SimTime, SleepQuality};
 
 pub const NEED_MAX: u16 = 10_000;
 pub const NEED_RATE_PERIOD_TICKS: u16 = 60;
@@ -121,7 +121,14 @@ impl NeedState {
     }
 
     pub(crate) fn transition(&mut self, activity: AgentActivity, now: SimTime) -> bool {
-        let new_rates = rates_for(activity);
+        self.transition_rates(rates_for(activity), now)
+    }
+
+    pub(crate) fn transition_sleep(&mut self, quality: SleepQuality, now: SimTime) -> bool {
+        self.transition_rates(sleep_rates(quality), now)
+    }
+
+    fn transition_rates(&mut self, new_rates: [i8; 4], now: SimTime) -> bool {
         if self.rates == new_rates {
             return false;
         }
@@ -130,6 +137,13 @@ impl NeedState {
         self.generation = self.generation.wrapping_add(1);
         self.crossed &= crossed_mask(self.values);
         true
+    }
+
+    pub(crate) fn sleep_recovery_due(self, quality: SleepQuality, now: SimTime) -> Option<SimTime> {
+        let remaining = self.numerator(NeedKind::Rest, now);
+        let recovery = u128::from(quality.rest_recovery_per_period());
+        let elapsed = remaining.div_ceil(recovery).max(1);
+        now.checked_add(u64::try_from(elapsed).ok()?)
     }
 
     pub(crate) fn threshold_due(self, kind: NeedKind, now: SimTime) -> Option<SimTime> {
@@ -224,6 +238,14 @@ impl NeedState {
         }
         self.reference_time = now;
     }
+
+    #[cfg(test)]
+    pub(crate) fn set_value_for_test(&mut self, kind: NeedKind, value: u16, now: SimTime) {
+        self.rebase(now);
+        self.values[kind.index()] = value.min(NEED_MAX);
+        self.remainders[kind.index()] = 0;
+        self.crossed = crossed_mask(self.values);
+    }
 }
 
 const fn rates_for(activity: AgentActivity) -> [i8; 4] {
@@ -232,9 +254,15 @@ const fn rates_for(activity: AgentActivity) -> [i8; 4] {
         AgentActivity::Moving => ACTIVITY_RATES[1],
         AgentActivity::Gathering => ACTIVITY_RATES[2],
         AgentActivity::Building => ACTIVITY_RATES[3],
-        AgentActivity::Sleeping => ACTIVITY_RATES[4],
+        AgentActivity::Sleeping => sleep_rates(SleepQuality::OpenGround),
         AgentActivity::Dead => [0; 4],
     }
+}
+
+const fn sleep_rates(quality: SleepQuality) -> [i8; 4] {
+    let mut rates = ACTIVITY_RATES[4];
+    rates[NeedKind::Rest as usize] = -(quality.rest_recovery_per_period() as i8);
+    rates
 }
 
 const fn threshold(kind: NeedKind) -> u16 {
@@ -311,6 +339,37 @@ mod tests {
                 .rest
                 .value,
             0
+        );
+    }
+
+    #[test]
+    fn sleep_recovery_due_is_exact_for_quality_and_tick_batching() {
+        let mut state = NeedState::new(SimTime::ZERO);
+        state.values[NeedKind::Rest.index()] = 8_000;
+        let open_due = state
+            .sleep_recovery_due(SleepQuality::OpenGround, SimTime::ZERO)
+            .unwrap();
+        let sheltered_due = state
+            .sleep_recovery_due(SleepQuality::Sheltered, SimTime::ZERO)
+            .unwrap();
+        assert_eq!(open_due, SimTime::from_ticks(60_000));
+        assert_eq!(sheltered_due, SimTime::from_ticks(40_000));
+
+        state.transition_sleep(SleepQuality::OpenGround, SimTime::ZERO);
+        assert_eq!(state.view(AgentId::new(0), open_due).rest.value, 0);
+        assert_eq!(
+            state
+                .view(AgentId::new(0), SimTime::from_ticks(open_due.ticks() - 1))
+                .rest
+                .value,
+            0
+        );
+        assert_eq!(
+            state.sleep_recovery_due(
+                SleepQuality::OpenGround,
+                SimTime::from_ticks(open_due.ticks() - 1),
+            ),
+            Some(open_due)
         );
     }
 

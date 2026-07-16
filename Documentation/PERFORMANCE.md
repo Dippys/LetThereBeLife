@@ -120,6 +120,26 @@ cargo test -p sim-core --release release_physical_agent_slice_four_measurement -
 
 On 2026-07-16, the optimized local harness selected one 120-unit wood feature and performed 120 one-unit gather mutations in 9,100 ns total while retaining exactly one delta record. This is one machine-local observation, not a throughput regression threshold; it isolates composed capacity lookup plus sparse update and excludes perception, routing, action scheduling, inventory transfer, and allocator-level instrumentation. The public contention scenario separately proves that two equal-time gatherers cannot exceed one 12-unit berry capacity and that only one sparse delta is retained. Broader 20-100-agent action distributions and allocator profiling remain part of the Phase 2 integrated survival/soak slice.
 
+### Physical-agent Slice 5
+
+`SleepState` is unit-size-asserted at 24 bytes/alignment eight. It is a fixed pointer-free parallel record containing two `SimTime` values, one-byte quality, and an active flag; location and wake generation are not duplicated from the existing agent/policy state. Exact population reservation therefore retains 480, 2,400, and 240,000 logical bytes for 20, 100, and 10,000 agents. The synthetic worst-concentration workload starts every agent sleeping at the same tick. It retains seven scheduler records per agent: three superseded idle thresholds, three current sleeping thresholds, and one wake. Ordinary runs distribute due times, and stale compaction remains bounded by the existing engine policy.
+
+The ignored optimized harness uses this command:
+
+```powershell
+cargo test --release -p sim-core release_physical_agent_slice_five_measurement -- --ignored --nocapture --test-threads=1
+```
+
+One run on 2026-07-16 recorded:
+
+| Agents | Sleep capacity | Logical sleep bytes | Scheduled records | Schedule all | Extract equal-time wakes |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 20 | 20 | 480 | 140 | 4,500 ns | 1,000 ns |
+| 100 | 100 | 2,400 | 700 | 11,800 ns | 5,200 ns |
+| 10,000 | 10,000 | 240,000 | 70,000 | 1,213,600 ns | 876,600 ns |
+
+The timings are one machine-local optimized observation, not regression thresholds. They isolate state transition, analytical threshold/wake insertion, and due extraction; they exclude world validation, policy selection, diagnostics retention, allocator attribution, and the complete tick dispatcher. Sleep performs no per-tick population scan. The integrated Slice 8 soak must measure mixed sleep/wake/interrupt distributions and determine whether the private binary heap should move to buckets before population scale increases.
+
 The current terrain layout intentionally uses `u16` elevation, `u8` moisture, and a one-byte `TerrainClass` packing a `SurfaceType` low nibble with a `BiomeType` high nibble; unit assertions fix `TerrainClass` at 1 byte and `TerrainCell` at 4 bytes. The 16,777,216-cell bootstrap ceiling therefore still permits a 64 MiB logical cell payload before tile metadata and sparse features, and the complete 4,294,967,296-cell envelope remains exactly 16 GiB of raw terrain. `Engine::new` owns zero terrain cells; the viewer retains only streamed clipped bootstrap/full expansion tiles, while headless explicitly chooses the cost of completely materializing its configured rectangle. Temperature remains derived rather than adding it to every cell: the public `ClimateSample` is four bytes and is built allocation-free from four analytic temperature nodes, the retained moisture byte, and one wind-direction byte. Slice 7 likewise adds no retained world state: `WaterSource` and `TraversalKind` are one byte, `TraversalStep` is eight bytes, and point/step queries allocate nothing. A traversal query performs two chunk-map lookups plus at most one target-feature binary search; settlement searches remain explicitly bounded caller work until the physical-agent loop provides a measured batching need.
 
 ### World-quality baseline

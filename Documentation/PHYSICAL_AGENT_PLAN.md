@@ -2,7 +2,7 @@
 
 Last synchronized: 2026-07-16.
 
-Status: **Active plan**. Phase 1 world foundation and Phase 2 Slices 0-4 are complete. Slice 5 is the next implementation target; later slices are planned and must be completed in order unless this document records a reviewed dependency change.
+Status: **Active plan**. Phase 1 world foundation and Phase 2 Slices 0-5 are complete. Slice 6 is the next implementation target; later slices are planned and must be completed in order unless this document records a reviewed dependency change.
 
 ## Purpose
 
@@ -39,7 +39,7 @@ The repository already provides the world-side contracts needed to begin:
 - deterministic resident cell/feature visitation and the Phase 1 settlement-candidate scenario provide bounded search building blocks.
 - `sim-headless` eagerly materializes the configured bootstrap area before ticking; `sim-viewer` streams terrain asynchronously and currently has no agent presentation.
 
-Slices 0-4 now provide compact agent storage and inventory, scheduled movement, one-agent-per-cell occupancy, bounded objective perception, deterministic local routes, analytical physical needs, an explicitly activated deterministic physical policy, effective gather/eat/drink actions, and sparse permanent generated-resource depletion. Not yet implemented are full sleep behavior, structures, health, death, or richer agent-specific snapshots.
+Slices 0-5 now provide compact agent storage and inventory, scheduled movement, one-agent-per-cell occupancy, bounded objective perception, deterministic local routes, analytical physical needs, an explicitly activated deterministic physical policy, effective gather/eat/drink actions, sparse permanent generated-resource depletion, and scheduled interruptible sleep with analytical recovery. Not yet implemented are structures, health, death, or richer agent-specific snapshots.
 
 ## Non-negotiable constraints
 
@@ -312,7 +312,7 @@ Unit tests cover compact layouts, per-kind overflow, gather-capable policy selec
 
 ## Slice 5: Rest and sleep
 
-Status: **Planned**. Depends on Slices 0-4.
+Status: **Implemented** on 2026-07-16. Depends on Slices 0-4.
 
 ### Objective
 
@@ -334,6 +334,14 @@ Add scheduled sleep/wake behavior that restores rest, remains interruptible by p
 - Analytical recovery matches exact boundary cases and is deterministic across tick batching.
 - Sleep cannot bypass hunger, thirst, exposure, or death thresholds.
 - Sleep event volume is independent of render frames and does not require per-tick updates.
+
+### Implemented result
+
+Private `sim-core::sleep` owns a fixed 24-byte pointer-free `SleepState` parallel to the hot agent record, plus public read-only `SleepView` and latest-tick `SleepDiagnostic` values. `Engine::request_sleep` provides an explicit fallible intent for headless/manual scenarios while the autonomous policy starts the same authoritative transition at a reached rest threshold. Current Slice 5 locations must be the agent's own resident standable cell, owned by that agent in the spatial index, and below the exposure threshold. Water, blocking features, another occupant, unloaded/outside coverage, unsafe exposure, remote targets, existing commitments, and scheduling exhaustion are typed rejections. Open ground is the only implemented quality; the `Sheltered` quality and faster recovery rate are reserved for Slice 6's authoritative structure input rather than inferred early.
+
+Sleep rebases needs once into reduced hunger/thirst, negative rest, and open-ground exposure rates, predicts the exact zero-rest boundary from the fixed-point numerator, and schedules one dedicated wake event. Event ordering is now threshold, wake, action completion, movement, then decision, so a same-time urgent physical threshold supersedes wake. Hunger, thirst, or exposure interruption invalidates the wake, returns the agent idle, records the causal reason, and schedules at most one policy reconsideration; sequence exhaustion settles the sleeper idle and makes the wake stale rather than allowing the threshold to be bypassed. Normal wake rebases once, records completion, and never scans sleeping agents per tick. Reset clears sleep state and diagnostics.
+
+Unit coverage fixes the 24-byte/alignment-eight sleep layout, exact open-ground/sheltered analytical boundaries, threshold-before-wake ordering, unsafe-location rejection, and atomic sequence-exhaustion behavior. Public `physical_agent_slice5` scenarios cover planned wake, pause preservation, thirst interruption, stale-wake harmlessness, self-occupancy, other-agent/water/feature rejection, and reset. The ignored optimized harness records exact state capacity and scheduled event volume for 20, 100, and 10,000 agents in `PERFORMANCE.md`. `sim-headless` now reports sleep starts, planned wakes, interrupted wakes, and currently sleeping agents. D-042 records the durable state, quality, validation, ordering, and interruption decisions.
 
 ## Slice 6: Minimal shelter
 

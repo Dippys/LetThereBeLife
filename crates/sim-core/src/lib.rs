@@ -6,6 +6,7 @@ mod policy;
 mod resources;
 mod routing;
 mod scheduler;
+mod sleep;
 mod spatial;
 mod world;
 mod worldgen;
@@ -32,6 +33,10 @@ pub use resources::{
     INVENTORY_CAPACITY_PER_KIND, InventoryView,
 };
 pub use routing::{MAX_ROUTE_EXPANSIONS, RouteRequest, RouteRequestError};
+pub use sleep::{
+    SleepDiagnostic, SleepDiagnosticKind, SleepInterruptionReason, SleepQuality, SleepRequestError,
+    SleepView,
+};
 pub use world::{
     BaseResource, BiomeType, CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkInspection,
     ChunkLoadRequest, ChunkLocalPosition, ChunkPresence, ClimateSample, DEFAULT_INITIAL_WORLD_SIZE,
@@ -50,6 +55,7 @@ use policy::{PolicyAction, PolicySelection, retry_delay, select};
 use resources::ResourceDeltas;
 use routing::RoutePlanner;
 use scheduler::{EventClass, MAX_DUE_EVENTS_PER_TICK, Scheduler};
+use sleep::interruption_for_need;
 
 /// Immutable settings used to construct or reset a simulation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,6 +139,7 @@ pub struct Engine {
     route_outcomes: Vec<RouteEventOutcome>,
     need_outcomes: Vec<NeedThresholdEventOutcome>,
     policy_diagnostics: Vec<PolicyDiagnostic>,
+    sleep_diagnostics: Vec<SleepDiagnostic>,
     policy_active: bool,
     resource_deltas: ResourceDeltas,
     route_planner: RoutePlanner,
@@ -157,6 +164,7 @@ impl Engine {
             route_outcomes: Vec::new(),
             need_outcomes: Vec::new(),
             policy_diagnostics: Vec::new(),
+            sleep_diagnostics: Vec::new(),
             policy_active: false,
             resource_deltas: ResourceDeltas::default(),
             route_planner: RoutePlanner::default(),
@@ -188,6 +196,7 @@ impl Engine {
                 self.route_outcomes.clear();
                 self.need_outcomes.clear();
                 self.policy_diagnostics.clear();
+                self.sleep_diagnostics.clear();
                 self.policy_active = false;
                 self.resource_deltas = ResourceDeltas::default();
                 self.route_planner = RoutePlanner::default();
@@ -216,6 +225,7 @@ impl Engine {
         self.route_outcomes.clear();
         self.need_outcomes.clear();
         self.policy_diagnostics.clear();
+        self.sleep_diagnostics.clear();
         let mut processed = 0_usize;
         while processed < MAX_DUE_EVENTS_PER_TICK {
             let Some(event) = self.scheduler.pop_due(self.time) else {
@@ -223,12 +233,40 @@ impl Engine {
             };
             if event.class == EventClass::NeedThreshold {
                 let outcome = self.population.apply_need_threshold(event);
-                if self.policy_active && outcome.outcome == NeedThresholdOutcomeKind::Reached {
-                    let _ = self.population.interrupt_for_policy_decision(
-                        &mut self.scheduler,
-                        self.time,
-                        outcome.agent,
-                    );
+                if outcome.outcome == NeedThresholdOutcomeKind::Reached {
+                    let sleeping = self.population.sleep_view(outcome.agent);
+                    let interruption = interruption_for_need(outcome.kind);
+                    if sleeping.is_some() && interruption.is_some() {
+                        let result = self.population.interrupt_for_policy_decision(
+                            &mut self.scheduler,
+                            self.time,
+                            outcome.agent,
+                            self.policy_active,
+                        );
+                        let interrupted = match result {
+                            Ok((_, interrupted)) => interrupted,
+                            Err(_) => self
+                                .population
+                                .force_interrupt_sleep(self.time, outcome.agent),
+                        };
+                        if let (Some(sleep), Some(reason)) = (sleeping, interruption)
+                            && interrupted.is_some()
+                        {
+                            self.sleep_diagnostics.push(SleepDiagnostic {
+                                sleep,
+                                at: self.time,
+                                kind: SleepDiagnosticKind::Interrupted,
+                                interruption: Some(reason),
+                            });
+                        }
+                    } else if self.policy_active {
+                        let _ = self.population.interrupt_for_policy_decision(
+                            &mut self.scheduler,
+                            self.time,
+                            outcome.agent,
+                            true,
+                        );
+                    }
                 }
                 self.need_outcomes.push(outcome);
                 processed += 1;
@@ -239,7 +277,7 @@ impl Engine {
                 processed += 1;
                 continue;
             }
-            if event.class == EventClass::ActionCompletion {
+            if matches!(event.class, EventClass::Wake | EventClass::ActionCompletion) {
                 self.apply_policy_action_completion(event);
                 processed += 1;
                 continue;
@@ -493,6 +531,46 @@ impl Engine {
         self.resource_deltas.len()
     }
 
+    /// Starts one explicit sleep intent at the agent's current physical location.
+    pub fn request_sleep(
+        &mut self,
+        agent: AgentId,
+        position: WorldPosition,
+    ) -> Result<SleepView, SleepRequestError> {
+        if self.policy_active {
+            return Err(SleepRequestError::PolicyControlled);
+        }
+        let quality =
+            self.population
+                .validate_sleep_location(&self.world, self.time, agent, position)?;
+        self.compact_scheduler_if_needed();
+        let sleep = self.population.schedule_sleep(
+            &mut self.scheduler,
+            self.time,
+            agent,
+            position,
+            quality,
+            PolicyReason::RestThreshold,
+        )?;
+        self.sleep_diagnostics.push(SleepDiagnostic {
+            sleep,
+            at: self.time,
+            kind: SleepDiagnosticKind::Started,
+            interruption: None,
+        });
+        Ok(sleep)
+    }
+
+    /// Returns the active sleep interval for one agent, if any.
+    pub fn sleep(&self, agent: AgentId) -> Option<SleepView> {
+        self.population.sleep_view(agent)
+    }
+
+    /// Sleep starts, planned wakes, and threshold interruptions from the latest advancing tick.
+    pub fn sleep_diagnostics(&self) -> &[SleepDiagnostic] {
+        &self.sleep_diagnostics
+    }
+
     /// Activates autonomous physical decisions after population initialization.
     pub fn activate_physical_policy(&mut self) -> Result<(), PolicyActivationError> {
         if !self.population.is_initialized() {
@@ -722,6 +800,60 @@ impl Engine {
                 PhysicalGoal::SeekFood => PhysicalGoal::GatherMaterial,
                 goal => goal,
             };
+            if action_goal == PhysicalGoal::Sleep {
+                let quality = match self.population.validate_sleep_location(
+                    &self.world,
+                    self.time,
+                    agent,
+                    target,
+                ) {
+                    Ok(quality) => quality,
+                    Err(error) => {
+                        self.schedule_policy_retry(
+                            agent,
+                            action_goal,
+                            Some(target),
+                            selection.reason,
+                            sleep_failure(error),
+                        );
+                        return;
+                    }
+                };
+                match self.population.schedule_sleep(
+                    &mut self.scheduler,
+                    self.time,
+                    agent,
+                    target,
+                    quality,
+                    selection.reason,
+                ) {
+                    Ok(sleep) => {
+                        self.policy_diagnostics.push(PolicyDiagnostic {
+                            agent,
+                            at: self.time,
+                            goal: action_goal,
+                            target: Some(target),
+                            reason: selection.reason,
+                            kind: PolicyDiagnosticKind::ActionStarted,
+                            failure: None,
+                        });
+                        self.sleep_diagnostics.push(SleepDiagnostic {
+                            sleep,
+                            at: self.time,
+                            kind: SleepDiagnosticKind::Started,
+                            interruption: None,
+                        });
+                    }
+                    Err(error) => self.schedule_policy_retry(
+                        agent,
+                        action_goal,
+                        Some(target),
+                        selection.reason,
+                        sleep_failure(error),
+                    ),
+                }
+                return;
+            }
             match self.population.schedule_policy_action(
                 &mut self.scheduler,
                 self.time,
@@ -820,8 +952,21 @@ impl Engine {
             PhysicalGoal::Drink => self.apply_drink(event.agent, target),
             PhysicalGoal::Eat => self.apply_eat(event.agent),
             PhysicalGoal::GatherMaterial => self.apply_gather(event.agent, reason),
-            PhysicalGoal::Sleep
-            | PhysicalGoal::SeekShelter
+            PhysicalGoal::Sleep => {
+                let sleep = self.population.finish_sleep(event.agent);
+                if let Some(sleep) = sleep {
+                    self.sleep_diagnostics.push(SleepDiagnostic {
+                        sleep,
+                        at: self.time,
+                        kind: SleepDiagnosticKind::Woke,
+                        interruption: None,
+                    });
+                    Ok(())
+                } else {
+                    Err(PolicyFailureReason::InconsistentState)
+                }
+            }
+            PhysicalGoal::SeekShelter
             | PhysicalGoal::BuildShelter
             | PhysicalGoal::Incapacitated => Err(PolicyFailureReason::DeferredToLaterSlice),
             PhysicalGoal::SeekWater | PhysicalGoal::SeekFood | PhysicalGoal::Wait => {
@@ -839,14 +984,16 @@ impl Engine {
                     kind: PolicyDiagnosticKind::ActionCompleted,
                     failure: None,
                 });
-                if let Err(error) = self.population.schedule_policy_decision(
-                    &mut self.scheduler,
-                    self.time,
-                    event.agent,
-                    1,
-                    PolicyReason::ActionCompleted,
-                    false,
-                ) {
+                if self.policy_active
+                    && let Err(error) = self.population.schedule_policy_decision(
+                        &mut self.scheduler,
+                        self.time,
+                        event.agent,
+                        1,
+                        PolicyReason::ActionCompleted,
+                        false,
+                    )
+                {
                     self.schedule_policy_retry(
                         event.agent,
                         goal,
@@ -1221,6 +1368,26 @@ fn move_failure(error: MoveRequestError) -> PolicyFailureReason {
         MoveRequestError::PolicyControlled
         | MoveRequestError::MissingAgent
         | MoveRequestError::DeadAgent => PolicyFailureReason::InconsistentState,
+    }
+}
+
+fn sleep_failure(error: SleepRequestError) -> PolicyFailureReason {
+    match error {
+        SleepRequestError::Water => PolicyFailureReason::SleepLocationWater,
+        SleepRequestError::BlockingFeature => PolicyFailureReason::SleepLocationBlocked,
+        SleepRequestError::Occupied(_) => PolicyFailureReason::SleepLocationOccupied,
+        SleepRequestError::UnsafeExposure => PolicyFailureReason::SleepLocationUnsafe,
+        SleepRequestError::OutsideActiveArea
+        | SleepRequestError::OutsideWorld
+        | SleepRequestError::Unloaded
+        | SleepRequestError::NotAtLocation => PolicyFailureReason::SleepLocationUnavailable,
+        SleepRequestError::TimeOverflow => PolicyFailureReason::TimeOverflow,
+        SleepRequestError::RescheduleLimit => PolicyFailureReason::RescheduleLimit,
+        SleepRequestError::EventSequenceExhausted => PolicyFailureReason::EventSequenceExhausted,
+        SleepRequestError::MissingAgent
+        | SleepRequestError::DeadAgent
+        | SleepRequestError::PolicyControlled
+        | SleepRequestError::AgentCommitted => PolicyFailureReason::InconsistentState,
     }
 }
 
@@ -2292,6 +2459,114 @@ mod tests {
             deltas.len(),
             gathered,
         );
+    }
+
+    #[test]
+    fn sleep_rejects_unsafe_exposure_and_sequence_exhaustion_without_partial_state() {
+        let mut engine = resident_engine(128);
+        let position = standable_steps(&engine, 1)[0].0;
+        engine
+            .initialize_population(
+                PopulationInit {
+                    active_area: engine.world().initial_bounds(),
+                    population: 1,
+                },
+                &[position],
+            )
+            .unwrap();
+        engine.population.set_need_value_for_test(
+            AgentId::new(0),
+            NeedKind::Exposure,
+            7_000,
+            engine.time,
+        );
+        assert_eq!(
+            engine.request_sleep(AgentId::new(0), position),
+            Err(SleepRequestError::UnsafeExposure)
+        );
+        assert_eq!(engine.sleep(AgentId::new(0)), None);
+        assert_eq!(
+            engine.agent_views(1).next().unwrap().activity,
+            AgentActivity::Idle
+        );
+
+        engine.population.set_need_value_for_test(
+            AgentId::new(0),
+            NeedKind::Exposure,
+            0,
+            engine.time,
+        );
+        engine.scheduler.exhaust_sequence();
+        let before = engine.physical_needs(AgentId::new(0)).unwrap();
+        assert_eq!(
+            engine.request_sleep(AgentId::new(0), position),
+            Err(SleepRequestError::EventSequenceExhausted)
+        );
+        assert_eq!(engine.sleep(AgentId::new(0)), None);
+        assert_eq!(engine.physical_needs(AgentId::new(0)).unwrap(), before);
+        assert_eq!(
+            engine.agent_views(1).next().unwrap().activity,
+            AgentActivity::Idle
+        );
+    }
+
+    #[test]
+    #[ignore = "release-only Slice 5 sleep-state and wake-event measurement"]
+    fn release_physical_agent_slice_five_measurement() {
+        assert!(
+            !std::hint::black_box(cfg!(debug_assertions)),
+            "run this measurement in release mode"
+        );
+        eprintln!(
+            "population\tsleep_state_size\tsleep_state_align\tsleep_capacity\tsleep_logical_bytes\tscheduled_events\tschedule_ns\twake_extract_ns"
+        );
+        for population in [20_u32, 100, 10_000] {
+            let mut engine = resident_engine(512);
+            engine
+                .initialize_population(
+                    PopulationInit {
+                        active_area: engine.world().initial_bounds(),
+                        population,
+                    },
+                    &[],
+                )
+                .unwrap();
+            let positions: Vec<_> = engine
+                .population
+                .views(population as usize)
+                .map(|view| view.position)
+                .collect();
+            let schedule_start = Instant::now();
+            for (raw, position) in positions.into_iter().enumerate() {
+                engine
+                    .population
+                    .schedule_sleep(
+                        &mut engine.scheduler,
+                        SimTime::ZERO,
+                        AgentId::new(raw as u32),
+                        position,
+                        SleepQuality::OpenGround,
+                        PolicyReason::RestThreshold,
+                    )
+                    .unwrap();
+            }
+            let schedule_ns = schedule_start.elapsed().as_nanos();
+            let scheduled_events = engine.scheduler.len();
+            let wake_start = Instant::now();
+            let mut extracted = 0;
+            while engine.scheduler.pop_due(SimTime::from_ticks(1)).is_some() {
+                extracted += 1;
+            }
+            let wake_extract_ns = wake_start.elapsed().as_nanos();
+            assert_eq!(extracted, population as usize);
+            let sleep_capacity = engine.population.sleep_capacity();
+            eprintln!(
+                "{population}\t{}\t{}\t{sleep_capacity}\t{}\t{scheduled_events}\t{schedule_ns}\t{wake_extract_ns}",
+                size_of::<sleep::SleepState>(),
+                std::mem::align_of::<sleep::SleepState>(),
+                sleep_capacity * size_of::<sleep::SleepState>(),
+            );
+        }
     }
 
     #[test]
