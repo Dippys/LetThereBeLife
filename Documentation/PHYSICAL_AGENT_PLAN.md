@@ -39,7 +39,7 @@ The repository already provides the world-side contracts needed to begin:
 - deterministic resident cell/feature visitation and the Phase 1 settlement-candidate scenario provide bounded search building blocks.
 - `sim-headless` eagerly materializes the configured bootstrap area before ticking; `sim-viewer` streams terrain asynchronously and currently has no agent presentation.
 
-Not yet implemented are agent storage, an event scheduler, movement execution, occupancy, perception, needs, inventory, resource depletion, structures, health, death, or agent-specific snapshots.
+Slices 0-1 now provide compact agent storage, scheduled movement, one-agent-per-cell occupancy, bounded objective perception, and deterministic local routes. Not yet implemented are needs, action selection, inventory, resource depletion, structures, health, death, or richer agent-specific snapshots.
 
 ## Non-negotiable constraints
 
@@ -147,7 +147,7 @@ Unit regressions cover initialization atomicity, invalid/duplicate/insufficient 
 
 ## Slice 1: Spatial occupancy, perception, and local routes
 
-Status: **Next**. Slice 0 implemented.
+Status: **Implemented** on 2026-07-16.
 
 ### Objective
 
@@ -164,7 +164,7 @@ Let agents discover nearby physical facts and navigate short distances without a
 
 - Maintain a simulation-owned spatial index from world/chunk locations to present agent IDs.
 - Apply position and index changes atomically at deterministic command boundaries.
-- Provide bounded radius/rectangle queries returning agents, drinkable water, immutable resources, structures, and traversable cells in canonical order.
+- Provide bounded radius/rectangle queries returning currently implemented agents, drinkable water, immutable resources, and traversable cells in canonical order. Extend the same objective boundary with structures when Slice 6 introduces their authoritative store; do not invent structure identity or state in Slice 1.
 - Add short deterministic routing over cardinal `World::traversal_step` results with explicit no-path, budget-exhausted, unloaded, and invalid-target outcomes.
 - Schedule route or waypoint progress from traversal costs; do not create a movement event every engine tick.
 - Invalidate only routes affected by changed dynamic occupancy or later structures, not by irrelevant world revisions.
@@ -179,6 +179,14 @@ Let agents discover nearby physical facts and navigate short distances without a
 - Route execution cannot walk through water, excessive slope, blocking features, agents under the chosen collision rule, or unloaded terrain.
 - Focused tests cover signed coordinates, chunk boundaries, route ties, no-path, search-budget exhaustion, dynamic occupancy, and atomic transfer.
 - Query cost, route-search expansions, temporary allocations, and spatial-index bytes per agent are measured.
+
+### Implemented result
+
+`sim-core::spatial` owns one-agent-per-cell occupancy in a sparse compact signed chunk map. Each bucket keeps sorted eight-byte `(local cell, AgentId)` entries; moving agents occupy their source until completion, and checked source-to-target transfer is atomic. The existing total scheduler order makes the lower `AgentId` the deterministic equal-time winner for an initially empty target, independent of request insertion order. Already occupied targets are rejected without reserving empty targets.
+
+`Engine::perceive_physical` performs active-area-clipped radius queries through 31 cells and returns agents, drinkable water, immutable resources, and traversable cells in global row-major order. `Engine::request_route` uses deterministic traversal-cost Dijkstra with a caller budget capped at 4,096 expansions and distinct invalid, occupied, no-path, budget-exhausted, unloaded, and terrain-blocked outcomes. Optional per-agent route state stores only a compact destination and budget; a reusable engine planner recomputes the next step after each positive-cost completion, so routes carry no path vector and cause no per-tick population scan. Occupancy conflicts trigger bounded replanning, while irrelevant world revision changes have no route state to invalidate.
+
+Unit and public integration regressions cover compact layouts, signed `-65/-64/-1/0/63/64` bucket boundaries, atomic failed transfer, request-order-independent equal-time contention, row-major bounded perception, budget exhaustion, occupied-corridor no-path, and scheduled arrival. `sim-headless` now uses perception and routes for its 20-agent smoke. The ignored release harness records 20/100/10,000-agent spatial capacity and perception work plus a 75-expansion reusable route search. D-038 records the durable ownership, collision, query, route, and structure-deferral decisions.
 
 ## Slice 2: Analytical physical needs
 

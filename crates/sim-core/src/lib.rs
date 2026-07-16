@@ -1,15 +1,20 @@
 //! Engine-independent deterministic simulation foundation.
 
 mod agent;
+mod routing;
 mod scheduler;
+mod spatial;
 mod world;
 mod worldgen;
 
 pub use agent::{
-    AgentActivity, AgentId, AgentView, EventId, MAX_POPULATION, MoveRequestError,
-    MovementEventOutcome, MovementOutcomeKind, MovementScheduled, PopulationInit,
-    PopulationInitError, PopulationInitOutcome, SimTime, SpawnInvalidReason,
+    AgentActivity, AgentId, AgentView, EventId, MAX_PERCEPTION_CELLS, MAX_PERCEPTION_RADIUS,
+    MAX_POPULATION, MoveRequestError, MovementEventOutcome, MovementOutcomeKind, MovementScheduled,
+    PerceivedResource, PerceivedWater, PerceptionError, PhysicalPerception, PopulationInit,
+    PopulationInitError, PopulationInitOutcome, RouteEventOutcome, RouteOutcomeKind,
+    RouteScheduled, SimTime, SpawnInvalidReason,
 };
+pub use routing::{MAX_ROUTE_EXPANSIONS, RouteRequest, RouteRequestError};
 pub use world::{
     BaseResource, BiomeType, CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkInspection,
     ChunkLoadRequest, ChunkLocalPosition, ChunkPresence, ClimateSample, DEFAULT_INITIAL_WORLD_SIZE,
@@ -24,6 +29,7 @@ pub use world::{
 use std::time::Duration;
 
 use agent::Population;
+use routing::RoutePlanner;
 use scheduler::{MAX_DUE_EVENTS_PER_TICK, Scheduler};
 
 /// Immutable settings used to construct or reset a simulation.
@@ -105,6 +111,8 @@ pub struct Engine {
     population: Population,
     scheduler: Scheduler,
     movement_outcomes: Vec<MovementEventOutcome>,
+    route_outcomes: Vec<RouteEventOutcome>,
+    route_planner: RoutePlanner,
 }
 
 impl Engine {
@@ -123,6 +131,8 @@ impl Engine {
             population: Population::default(),
             scheduler: Scheduler::default(),
             movement_outcomes: Vec::new(),
+            route_outcomes: Vec::new(),
+            route_planner: RoutePlanner::default(),
         }
     }
 
@@ -148,6 +158,8 @@ impl Engine {
                 self.population = Population::default();
                 self.scheduler = Scheduler::default();
                 self.movement_outcomes.clear();
+                self.route_outcomes.clear();
+                self.route_planner = RoutePlanner::default();
                 EngineCommandOutcome::Applied
             }
             EngineCommand::GenerateWorldArea(bounds) => {
@@ -170,13 +182,36 @@ impl Engine {
         };
         self.time = next_time;
         self.movement_outcomes.clear();
+        self.route_outcomes.clear();
         let mut processed = 0_usize;
         while processed < MAX_DUE_EVENTS_PER_TICK {
             let Some(event) = self.scheduler.pop_due(self.time) else {
                 break;
             };
-            self.movement_outcomes
-                .push(self.population.apply_movement(&self.world, event));
+            let outcome = self.population.apply_movement(&self.world, event);
+            let agent = outcome.agent;
+            let kind = outcome.kind;
+            self.movement_outcomes.push(outcome);
+            match kind {
+                MovementOutcomeKind::Moved | MovementOutcomeKind::Occupied(_) => {
+                    self.continue_route(agent);
+                }
+                MovementOutcomeKind::StaleEvent => {}
+                MovementOutcomeKind::InconsistentOccupancy => {
+                    self.finish_route(agent, RouteOutcomeKind::InconsistentOccupancy);
+                }
+                MovementOutcomeKind::MissingAgent
+                | MovementOutcomeKind::DeadAgent
+                | MovementOutcomeKind::InvalidStep
+                | MovementOutcomeKind::Unloaded
+                | MovementOutcomeKind::OutsideWorld
+                | MovementOutcomeKind::OutsideActiveArea
+                | MovementOutcomeKind::Blocked(_) => {
+                    if self.population.route_request(agent).is_some() {
+                        self.finish_route(agent, map_movement_route_failure(kind));
+                    }
+                }
+            }
             processed += 1;
         }
         TickOutcome::Advanced {
@@ -242,6 +277,8 @@ impl Engine {
         self.population = population;
         self.scheduler = scheduler;
         self.movement_outcomes = movement_outcomes;
+        self.route_outcomes.clear();
+        self.route_planner = RoutePlanner::default();
         Ok(outcome)
     }
 
@@ -265,6 +302,58 @@ impl Engine {
         )
     }
 
+    /// Plans a bounded deterministic minimum-travel-time local route and schedules its first step.
+    pub fn request_route(
+        &mut self,
+        agent: AgentId,
+        request: RouteRequest,
+    ) -> Result<RouteScheduled, RouteRequestError> {
+        let (origin, active_area) = self.population.route_context(agent)?;
+        let plan = self.route_planner.plan(
+            &self.world,
+            self.population.spatial(),
+            active_area,
+            agent,
+            origin,
+            request,
+        )?;
+        let scheduled = self
+            .population
+            .schedule_route_step(
+                &mut self.scheduler,
+                &self.world,
+                self.time,
+                agent,
+                request,
+                plan.next,
+            )
+            .map_err(map_move_route_error)?;
+        Ok(RouteScheduled {
+            first_event: scheduled.event,
+            first_completion: scheduled.completes_at,
+            destination: request.destination,
+            expansions: plan.expansions,
+        })
+    }
+
+    /// Returns objective nearby physical facts in canonical world row order.
+    pub fn perceive_physical(
+        &self,
+        agent: AgentId,
+        radius: u8,
+    ) -> Result<PhysicalPerception, PerceptionError> {
+        self.population.perceive(&self.world, agent, radius)
+    }
+
+    /// Returns objective facts for a bounded half-open rectangle inside the active area.
+    pub fn perceive_physical_area(
+        &self,
+        agent: AgentId,
+        area: WorldRect,
+    ) -> Result<PhysicalPerception, PerceptionError> {
+        self.population.perceive_area(&self.world, agent, area)
+    }
+
     /// Returns at most `limit` canonical read-only views in ascending ID order.
     pub fn agent_views(&self, limit: usize) -> impl Iterator<Item = AgentView> + '_ {
         self.population.views(limit)
@@ -273,6 +362,11 @@ impl Engine {
     /// Outcomes from the most recent advancing tick. Paused ticks preserve them.
     pub fn movement_outcomes(&self) -> &[MovementEventOutcome] {
         &self.movement_outcomes
+    }
+
+    /// Route arrivals or terminal route failures from the most recent advancing tick.
+    pub fn route_outcomes(&self) -> &[RouteEventOutcome] {
+        &self.route_outcomes
     }
 
     pub fn snapshot(&self) -> SimulationSnapshot {
@@ -286,6 +380,116 @@ impl Engine {
             agent_count: self.population.len() as u32,
             scheduled_event_count: self.scheduler.len() as u32,
         }
+    }
+
+    fn continue_route(&mut self, agent: AgentId) {
+        let Some(request) = self.population.route_request(agent) else {
+            return;
+        };
+        let Ok((origin, active_area)) = self.population.route_context(agent) else {
+            self.finish_route(agent, RouteOutcomeKind::InconsistentOccupancy);
+            return;
+        };
+        if origin == request.destination {
+            self.finish_route(agent, RouteOutcomeKind::Arrived);
+            return;
+        }
+        match self.route_planner.plan(
+            &self.world,
+            self.population.spatial(),
+            active_area,
+            agent,
+            origin,
+            request,
+        ) {
+            Ok(plan) => {
+                if let Err(error) = self.population.schedule_route_step(
+                    &mut self.scheduler,
+                    &self.world,
+                    self.time,
+                    agent,
+                    request,
+                    plan.next,
+                ) {
+                    self.finish_route(agent, map_move_route_failure_kind(error));
+                }
+            }
+            Err(error) => self.finish_route(agent, map_route_failure_kind(error)),
+        }
+    }
+
+    fn finish_route(&mut self, agent: AgentId, kind: RouteOutcomeKind) {
+        let Some(request) = self.population.route_request(agent) else {
+            return;
+        };
+        self.population.clear_route(agent);
+        self.route_outcomes.push(RouteEventOutcome {
+            agent,
+            at: self.time,
+            destination: request.destination,
+            kind,
+        });
+    }
+}
+
+fn map_move_route_error(error: MoveRequestError) -> RouteRequestError {
+    match error {
+        MoveRequestError::MissingAgent => RouteRequestError::MissingAgent,
+        MoveRequestError::DeadAgent => RouteRequestError::DeadAgent,
+        MoveRequestError::InvalidStep => RouteRequestError::NoPath { expansions: 0 },
+        MoveRequestError::Unloaded => RouteRequestError::Unloaded,
+        MoveRequestError::OutsideWorld => RouteRequestError::OutsideWorld,
+        MoveRequestError::OutsideActiveArea => RouteRequestError::OutsideActiveArea,
+        MoveRequestError::Blocked(kind) => RouteRequestError::Blocked(kind),
+        MoveRequestError::Occupied(agent) => RouteRequestError::Occupied(agent),
+        MoveRequestError::TimeOverflow => RouteRequestError::TimeOverflow,
+        MoveRequestError::RescheduleLimit => RouteRequestError::RescheduleLimit,
+        MoveRequestError::EventSequenceExhausted => RouteRequestError::EventSequenceExhausted,
+    }
+}
+
+fn map_move_route_failure_kind(error: MoveRequestError) -> RouteOutcomeKind {
+    match map_move_route_error(error) {
+        RouteRequestError::Occupied(agent) => RouteOutcomeKind::Occupied(agent),
+        error => map_route_failure_kind(error),
+    }
+}
+
+fn map_route_failure_kind(error: RouteRequestError) -> RouteOutcomeKind {
+    match error {
+        RouteRequestError::NoPath { expansions } => RouteOutcomeKind::NoPath { expansions },
+        RouteRequestError::BudgetExhausted { expansions } => {
+            RouteOutcomeKind::BudgetExhausted { expansions }
+        }
+        RouteRequestError::Occupied(agent) => RouteOutcomeKind::Occupied(agent),
+        RouteRequestError::Unloaded => RouteOutcomeKind::Unloaded,
+        RouteRequestError::OutsideWorld => RouteOutcomeKind::OutsideWorld,
+        RouteRequestError::OutsideActiveArea => RouteOutcomeKind::OutsideActiveArea,
+        RouteRequestError::Blocked(kind) => RouteOutcomeKind::Blocked(kind),
+        RouteRequestError::TimeOverflow => RouteOutcomeKind::TimeOverflow,
+        RouteRequestError::RescheduleLimit => RouteOutcomeKind::RescheduleLimit,
+        RouteRequestError::EventSequenceExhausted => RouteOutcomeKind::EventSequenceExhausted,
+        RouteRequestError::MissingAgent
+        | RouteRequestError::DeadAgent
+        | RouteRequestError::AlreadyAtDestination
+        | RouteRequestError::ZeroBudget
+        | RouteRequestError::BudgetTooLarge { .. } => RouteOutcomeKind::InconsistentOccupancy,
+    }
+}
+
+fn map_movement_route_failure(kind: MovementOutcomeKind) -> RouteOutcomeKind {
+    match kind {
+        MovementOutcomeKind::Unloaded => RouteOutcomeKind::Unloaded,
+        MovementOutcomeKind::OutsideWorld => RouteOutcomeKind::OutsideWorld,
+        MovementOutcomeKind::OutsideActiveArea => RouteOutcomeKind::OutsideActiveArea,
+        MovementOutcomeKind::Blocked(kind) => RouteOutcomeKind::Blocked(kind),
+        MovementOutcomeKind::Occupied(agent) => RouteOutcomeKind::Occupied(agent),
+        MovementOutcomeKind::InconsistentOccupancy
+        | MovementOutcomeKind::MissingAgent
+        | MovementOutcomeKind::DeadAgent
+        | MovementOutcomeKind::InvalidStep
+        | MovementOutcomeKind::Moved
+        | MovementOutcomeKind::StaleEvent => RouteOutcomeKind::InconsistentOccupancy,
     }
 }
 
@@ -768,7 +972,11 @@ mod tests {
             .find_map(|(index, &left)| {
                 let left_cost = base.world().traversal_step(left.0, left.1).ok()?.cost()?;
                 candidates[index + 1..].iter().copied().find_map(|right| {
-                    (base.world().traversal_step(right.0, right.1).ok()?.cost()? == left_cost)
+                    (base.world().traversal_step(right.0, right.1).ok()?.cost()? == left_cost
+                        && left.0 != right.0
+                        && left.0 != right.1
+                        && left.1 != right.0
+                        && left.1 != right.1)
                         .then_some((left, right))
                 })
             })
@@ -885,7 +1093,7 @@ mod tests {
                     &[],
                 )
                 .unwrap();
-            let (record_capacity, generation_capacity) = engine.population.capacities();
+            let (record_capacity, generation_capacity, _, _, _) = engine.population.capacities();
             let initial_scheduler_capacity = engine.scheduler.capacity();
             let outcome_capacity = engine.movement_outcomes.capacity();
 
@@ -960,5 +1168,124 @@ mod tests {
                 std::mem::align_of::<scheduler::ScheduledEvent>(),
             );
         }
+    }
+
+    #[test]
+    #[ignore = "release-only Slice 1 spatial, perception, and route measurement"]
+    fn release_physical_agent_slice_one_measurement() {
+        assert!(
+            !std::hint::black_box(cfg!(debug_assertions)),
+            "run this measurement in release mode"
+        );
+        eprintln!(
+            "population\tspatial_entry_size\tspatial_entry_align\troute_state_size\tspatial_entry_capacity\tspatial_buckets\tspatial_logical_bytes\tperception_cells\tperceived_agents\twater\tresources\tperception_ns"
+        );
+        for population in [20_u32, 100, 10_000] {
+            let mut engine = resident_engine(512);
+            engine
+                .initialize_population(
+                    PopulationInit {
+                        active_area: engine.world().initial_bounds(),
+                        population,
+                    },
+                    &[],
+                )
+                .unwrap();
+            let (_, _, route_capacity, spatial_capacity, spatial_buckets) =
+                engine.population.capacities();
+            let start = Instant::now();
+            let perception = engine.perceive_physical(AgentId::new(0), 31).unwrap();
+            let perception_ns = start.elapsed().as_nanos();
+            let spatial_logical_bytes = spatial_capacity * size_of::<spatial::CellOccupant>()
+                + route_capacity * size_of::<Option<agent::RouteState>>();
+            let perception_cells = (perception.area.max.x - perception.area.min.x)
+                * (perception.area.max.y - perception.area.min.y);
+            eprintln!(
+                "{population}\t{}\t{}\t{}\t{spatial_capacity}\t{spatial_buckets}\t{spatial_logical_bytes}\t{perception_cells}\t{}\t{}\t{}\t{perception_ns}",
+                size_of::<spatial::CellOccupant>(),
+                std::mem::align_of::<spatial::CellOccupant>(),
+                size_of::<Option<agent::RouteState>>(),
+                perception.agents.len(),
+                perception.drinkable_water.len(),
+                perception.resources.len(),
+            );
+        }
+
+        let mut engine = resident_engine(512);
+        let origin = standable_steps(&engine, 1)[0].0;
+        engine
+            .initialize_population(
+                PopulationInit {
+                    active_area: engine.world().initial_bounds(),
+                    population: 1,
+                },
+                &[origin],
+            )
+            .unwrap();
+        let active_area = engine.world().initial_bounds();
+        let mut selected = None;
+        'search: for radius in 8_i64..=48 {
+            for dy in -radius..=radius {
+                for dx in -radius..=radius {
+                    if dx.abs().max(dy.abs()) != radius {
+                        continue;
+                    }
+                    let destination = WorldPosition {
+                        x: origin.x + dx,
+                        y: origin.y + dy,
+                    };
+                    if !active_area.contains(destination) {
+                        continue;
+                    }
+                    let request = RouteRequest {
+                        destination,
+                        max_expansions: MAX_ROUTE_EXPANSIONS,
+                    };
+                    if let Ok(plan) = engine.route_planner.plan(
+                        &engine.world,
+                        engine.population.spatial(),
+                        active_area,
+                        AgentId::new(0),
+                        origin,
+                        request,
+                    ) && plan.expansions >= 64
+                    {
+                        selected = Some((request, plan.expansions));
+                        break 'search;
+                    }
+                }
+            }
+        }
+        let (request, expansions) =
+            selected.expect("seeded area should have a measured local route");
+        let capacities_before = engine.route_planner.capacities();
+        let repetitions = 1_000_u128;
+        let start = Instant::now();
+        for _ in 0..repetitions {
+            let plan = engine
+                .route_planner
+                .plan(
+                    &engine.world,
+                    engine.population.spatial(),
+                    active_area,
+                    AgentId::new(0),
+                    origin,
+                    request,
+                )
+                .unwrap();
+            assert_eq!(plan.expansions, expansions);
+            std::hint::black_box(plan.next);
+        }
+        let average_ns = start.elapsed().as_nanos() / repetitions;
+        let capacities_after = engine.route_planner.capacities();
+        eprintln!(
+            "route_expansions\t{expansions}\troute_average_ns\t{average_ns}\tnode_capacity\t{}\tlookup_capacity\t{}\topen_capacity\t{}\tgrowth_buffers\t{}",
+            capacities_after.0,
+            capacities_after.1,
+            capacities_after.2,
+            usize::from(capacities_before.0 != capacities_after.0)
+                + usize::from(capacities_before.1 != capacities_after.1)
+                + usize::from(capacities_before.2 != capacities_after.2),
+        );
     }
 }

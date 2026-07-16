@@ -1,7 +1,8 @@
 use sim_config::{AppConfig, DEFAULT_CONFIG_PATH};
 use sim_core::{
-    AgentActivity, Engine, MovementOutcomeKind, PopulationInit, TraversalStep, WorldPosition,
+    AgentActivity, Engine, MovementOutcomeKind, PopulationInit, RouteOutcomeKind, RouteRequest,
 };
+use std::collections::BTreeSet;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut ticks = 600_u64;
@@ -44,27 +45,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &[],
     )?;
     let initial_agents: Vec<_> = engine.agent_views(agent_count as usize).collect();
-    let mut scheduled_movements = 0_u32;
+    let mut reserved: BTreeSet<_> = initial_agents.iter().map(|agent| agent.position).collect();
+    let mut scheduled_routes = 0_u32;
     for agent in initial_agents {
-        let target = [(1, 0), (0, 1), (-1, 0), (0, -1)]
+        let target = engine
+            .perceive_physical(agent.id, 1)?
+            .traversable_cells
             .into_iter()
-            .map(|(dx, dy)| WorldPosition {
-                x: agent.position.x + dx,
-                y: agent.position.y + dy,
-            })
             .find(|&target| {
-                active_area.contains(target)
-                    && engine
-                        .world()
-                        .traversal_step(agent.position, target)
-                        .is_ok_and(TraversalStep::is_passable)
+                (target.x - agent.position.x).abs() + (target.y - agent.position.y).abs() == 1
+                    && !reserved.contains(&target)
             });
         if let Some(target) = target {
-            engine.request_move(agent.id, target)?;
-            scheduled_movements += 1;
+            engine.request_route(
+                agent.id,
+                RouteRequest {
+                    destination: target,
+                    max_expansions: 16,
+                },
+            )?;
+            reserved.insert(target);
+            scheduled_routes += 1;
         }
     }
     let mut completed_movements = 0_u32;
+    let mut completed_routes = 0_u32;
+    let mut failed_routes = 0_u32;
     for _ in 0..ticks {
         engine.tick();
         completed_movements += engine
@@ -72,6 +78,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .iter()
             .filter(|outcome| outcome.kind == MovementOutcomeKind::Moved)
             .count() as u32;
+        for outcome in engine.route_outcomes() {
+            if outcome.kind == RouteOutcomeKind::Arrived {
+                completed_routes += 1;
+            } else {
+                failed_routes += 1;
+            }
+        }
     }
 
     let snapshot = engine.snapshot();
@@ -80,15 +93,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .filter(|agent| agent.activity == AgentActivity::Moving)
         .count();
     println!(
-        "completed tick={} simulated_seconds={:.3} seed={} initial_world={}x{} agents={} movements={}/{} moving={}",
+        "completed tick={} simulated_seconds={:.3} seed={} initial_world={}x{} agents={} routes={}/{} route_failures={} movements={} moving={}",
         snapshot.tick,
         snapshot.simulated_seconds,
         snapshot.seed,
         engine.world().width(),
         engine.world().height(),
         snapshot.agent_count,
+        completed_routes,
+        scheduled_routes,
+        failed_routes,
         completed_movements,
-        scheduled_movements,
         moving_agents,
     );
     Ok(())

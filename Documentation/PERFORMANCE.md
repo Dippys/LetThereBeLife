@@ -46,6 +46,28 @@ On 2026-07-16 it initialized seed-42 agents inside a resident 512 x 512 rectangl
 
 Logical bytes include reserved `AgentRecord`, `u32` generation, `ScheduledEvent`, and cold outcome payload capacities. They exclude four `Vec`/heap headers, allocator metadata, the population's active rectangle, engine/world fields, initialization scratch, and any spare capacity beyond the reported exact reservations. "Retained buffers" is the structural allocation count after initialization. Growth allocations count observed capacity changes during each timed scheduler phase; initial insertion performs none because event storage is reserved to population size, while the artificial all-agent reschedule batch grows the heap once. Normal scheduling compacts stale events before retained length exceeds population plus 4,096 (minimum 64), so repeated rescheduling cannot grow without bound.
 
+### Physical-agent Slice 1
+
+The spatial/index layouts are unit-size-asserted: private `CellOccupant` is 8 bytes/alignment 4, private `RouteState` is 6 bytes, `Option<RouteState>` is 8 bytes, and reusable Dijkstra node/frontier records are each 12 bytes/alignment 4. Occupancy uses one compact entry per agent inside a chunk bucket rather than a dense active-area grid; the optional route array is parallel to the population. Perception is capped at radius 31, or 3,969 cells away from active-area edges, and allocates only bounded returned fact vectors. The route planner retains and clears three shared scratch collections rather than allocating a path per agent.
+
+The ignored release harness uses this command:
+
+```powershell
+cargo test --release -p sim-core tests::release_physical_agent_slice_one_measurement -- --ignored --nocapture --test-threads=1
+```
+
+On 2026-07-16, seed 42 used a resident 512 x 512 rectangle. Agent 0 began near an active-area corner, so its radius-31 perception clipped to 1,024 cells. Nanosecond observations are local optimized CPU timings, not regression limits:
+
+| Population | Spatial entry capacity | Nonempty buckets | Spatial + route logical bytes | Returned agents | Perception time |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 20 | 32 | 1 | 416 | 20 | 42,700 ns |
+| 100 | 128 | 2 | 1,824 | 32 | 27,300 ns |
+| 10,000 | 16,384 | 8 | 211,072 | 672 | 35,100 ns |
+
+Logical bytes include retained `CellOccupant` capacity plus one `Option<RouteState>` slot per agent. They exclude `BTreeMap` nodes, per-bucket `Vec` headers, allocator metadata, agent/scheduler storage already reported for Slice 0, and the bounded caller-owned perception result vectors. Population placement is canonical row-major, so bucket count and local density reflect this synthetic initialization rather than an expected settled distribution.
+
+The same harness warmed one sparse-agent route, then repeated its deterministic 75-expansion minimum-travel-time search 1,000 times. It averaged 12,798 ns per search, retained capacities of 128 route nodes, 112 hash slots, and 16 frontier entries, and observed zero buffer-capacity growth after warm-up. The lookup hash table is never iterated and therefore cannot influence route order; explicit heap keys and fixed neighbor order own determinism. Recomputing per waypoint trades bounded repeated work for zero per-agent path allocations. Larger route distributions and allocator-level measurements remain open until the action policy supplies representative destinations.
+
 The current terrain layout intentionally uses `u16` elevation, `u8` moisture, and a one-byte `TerrainClass` packing a `SurfaceType` low nibble with a `BiomeType` high nibble; unit assertions fix `TerrainClass` at 1 byte and `TerrainCell` at 4 bytes. The 16,777,216-cell bootstrap ceiling therefore still permits a 64 MiB logical cell payload before tile metadata and sparse features, and the complete 4,294,967,296-cell envelope remains exactly 16 GiB of raw terrain. `Engine::new` owns zero terrain cells; the viewer retains only streamed clipped bootstrap/full expansion tiles, while headless explicitly chooses the cost of completely materializing its configured rectangle. Temperature remains derived rather than adding it to every cell: the public `ClimateSample` is four bytes and is built allocation-free from four analytic temperature nodes, the retained moisture byte, and one wind-direction byte. Slice 7 likewise adds no retained world state: `WaterSource` and `TraversalKind` are one byte, `TraversalStep` is eight bytes, and point/step queries allocate nothing. A traversal query performs two chunk-map lookups plus at most one target-feature binary search; settlement searches remain explicitly bounded caller work until the physical-agent loop provides a measured batching need.
 
 ### World-quality baseline

@@ -2,6 +2,7 @@ use sim_core::{
     AgentView, Engine, EngineConfig, MovementOutcomeKind, PopulationInit, TraversalStep,
     WorldConfig, WorldPosition,
 };
+use std::collections::BTreeSet;
 
 fn initialized_engine() -> Engine {
     let mut engine = Engine::new(EngineConfig {
@@ -25,6 +26,7 @@ fn initialized_engine() -> Engine {
 fn schedule_canonical_steps(engine: &mut Engine, reverse: bool) -> usize {
     let bounds = engine.world().initial_bounds();
     let mut agents: Vec<AgentView> = engine.agent_views(20).collect();
+    let occupied: BTreeSet<_> = agents.iter().map(|agent| agent.position).collect();
     if reverse {
         agents.reverse();
     }
@@ -38,6 +40,7 @@ fn schedule_canonical_steps(engine: &mut Engine, reverse: bool) -> usize {
             })
             .find(|&target| {
                 bounds.contains(target)
+                    && !occupied.contains(&target)
                     && engine
                         .world()
                         .traversal_step(agent.position, target)

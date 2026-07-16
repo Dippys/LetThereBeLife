@@ -1,9 +1,11 @@
 use std::{collections::BTreeSet, error::Error, fmt};
 
 use crate::{
-    Standability, TraversalKind, WORLD_GENERATION_BOUNDS, World, WorldPosition, WorldQueryError,
-    WorldRect,
+    BaseResource, Standability, TraversalKind, WORLD_GENERATION_BOUNDS, WaterSource, World,
+    WorldPosition, WorldQueryError, WorldRect,
+    routing::{RouteRequest, RouteRequestError},
     scheduler::{ScheduleError, ScheduledEvent, Scheduler},
+    spatial::{SpatialIndex, TransferError},
 };
 
 pub const MAX_POPULATION: u32 = 10_000_000;
@@ -69,7 +71,7 @@ pub struct AgentView {
     pub activity: AgentActivity,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(C)]
 pub(crate) struct CompactPosition {
     pub(crate) x: i16,
@@ -77,7 +79,7 @@ pub(crate) struct CompactPosition {
 }
 
 impl CompactPosition {
-    fn checked(position: WorldPosition) -> Option<Self> {
+    pub(crate) fn checked(position: WorldPosition) -> Option<Self> {
         Some(Self {
             x: i16::try_from(position.x).ok()?,
             y: i16::try_from(position.y).ok()?,
@@ -220,6 +222,14 @@ pub struct MovementScheduled {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RouteScheduled {
+    pub first_event: EventId,
+    pub first_completion: SimTime,
+    pub destination: WorldPosition,
+    pub expansions: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MoveRequestError {
     MissingAgent,
     DeadAgent,
@@ -228,6 +238,7 @@ pub enum MoveRequestError {
     OutsideWorld,
     OutsideActiveArea,
     Blocked(TraversalKind),
+    Occupied(AgentId),
     TimeOverflow,
     RescheduleLimit,
     EventSequenceExhausted,
@@ -252,6 +263,8 @@ pub enum MovementOutcomeKind {
     OutsideWorld,
     OutsideActiveArea,
     Blocked(TraversalKind),
+    Occupied(AgentId),
+    InconsistentOccupancy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -264,10 +277,88 @@ pub struct MovementEventOutcome {
     pub kind: MovementOutcomeKind,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteOutcomeKind {
+    Arrived,
+    Occupied(AgentId),
+    NoPath { expansions: u16 },
+    BudgetExhausted { expansions: u16 },
+    Unloaded,
+    OutsideWorld,
+    OutsideActiveArea,
+    Blocked(TraversalKind),
+    TimeOverflow,
+    RescheduleLimit,
+    EventSequenceExhausted,
+    InconsistentOccupancy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RouteEventOutcome {
+    pub agent: AgentId,
+    pub at: SimTime,
+    pub destination: WorldPosition,
+    pub kind: RouteOutcomeKind,
+}
+
+pub const MAX_PERCEPTION_RADIUS: u8 = 31;
+pub const MAX_PERCEPTION_CELLS: u16 = 3_969;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PerceivedWater {
+    pub position: WorldPosition,
+    pub source: WaterSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PerceivedResource {
+    pub position: WorldPosition,
+    pub resource: BaseResource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhysicalPerception {
+    pub area: WorldRect,
+    pub agents: Vec<AgentView>,
+    pub drinkable_water: Vec<PerceivedWater>,
+    pub resources: Vec<PerceivedResource>,
+    pub traversable_cells: Vec<WorldPosition>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PerceptionError {
+    MissingAgent,
+    DeadAgent,
+    RadiusTooLarge { requested: u8, maximum: u8 },
+    EmptyArea,
+    AreaOutsideActive,
+    AreaTooLarge { requested: u64, maximum: u16 },
+    Unloaded,
+    OutsideWorld,
+    AllocationFailed,
+}
+
+impl fmt::Display for PerceptionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "physical perception failed: {self:?}")
+    }
+}
+
+impl Error for PerceptionError {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(C)]
+pub(crate) struct RouteState {
+    destination: CompactPosition,
+    max_expansions: u16,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct Population {
     records: Vec<AgentRecord>,
     movement_generations: Vec<u32>,
+    routes: Vec<Option<RouteState>>,
+    spatial: SpatialIndex,
     active_area: Option<WorldRect>,
     initialized: bool,
 }
@@ -365,9 +456,22 @@ impl Population {
             .try_reserve_exact(capacity)
             .map_err(|_| PopulationInitError::AllocationFailed)?;
         movement_generations.resize(capacity, 0);
+        let mut routes = Vec::new();
+        routes
+            .try_reserve_exact(capacity)
+            .map_err(|_| PopulationInitError::AllocationFailed)?;
+        routes.resize(capacity, None);
+        let spatial = SpatialIndex::from_positions(
+            records
+                .iter()
+                .enumerate()
+                .map(|(raw, record)| (AgentId(raw as u32), record.position.world())),
+        );
 
         self.records = records;
         self.movement_generations = movement_generations;
+        self.routes = routes;
+        self.spatial = spatial;
         self.active_area = Some(init.active_area);
         self.initialized = true;
         Ok(PopulationInitOutcome {
@@ -378,6 +482,19 @@ impl Population {
     }
 
     pub(crate) fn schedule_movement(
+        &mut self,
+        scheduler: &mut Scheduler,
+        world: &World,
+        now: SimTime,
+        agent: AgentId,
+        target: WorldPosition,
+    ) -> Result<MovementScheduled, MoveRequestError> {
+        let scheduled = self.schedule_step(scheduler, world, now, agent, target)?;
+        self.routes[agent.0 as usize] = None;
+        Ok(scheduled)
+    }
+
+    fn schedule_step(
         &mut self,
         scheduler: &mut Scheduler,
         world: &World,
@@ -402,6 +519,11 @@ impl Population {
         {
             return Err(MoveRequestError::OutsideActiveArea);
         }
+        if let Some(occupant) = self.spatial.occupant(target)
+            && occupant != agent
+        {
+            return Err(MoveRequestError::Occupied(occupant));
+        }
         let step = world
             .traversal_step(record.position.world(), target)
             .map_err(map_query_error)?;
@@ -425,6 +547,25 @@ impl Population {
             event: EventId(sequence),
             completes_at: due,
         })
+    }
+
+    pub(crate) fn schedule_route_step(
+        &mut self,
+        scheduler: &mut Scheduler,
+        world: &World,
+        now: SimTime,
+        agent: AgentId,
+        request: RouteRequest,
+        target: WorldPosition,
+    ) -> Result<MovementScheduled, MoveRequestError> {
+        let destination =
+            CompactPosition::checked(request.destination).ok_or(MoveRequestError::OutsideWorld)?;
+        let scheduled = self.schedule_step(scheduler, world, now, agent, target)?;
+        self.routes[agent.0 as usize] = Some(RouteState {
+            destination,
+            max_expansions: request.max_expansions,
+        });
+        Ok(scheduled)
     }
 
     pub(crate) fn apply_movement(
@@ -464,9 +605,21 @@ impl Population {
         }
         let kind = match world.traversal_step(from, target) {
             Ok(step) if step.is_passable() => {
-                record.position = event.target;
-                record.activity = AgentActivity::Idle;
-                MovementOutcomeKind::Moved
+                match self.spatial.transfer(event.agent, from, target) {
+                    Ok(()) => {
+                        record.position = event.target;
+                        record.activity = AgentActivity::Idle;
+                        MovementOutcomeKind::Moved
+                    }
+                    Err(TransferError::Occupied(occupant)) => {
+                        record.activity = AgentActivity::Idle;
+                        MovementOutcomeKind::Occupied(occupant)
+                    }
+                    Err(TransferError::SourceMismatch) => {
+                        record.activity = AgentActivity::Idle;
+                        MovementOutcomeKind::InconsistentOccupancy
+                    }
+                }
             }
             Ok(step) => {
                 record.activity = AgentActivity::Idle;
@@ -492,6 +645,174 @@ impl Population {
             })
     }
 
+    pub(crate) fn view(&self, agent: AgentId) -> Option<AgentView> {
+        let record = self.records.get(agent.0 as usize)?;
+        Some(AgentView {
+            id: agent,
+            position: record.position.world(),
+            activity: record.activity,
+        })
+    }
+
+    pub(crate) fn route_context(
+        &self,
+        agent: AgentId,
+    ) -> Result<(WorldPosition, WorldRect), RouteRequestError> {
+        let record = self
+            .records
+            .get(agent.0 as usize)
+            .ok_or(RouteRequestError::MissingAgent)?;
+        if record.activity == AgentActivity::Dead {
+            return Err(RouteRequestError::DeadAgent);
+        }
+        Ok((
+            record.position.world(),
+            self.active_area.expect("initialized population"),
+        ))
+    }
+
+    pub(crate) fn route_request(&self, agent: AgentId) -> Option<RouteRequest> {
+        self.routes
+            .get(agent.0 as usize)
+            .copied()
+            .flatten()
+            .map(|route| RouteRequest {
+                destination: route.destination.world(),
+                max_expansions: route.max_expansions,
+            })
+    }
+
+    pub(crate) fn clear_route(&mut self, agent: AgentId) {
+        if let Some(route) = self.routes.get_mut(agent.0 as usize) {
+            *route = None;
+        }
+    }
+
+    pub(crate) fn spatial(&self) -> &SpatialIndex {
+        &self.spatial
+    }
+
+    pub(crate) fn perceive(
+        &self,
+        world: &World,
+        agent: AgentId,
+        radius: u8,
+    ) -> Result<PhysicalPerception, PerceptionError> {
+        if radius > MAX_PERCEPTION_RADIUS {
+            return Err(PerceptionError::RadiusTooLarge {
+                requested: radius,
+                maximum: MAX_PERCEPTION_RADIUS,
+            });
+        }
+        let view = self.view(agent).ok_or(PerceptionError::MissingAgent)?;
+        if view.activity == AgentActivity::Dead {
+            return Err(PerceptionError::DeadAgent);
+        }
+        let active = self.active_area.expect("initialized population");
+        let radius = i64::from(radius);
+        let requested = WorldRect {
+            min: WorldPosition {
+                x: view.position.x - radius,
+                y: view.position.y - radius,
+            },
+            max: WorldPosition {
+                x: view.position.x + radius + 1,
+                y: view.position.y + radius + 1,
+            },
+        };
+        let area = active
+            .intersection(requested)
+            .ok_or(PerceptionError::OutsideWorld)?;
+        self.perceive_area(world, agent, area)
+    }
+
+    pub(crate) fn perceive_area(
+        &self,
+        world: &World,
+        agent: AgentId,
+        area: WorldRect,
+    ) -> Result<PhysicalPerception, PerceptionError> {
+        let view = self.view(agent).ok_or(PerceptionError::MissingAgent)?;
+        if view.activity == AgentActivity::Dead {
+            return Err(PerceptionError::DeadAgent);
+        }
+        if area.max.x <= area.min.x || area.max.y <= area.min.y {
+            return Err(PerceptionError::EmptyArea);
+        }
+        if !self
+            .active_area
+            .expect("initialized population")
+            .contains_rect(area)
+        {
+            return Err(PerceptionError::AreaOutsideActive);
+        }
+        let width = u64::try_from(area.max.x - area.min.x)
+            .map_err(|_| PerceptionError::AreaOutsideActive)?;
+        let height = u64::try_from(area.max.y - area.min.y)
+            .map_err(|_| PerceptionError::AreaOutsideActive)?;
+        let requested = width
+            .checked_mul(height)
+            .ok_or(PerceptionError::AreaTooLarge {
+                requested: u64::MAX,
+                maximum: MAX_PERCEPTION_CELLS,
+            })?;
+        if requested > u64::from(MAX_PERCEPTION_CELLS) {
+            return Err(PerceptionError::AreaTooLarge {
+                requested,
+                maximum: MAX_PERCEPTION_CELLS,
+            });
+        }
+        let cell_count = requested as usize;
+        let mut agent_ids = Vec::new();
+        agent_ids
+            .try_reserve(self.len().min(cell_count))
+            .map_err(|_| PerceptionError::AllocationFailed)?;
+        self.spatial.agents_in(area, &mut agent_ids);
+        let mut agents = Vec::new();
+        agents
+            .try_reserve(agent_ids.len())
+            .map_err(|_| PerceptionError::AllocationFailed)?;
+        agents.extend(agent_ids.into_iter().filter_map(|id| self.view(id)));
+        let mut drinkable_water = Vec::new();
+        let mut resources = Vec::new();
+        let mut traversable_cells = Vec::new();
+        traversable_cells
+            .try_reserve(cell_count)
+            .map_err(|_| PerceptionError::AllocationFailed)?;
+        for y in area.min.y..area.max.y {
+            for x in area.min.x..area.max.x {
+                let position = WorldPosition { x, y };
+                match world
+                    .standability_at(position)
+                    .map_err(map_perception_query_error)?
+                {
+                    Standability::Standable => traversable_cells.push(position),
+                    Standability::BlockedByWater | Standability::BlockedByFeature => {}
+                }
+                if let Some(source) = world
+                    .water_at(position)
+                    .map_err(map_perception_query_error)?
+                    && source.is_drinkable()
+                {
+                    try_push(&mut drinkable_water, PerceivedWater { position, source })?;
+                }
+                if let Some(resource) = world
+                    .resource_at(position)
+                    .map_err(map_perception_query_error)?
+                {
+                    try_push(&mut resources, PerceivedResource { position, resource })?;
+                }
+            }
+        }
+        Ok(PhysicalPerception {
+            area,
+            agents,
+            drinkable_water,
+            resources,
+            traversable_cells,
+        })
+    }
+
     pub(crate) fn len(&self) -> usize {
         self.records.len()
     }
@@ -509,10 +830,13 @@ impl Population {
     }
 
     #[cfg(test)]
-    pub(crate) fn capacities(&self) -> (usize, usize) {
+    pub(crate) fn capacities(&self) -> (usize, usize, usize, usize, usize) {
         (
             self.records.capacity(),
             self.movement_generations.capacity(),
+            self.routes.capacity(),
+            self.spatial.retained_entry_capacity(),
+            self.spatial.bucket_count(),
         )
     }
 
@@ -552,6 +876,24 @@ fn map_event_query_error(error: WorldQueryError) -> MovementOutcomeKind {
     }
 }
 
+fn map_perception_query_error(error: WorldQueryError) -> PerceptionError {
+    match error {
+        WorldQueryError::OutsideWorldBounds => PerceptionError::OutsideWorld,
+        WorldQueryError::Unloaded => PerceptionError::Unloaded,
+        WorldQueryError::NonCardinalStep => unreachable!("point queries are not movement steps"),
+    }
+}
+
+fn try_push<T>(values: &mut Vec<T>, value: T) -> Result<(), PerceptionError> {
+    if values.len() == values.capacity() {
+        values
+            .try_reserve(1)
+            .map_err(|_| PerceptionError::AllocationFailed)?;
+    }
+    values.push(value);
+    Ok(())
+}
+
 fn movement_outcome(
     event: ScheduledEvent,
     from: Option<WorldPosition>,
@@ -581,6 +923,8 @@ mod tests {
         assert_eq!(size_of::<CompactPosition>(), 4);
         assert_eq!(size_of::<AgentActivity>(), 1);
         assert_eq!(size_of::<AgentRecord>(), 6);
+        assert_eq!(size_of::<RouteState>(), 6);
+        assert_eq!(size_of::<Option<RouteState>>(), 8);
         assert_eq!(size_of::<ScheduledEvent>(), 32);
     }
 }

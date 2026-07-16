@@ -19,7 +19,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .codex/skills/validate-rust-
 The gate also verifies that `target/debug/config/simulation.toml` exists and is byte-equivalent to the repository configuration after the workspace build.
 It launches the hidden viewer, waits for at least one asynchronously streamed terrain tile, then renders two frames, validating GPU adapter/surface creation, WGSL pipeline layout, worker-to-main-thread loading, command submission, and presentation.
 
-The final 2026-07-16 Phase 2 Slice 0 run used the canonical command with `-Runtime`. Immutable-document and eight skill checks passed; workspace tests passed with 96 `sim-core` unit tests (94 passed, two ignored release harnesses), the public `physical_agent_slice0` and `world_foundation_exit` integrations, eight `render_map` tests, 46 viewer tests (44 passed, two ignored release harnesses), and all remaining crate/doc tests. Formatting, Clippy with warnings denied, the 600-tick/20-agent headless smoke, and the two-frame hidden GPU viewer smoke all passed.
+The final 2026-07-16 Phase 2 Slice 1 run used the canonical command with `-Runtime`. Immutable-document and eight skill checks passed; workspace tests passed with 100 `sim-core` unit tests (97 passed, three ignored release harnesses), the public `physical_agent_slice0`, three-case `physical_agent_slice1`, and `world_foundation_exit` integrations, eight `render_map` tests, 46 viewer tests (44 passed, two ignored release harnesses), and all remaining crate/doc tests. Formatting, Clippy with warnings denied, the 600-tick/20-agent headless route smoke, and the two-frame hidden GPU viewer smoke all passed.
 
 ## Runtime checks
 
@@ -31,7 +31,7 @@ cargo run -p sim-viewer
 Expected headless result for the command above:
 
 ```text
-completed tick=600 simulated_seconds=10.000 seed=42 initial_world=4096x4096 agents=20 movements=20/20 moving=0
+completed tick=600 simulated_seconds=10.000 seed=42 initial_world=4096x4096 agents=20 routes=20/20 route_failures=0 movements=20 moving=0
 ```
 
 ## Repeatable world-quality review
@@ -73,6 +73,7 @@ cargo test --release -p sim-core worldgen::drainage::tests::compare_candidate_sk
 - Physical-agent initialization rejects incomplete residency, blocked/duplicate/out-of-area positions, insufficient standable cells, and repeated initialization without publishing partial population state. Successful initialization preserves requested order, fills canonically, restarts IDs at zero after reset, and keeps terrain residency across reset.
 - `AgentId`, compact position, activity, hot agent record, and scheduled event layouts are fixed by size/alignment assertions. Scheduler tests cover the exact time/class/agent/sequence order, future-event exclusion, sequence exhaustion without insertion, and a 4,096-event per-tick drain with deterministic backlog.
 - Movement tests cover exact integer-cost completion time, pause retention, blocked/non-cardinal/missing/dead/outside-active/outside-world request outcomes, no position/world mutation on rejection, lazy stale duplicate suppression, equal-time ID ordering independent of insertion order, typed simulation-time exhaustion, and bounded read-only views. The public-only `physical_agent_slice0` integration scenario initializes 20 agents, schedules commands in forward and reverse order, and requires identical final views/snapshots and movement counts.
+- Slice 1 spatial tests size-check compact bucket entries and route scratch, cover signed `-65/-64/-1/0/63/64` chunk edges, and prove occupied-target or source-mismatch transfers preserve both index entries. Public `physical_agent_slice1` scenarios require request-order-independent equal-time route contention with one `AgentId`-ordered winner, bounded row-major physical perception, distinct budget-exhausted and occupied-corridor no-path outcomes, scheduled arrival, and identical final views/snapshots. The ignored release harness records spatial/route capacities, bounded perception work, route expansions, and warm scratch growth.
 - Equal seeds produce equal declared engine worlds; explicit bootstrap materialization reproduces eager deterministic terrain and features, and materializing terrain does not alter fixed tick progression.
 - World generation is deterministic and different seeds change terrain.
 - Generated samples contain terrain variation plus sparse features.
