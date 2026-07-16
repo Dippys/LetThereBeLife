@@ -1,6 +1,7 @@
 //! Engine-independent deterministic simulation foundation.
 
 mod agent;
+mod diagnostics;
 mod health;
 mod needs;
 mod policy;
@@ -20,6 +21,7 @@ pub use agent::{
     PopulationInitError, PopulationInitOutcome, RouteEventOutcome, RouteOutcomeKind,
     RouteScheduled, SimTime, SpawnInvalidReason,
 };
+pub use diagnostics::{EngineCapacityMetrics, EngineDiagnostics, EngineWorkMetrics};
 pub use health::{
     DeathCause, DeathRecord, HEALTH_CONSEQUENCE_INTERVAL_TICKS, HEALTH_INCAPACITATION_THRESHOLD,
     HEALTH_MAX, HealthDiagnostic, HealthDiagnosticKind, HealthStatus, HealthView,
@@ -36,7 +38,7 @@ pub use policy::{
 };
 pub use resources::{
     DRINK_THIRST_RELIEF, EAT_HUNGER_RELIEF, FOOD_CONSUMPTION, GATHER_YIELD,
-    INVENTORY_CAPACITY_PER_KIND, InventoryView,
+    INVENTORY_CAPACITY_PER_KIND, InitialInventoryError, InventoryView, ResourceDeltaView,
 };
 pub use routing::{MAX_ROUTE_EXPANSIONS, RouteRequest, RouteRequestError};
 pub use sleep::{
@@ -62,6 +64,7 @@ pub use world::{
 use std::time::Duration;
 
 use agent::{ActionEffectError, MovementEnvironment, Population};
+use diagnostics::RuntimeCounters;
 use policy::{PolicyAction, PolicySelection, retry_delay, select};
 use resources::ResourceDeltas;
 use routing::{RouteEnvironment, RoutePlanner};
@@ -163,6 +166,7 @@ pub struct Engine {
     resource_deltas: ResourceDeltas,
     structures: StructureStore,
     route_planner: RoutePlanner,
+    runtime_counters: RuntimeCounters,
 }
 
 impl Engine {
@@ -192,6 +196,7 @@ impl Engine {
             resource_deltas: ResourceDeltas::default(),
             structures: StructureStore::default(),
             route_planner: RoutePlanner::default(),
+            runtime_counters: RuntimeCounters::default(),
         }
     }
 
@@ -228,6 +233,7 @@ impl Engine {
                 self.resource_deltas = ResourceDeltas::default();
                 self.structures = StructureStore::default();
                 self.route_planner = RoutePlanner::default();
+                self.runtime_counters = RuntimeCounters::default();
                 EngineCommandOutcome::Applied
             }
             EngineCommand::GenerateWorldArea(bounds) => {
@@ -318,6 +324,9 @@ impl Engine {
                     }
                 }
                 self.need_outcomes.push(outcome);
+                if outcome.outcome != NeedThresholdOutcomeKind::Reached {
+                    self.runtime_counters.stale_events_processed += 1;
+                }
                 processed += 1;
                 continue;
             }
@@ -343,6 +352,9 @@ impl Engine {
                     HealthDiagnosticKind::Deteriorated | HealthDiagnosticKind::StaleEvent => {}
                 }
                 self.health_diagnostics.push(outcome);
+                if outcome.kind == HealthDiagnosticKind::StaleEvent {
+                    self.runtime_counters.stale_events_processed += 1;
+                }
                 processed += 1;
                 continue;
             }
@@ -371,13 +383,15 @@ impl Engine {
                 MovementOutcomeKind::Moved | MovementOutcomeKind::Occupied(_) => {
                     self.continue_route(agent);
                 }
-                MovementOutcomeKind::StaleEvent => {}
+                MovementOutcomeKind::StaleEvent
+                | MovementOutcomeKind::MissingAgent
+                | MovementOutcomeKind::DeadAgent => {
+                    self.runtime_counters.stale_events_processed += 1;
+                }
                 MovementOutcomeKind::InconsistentOccupancy => {
                     self.finish_route(agent, RouteOutcomeKind::InconsistentOccupancy);
                 }
-                MovementOutcomeKind::MissingAgent
-                | MovementOutcomeKind::DeadAgent
-                | MovementOutcomeKind::InvalidStep
+                MovementOutcomeKind::InvalidStep
                 | MovementOutcomeKind::Unloaded
                 | MovementOutcomeKind::OutsideWorld
                 | MovementOutcomeKind::OutsideActiveArea
@@ -395,10 +409,18 @@ impl Engine {
             }
             processed += 1;
         }
+        let processed = processed as u16;
+        self.runtime_counters.events_processed += u64::from(processed);
+        self.runtime_counters.peak_events_processed_per_tick = self
+            .runtime_counters
+            .peak_events_processed_per_tick
+            .max(processed);
+        let due_backlog = self.scheduler.has_due(self.time);
+        self.runtime_counters.due_backlog_ticks += u64::from(due_backlog);
         TickOutcome::Advanced {
             time: self.time,
-            processed_events: processed as u16,
-            due_backlog: self.scheduler.has_due(self.time),
+            processed_events: processed,
+            due_backlog,
         }
     }
 
@@ -483,6 +505,7 @@ impl Engine {
         self.policy_active = false;
         self.route_outcomes.clear();
         self.route_planner = RoutePlanner::default();
+        self.runtime_counters = RuntimeCounters::default();
         Ok(outcome)
     }
 
@@ -526,6 +549,7 @@ impl Engine {
     ) -> Result<RouteScheduled, RouteRequestError> {
         self.compact_scheduler_if_needed();
         let (origin, active_area) = self.population.route_context(agent)?;
+        self.runtime_counters.route_plans += 1;
         let plan = self.route_planner.plan(
             RouteEnvironment {
                 world: &self.world,
@@ -536,7 +560,17 @@ impl Engine {
             agent,
             origin,
             request,
-        )?;
+        );
+        let expansions = match &plan {
+            Ok(plan) => plan.expansions,
+            Err(
+                RouteRequestError::NoPath { expansions }
+                | RouteRequestError::BudgetExhausted { expansions },
+            ) => *expansions,
+            Err(_) => 0,
+        };
+        self.runtime_counters.route_expansions += u64::from(expansions);
+        let plan = plan?;
         let scheduled = self
             .population
             .schedule_route_step(
@@ -634,6 +668,21 @@ impl Engine {
         self.population.inventory(agent)
     }
 
+    /// Records explicit starting supplies before autonomous simulation begins.
+    pub fn set_initial_inventory(
+        &mut self,
+        agent: AgentId,
+        inventory: InventoryView,
+    ) -> Result<(), InitialInventoryError> {
+        if self.policy_active {
+            return Err(InitialInventoryError::PolicyActive);
+        }
+        if self.time != SimTime::ZERO {
+            return Err(InitialInventoryError::SimulationAdvanced);
+        }
+        self.population.set_initial_inventory(agent, inventory)
+    }
+
     /// Composes immutable generated capacity with sparse simulation-owned depletion.
     pub fn available_resource_at(
         &self,
@@ -645,6 +694,11 @@ impl Engine {
     /// Number of generated features with simulation-owned remaining-capacity state.
     pub fn modified_resource_count(&self) -> usize {
         self.resource_deltas.len()
+    }
+
+    /// Sparse modified generated resources in deterministic position order.
+    pub fn resource_delta_views(&self) -> impl Iterator<Item = ResourceDeltaView> + '_ {
+        self.resource_deltas.views(&self.world)
     }
 
     /// Starts one explicit sleep intent at the agent's current physical location.
@@ -765,6 +819,47 @@ impl Engine {
         }
     }
 
+    /// Cumulative deterministic work and retained-capacity diagnostics for this run.
+    pub fn diagnostics(&self) -> EngineDiagnostics {
+        let population = self.population.capacities();
+        EngineDiagnostics {
+            work: EngineWorkMetrics {
+                events_scheduled: self.scheduler.total_scheduled(),
+                events_processed: self.runtime_counters.events_processed,
+                stale_events_processed: self.runtime_counters.stale_events_processed,
+                stale_events_compacted: self.scheduler.total_compacted(),
+                due_backlog_ticks: self.runtime_counters.due_backlog_ticks,
+                peak_scheduled_events: self.scheduler.peak_len() as u32,
+                peak_events_processed_per_tick: self
+                    .runtime_counters
+                    .peak_events_processed_per_tick,
+                policy_perception_queries: self.runtime_counters.policy_perception_queries,
+                policy_perceived_cells: self.runtime_counters.policy_perceived_cells,
+                route_plans: self.runtime_counters.route_plans,
+                route_expansions: self.runtime_counters.route_expansions,
+                policy_retries: self.runtime_counters.policy_retries,
+                peak_policy_retry_depth: self.runtime_counters.peak_policy_retry_depth,
+            },
+            capacity: EngineCapacityMetrics {
+                agent_records: population.records,
+                movement_generations: population.movement_generations,
+                routes: population.routes,
+                needs: population.needs,
+                policies: population.policies,
+                inventories: population.inventories,
+                sleeps: population.sleeps,
+                health: population.health,
+                occupancy_entries: population.occupancy_entries,
+                occupancy_entry_capacity: population.occupancy_entry_capacity,
+                occupancy_buckets: population.occupancy_buckets,
+                scheduled_events: self.scheduler.len(),
+                scheduler_capacity: self.scheduler.capacity(),
+                resource_deltas: self.resource_deltas.len(),
+                structure_slots: self.structures.retained_slots(),
+            },
+        }
+    }
+
     fn continue_route(&mut self, agent: AgentId) {
         self.compact_scheduler_if_needed();
         let Some(request) = self.population.route_request(agent) else {
@@ -865,6 +960,7 @@ impl Engine {
 
     fn apply_policy_decision(&mut self, event: scheduler::ScheduledEvent) {
         if !self.population.policy_event_is_current(event) {
+            self.runtime_counters.stale_events_processed += 1;
             self.policy_diagnostics.push(PolicyDiagnostic {
                 agent: event.agent,
                 at: self.time,
@@ -893,6 +989,10 @@ impl Engine {
                 return;
             }
         };
+        self.runtime_counters.policy_perception_queries += 1;
+        let width = (perception.area.max.x - perception.area.min.x) as u64;
+        let height = (perception.area.max.y - perception.area.min.y) as u64;
+        self.runtime_counters.policy_perceived_cells += width * height;
         let selection = select(view.position, needs, inventory, &perception);
         self.policy_diagnostics.push(PolicyDiagnostic {
             agent: event.agent,
@@ -1116,6 +1216,7 @@ impl Engine {
                 return;
             }
         }) else {
+            self.runtime_counters.stale_events_processed += 1;
             self.policy_diagnostics.push(PolicyDiagnostic {
                 agent: event.agent,
                 at: self.time,
@@ -1491,7 +1592,13 @@ impl Engine {
         failure: PolicyFailureReason,
     ) {
         self.population.clear_route(agent);
-        let delay = retry_delay(self.population.policy_retries(agent));
+        let retry_depth = self.population.policy_retries(agent);
+        let delay = retry_delay(retry_depth);
+        self.runtime_counters.policy_retries += 1;
+        self.runtime_counters.peak_policy_retry_depth = self
+            .runtime_counters
+            .peak_policy_retry_depth
+            .max(retry_depth.saturating_add(1));
         let scheduling_failure = self
             .population
             .schedule_policy_decision(
@@ -3065,7 +3172,9 @@ mod tests {
                     &[],
                 )
                 .unwrap();
-            let (record_capacity, generation_capacity, _, _, _, _) = engine.population.capacities();
+            let capacities = engine.population.capacities();
+            let record_capacity = capacities.records;
+            let generation_capacity = capacities.movement_generations;
             let initial_scheduler_capacity = engine.scheduler.capacity();
             let outcome_capacity = engine.movement_outcomes.capacity();
 
@@ -3333,8 +3442,10 @@ mod tests {
                     &[],
                 )
                 .unwrap();
-            let (_, _, route_capacity, _, spatial_capacity, spatial_buckets) =
-                engine.population.capacities();
+            let capacities = engine.population.capacities();
+            let route_capacity = capacities.routes;
+            let spatial_capacity = capacities.occupancy_entry_capacity;
+            let spatial_buckets = capacities.occupancy_buckets;
             let start = Instant::now();
             let perception = engine.perceive_physical(AgentId::new(0), 31).unwrap();
             let perception_ns = start.elapsed().as_nanos();

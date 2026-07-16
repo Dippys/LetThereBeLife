@@ -75,7 +75,16 @@ Run the headless engine smoke test with:
 cargo run -p sim-headless -- --config config/simulation.toml --ticks 600 --seed 1
 ```
 
-The headless runner accepts `--agents NUMBER` (default 20). After eager terrain materialization it atomically places that many agents in deterministic standable row-major cells, explicitly activates their physical action policy, and reports route/movement outcomes, blocked/depleted progress, total/living/active/dead counts, separate physical death causes, policy selections, and typed failures. The first 600 ticks normally contain one wait decision per agent because no physical need has reached its actionable threshold yet. The viewer intentionally starts with no agents until it gains an equivalent deterministic complete-residency gate.
+The headless runner also accepts `--agents NUMBER` (default 20) and `--batch-size NUMBER`. It selects deterministic bounded spawn roles, explicitly activates physical policy, and emits one compact versioned causal report/hash. Configured runs use zero starting supplies.
+
+Run the complete Phase 2 canonical survival scenario with:
+
+```powershell
+cargo run --release -p sim-headless -- --canonical --agents 20 --batch-size 10000
+cargo run --release -p sim-headless -- --canonical --agents 100 --batch-size 10000
+```
+
+Canonical mode fixes seed 1, a 2,048 x 2,048 resident world, 600,000 driver ticks, fresh-water and concentrated wood cohorts, 32 starting food units per agent, and eight starting shelter-wood units for the fresh-water cohort. The report includes final populations, causal death counts, actions/failures, resource/structure changes, scheduler/stale/retry work, and soak invariant results. These starting supplies are explicit scenario inputs, not generated-world mutations. The viewer intentionally starts with no agents until it gains an equivalent deterministic complete-residency gate and read-only presentation path.
 
 Verify the workspace with `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings`.
 

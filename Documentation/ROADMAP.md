@@ -38,30 +38,30 @@ Last synchronized: 2026-07-16.
 - Physical-agent Slice 5: 24-byte parallel sleep state, explicit valid-location sleep intent, analytical quality-based rest recovery, dedicated threshold-ordered wake events, hunger/thirst/exposure interruption, public sleep diagnostics, headless counters, and recorded 20/100/10,000-agent state/event measurements.
 - Physical-agent Slice 6: sparse simulation-owned one-cell lean-to construction, atomic eight-wood reservation/refund, structure-aware perception/traversal, completed adjacent sheltered sleep, deterministic overlap arbitration, and recorded structure/index/event measurements.
 - Physical-agent Slice 7: 16-byte scheduled health state, explicit severe hunger/thirst/rest/exposure consequences, stable multi-cause precedence, incapacitation, terminal physical death with occupancy/event cleanup, retained causal records, public health/death inspection, and headless cause counts.
+- Physical-agent Slice 8 and Phase 2 exit: reusable canonical seed-1 20/100-agent headless scenarios over a 2,048-cell square, explicit recorded starting supplies and freshwater/fallback spawn roles, equality-stable causal reports plus versioned semantic hashes, replay/divergence/batching/reset proofs, cumulative scheduler/route/perception/capacity diagnostics, 600,000-tick release soaks with mixed survival/dehydration outcomes, and zero sampled invariant violations.
 - `sim-core` maintainability pass: split world queries and deterministic visitation into responsibility-focused private modules, and move the large world/worldgen unit suites out of production entry files without changing public APIs or test paths.
 
 ## Active
 
-- Execute the ordered Phase 2 [physical-agent loop implementation plan](PHYSICAL_AGENT_PLAN.md) one coherent slice at a time. Slices 0-7 are complete; Slice 8 is next: the integrated 20-100-agent survival proof, deterministic report/hash, soak evidence, and final Phase 2 budgets.
-- Treat generated terrain as intentionally unstable while there is no save/load or other persisted world output. Seed output may still change if an observed physical-agent failure proves a foundational correction necessary; generator versioning is not current work.
+- Phase 2 is complete. Define the canonical Phase 3 beliefs/relationships plan before implementation, preserving the physical-agent report and deterministic engine boundaries established by [PHYSICAL_AGENT_PLAN.md](PHYSICAL_AGENT_PLAN.md).
+- Treat generated terrain as intentionally unstable while there is no save/load or other persisted world output. Generator versioning is not current work.
 
 ## Next
 
 The completed Phase 1 sequence remains recorded in [WORLD_FOUNDATION_PLAN.md](WORLD_FOUNDATION_PLAN.md). Phase 2 scope, dependencies, per-slice deliverables, acceptance criteria, measurements, documentation duties, and explicit deferrals are canonical in [PHYSICAL_AGENT_PLAN.md](PHYSICAL_AGENT_PLAN.md).
 
-- Complete Slice 8: run the full physical loop in deterministic 20-agent and 100-agent scenarios, produce the compact causal report/hash, and record soak/capacity/throughput evidence.
-- Close Phase 2 only after the integrated survival proof validates all Slice 0-7 systems together.
-- Stop after each slice for review, documentation synchronization, validation, and an explicit handoff to the next slice.
-- Use the representative-seed review set only when an observed agent-loop failure requires another generator change.
+- Create one canonical Phase 3 slice-by-slice plan for beliefs, memory, and relationships before changing engine behavior.
+- Keep agent/structure presentation read-only when viewer work begins; the viewer still owns no authoritative physical state.
+- Use the representative-seed review set only when an observed simulation failure requires another generator change.
 
 ## Deferred
 
 - Generator versioning, save/load, chunk persistence, and unloading policy are deferred until persisted world output is about to be introduced and the generator is ready to stabilize. Version identifiers must still be added before the first durable world format ships.
-- Later cognition, society, and presentation phases remain deferred until the active physical-agent loop establishes their concrete requirements.
+- Society and later presentation phases remain deferred until their canonical plans establish concrete requirements.
 
 ## Planned
 
-Continue Phase 2 only through the canonical physical-agent plan, using the relevant `InitialDocumentation/` files only as immutable design input. Phase 3 beliefs and relationships remains deferred until every Phase 2 exit criterion passes.
+Phase 3 beliefs and relationships may begin only through a reviewed canonical plan using the relevant `InitialDocumentation/` files as immutable design input. Phase 2 physical-agent behavior is now an implemented dependency, not active feature work.
 
 ## Open
 

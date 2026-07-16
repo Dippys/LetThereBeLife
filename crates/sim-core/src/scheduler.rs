@@ -82,6 +82,9 @@ pub(crate) enum ScheduleError {
 pub(crate) struct Scheduler {
     events: BinaryHeap<ScheduledEvent>,
     next_sequence: u64,
+    total_scheduled: u64,
+    total_compacted: u64,
+    peak_len: usize,
 }
 
 impl Scheduler {
@@ -94,6 +97,9 @@ impl Scheduler {
         Self {
             events: BinaryHeap::with_capacity(capacity),
             next_sequence: 0,
+            total_scheduled: 0,
+            total_compacted: 0,
+            peak_len: 0,
         }
     }
 
@@ -103,6 +109,9 @@ impl Scheduler {
         Ok(Self {
             events,
             next_sequence: 0,
+            total_scheduled: 0,
+            total_compacted: 0,
+            peak_len: 0,
         })
     }
 
@@ -128,6 +137,7 @@ impl Scheduler {
             goal: PhysicalGoal::Wait,
             class: EventClass::Movement,
         });
+        self.record_schedule();
         Ok(sequence)
     }
 
@@ -153,6 +163,7 @@ impl Scheduler {
             goal: PhysicalGoal::Wait,
             class: EventClass::NeedThreshold,
         });
+        self.record_schedule();
         Ok(sequence)
     }
 
@@ -178,6 +189,7 @@ impl Scheduler {
             goal: PhysicalGoal::Incapacitated,
             class: EventClass::HealthConsequence,
         });
+        self.record_schedule();
         Ok(sequence)
     }
 
@@ -257,7 +269,13 @@ impl Scheduler {
             goal,
             class,
         });
+        self.record_schedule();
         Ok(sequence)
+    }
+
+    fn record_schedule(&mut self) {
+        self.total_scheduled = self.total_scheduled.saturating_add(1);
+        self.peak_len = self.peak_len.max(self.events.len());
     }
 
     pub(crate) fn pop_due(&mut self, now: SimTime) -> Option<ScheduledEvent> {
@@ -277,12 +295,27 @@ impl Scheduler {
     }
 
     pub(crate) fn retain(&mut self, mut keep: impl FnMut(&ScheduledEvent) -> bool) {
+        let before = self.events.len();
         self.events.retain(|event| keep(event));
+        self.total_compacted = self
+            .total_compacted
+            .saturating_add((before - self.events.len()) as u64);
     }
 
-    #[cfg(test)]
     pub(crate) fn capacity(&self) -> usize {
         self.events.capacity()
+    }
+
+    pub(crate) const fn total_scheduled(&self) -> u64 {
+        self.total_scheduled
+    }
+
+    pub(crate) const fn total_compacted(&self) -> u64 {
+        self.total_compacted
+    }
+
+    pub(crate) const fn peak_len(&self) -> usize {
+        self.peak_len
     }
 
     #[cfg(test)]
@@ -439,6 +472,9 @@ mod tests {
         let mut scheduler = Scheduler {
             events: BinaryHeap::new(),
             next_sequence: u64::MAX,
+            total_scheduled: 0,
+            total_compacted: 0,
+            peak_len: 0,
         };
         assert_eq!(
             scheduler.schedule_movement(

@@ -315,7 +315,28 @@ cargo test --release -p sim-core health::tests::release_physical_agent_slice_sev
 | 100 | 100 | 1,600 | 100 | 3,200 | 4,800 | 9.4 us | 3.3 us |
 | 10,000 | 10,000 | 160,000 | 10,000 | 320,000 | 480,000 | 1.036 ms | 0.554 ms |
 
-The harness uses exact vector and heap capacities, places every synthetic agent at the dehydration-severity boundary, schedules one equal-time consequence per agent, and drains the complete due set. Timings are one optimized machine-local observation, not regression thresholds. Combined bytes exclude `Vec`/`BinaryHeap` headers, allocator metadata, the existing 32-byte need state, and sparse terminal records. Normal runs distribute projected boundaries over time; the equal-time harness intentionally measures a concentrated worst-shaped due batch. Slice 8 must measure integrated mixed policy, route, sleep, build, health, and stale-event distributions before any scheduler replacement.
+The harness uses exact vector and heap capacities, places every synthetic agent at the dehydration-severity boundary, schedules one equal-time consequence per agent, and drains the complete due set. Timings are one optimized machine-local observation, not regression thresholds. Combined bytes exclude `Vec`/`BinaryHeap` headers, allocator metadata, the existing 32-byte need state, and sparse terminal records. Normal runs distribute projected boundaries over time; the equal-time harness intentionally measures a concentrated worst-shaped due batch. The integrated Slice 8 evidence below now governs any scheduler-replacement decision.
+
+### Phase 2 Slice 8 integrated survival and soak
+
+Canonical command:
+
+```powershell
+cargo test --release -p sim-headless --test physical_agent_slice8 -- --ignored --nocapture --test-threads=1
+```
+
+The scenario fixes seed 1, a fully resident 2,048 x 2,048 world, 600,000 driver ticks, radius-eight policy work, 32 starting food units per agent, and eight starting wood units for the 75% fresh-water cohort. The remaining 25% begin around one wood source to concentrate contention and provide a causal dehydration failure path. Repeated reports/hashes must be identical before results are accepted.
+
+| Agents | Elapsed | Peak working set | Events processed/scheduled | Peak queue/capacity | Stale processed/compacted | Perception queries/cells | Route plans/expansions | Peak retry | Estimated retained logical payload |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 20 | 803 ms | 24,956,928 B | 16,104 / 16,284 | 379 / 400 | 959 / 0 | 14,702 / 4,217,054 | 205 / 677 | 68 | 15,674 B |
+| 100 | 2,278 ms | 25,108,480 B | 82,341 / 83,241 | 1,805 / 2,000 | 4,705 / 0 | 75,519 / 21,562,851 | 104 / 2,594 | 22 | 79,632 B |
+
+Both runs reported zero due-backlog ticks, maximum same-tick batches of 150 and 750, and zero invariant violations across 1,001 samples. The 20-agent run completed 10 gathers, 16 shelters, 60 eats, 105 drinks, and 15 sleep/wake cycles with 15 survivors; the 100-agent run completed 40 gathers, 80 shelters, 300 eats, 525 drinks, and 75 sleep/wake cycles with 75 survivors. The remaining agents died reproducibly from dehydration. Resource changes remained sparse at one/two entries and 40/160 removed units; structure slots peaked at 16/128 and occupancy entry capacity at 32/128.
+
+The logical-payload estimate includes exact population capacities for the six-byte agent record, four-byte movement generation, eight-byte optional route, 32-byte need, 12-byte policy, three-byte inventory, 24-byte sleep, and 16-byte health records; peak eight-byte occupancy-entry capacity; 32-byte scheduler capacity; 32-byte structure slots; and six-byte logical resource deltas. It excludes all `Vec`/heap headers, `BTreeMap` nodes, allocator metadata/fragmentation, death and latest-tick diagnostic buffers, world terrain/features, regional generation caches, and reusable route/perception scratch. Exact allocator-call attribution is not currently instrumented; observed capacity growth is explicit (scheduler reserve reaches 400/2,000, structure slots 16/128), and the process working-set measurement captures the complete release process. These are one-machine observations, not regression thresholds.
+
+The mixed workload does not justify replacing the binary heap: peak queue stays below 16 records per configured agent, no tick leaves due work backlogged, and no compaction threshold is reached. Revisit buckets/timing wheels only after a later phase materially increases simultaneous event concentration or population scale.
 
 ## Required measurement conditions
 

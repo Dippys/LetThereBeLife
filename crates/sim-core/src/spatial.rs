@@ -147,17 +147,14 @@ impl SpatialIndex {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.buckets.values().map(Vec::len).sum()
     }
 
-    #[cfg(test)]
     pub(crate) fn retained_entry_capacity(&self) -> usize {
         self.buckets.values().map(Vec::capacity).sum()
     }
 
-    #[cfg(test)]
     pub(crate) fn bucket_count(&self) -> usize {
         self.buckets.len()
     }

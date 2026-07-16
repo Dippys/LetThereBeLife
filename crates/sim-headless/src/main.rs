@@ -1,26 +1,26 @@
 use sim_config::{AppConfig, DEFAULT_CONFIG_PATH};
-use sim_core::{
-    AgentActivity, DeathCause, Engine, MovementOutcomeKind, PolicyDiagnosticKind,
-    PolicyFailureReason, PopulationInit, RouteOutcomeKind, SleepDiagnosticKind,
-    StructureDiagnosticKind,
-};
+use sim_headless::{CANONICAL_TICKS, ScenarioConfig, ScenarioRunner};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut ticks = 600_u64;
+    let mut ticks = None;
     let mut seed = None;
     let mut agent_count = 20_u32;
+    let mut batch_size = 1_000_u64;
+    let mut canonical = false;
     let mut config_path = DEFAULT_CONFIG_PATH.to_owned();
     let mut args = std::env::args().skip(1);
 
     while let Some(argument) = args.next() {
         match argument.as_str() {
-            "--ticks" => ticks = parse_next(&mut args, "--ticks"),
+            "--canonical" => canonical = true,
+            "--ticks" => ticks = Some(parse_next(&mut args, "--ticks")),
             "--seed" => seed = Some(parse_next(&mut args, "--seed")),
             "--agents" => agent_count = parse_next(&mut args, "--agents"),
+            "--batch-size" => batch_size = parse_next(&mut args, "--batch-size"),
             "--config" => config_path = parse_next(&mut args, "--config"),
             "--help" | "-h" => {
                 println!(
-                    "Usage: sim-headless [--config PATH] [--ticks NUMBER] [--seed NUMBER] [--agents NUMBER]"
+                    "Usage: sim-headless [--canonical] [--config PATH] [--ticks NUMBER] [--seed NUMBER] [--agents NUMBER] [--batch-size NUMBER]"
                 );
                 return Ok(());
             }
@@ -31,134 +31,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let mut engine_config = AppConfig::load(config_path)?.engine_config()?;
-    if let Some(seed) = seed {
-        engine_config.seed = seed;
-    }
-    let mut engine = Engine::new(engine_config);
-    engine.materialize_initial_area()?;
-    let active_area = engine.world().initial_bounds();
-    engine.initialize_population(
-        PopulationInit {
-            active_area,
+    let mut scenario = if canonical {
+        ScenarioConfig::canonical(agent_count)
+    } else {
+        ScenarioConfig {
+            engine: AppConfig::load(config_path)?.engine_config()?,
             population: agent_count,
-        },
-        &[],
-    )?;
-    engine.activate_physical_policy()?;
-    let mut completed_movements = 0_u32;
-    let mut completed_routes = 0_u32;
-    let mut failed_routes = 0_u32;
-    let mut policy_selections = 0_u32;
-    let mut policy_failures = 0_u32;
-    let mut sleep_starts = 0_u32;
-    let mut planned_wakes = 0_u32;
-    let mut interrupted_wakes = 0_u32;
-    let mut shelter_starts = 0_u32;
-    let mut shelter_completions = 0_u32;
-    let mut shelter_cancellations = 0_u32;
-    let mut blocked_progress = 0_u32;
-    let mut depletion_failures = 0_u32;
-    for _ in 0..ticks {
-        engine.tick();
-        completed_movements += engine
-            .movement_outcomes()
-            .iter()
-            .filter(|outcome| outcome.kind == MovementOutcomeKind::Moved)
-            .count() as u32;
-        for outcome in engine.route_outcomes() {
-            if outcome.kind == RouteOutcomeKind::Arrived {
-                completed_routes += 1;
-            } else {
-                failed_routes += 1;
-            }
+            driver_ticks: 600,
+            access_radius: sim_core::PHYSICAL_POLICY_RADIUS,
+            initial_food_per_agent: 0,
+            initial_wood_per_water_agent: 0,
         }
-        policy_selections += engine
-            .policy_diagnostics()
-            .iter()
-            .filter(|diagnostic| diagnostic.kind == PolicyDiagnosticKind::Selected)
-            .count() as u32;
-        policy_failures += engine
-            .policy_diagnostics()
-            .iter()
-            .filter(|diagnostic| diagnostic.failure.is_some())
-            .count() as u32;
-        for diagnostic in engine.policy_diagnostics() {
-            match diagnostic.failure {
-                Some(
-                    PolicyFailureReason::Occupied
-                    | PolicyFailureReason::NoPath
-                    | PolicyFailureReason::RouteBudgetExhausted
-                    | PolicyFailureReason::TargetUnavailable,
-                ) => blocked_progress += 1,
-                Some(PolicyFailureReason::ResourceDepleted) => depletion_failures += 1,
-                _ => {}
-            }
-        }
-        for diagnostic in engine.sleep_diagnostics() {
-            match diagnostic.kind {
-                SleepDiagnosticKind::Started => sleep_starts += 1,
-                SleepDiagnosticKind::Woke => planned_wakes += 1,
-                SleepDiagnosticKind::Interrupted => interrupted_wakes += 1,
-            }
-        }
-        for diagnostic in engine.structure_diagnostics() {
-            match diagnostic.kind {
-                StructureDiagnosticKind::Started => shelter_starts += 1,
-                StructureDiagnosticKind::Completed => shelter_completions += 1,
-                StructureDiagnosticKind::Cancelled => shelter_cancellations += 1,
-            }
-        }
+    };
+    scenario.driver_ticks = ticks.unwrap_or(if canonical { CANONICAL_TICKS } else { 600 });
+    if let Some(seed) = seed {
+        scenario.engine.seed = seed;
     }
 
-    let snapshot = engine.snapshot();
-    let moving_agents = engine
-        .agent_views(agent_count as usize)
-        .filter(|agent| agent.activity == AgentActivity::Moving)
-        .count();
-    let sleeping_agents = engine
-        .agent_views(agent_count as usize)
-        .filter(|agent| agent.activity == AgentActivity::Sleeping)
-        .count();
-    let deaths = |cause| {
-        engine
-            .death_records()
-            .iter()
-            .filter(|record| record.cause == cause)
-            .count()
-    };
-    println!(
-        "completed tick={} simulated_seconds={:.3} seed={} initial_world={}x{} agents={} living={} active={} deaths={} dehydration={} starvation={} exhaustion={} exposure={} routes={} route_failures={} blocked_progress={} depletion_failures={} movements={} moving={} policy_selections={} policy_failures={} sleep_starts={} planned_wakes={} interrupted_wakes={} sleeping={} shelter_starts={} shelter_completions={} shelter_cancellations={} structures={}",
-        snapshot.tick,
-        snapshot.simulated_seconds,
-        snapshot.seed,
-        engine.world().width(),
-        engine.world().height(),
-        snapshot.agent_count,
-        snapshot.living_agent_count,
-        snapshot.active_agent_count,
-        snapshot.death_count,
-        deaths(DeathCause::Dehydration),
-        deaths(DeathCause::Starvation),
-        deaths(DeathCause::Exhaustion),
-        deaths(DeathCause::Exposure),
-        completed_routes,
-        failed_routes,
-        blocked_progress,
-        depletion_failures,
-        completed_movements,
-        moving_agents,
-        policy_selections,
-        policy_failures,
-        sleep_starts,
-        planned_wakes,
-        interrupted_wakes,
-        sleeping_agents,
-        shelter_starts,
-        shelter_completions,
-        shelter_cancellations,
-        snapshot.structure_count,
-    );
+    let report = ScenarioRunner::new(scenario)?.run(batch_size)?;
+    println!("{report}");
     Ok(())
 }
 
@@ -166,7 +57,7 @@ fn parse_next<T: std::str::FromStr>(args: &mut impl Iterator<Item = String>, nam
     args.next()
         .and_then(|value| value.parse().ok())
         .unwrap_or_else(|| {
-            eprintln!("{name} requires a valid number");
+            eprintln!("{name} requires a valid value");
             std::process::exit(2);
         })
 }

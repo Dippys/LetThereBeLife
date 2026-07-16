@@ -11,7 +11,7 @@ use crate::{
     policy::{
         PhysicalGoal, PhysicalPolicyView, PolicyAction, PolicyPhase, PolicyReason, PolicyState,
     },
-    resources::{FOOD_CONSUMPTION, InventoryView, ResourceDeltas},
+    resources::{FOOD_CONSUMPTION, InitialInventoryError, InventoryView, ResourceDeltas},
     routing::{RouteRequest, RouteRequestError},
     scheduler::{EventClass, ScheduleError, ScheduledEvent, Scheduler},
     sleep::{SleepQuality, SleepRequestError, SleepState, SleepView},
@@ -407,6 +407,21 @@ pub(crate) struct Population {
     active_count: u32,
     active_area: Option<WorldRect>,
     initialized: bool,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct PopulationCapacities {
+    pub(crate) records: usize,
+    pub(crate) movement_generations: usize,
+    pub(crate) routes: usize,
+    pub(crate) needs: usize,
+    pub(crate) policies: usize,
+    pub(crate) inventories: usize,
+    pub(crate) sleeps: usize,
+    pub(crate) health: usize,
+    pub(crate) occupancy_entries: usize,
+    pub(crate) occupancy_entry_capacity: usize,
+    pub(crate) occupancy_buckets: usize,
 }
 
 impl Population {
@@ -1318,6 +1333,25 @@ impl Population {
             .then(|| self.inventories[index])
     }
 
+    pub(crate) fn set_initial_inventory(
+        &mut self,
+        agent: AgentId,
+        inventory: InventoryView,
+    ) -> Result<(), InitialInventoryError> {
+        if inventory.food > crate::INVENTORY_CAPACITY_PER_KIND
+            || inventory.wood > crate::INVENTORY_CAPACITY_PER_KIND
+            || inventory.stone > crate::INVENTORY_CAPACITY_PER_KIND
+        {
+            return Err(InitialInventoryError::AmountExceedsCapacity);
+        }
+        let slot = self
+            .inventories
+            .get_mut(agent.0 as usize)
+            .ok_or(InitialInventoryError::MissingAgent)?;
+        *slot = inventory;
+        Ok(())
+    }
+
     pub(crate) fn can_build_shelter(&self, agent: AgentId) -> bool {
         self.inventory(agent)
             .is_some_and(|inventory| inventory.wood >= SHELTER_WOOD_COST)
@@ -1686,16 +1720,20 @@ impl Population {
             })
     }
 
-    #[cfg(test)]
-    pub(crate) fn capacities(&self) -> (usize, usize, usize, usize, usize, usize) {
-        (
-            self.records.capacity(),
-            self.movement_generations.capacity(),
-            self.routes.capacity(),
-            self.needs.capacity(),
-            self.spatial.retained_entry_capacity(),
-            self.spatial.bucket_count(),
-        )
+    pub(crate) fn capacities(&self) -> PopulationCapacities {
+        PopulationCapacities {
+            records: self.records.capacity(),
+            movement_generations: self.movement_generations.capacity(),
+            routes: self.routes.capacity(),
+            needs: self.needs.capacity(),
+            policies: self.policies.capacity(),
+            inventories: self.inventories.capacity(),
+            sleeps: self.sleeps.capacity(),
+            health: self.health.capacity(),
+            occupancy_entries: self.spatial.len(),
+            occupancy_entry_capacity: self.spatial.retained_entry_capacity(),
+            occupancy_buckets: self.spatial.bucket_count(),
+        }
     }
 
     #[cfg(test)]

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, error::Error, fmt};
 
 use crate::{BaseResource, ResourceKind, World, WorldPosition, WorldQueryError};
 
@@ -8,12 +8,36 @@ pub const FOOD_CONSUMPTION: u8 = 1;
 pub const EAT_HUNGER_RELIEF: u16 = 4_000;
 pub const DRINK_THIRST_RELIEF: u16 = 5_000;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InitialInventoryError {
+    PolicyActive,
+    SimulationAdvanced,
+    MissingAgent,
+    AmountExceedsCapacity,
+}
+
+impl fmt::Display for InitialInventoryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "initial inventory setup failed: {self:?}")
+    }
+}
+
+impl Error for InitialInventoryError {}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub struct InventoryView {
     pub food: u8,
     pub wood: u8,
     pub stone: u8,
+}
+
+/// Sparse simulation-owned remaining capacity for one modified generated feature.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResourceDeltaView {
+    pub position: WorldPosition,
+    pub kind: ResourceKind,
+    pub remaining: u16,
 }
 
 impl InventoryView {
@@ -103,6 +127,26 @@ impl ResourceDeltas {
 
     pub(crate) fn len(&self) -> usize {
         self.remaining.len()
+    }
+
+    pub(crate) fn views<'a>(
+        &'a self,
+        world: &'a World,
+    ) -> impl Iterator<Item = ResourceDeltaView> + 'a {
+        self.remaining.iter().map(|(position, &remaining)| {
+            let position = WorldPosition {
+                x: i64::from(position.x),
+                y: i64::from(position.y),
+            };
+            let resource = world
+                .base_resource_at(position)
+                .expect("resource delta keys remain backed by generated features");
+            ResourceDeltaView {
+                position,
+                kind: resource.kind,
+                remaining,
+            }
+        })
     }
 }
 

@@ -233,7 +233,6 @@ impl StructureStore {
         self.live_count
     }
 
-    #[cfg(test)]
     pub(crate) fn retained_slots(&self) -> usize {
         self.records.capacity()
     }

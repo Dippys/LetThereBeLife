@@ -2,7 +2,7 @@
 
 Last synchronized: 2026-07-16.
 
-Status: **Active plan**. Phase 1 world foundation and Phase 2 Slices 0-7 are complete. Slice 8 is the next implementation target; later work must remain in dependency order unless this document records a reviewed dependency change.
+Status: **Implemented**. Phase 1 world foundation and all Phase 2 Slices 0-8 are complete. Phase 3 beliefs and relationships is the next planning boundary; later work must remain in dependency order unless a reviewed plan records a dependency change.
 
 ## Purpose
 
@@ -39,7 +39,7 @@ The repository already provides the world-side contracts needed to begin:
 - deterministic resident cell/feature visitation and the Phase 1 settlement-candidate scenario provide bounded search building blocks.
 - `sim-headless` eagerly materializes the configured bootstrap area before ticking; `sim-viewer` streams terrain asynchronously and currently has no agent presentation.
 
-Slices 0-7 now provide compact agent storage and inventory, scheduled movement, one-agent-per-cell occupancy, bounded objective perception, deterministic local routes, analytical physical needs, an explicitly activated deterministic physical policy, effective gather/eat/drink actions, sparse permanent generated-resource depletion, scheduled interruptible sleep, sparse minimal shelters with adjacent sheltered sleep, compact scheduled health deterioration, incapacitation, terminal physical death, and causal reporting. The integrated 20-100-agent survival proof and richer phase-exit report remain Slice 8.
+Slices 0-8 provide compact agent storage and inventory, scheduled movement, one-agent-per-cell occupancy, bounded objective perception, deterministic local routes, analytical physical needs, an explicitly activated deterministic physical policy, effective gather/eat/drink actions, sparse permanent generated-resource depletion, scheduled interruptible sleep, sparse minimal shelters with adjacent sheltered sleep, compact scheduled health deterioration, incapacitation, terminal physical death, deterministic causal reports, and bounded 20/100-agent survival soaks.
 
 ## Non-negotiable constraints
 
@@ -424,7 +424,7 @@ Health consequences sort after same-time need thresholds but before wake, action
 
 ## Slice 8: Phase 2 integrated survival proof
 
-Status: **Planned**. Depends on Slices 0-7.
+Status: **Implemented**. Depends on Slices 0-7.
 
 ### Objective
 
@@ -451,6 +451,14 @@ Prove the complete physical loop with repeatable 20-100-agent headless scenarios
 - Population, event queue, indexes, inventories, deltas, and structures remain within recorded capacities during the soak.
 - The full repository gate and the relevant release scenario/benchmark commands pass from a clean process.
 - Living documentation exactly matches the implemented Phase 2 boundary and lists remaining limitations.
+
+### Implemented result
+
+`sim-headless` now owns a reusable `ScenarioRunner`, canonical `ScenarioConfig`, compact equality-stable `ScenarioReport`, and explicitly versioned FNV-1a semantic encoding. The canonical seed-1, 2,048 x 2,048 scenario runs 600,000 driver ticks with 20 or 100 agents. It selects 75% of starts on deterministic standable cells cardinally adjacent to fresh water and concentrates the remaining 25% around one bounded wood source to exercise gathering, route/occupancy contention, and a reproducible dehydration failure cohort. Initial conditions record 32 carried food units for every agent and eight shelter-wood units for the freshwater cohort; `Engine::set_initial_inventory` accepts these supplies only at tick zero before policy activation. Full starting food, local timber, bounded perception, and waiting after shelter completion constrain the workload while preserving D-041's established generic no-urgent gathering behavior.
+
+The report includes selection inputs and hash, final activity/population state, gather/eat/drink/sleep/build/route/failure/death counts, sparse resource changes, structures, inventory totals, cumulative scheduled/processed/stale events, maximum due batch and queue depth, retry depth, route expansions, perception cells, retained capacities, and sampled invariant results. The semantic hash explicitly writes integer fields, enum ranks, positions, per-agent needs/health/inventory/policy, resource deltas, structures, and death records; it does not depend on `Debug`, platform hash randomization, floating-point display, or collection iteration accidents.
+
+Normal integration tests prove same-input equality and byte-stable display for 20 and 100 agents, driver batching equivalence, accepted-command divergence, and reset/replay. Ignored release tests repeat both complete canonical scenarios. The 20-agent result retains 15 survivors and five dehydration deaths after 10 gathers, 16 completed shelters, 60 eats, 105 drinks, and 15 complete sleep/wake cycles. The 100-agent result retains 75 survivors and 25 dehydration deaths after 40 gathers, 80 completed shelters, 300 eats, 525 drinks, and 75 sleep/wake cycles. Both 1,001-sample soaks report zero occupancy, resource, or structure invariant violations and no due backlog; peak retry depths are 68/22 and peak event queues are 379/1,805. D-045 records the durable scenario, report, initial-supply, and diagnostic boundaries.
 
 ## Data ownership target
 
