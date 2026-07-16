@@ -2,7 +2,7 @@
 
 Last synchronized: 2026-07-16.
 
-Status: **Active plan**. Phase 1 world foundation and Phase 2 Slice 0 are complete. Slice 1 is the next implementation target; later slices are planned and must be completed in order unless this document records a reviewed dependency change.
+Status: **Active plan**. Phase 1 world foundation and Phase 2 Slices 0-2 are complete. Slice 3 is the next implementation target; later slices are planned and must be completed in order unless this document records a reviewed dependency change.
 
 ## Purpose
 
@@ -39,7 +39,7 @@ The repository already provides the world-side contracts needed to begin:
 - deterministic resident cell/feature visitation and the Phase 1 settlement-candidate scenario provide bounded search building blocks.
 - `sim-headless` eagerly materializes the configured bootstrap area before ticking; `sim-viewer` streams terrain asynchronously and currently has no agent presentation.
 
-Slices 0-1 now provide compact agent storage, scheduled movement, one-agent-per-cell occupancy, bounded objective perception, and deterministic local routes. Not yet implemented are needs, action selection, inventory, resource depletion, structures, health, death, or richer agent-specific snapshots.
+Slices 0-2 now provide compact agent storage, scheduled movement, one-agent-per-cell occupancy, bounded objective perception, deterministic local routes, and analytical physical needs with scheduled threshold outcomes. Not yet implemented are action selection, inventory, resource depletion, structures, health, death, or richer agent-specific snapshots.
 
 ## Non-negotiable constraints
 
@@ -141,7 +141,7 @@ The first implementation may use a simple bounded scheduler if benchmarks justif
 
 ### Implemented result
 
-`sim-core::agent` now owns dense zero-based `AgentId` slots, six-byte compact position/activity records, parallel movement generations, atomic resident-area initialization, and bounded read-only views/outcomes. `sim-core::scheduler` owns 32-byte heap events with total `(time, class, agent, sequence)` order, checked sequence/time overflow, lazy stale-event invalidation, bounded stale retention, and a 4,096-event due-drain ceiling. `Engine` exposes explicit initialization and typed movement scheduling, keeps the viewer population-empty, and clears population/scheduler/IDs on reset while preserving resident terrain. `sim-headless` initializes 20 agents by default and executes one deterministic physical step per movable agent.
+`sim-core::agent` now owns dense zero-based `AgentId` slots, six-byte compact position/activity records, parallel movement generations, atomic resident-area initialization, and bounded read-only views/outcomes. `sim-core::scheduler` owns 32-byte heap events with the Slice 2-extended total `(time, class, agent, event detail, sequence)` order, checked sequence/time overflow, lazy stale-event invalidation, bounded stale retention, and a 4,096-event due-drain ceiling. `Engine` exposes explicit initialization and typed movement scheduling, keeps the viewer population-empty, and clears population/scheduler/IDs on reset while preserving resident terrain. `sim-headless` initializes 20 agents by default and executes one deterministic physical step per movable agent.
 
 Unit regressions cover initialization atomicity, invalid/duplicate/insufficient spawns, compact layouts, exact completion time, pause/reset, blocked and invalid requests, dead/missing IDs, active/world bounds, stale duplicate events, equal-time insertion reversal, overflow, and due backlog. The public-only `physical_agent_slice0` scenario replays 20 agents across forward/reverse command insertion. The ignored release harness records 20, 100, and 10,000-agent capacities, retained bytes, structural/growth allocation counts, and insertion/reschedule/extraction timings in `PERFORMANCE.md`. D-037 records the durable layout, time, ordering, cancellation, reset, and temporary heap decisions. The complete runtime validation gate passed after the final implementation and documentation synchronization.
 
@@ -190,7 +190,7 @@ Unit and public integration regressions cover compact layouts, signed `-65/-64/-
 
 ## Slice 2: Analytical physical needs
 
-Status: **Planned**. Depends on Slices 0-1.
+Status: **Implemented** on 2026-07-16. Depends on Slices 0-1.
 
 ### Objective
 
@@ -221,6 +221,14 @@ Add hunger, thirst, rest, and safety/exposure as compact analytically evaluated 
 - Paused time changes no need value; reset and replay reproduce all thresholds.
 - No floating-point value enters authoritative need state or event ordering unless a separately recorded determinism decision justifies it.
 - Need-state bytes per agent, threshold-event bytes, reschedule rate, and due-event throughput are recorded.
+
+### Implemented result
+
+`sim-core::needs` now owns a 32-byte fixed-point `NeedState` for hunger, thirst, rest, and exposure. Values use a 0-10,000 range, signed rates per 60 fixed simulation ticks, a shared reference time, and retained sub-unit remainders, so activity rebasing is exact without floating point or per-tick population updates. Idle, moving, gathering, building, and sleeping profiles are explicit; only the already-implemented idle/moving transitions are currently reachable, while exposure remains a provisional physical pressure rather than fear or social safety.
+
+Population initialization atomically creates three applicable initial thresholds per agent; neutral exposure schedules none. Activity changes advance one bounded-safe wrapping need generation, rebase all four values exactly, and schedule only future positive-rate thresholds. Reached thresholds are one-shot wake/debug outcomes until a later value or rate change crosses them back below the actionable boundary. Superseded events are typed stale outcomes and participate in the existing bounded due drain and scheduler compaction. Equal-time order is `(time, threshold before movement, AgentId, hunger/thirst/rest/exposure, sequence)`, so a threshold reached at movement completion observes the finishing activity before its rate changes. Multi-waypoint routes remain continuously moving between route start and end instead of creating zero-duration idle reschedules.
+
+`Engine::physical_needs` exposes current values, rates, threshold state, and the next due need; `Engine::need_threshold_outcomes` exposes the latest advancing tick's reached/stale events. Unit and public integration regressions cover compact layout, interpolation, ceiling prediction, saturation, overflow, exact remainder-preserving activity changes, provisional activity profiles, pause/reset/replay, 90,000-tick chunking independence, movement rates, stale reschedules, and equal-time priority. The ignored release harness records 20, 100, and 10,000-agent need/event capacities and scheduling/extraction timings in `PERFORMANCE.md`. D-039 records the durable representation, threshold, ordering, and provisional-rate decisions.
 
 ## Slice 3: Deterministic physical action policy
 

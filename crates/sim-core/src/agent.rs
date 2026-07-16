@@ -1,10 +1,12 @@
 use std::{collections::BTreeSet, error::Error, fmt};
 
 use crate::{
-    BaseResource, Standability, TraversalKind, WORLD_GENERATION_BOUNDS, WaterSource, World,
+    BaseResource, NeedKind, NeedQueryError, NeedThresholdEventOutcome, NeedThresholdOutcomeKind,
+    PhysicalNeedsView, Standability, TraversalKind, WORLD_GENERATION_BOUNDS, WaterSource, World,
     WorldPosition, WorldQueryError, WorldRect,
+    needs::NeedState,
     routing::{RouteRequest, RouteRequestError},
-    scheduler::{ScheduleError, ScheduledEvent, Scheduler},
+    scheduler::{EventClass, ScheduleError, ScheduledEvent, Scheduler},
     spatial::{SpatialIndex, TransferError},
 };
 
@@ -59,9 +61,12 @@ impl SimTime {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum AgentActivity {
-    Idle,
-    Moving,
-    Dead,
+    Idle = 0,
+    Moving = 1,
+    Gathering = 2,
+    Building = 3,
+    Sleeping = 4,
+    Dead = 5,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,6 +142,7 @@ pub enum PopulationInitError {
         found: u32,
     },
     AllocationFailed,
+    EventSequenceExhausted,
 }
 
 impl fmt::Display for PopulationInitError {
@@ -186,6 +192,9 @@ impl fmt::Display for PopulationInitError {
                 "active area has only {found} valid spawn cells for {requested} agents"
             ),
             Self::AllocationFailed => formatter.write_str("population allocation failed"),
+            Self::EventSequenceExhausted => {
+                formatter.write_str("event sequence exhausted during population initialization")
+            }
         }
     }
 }
@@ -265,6 +274,7 @@ pub enum MovementOutcomeKind {
     Blocked(TraversalKind),
     Occupied(AgentId),
     InconsistentOccupancy,
+    EventSequenceExhausted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -358,6 +368,7 @@ pub(crate) struct Population {
     records: Vec<AgentRecord>,
     movement_generations: Vec<u32>,
     routes: Vec<Option<RouteState>>,
+    needs: Vec<NeedState>,
     spatial: SpatialIndex,
     active_area: Option<WorldRect>,
     initialized: bool,
@@ -367,6 +378,7 @@ impl Population {
     pub(crate) fn initialize(
         &mut self,
         world: &World,
+        now: SimTime,
         init: PopulationInit,
         requested_positions: &[WorldPosition],
     ) -> Result<PopulationInitOutcome, PopulationInitError> {
@@ -461,6 +473,11 @@ impl Population {
             .try_reserve_exact(capacity)
             .map_err(|_| PopulationInitError::AllocationFailed)?;
         routes.resize(capacity, None);
+        let mut needs = Vec::new();
+        needs
+            .try_reserve_exact(capacity)
+            .map_err(|_| PopulationInitError::AllocationFailed)?;
+        needs.resize(capacity, NeedState::new(now));
         let spatial = SpatialIndex::from_positions(
             records
                 .iter()
@@ -471,6 +488,7 @@ impl Population {
         self.records = records;
         self.movement_generations = movement_generations;
         self.routes = routes;
+        self.needs = needs;
         self.spatial = spatial;
         self.active_area = Some(init.active_area);
         self.initialized = true;
@@ -510,6 +528,10 @@ impl Population {
         if record.activity == AgentActivity::Dead {
             return Err(MoveRequestError::DeadAgent);
         }
+        let activity_changes = record.activity != AgentActivity::Moving;
+        if !scheduler.can_schedule(if activity_changes { 5 } else { 1 }) {
+            return Err(MoveRequestError::EventSequenceExhausted);
+        }
         if !WORLD_GENERATION_BOUNDS.contains(target) {
             return Err(MoveRequestError::OutsideWorld);
         }
@@ -542,7 +564,10 @@ impl Population {
                 ScheduleError::SequenceExhausted => MoveRequestError::EventSequenceExhausted,
             })?;
         self.movement_generations[index] = generation;
-        self.records[index].activity = AgentActivity::Moving;
+        if activity_changes {
+            self.transition_activity(scheduler, now, agent, AgentActivity::Moving)
+                .expect("event sequence capacity was prechecked");
+        }
         Ok(MovementScheduled {
             event: EventId(sequence),
             completes_at: due,
@@ -570,6 +595,7 @@ impl Population {
 
     pub(crate) fn apply_movement(
         &mut self,
+        scheduler: &mut Scheduler,
         world: &World,
         event: ScheduledEvent,
     ) -> MovementEventOutcome {
@@ -587,50 +613,174 @@ impl Population {
         {
             return movement_outcome(event, Some(from), target, MovementOutcomeKind::StaleEvent);
         }
+        if !scheduler.can_schedule(4) {
+            self.settle_activity_without_events(event.due, event.agent, AgentActivity::Idle);
+            return movement_outcome(
+                event,
+                Some(from),
+                target,
+                MovementOutcomeKind::EventSequenceExhausted,
+            );
+        }
         if !WORLD_GENERATION_BOUNDS.contains(target) {
-            record.activity = AgentActivity::Idle;
-            return movement_outcome(event, Some(from), target, MovementOutcomeKind::OutsideWorld);
+            let outcome =
+                movement_outcome(event, Some(from), target, MovementOutcomeKind::OutsideWorld);
+            self.transition_activity(scheduler, event.due, event.agent, AgentActivity::Idle)
+                .expect("event sequence capacity was prechecked");
+            return outcome;
         }
         if !self
             .active_area
             .is_some_and(|active_area| active_area.contains(target))
         {
-            record.activity = AgentActivity::Idle;
-            return movement_outcome(
+            let outcome = movement_outcome(
                 event,
                 Some(from),
                 target,
                 MovementOutcomeKind::OutsideActiveArea,
             );
+            self.transition_activity(scheduler, event.due, event.agent, AgentActivity::Idle)
+                .expect("event sequence capacity was prechecked");
+            return outcome;
         }
         let kind = match world.traversal_step(from, target) {
             Ok(step) if step.is_passable() => {
                 match self.spatial.transfer(event.agent, from, target) {
                     Ok(()) => {
                         record.position = event.target;
-                        record.activity = AgentActivity::Idle;
                         MovementOutcomeKind::Moved
                     }
                     Err(TransferError::Occupied(occupant)) => {
-                        record.activity = AgentActivity::Idle;
                         MovementOutcomeKind::Occupied(occupant)
                     }
                     Err(TransferError::SourceMismatch) => {
-                        record.activity = AgentActivity::Idle;
                         MovementOutcomeKind::InconsistentOccupancy
                     }
                 }
             }
-            Ok(step) => {
-                record.activity = AgentActivity::Idle;
-                MovementOutcomeKind::Blocked(step.kind())
-            }
-            Err(error) => {
-                record.activity = AgentActivity::Idle;
-                map_event_query_error(error)
-            }
+            Ok(step) => MovementOutcomeKind::Blocked(step.kind()),
+            Err(error) => map_event_query_error(error),
         };
-        movement_outcome(event, Some(from), target, kind)
+        let outcome = movement_outcome(event, Some(from), target, kind);
+        let route_continues = self.routes[index].is_some()
+            && matches!(
+                kind,
+                MovementOutcomeKind::Moved | MovementOutcomeKind::Occupied(_)
+            );
+        if !route_continues {
+            self.transition_activity(scheduler, event.due, event.agent, AgentActivity::Idle)
+                .expect("event sequence capacity was prechecked");
+        }
+        outcome
+    }
+
+    pub(crate) fn finish_route_activity(
+        &mut self,
+        scheduler: &mut Scheduler,
+        now: SimTime,
+        agent: AgentId,
+    ) -> Result<(), MoveRequestError> {
+        let Some(record) = self.records.get(agent.0 as usize) else {
+            return Err(MoveRequestError::MissingAgent);
+        };
+        if matches!(record.activity, AgentActivity::Idle | AgentActivity::Dead) {
+            return Ok(());
+        }
+        match self.transition_activity(scheduler, now, agent, AgentActivity::Idle) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                self.settle_activity_without_events(now, agent, AgentActivity::Idle);
+                Err(error)
+            }
+        }
+    }
+
+    pub(crate) fn initialize_need_events(
+        &self,
+        scheduler: &mut Scheduler,
+        now: SimTime,
+    ) -> Result<(), ScheduleError> {
+        for (index, state) in self.needs.iter().copied().enumerate() {
+            self.schedule_need_thresholds(scheduler, AgentId(index as u32), state, now)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn needs_view(
+        &self,
+        agent: AgentId,
+        now: SimTime,
+    ) -> Result<PhysicalNeedsView, NeedQueryError> {
+        let record = self
+            .records
+            .get(agent.0 as usize)
+            .ok_or(NeedQueryError::MissingAgent)?;
+        if record.activity == AgentActivity::Dead {
+            return Err(NeedQueryError::DeadAgent);
+        }
+        Ok(self.needs[agent.0 as usize].view(agent, now))
+    }
+
+    pub(crate) fn apply_need_threshold(
+        &mut self,
+        event: ScheduledEvent,
+    ) -> NeedThresholdEventOutcome {
+        let index = event.agent.0 as usize;
+        let Some(record) = self.records.get(index) else {
+            return need_outcome(event, None, NeedThresholdOutcomeKind::MissingAgent);
+        };
+        if record.activity == AgentActivity::Dead {
+            return need_outcome(event, None, NeedThresholdOutcomeKind::DeadAgent);
+        }
+        let (outcome, value) =
+            self.needs[index].apply_threshold(event.generation, event.need, event.due);
+        need_outcome(event, Some(value), outcome)
+    }
+
+    fn transition_activity(
+        &mut self,
+        scheduler: &mut Scheduler,
+        now: SimTime,
+        agent: AgentId,
+        activity: AgentActivity,
+    ) -> Result<(), MoveRequestError> {
+        let index = agent.0 as usize;
+        if self.needs[index].requires_transition(activity) && !scheduler.can_schedule(4) {
+            return Err(MoveRequestError::EventSequenceExhausted);
+        }
+        if self.needs[index].transition(activity, now) {
+            let state = self.needs[index];
+            self.schedule_need_thresholds(scheduler, agent, state, now)
+                .map_err(|_| MoveRequestError::EventSequenceExhausted)?;
+        }
+        self.records[index].activity = activity;
+        Ok(())
+    }
+
+    fn settle_activity_without_events(
+        &mut self,
+        now: SimTime,
+        agent: AgentId,
+        activity: AgentActivity,
+    ) {
+        let index = agent.0 as usize;
+        self.needs[index].transition(activity, now);
+        self.records[index].activity = activity;
+    }
+
+    fn schedule_need_thresholds(
+        &self,
+        scheduler: &mut Scheduler,
+        agent: AgentId,
+        state: NeedState,
+        now: SimTime,
+    ) -> Result<(), ScheduleError> {
+        for kind in NeedKind::ALL {
+            if let Some(due) = state.threshold_due(kind, now) {
+                scheduler.schedule_need_threshold(due, agent, state.generation(), kind)?;
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn views(&self, limit: usize) -> impl Iterator<Item = AgentView> + '_ {
@@ -823,18 +973,27 @@ impl Population {
 
     pub(crate) fn event_is_current(&self, event: &ScheduledEvent) -> bool {
         let index = event.agent.0 as usize;
-        self.records.get(index).is_some_and(|record| {
-            record.activity == AgentActivity::Moving
-                && self.movement_generations[index] == event.generation
-        })
+        self.records
+            .get(index)
+            .is_some_and(|record| match event.class {
+                EventClass::Movement => {
+                    record.activity == AgentActivity::Moving
+                        && self.movement_generations[index] == event.generation
+                }
+                EventClass::NeedThreshold => {
+                    record.activity != AgentActivity::Dead
+                        && self.needs[index].event_is_current(event.generation, event.need)
+                }
+            })
     }
 
     #[cfg(test)]
-    pub(crate) fn capacities(&self) -> (usize, usize, usize, usize, usize) {
+    pub(crate) fn capacities(&self) -> (usize, usize, usize, usize, usize, usize) {
         (
             self.records.capacity(),
             self.movement_generations.capacity(),
             self.routes.capacity(),
+            self.needs.capacity(),
             self.spatial.retained_entry_capacity(),
             self.spatial.bucket_count(),
         )
@@ -907,6 +1066,21 @@ fn movement_outcome(
         from,
         target,
         kind,
+    }
+}
+
+fn need_outcome(
+    event: ScheduledEvent,
+    value: Option<u16>,
+    outcome: NeedThresholdOutcomeKind,
+) -> NeedThresholdEventOutcome {
+    NeedThresholdEventOutcome {
+        event: EventId(event.sequence),
+        agent: event.agent,
+        due: event.due,
+        kind: event.need,
+        value,
+        outcome,
     }
 }
 

@@ -1,6 +1,7 @@
 //! Engine-independent deterministic simulation foundation.
 
 mod agent;
+mod needs;
 mod routing;
 mod scheduler;
 mod spatial;
@@ -13,6 +14,10 @@ pub use agent::{
     PerceivedResource, PerceivedWater, PerceptionError, PhysicalPerception, PopulationInit,
     PopulationInitError, PopulationInitOutcome, RouteEventOutcome, RouteOutcomeKind,
     RouteScheduled, SimTime, SpawnInvalidReason,
+};
+pub use needs::{
+    NEED_MAX, NEED_RATE_PERIOD_TICKS, NeedKind, NeedLevelView, NeedQueryError, NeedThreshold,
+    NeedThresholdEventOutcome, NeedThresholdOutcomeKind, PhysicalNeedsView,
 };
 pub use routing::{MAX_ROUTE_EXPANSIONS, RouteRequest, RouteRequestError};
 pub use world::{
@@ -30,7 +35,7 @@ use std::time::Duration;
 
 use agent::Population;
 use routing::RoutePlanner;
-use scheduler::{MAX_DUE_EVENTS_PER_TICK, Scheduler};
+use scheduler::{EventClass, MAX_DUE_EVENTS_PER_TICK, Scheduler};
 
 /// Immutable settings used to construct or reset a simulation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,6 +117,7 @@ pub struct Engine {
     scheduler: Scheduler,
     movement_outcomes: Vec<MovementEventOutcome>,
     route_outcomes: Vec<RouteEventOutcome>,
+    need_outcomes: Vec<NeedThresholdEventOutcome>,
     route_planner: RoutePlanner,
 }
 
@@ -132,6 +138,7 @@ impl Engine {
             scheduler: Scheduler::default(),
             movement_outcomes: Vec::new(),
             route_outcomes: Vec::new(),
+            need_outcomes: Vec::new(),
             route_planner: RoutePlanner::default(),
         }
     }
@@ -159,6 +166,7 @@ impl Engine {
                 self.scheduler = Scheduler::default();
                 self.movement_outcomes.clear();
                 self.route_outcomes.clear();
+                self.need_outcomes.clear();
                 self.route_planner = RoutePlanner::default();
                 EngineCommandOutcome::Applied
             }
@@ -183,12 +191,21 @@ impl Engine {
         self.time = next_time;
         self.movement_outcomes.clear();
         self.route_outcomes.clear();
+        self.need_outcomes.clear();
         let mut processed = 0_usize;
         while processed < MAX_DUE_EVENTS_PER_TICK {
             let Some(event) = self.scheduler.pop_due(self.time) else {
                 break;
             };
-            let outcome = self.population.apply_movement(&self.world, event);
+            if event.class == EventClass::NeedThreshold {
+                self.need_outcomes
+                    .push(self.population.apply_need_threshold(event));
+                processed += 1;
+                continue;
+            }
+            let outcome = self
+                .population
+                .apply_movement(&mut self.scheduler, &self.world, event);
             let agent = outcome.agent;
             let kind = outcome.kind;
             self.movement_outcomes.push(outcome);
@@ -209,6 +226,11 @@ impl Engine {
                 | MovementOutcomeKind::Blocked(_) => {
                     if self.population.route_request(agent).is_some() {
                         self.finish_route(agent, map_movement_route_failure(kind));
+                    }
+                }
+                MovementOutcomeKind::EventSequenceExhausted => {
+                    if self.population.route_request(agent).is_some() {
+                        self.finish_route(agent, RouteOutcomeKind::EventSequenceExhausted);
                     }
                 }
             }
@@ -267,16 +289,27 @@ impl Engine {
             return Err(PopulationInitError::AlreadyInitialized);
         }
         let mut population = Population::default();
-        let outcome = population.initialize(&self.world, init, requested_positions)?;
-        let scheduler = Scheduler::try_with_capacity(init.population as usize)
+        let outcome = population.initialize(&self.world, self.time, init, requested_positions)?;
+        let scheduler_capacity = (init.population as usize)
+            .checked_mul(4)
+            .ok_or(PopulationInitError::AllocationFailed)?;
+        let mut scheduler = Scheduler::try_with_capacity(scheduler_capacity)
             .map_err(|_| PopulationInitError::AllocationFailed)?;
         let mut movement_outcomes = Vec::new();
         movement_outcomes
             .try_reserve_exact((init.population as usize).min(MAX_DUE_EVENTS_PER_TICK))
             .map_err(|_| PopulationInitError::AllocationFailed)?;
+        population
+            .initialize_need_events(&mut scheduler, self.time)
+            .map_err(|_| PopulationInitError::EventSequenceExhausted)?;
+        let mut need_outcomes = Vec::new();
+        need_outcomes
+            .try_reserve_exact((init.population as usize).min(MAX_DUE_EVENTS_PER_TICK))
+            .map_err(|_| PopulationInitError::AllocationFailed)?;
         self.population = population;
         self.scheduler = scheduler;
         self.movement_outcomes = movement_outcomes;
+        self.need_outcomes = need_outcomes;
         self.route_outcomes.clear();
         self.route_planner = RoutePlanner::default();
         Ok(outcome)
@@ -287,12 +320,7 @@ impl Engine {
         agent: AgentId,
         target: WorldPosition,
     ) -> Result<MovementScheduled, MoveRequestError> {
-        let retention_limit = self.population.len().saturating_add(4_096).max(64);
-        if self.scheduler.len() >= retention_limit {
-            let population = &self.population;
-            self.scheduler
-                .retain(|event| population.event_is_current(event));
-        }
+        self.compact_scheduler_if_needed();
         self.population.schedule_movement(
             &mut self.scheduler,
             &self.world,
@@ -308,6 +336,7 @@ impl Engine {
         agent: AgentId,
         request: RouteRequest,
     ) -> Result<RouteScheduled, RouteRequestError> {
+        self.compact_scheduler_if_needed();
         let (origin, active_area) = self.population.route_context(agent)?;
         let plan = self.route_planner.plan(
             &self.world,
@@ -369,6 +398,16 @@ impl Engine {
         &self.route_outcomes
     }
 
+    /// Need thresholds reached or discarded as stale during the most recent advancing tick.
+    pub fn need_threshold_outcomes(&self) -> &[NeedThresholdEventOutcome] {
+        &self.need_outcomes
+    }
+
+    /// Analytically evaluates one agent's physical needs at current simulation time.
+    pub fn physical_needs(&self, agent: AgentId) -> Result<PhysicalNeedsView, NeedQueryError> {
+        self.population.needs_view(agent, self.time)
+    }
+
     pub fn snapshot(&self) -> SimulationSnapshot {
         SimulationSnapshot {
             tick: self.time.ticks(),
@@ -383,6 +422,7 @@ impl Engine {
     }
 
     fn continue_route(&mut self, agent: AgentId) {
+        self.compact_scheduler_if_needed();
         let Some(request) = self.population.route_request(agent) else {
             return;
         };
@@ -422,6 +462,18 @@ impl Engine {
         let Some(request) = self.population.route_request(agent) else {
             return;
         };
+        let kind =
+            match self
+                .population
+                .finish_route_activity(&mut self.scheduler, self.time, agent)
+            {
+                Ok(()) => kind,
+                Err(MoveRequestError::RescheduleLimit) => RouteOutcomeKind::RescheduleLimit,
+                Err(MoveRequestError::EventSequenceExhausted) => {
+                    RouteOutcomeKind::EventSequenceExhausted
+                }
+                Err(_) => RouteOutcomeKind::InconsistentOccupancy,
+            };
         self.population.clear_route(agent);
         self.route_outcomes.push(RouteEventOutcome {
             agent,
@@ -429,6 +481,20 @@ impl Engine {
             destination: request.destination,
             kind,
         });
+    }
+
+    fn compact_scheduler_if_needed(&mut self) {
+        let retention_limit = self
+            .population
+            .len()
+            .saturating_mul(5)
+            .saturating_add(4_096)
+            .max(64);
+        if self.scheduler.len() >= retention_limit {
+            let population = &self.population;
+            self.scheduler
+                .retain(|event| population.event_is_current(event));
+        }
     }
 }
 
@@ -485,6 +551,7 @@ fn map_movement_route_failure(kind: MovementOutcomeKind) -> RouteOutcomeKind {
         MovementOutcomeKind::Blocked(kind) => RouteOutcomeKind::Blocked(kind),
         MovementOutcomeKind::Occupied(agent) => RouteOutcomeKind::Occupied(agent),
         MovementOutcomeKind::InconsistentOccupancy
+        | MovementOutcomeKind::EventSequenceExhausted
         | MovementOutcomeKind::MissingAgent
         | MovementOutcomeKind::DeadAgent
         | MovementOutcomeKind::InvalidStep
@@ -1037,6 +1104,49 @@ mod tests {
     }
 
     #[test]
+    fn sequence_exhaustion_settles_due_route_without_stranding_moving_activity() {
+        let mut engine = resident_engine(64);
+        let pair = standable_steps(&engine, 1)[0];
+        engine
+            .initialize_population(
+                PopulationInit {
+                    active_area: engine.world().initial_bounds(),
+                    population: 1,
+                },
+                &[pair.0],
+            )
+            .unwrap();
+        let route = engine
+            .request_route(
+                AgentId::new(0),
+                RouteRequest {
+                    destination: pair.1,
+                    max_expansions: 8,
+                },
+            )
+            .unwrap();
+        engine.scheduler.exhaust_sequence();
+        while engine.snapshot().tick < route.first_completion.ticks() {
+            engine.tick();
+        }
+        let view = engine.agent_views(1).next().unwrap();
+        assert_eq!(view.position, pair.0);
+        assert_eq!(view.activity, AgentActivity::Idle);
+        assert_eq!(
+            engine
+                .physical_needs(view.id)
+                .unwrap()
+                .thirst
+                .rate_per_period,
+            4
+        );
+        assert_eq!(
+            engine.route_outcomes().last().unwrap().kind,
+            RouteOutcomeKind::EventSequenceExhausted
+        );
+    }
+
+    #[test]
     fn due_event_drain_is_bounded_and_reports_backlog() {
         let mut engine = Engine::default();
         for sequence in 0..=MAX_DUE_EVENTS_PER_TICK {
@@ -1093,7 +1203,7 @@ mod tests {
                     &[],
                 )
                 .unwrap();
-            let (record_capacity, generation_capacity, _, _, _) = engine.population.capacities();
+            let (record_capacity, generation_capacity, _, _, _, _) = engine.population.capacities();
             let initial_scheduler_capacity = engine.scheduler.capacity();
             let outcome_capacity = engine.movement_outcomes.capacity();
 
@@ -1191,7 +1301,7 @@ mod tests {
                     &[],
                 )
                 .unwrap();
-            let (_, _, route_capacity, spatial_capacity, spatial_buckets) =
+            let (_, _, route_capacity, _, spatial_capacity, spatial_buckets) =
                 engine.population.capacities();
             let start = Instant::now();
             let perception = engine.perceive_physical(AgentId::new(0), 31).unwrap();
@@ -1287,5 +1397,70 @@ mod tests {
                 + usize::from(capacities_before.1 != capacities_after.1)
                 + usize::from(capacities_before.2 != capacities_after.2),
         );
+    }
+
+    #[test]
+    #[ignore = "release-only Slice 2 analytical-needs measurement"]
+    fn release_physical_agent_slice_two_measurement() {
+        assert!(
+            !std::hint::black_box(cfg!(debug_assertions)),
+            "run this measurement in release mode"
+        );
+        eprintln!(
+            "population\tneed_state_size\tneed_state_align\tthreshold_event_size\tneed_capacity\tscheduler_capacity\tinitial_events\trescheduled_events\tschedule_ns\tdue_extract_ns\tgrowth_buffers\tretained_logical_bytes"
+        );
+        for population in [20_usize, 100, 10_000] {
+            let mut states = Vec::with_capacity(population);
+            states.resize(population, needs::NeedState::new(SimTime::ZERO));
+            let mut scheduler = Scheduler::with_capacity(population * 4);
+            for (raw, state) in states.iter().copied().enumerate() {
+                for kind in NeedKind::ALL {
+                    if let Some(due) = state.threshold_due(kind, SimTime::ZERO) {
+                        scheduler
+                            .schedule_need_threshold(due, AgentId::new(raw as u32), 0, kind)
+                            .unwrap();
+                    }
+                }
+            }
+            let initial_events = scheduler.len();
+            let before_capacity = scheduler.capacity();
+            let schedule_start = Instant::now();
+            let mut rescheduled_events = 0;
+            for (raw, state) in states.iter_mut().enumerate() {
+                state.transition(AgentActivity::Moving, SimTime::from_ticks(1));
+                for kind in NeedKind::ALL {
+                    if let Some(due) = state.threshold_due(kind, SimTime::from_ticks(1)) {
+                        scheduler
+                            .schedule_need_threshold(
+                                due,
+                                AgentId::new(raw as u32),
+                                state.generation(),
+                                kind,
+                            )
+                            .unwrap();
+                        rescheduled_events += 1;
+                    }
+                }
+            }
+            let schedule_ns = schedule_start.elapsed().as_nanos();
+            let growth_buffers = usize::from(scheduler.capacity() != before_capacity);
+            let due_start = Instant::now();
+            let mut extracted = 0;
+            while scheduler.pop_due(SimTime::from_ticks(u64::MAX)).is_some() {
+                extracted += 1;
+            }
+            let due_extract_ns = due_start.elapsed().as_nanos();
+            assert_eq!(extracted, initial_events + rescheduled_events);
+            let retained_logical_bytes = states.capacity() * size_of::<needs::NeedState>()
+                + scheduler.capacity() * size_of::<scheduler::ScheduledEvent>();
+            eprintln!(
+                "{population}\t{}\t{}\t{}\t{}\t{}\t{initial_events}\t{rescheduled_events}\t{schedule_ns}\t{due_extract_ns}\t{growth_buffers}\t{retained_logical_bytes}",
+                size_of::<needs::NeedState>(),
+                std::mem::align_of::<needs::NeedState>(),
+                size_of::<scheduler::ScheduledEvent>(),
+                states.capacity(),
+                scheduler.capacity(),
+            );
+        }
     }
 }

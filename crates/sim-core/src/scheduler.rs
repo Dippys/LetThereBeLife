@@ -1,6 +1,6 @@
 use std::{cmp::Ordering, collections::BinaryHeap};
 
-use crate::{AgentId, SimTime, agent::CompactPosition};
+use crate::{AgentId, NeedKind, SimTime, agent::CompactPosition};
 
 /// Maximum number of due events one engine tick may apply.
 pub(crate) const MAX_DUE_EVENTS_PER_TICK: usize = 4_096;
@@ -8,13 +8,15 @@ pub(crate) const MAX_DUE_EVENTS_PER_TICK: usize = 4_096;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
 pub(crate) enum EventClass {
-    Movement = 0,
+    NeedThreshold = 0,
+    Movement = 1,
 }
 
 impl EventClass {
     const fn rank(self) -> u8 {
         match self {
-            Self::Movement => 0,
+            Self::NeedThreshold => 0,
+            Self::Movement => 1,
         }
     }
 }
@@ -27,6 +29,7 @@ pub(crate) struct ScheduledEvent {
     pub(crate) agent: AgentId,
     pub(crate) generation: u32,
     pub(crate) target: CompactPosition,
+    pub(crate) need: NeedKind,
     pub(crate) class: EventClass,
 }
 
@@ -38,6 +41,7 @@ impl Ord for ScheduledEvent {
             .cmp(&self.due)
             .then_with(|| other.class.rank().cmp(&self.class.rank()))
             .then_with(|| other.agent.cmp(&self.agent))
+            .then_with(|| other.detail_rank().cmp(&self.detail_rank()))
             .then_with(|| other.sequence.cmp(&self.sequence))
     }
 }
@@ -45,6 +49,15 @@ impl Ord for ScheduledEvent {
 impl PartialOrd for ScheduledEvent {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl ScheduledEvent {
+    const fn detail_rank(self) -> u8 {
+        match self.class {
+            EventClass::NeedThreshold => self.need as u8,
+            EventClass::Movement => 0,
+        }
     }
 }
 
@@ -60,6 +73,10 @@ pub(crate) struct Scheduler {
 }
 
 impl Scheduler {
+    pub(crate) fn can_schedule(&self, count: u64) -> bool {
+        self.next_sequence.checked_add(count).is_some()
+    }
+
     #[cfg(test)]
     pub(crate) fn with_capacity(capacity: usize) -> Self {
         Self {
@@ -95,7 +112,32 @@ impl Scheduler {
             agent,
             generation,
             target,
+            need: NeedKind::Hunger,
             class: EventClass::Movement,
+        });
+        Ok(sequence)
+    }
+
+    pub(crate) fn schedule_need_threshold(
+        &mut self,
+        due: SimTime,
+        agent: AgentId,
+        generation: u32,
+        need: NeedKind,
+    ) -> Result<u64, ScheduleError> {
+        let sequence = self.next_sequence;
+        self.next_sequence = self
+            .next_sequence
+            .checked_add(1)
+            .ok_or(ScheduleError::SequenceExhausted)?;
+        self.events.push(ScheduledEvent {
+            due,
+            sequence,
+            agent,
+            generation,
+            target: CompactPosition { x: 0, y: 0 },
+            need,
+            class: EventClass::NeedThreshold,
         });
         Ok(sequence)
     }
@@ -124,6 +166,11 @@ impl Scheduler {
     pub(crate) fn capacity(&self) -> usize {
         self.events.capacity()
     }
+
+    #[cfg(test)]
+    pub(crate) fn exhaust_sequence(&mut self) {
+        self.next_sequence = u64::MAX;
+    }
 }
 
 #[cfg(test)]
@@ -137,6 +184,7 @@ mod tests {
             agent: AgentId::new(agent),
             generation: 1,
             target: CompactPosition { x: 0, y: 0 },
+            need: NeedKind::Hunger,
             class: EventClass::Movement,
         }
     }
@@ -171,6 +219,37 @@ mod tests {
             .unwrap();
         assert_eq!(scheduler.pop_due(SimTime::from_ticks(7)), None);
         assert!(scheduler.pop_due(SimTime::from_ticks(8)).is_some());
+    }
+
+    #[test]
+    fn equal_time_need_priority_precedes_movement_and_ignores_insertion_order() {
+        let mut scheduler = Scheduler::default();
+        scheduler
+            .schedule_movement(
+                SimTime::from_ticks(8),
+                AgentId::new(0),
+                1,
+                CompactPosition { x: 1, y: 0 },
+            )
+            .unwrap();
+        for need in NeedKind::ALL.into_iter().rev() {
+            scheduler
+                .schedule_need_threshold(SimTime::from_ticks(8), AgentId::new(0), 0, need)
+                .unwrap();
+        }
+        let keys: Vec<_> = std::iter::from_fn(|| scheduler.pop_due(SimTime::from_ticks(8)))
+            .map(|event| (event.class, event.need))
+            .collect();
+        assert_eq!(
+            keys,
+            [
+                (EventClass::NeedThreshold, NeedKind::Hunger),
+                (EventClass::NeedThreshold, NeedKind::Thirst),
+                (EventClass::NeedThreshold, NeedKind::Rest),
+                (EventClass::NeedThreshold, NeedKind::Exposure),
+                (EventClass::Movement, NeedKind::Hunger),
+            ]
+        );
     }
 
     #[test]
