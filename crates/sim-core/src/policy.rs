@@ -1,8 +1,8 @@
 use std::{error::Error, fmt};
 
 use crate::{
-    AgentId, NeedKind, PhysicalNeedsView, PhysicalPerception, ResourceKind, SimTime, WorldPosition,
-    agent::CompactPosition,
+    AgentId, InventoryView, NeedKind, PhysicalNeedsView, PhysicalPerception, ResourceKind, SimTime,
+    WorldPosition, agent::CompactPosition,
 };
 
 pub const PHYSICAL_POLICY_RADIUS: u8 = 8;
@@ -53,6 +53,7 @@ pub enum PolicyReason {
     ExposureThreshold,
     NoUrgentNeed,
     RouteArrived,
+    ActionCompleted,
     Retry,
 }
 
@@ -67,6 +68,10 @@ pub enum PolicyFailureReason {
     NoPath,
     RouteBudgetExhausted,
     TargetUnavailable,
+    ResourceDepleted,
+    InventoryFull,
+    NoEdibleInventory,
+    InvalidWaterAccess,
     TimeOverflow,
     RescheduleLimit,
     EventSequenceExhausted,
@@ -80,6 +85,7 @@ pub enum PolicyDiagnosticKind {
     Selected,
     RouteScheduled,
     ActionStarted,
+    ActionCompleted,
     ActionDeferred,
     RetryScheduled,
     StaleEvent,
@@ -183,6 +189,7 @@ pub(crate) struct PolicyAction {
 pub(crate) fn select(
     origin: WorldPosition,
     needs: PhysicalNeedsView,
+    inventory: InventoryView,
     perception: &PhysicalPerception,
 ) -> PolicySelection {
     let urgent = NeedKind::ALL
@@ -208,9 +215,16 @@ pub(crate) fn select(
             target: nearest_water_access(origin, perception),
             reason: PolicyReason::ThirstThreshold,
         },
+        Some(NeedKind::Hunger) if inventory.food > 0 => PolicySelection {
+            goal: PhysicalGoal::Eat,
+            target: Some(origin),
+            reason: PolicyReason::HungerThreshold,
+        },
         Some(NeedKind::Hunger) => PolicySelection {
             goal: PhysicalGoal::SeekFood,
-            target: nearest_food_access(origin, perception),
+            target: nearest_resource_access(origin, perception, |kind| {
+                kind == ResourceKind::Food && inventory.can_add(kind)
+            }),
             reason: PolicyReason::HungerThreshold,
         },
         Some(NeedKind::Rest) => PolicySelection {
@@ -223,11 +237,18 @@ pub(crate) fn select(
             target: None,
             reason: PolicyReason::ExposureThreshold,
         },
-        None => PolicySelection {
-            goal: PhysicalGoal::Wait,
-            target: Some(origin),
-            reason: PolicyReason::NoUrgentNeed,
-        },
+        None => nearest_resource_access(origin, perception, |kind| inventory.can_add(kind)).map_or(
+            PolicySelection {
+                goal: PhysicalGoal::Wait,
+                target: Some(origin),
+                reason: PolicyReason::NoUrgentNeed,
+            },
+            |target| PolicySelection {
+                goal: PhysicalGoal::GatherMaterial,
+                target: Some(target),
+                reason: PolicyReason::NoUrgentNeed,
+            },
+        ),
     }
 }
 
@@ -256,14 +277,15 @@ fn nearest_water_access(
         .min_by_key(|candidate| target_key(origin, *candidate))
 }
 
-fn nearest_food_access(
+fn nearest_resource_access(
     origin: WorldPosition,
     perception: &PhysicalPerception,
+    accepts: impl Fn(ResourceKind) -> bool,
 ) -> Option<WorldPosition> {
     perception
         .resources
         .iter()
-        .filter(|resource| resource.resource.kind == ResourceKind::Food)
+        .filter(|resource| accepts(resource.resource.kind))
         .flat_map(|resource| {
             std::iter::once(resource.position).chain(cardinal_neighbors(resource.position))
         })
@@ -396,11 +418,23 @@ mod tests {
         let origin = WorldPosition { x: 0, y: 0 };
         let facts = perception();
         assert_eq!(
-            select(origin, needs(7_000, 6_000, 0, 0), &facts).goal,
+            select(
+                origin,
+                needs(7_000, 6_000, 0, 0),
+                InventoryView::default(),
+                &facts,
+            )
+            .goal,
             PhysicalGoal::SeekWater
         );
         assert_eq!(
-            select(origin, needs(8_400, 6_000, 0, 0), &facts).goal,
+            select(
+                origin,
+                needs(8_400, 6_000, 0, 0),
+                InventoryView::default(),
+                &facts,
+            )
+            .goal,
             PhysicalGoal::SeekFood
         );
     }
@@ -409,7 +443,12 @@ mod tests {
     fn irrelevant_candidates_do_not_reorder_the_selected_water_access() {
         let origin = WorldPosition { x: 0, y: 0 };
         let mut facts = perception();
-        let selected = select(origin, needs(0, 6_000, 0, 0), &facts);
+        let selected = select(
+            origin,
+            needs(0, 6_000, 0, 0),
+            InventoryView::default(),
+            &facts,
+        );
         facts.resources.push(PerceivedResource {
             position: WorldPosition { x: -3, y: -3 },
             resource: BaseResource {
@@ -417,8 +456,43 @@ mod tests {
                 kind: ResourceKind::Wood,
             },
         });
-        assert_eq!(select(origin, needs(0, 6_000, 0, 0), &facts), selected);
+        assert_eq!(
+            select(
+                origin,
+                needs(0, 6_000, 0, 0),
+                InventoryView::default(),
+                &facts,
+            ),
+            selected
+        );
         assert_eq!(selected.target, Some(WorldPosition { x: 1, y: 0 }));
+    }
+
+    #[test]
+    fn carried_food_turns_hunger_into_eating_and_idle_agents_gather_capacity() {
+        let origin = WorldPosition { x: 0, y: 0 };
+        let facts = perception();
+        let carrying_food = InventoryView {
+            food: 1,
+            ..InventoryView::default()
+        };
+        assert_eq!(
+            select(origin, needs(7_000, 0, 0, 0), carrying_food, &facts).goal,
+            PhysicalGoal::Eat
+        );
+        assert_eq!(
+            select(origin, needs(0, 0, 0, 0), InventoryView::default(), &facts,).goal,
+            PhysicalGoal::GatherMaterial
+        );
+        let full = InventoryView {
+            food: crate::INVENTORY_CAPACITY_PER_KIND,
+            wood: crate::INVENTORY_CAPACITY_PER_KIND,
+            stone: crate::INVENTORY_CAPACITY_PER_KIND,
+        };
+        assert_eq!(
+            select(origin, needs(0, 0, 0, 0), full, &facts).goal,
+            PhysicalGoal::Wait
+        );
     }
 
     #[test]

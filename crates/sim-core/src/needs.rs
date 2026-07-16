@@ -191,6 +191,19 @@ impl NeedState {
         (NeedThresholdOutcomeKind::Reached, value)
     }
 
+    pub(crate) fn relieve(&mut self, kind: NeedKind, amount: u16, now: SimTime) {
+        self.rebase(now);
+        let index = kind.index();
+        let numerator = u32::from(self.values[index]) * u32::from(NEED_RATE_PERIOD_TICKS)
+            + u32::from(self.remainders[index]);
+        let relieved =
+            numerator.saturating_sub(u32::from(amount) * u32::from(NEED_RATE_PERIOD_TICKS));
+        self.values[index] = (relieved / u32::from(NEED_RATE_PERIOD_TICKS)) as u16;
+        self.remainders[index] = (relieved % u32::from(NEED_RATE_PERIOD_TICKS)) as u8;
+        self.generation = self.generation.wrapping_add(1);
+        self.crossed = crossed_mask(self.values);
+    }
+
     fn value(self, kind: NeedKind, now: SimTime) -> u16 {
         (self.numerator(kind, now) / u128::from(NEED_RATE_PERIOD_TICKS)) as u16
     }
@@ -350,5 +363,19 @@ mod tests {
         assert!(state.transition(AgentActivity::Moving, SimTime::from_ticks(60)));
         assert_eq!(state.generation, 0);
         assert_eq!(state.reference_time, SimTime::from_ticks(60));
+    }
+
+    #[test]
+    fn relief_preserves_exact_fractional_progress_and_changes_only_one_need() {
+        let mut state = NeedState::new(SimTime::ZERO);
+        state.values[NeedKind::Hunger.index()] = 10;
+        let before = state.view(AgentId::new(0), SimTime::from_ticks(1));
+        state.relieve(NeedKind::Hunger, 1, SimTime::from_ticks(1));
+        assert_eq!(state.remainders[NeedKind::Hunger.index()], 2);
+        let after = state.view(AgentId::new(0), SimTime::from_ticks(1));
+        assert_eq!(after.hunger.value, before.hunger.value - 1);
+        assert_eq!(after.thirst.value, before.thirst.value);
+        assert_eq!(after.rest.value, before.rest.value);
+        assert_eq!(after.exposure.value, before.exposure.value);
     }
 }

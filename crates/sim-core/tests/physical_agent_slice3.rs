@@ -215,13 +215,11 @@ fn thirst_selects_drink_deterministically_then_uses_positive_backoff() {
 
     run_to(&mut first, 90_061);
     assert!(first.policy_diagnostics().iter().any(|diagnostic| {
-        diagnostic.kind == PolicyDiagnosticKind::ActionDeferred
-            && diagnostic.failure == Some(PolicyFailureReason::DeferredToLaterSlice)
+        diagnostic.kind == PolicyDiagnosticKind::ActionCompleted
+            && diagnostic.goal == PhysicalGoal::Drink
+            && diagnostic.failure.is_none()
     }));
-    assert!(first.policy_diagnostics().iter().any(|diagnostic| {
-        diagnostic.kind == PolicyDiagnosticKind::RetryScheduled
-            && diagnostic.failure == Some(PolicyFailureReason::DeferredToLaterSlice)
-    }));
+    assert!(first.physical_needs(AgentId::new(0)).unwrap().thirst.value < 6_000);
     assert!(!first.physical_policy(AgentId::new(0)).unwrap().committed);
     assert!(!first.policy_diagnostics().iter().any(|diagnostic| {
         diagnostic.kind == PolicyDiagnosticKind::StaleEvent && diagnostic.at.ticks() == 90_061

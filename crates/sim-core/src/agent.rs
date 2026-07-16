@@ -8,6 +8,7 @@ use crate::{
     policy::{
         PhysicalGoal, PhysicalPolicyView, PolicyAction, PolicyPhase, PolicyReason, PolicyState,
     },
+    resources::{FOOD_CONSUMPTION, InventoryView, ResourceDeltas},
     routing::{RouteRequest, RouteRequestError},
     scheduler::{EventClass, ScheduleError, ScheduledEvent, Scheduler},
     spatial::{SpatialIndex, TransferError},
@@ -374,6 +375,7 @@ pub(crate) struct Population {
     routes: Vec<Option<RouteState>>,
     needs: Vec<NeedState>,
     policies: Vec<PolicyState>,
+    inventories: Vec<InventoryView>,
     spatial: SpatialIndex,
     active_area: Option<WorldRect>,
     initialized: bool,
@@ -488,6 +490,11 @@ impl Population {
             .try_reserve_exact(capacity)
             .map_err(|_| PopulationInitError::AllocationFailed)?;
         policies.resize(capacity, PolicyState::default());
+        let mut inventories = Vec::new();
+        inventories
+            .try_reserve_exact(capacity)
+            .map_err(|_| PopulationInitError::AllocationFailed)?;
+        inventories.resize(capacity, InventoryView::default());
         let spatial = SpatialIndex::from_positions(
             records
                 .iter()
@@ -500,6 +507,7 @@ impl Population {
         self.routes = routes;
         self.needs = needs;
         self.policies = policies;
+        self.inventories = inventories;
         self.spatial = spatial;
         self.active_area = Some(init.active_area);
         self.initialized = true;
@@ -794,10 +802,15 @@ impl Population {
         &self,
         agent: AgentId,
         now: SimTime,
-    ) -> Option<(AgentView, PhysicalNeedsView)> {
+    ) -> Option<(AgentView, PhysicalNeedsView, InventoryView)> {
         let view = self.view(agent)?;
-        (view.activity != AgentActivity::Dead)
-            .then(|| (view, self.needs[agent.0 as usize].view(agent, now)))
+        (view.activity != AgentActivity::Dead).then(|| {
+            (
+                view,
+                self.needs[agent.0 as usize].view(agent, now),
+                self.inventories[agent.0 as usize],
+            )
+        })
     }
 
     pub(crate) fn commit_policy_route(
@@ -955,16 +968,73 @@ impl Population {
         &mut self,
         scheduler: &mut Scheduler,
         event: ScheduledEvent,
-    ) -> Option<(PhysicalGoal, WorldPosition, PolicyReason)> {
+    ) -> Result<Option<(PhysicalGoal, WorldPosition, PolicyReason)>, MoveRequestError> {
         if !self.policy_event_is_current(event) {
-            return None;
+            return Ok(None);
         }
         let index = event.agent.0 as usize;
         let state = self.policies[index];
-        self.transition_activity(scheduler, event.due, event.agent, AgentActivity::Idle)
-            .ok()?;
+        if let Err(error) =
+            self.transition_activity(scheduler, event.due, event.agent, AgentActivity::Idle)
+        {
+            self.settle_activity_without_events(event.due, event.agent, AgentActivity::Idle);
+            self.policies[index].phase = PolicyPhase::Dormant;
+            return Err(error);
+        }
         self.policies[index].phase = PolicyPhase::Dormant;
-        Some((state.goal, state.target.world(), state.reason))
+        Ok(Some((state.goal, state.target.world(), state.reason)))
+    }
+
+    pub(crate) fn inventory(&self, agent: AgentId) -> Option<InventoryView> {
+        let index = agent.0 as usize;
+        self.records
+            .get(index)
+            .is_some_and(|record| record.activity != AgentActivity::Dead)
+            .then(|| self.inventories[index])
+    }
+
+    pub(crate) fn add_inventory(
+        &mut self,
+        agent: AgentId,
+        kind: crate::ResourceKind,
+        amount: u8,
+    ) -> u8 {
+        let inventory = &mut self.inventories[agent.0 as usize];
+        let accepted = inventory.remaining_capacity(kind).min(amount);
+        let slot = match kind {
+            crate::ResourceKind::Food => &mut inventory.food,
+            crate::ResourceKind::Wood => &mut inventory.wood,
+            crate::ResourceKind::Stone => &mut inventory.stone,
+        };
+        *slot += accepted;
+        accepted
+    }
+
+    pub(crate) fn apply_need_relief(
+        &mut self,
+        scheduler: &mut Scheduler,
+        now: SimTime,
+        agent: AgentId,
+        kind: NeedKind,
+        amount: u16,
+        consume_food: bool,
+    ) -> Result<(), ActionEffectError> {
+        let index = agent.0 as usize;
+        if consume_food && self.inventories[index].food < FOOD_CONSUMPTION {
+            return Err(ActionEffectError::NoEdibleInventory);
+        }
+        if !scheduler.can_schedule(4) {
+            return Err(ActionEffectError::EventSequenceExhausted);
+        }
+        let mut next = self.needs[index];
+        next.relieve(kind, amount, now);
+        self.schedule_need_thresholds(scheduler, agent, next, now)
+            .map_err(|_| ActionEffectError::EventSequenceExhausted)?;
+        if consume_food {
+            self.inventories[index].food -= FOOD_CONSUMPTION;
+        }
+        self.needs[index] = next;
+        Ok(())
     }
 
     pub(crate) fn policy_retries(&self, agent: AgentId) -> u8 {
@@ -1081,6 +1151,7 @@ impl Population {
     pub(crate) fn perceive(
         &self,
         world: &World,
+        resource_deltas: &ResourceDeltas,
         agent: AgentId,
         radius: u8,
     ) -> Result<PhysicalPerception, PerceptionError> {
@@ -1109,12 +1180,13 @@ impl Population {
         let area = active
             .intersection(requested)
             .ok_or(PerceptionError::OutsideWorld)?;
-        self.perceive_area(world, agent, area)
+        self.perceive_area(world, resource_deltas, agent, area)
     }
 
     pub(crate) fn perceive_area(
         &self,
         world: &World,
+        resource_deltas: &ResourceDeltas,
         agent: AgentId,
         area: WorldRect,
     ) -> Result<PhysicalPerception, PerceptionError> {
@@ -1182,8 +1254,8 @@ impl Population {
                 {
                     try_push(&mut drinkable_water, PerceivedWater { position, source })?;
                 }
-                if let Some(resource) = world
-                    .resource_at(position)
+                if let Some(resource) = resource_deltas
+                    .resource_at(world, position)
                     .map_err(map_perception_query_error)?
                 {
                     try_push(&mut resources, PerceivedResource { position, resource })?;
@@ -1240,9 +1312,20 @@ impl Population {
     }
 
     #[cfg(test)]
+    pub(crate) fn inventory_capacity(&self) -> usize {
+        self.inventories.capacity()
+    }
+
+    #[cfg(test)]
     pub(crate) fn mark_dead(&mut self, agent: AgentId) {
         self.records[agent.0 as usize].activity = AgentActivity::Dead;
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ActionEffectError {
+    NoEdibleInventory,
+    EventSequenceExhausted,
 }
 
 fn invalid_spawn_reason(

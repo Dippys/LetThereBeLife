@@ -2,7 +2,7 @@
 
 Last synchronized: 2026-07-16.
 
-Status: **Active plan**. Phase 1 world foundation and Phase 2 Slices 0-3 are complete. Slice 4 is the next implementation target; later slices are planned and must be completed in order unless this document records a reviewed dependency change.
+Status: **Active plan**. Phase 1 world foundation and Phase 2 Slices 0-4 are complete. Slice 5 is the next implementation target; later slices are planned and must be completed in order unless this document records a reviewed dependency change.
 
 ## Purpose
 
@@ -39,7 +39,7 @@ The repository already provides the world-side contracts needed to begin:
 - deterministic resident cell/feature visitation and the Phase 1 settlement-candidate scenario provide bounded search building blocks.
 - `sim-headless` eagerly materializes the configured bootstrap area before ticking; `sim-viewer` streams terrain asynchronously and currently has no agent presentation.
 
-Slices 0-3 now provide compact agent storage, scheduled movement, one-agent-per-cell occupancy, bounded objective perception, deterministic local routes, analytical physical needs with scheduled threshold outcomes, and an explicitly activated deterministic physical policy with typed diagnostics and bounded retry. Not yet implemented are effective inventory/resource actions, mutable depletion, full sleep behavior, structures, health, death, or richer agent-specific snapshots.
+Slices 0-4 now provide compact agent storage and inventory, scheduled movement, one-agent-per-cell occupancy, bounded objective perception, deterministic local routes, analytical physical needs, an explicitly activated deterministic physical policy, effective gather/eat/drink actions, and sparse permanent generated-resource depletion. Not yet implemented are full sleep behavior, structures, health, death, or richer agent-specific snapshots.
 
 ## Non-negotiable constraints
 
@@ -260,15 +260,15 @@ Connect needs, perception, routes, and activities with a deliberately small dete
 
 Private `sim-core::policy` defines a one-byte `PhysicalGoal` domain for seeking water, seeking food, gathering material, eating, drinking, sleeping, seeking shelter, building shelter, waiting, and incapacitation. One parallel 12-byte `PolicyState` stores the current compact target, generation, goal, phase, retry count, and reason without widening the six-byte hot agent record. `Engine::activate_physical_policy` is explicit and fallible after population initialization; it requires every agent to be idle and schedules one initial decision per agent, while non-activated manual tests and the viewer retain the prior inert population boundary.
 
-Decisions read only the current analytical need view and radius-eight `PhysicalPerception`. Reached needs use normalized integer urgency and the explicit thirst, exposure, hunger, rest tie order. Water/food access targets use Manhattan distance followed by row and column coordinates; no random stream is required because every current tie has a meaningful stable physical key. Inventory-, shelter-, and health-backed candidates are not fabricated before their authoritative slices exist. Current execution can wait, seek and reach fresh-water/food access, begin drink/eat action seams, begin sleep when rest becomes urgent, or report that shelter is deferred. Gather/build/incapacitation variants are reserved compact states and become selectable only when Slices 4, 6, and 7 provide their required objective facts.
+Decisions read only the current analytical need view and radius-eight `PhysicalPerception`. Reached needs use normalized integer urgency and the explicit thirst, exposure, hunger, rest tie order. Water/food access targets use Manhattan distance followed by row and column coordinates; no random stream is required because every current tie has a meaningful stable physical key. Current execution can wait, seek and reach fresh-water/food access, gather food/wood/stone, drink, eat carried food, begin sleep when rest becomes urgent, or report that shelter is deferred. Build and incapacitation variants remain reserved compact states until Slices 6 and 7 provide their required objective facts.
 
-The scheduler retains its 32-byte event record while adding separate action-completion and decision classes. Equal-time order is threshold, action completion, movement, decision, then `AgentId`, class detail, and sequence. One policy generation guarantees a single current commitment; activated engines reject public manual move/route requests with typed `PolicyControlled` errors. A reached need atomically interrupts a route or action, invalidates its movement/policy events, clears the route, rebases activity idle, and schedules a new decision one tick later. Missing targets plus typed perception/route failures schedule capped exponential backoff from 60 through 1,920 ticks; action completions currently emit `DeferredToLaterSlice` and back off instead of pretending that inventory, consumption, sleep completion, shelter, or death already exists. Latest-tick `PolicyDiagnostic` records selection, route/action start, deferral, retry, and stale work with typed reasons/failures for headless reporting.
+The scheduler retains its 32-byte event record while adding separate action-completion and decision classes. Equal-time order is threshold, action completion, movement, decision, then `AgentId`, class detail, and sequence. One policy generation guarantees a single current commitment; activated engines reject public manual move/route requests with typed `PolicyControlled` errors. A reached need atomically interrupts a route or action, invalidates its movement/policy events, clears the route, rebases activity idle, and schedules a new decision one tick later. Missing targets plus typed perception/route failures schedule capped exponential backoff from 60 through 1,920 ticks. Slice 4 gather/eat/drink completions now apply authoritative effects; sleep completion, shelter, and death still emit `DeferredToLaterSlice`. Latest-tick `PolicyDiagnostic` records selection, route/action start/completion, deferral, retry, and stale work with typed reasons/failures for headless reporting.
 
 Unit regressions cover the 12-byte state, one-byte complete goal discriminants, normalized urgency/tie ordering, irrelevant-fact independence, row-major target lookup, positive capped backoff, and complete equal-time class order. The public `physical_agent_slice3` scenario covers activation rejection for an existing manual commitment, explicit single activation, post-activation manual move/route rejection, initial waiting, deterministic replay at the 90,000-tick thirst crossing, one drink commitment, deferred completion, no-target retry, and absence of same-time reaction loops. The ignored release harness records 20, 100, and 10,000-agent policy/event capacity, insertion, extraction, and retained logical bytes in `PERFORMANCE.md`. `sim-headless` now activates the policy and reports selections and failures. D-040 records the durable goal, activation, ordering, commitment, interruption, target, retry, and later-slice-effect boundaries.
 
 ## Slice 4: Water, gathering, inventory, and consumption
 
-Status: **Planned**. Depends on Slices 0-3.
+Status: **Implemented** on 2026-07-16. Depends on Slices 0-3.
 
 ### Objective
 
@@ -301,6 +301,14 @@ Let agents satisfy thirst and hunger, gather food/wood/stone, carry compact reso
 - Eating and drinking change only the intended need/reference values and schedule correct next thresholds.
 - Inventory capacity and overflow are explicit and tested.
 - Delta bytes per modified feature, inventory bytes per agent, gather throughput, and allocation behavior are recorded.
+
+### Implemented result
+
+Private `sim-core::resources` owns a parallel three-byte `InventoryView` per agent and a sparse `BTreeMap` from compact feature positions to changed `u16` remaining capacity. Food, wood, and stone each have an explicit 32-unit carried cap; a gather completion transfers at most four units and clamps to remaining inventory space. Unmodified features retain no mutable entry, depletion is permanent for Phase 2, and `Engine::available_resource_at` plus bounded physical perception compose immutable `World::resource_at` capacity with the sparse delta. `Engine::modified_resource_count` exposes the changed-feature count without exposing mutation handles, and reset clears inventories and deltas while preserving generated residency.
+
+Idle policy decisions gather the nearest usable perceived resource in canonical order; urgent hunger eats one carried food or seeks and gathers food first. Action completions revalidate same/cardinal resources or fresh water, apply in total scheduler order, and then reconsider one tick later. Equal-time gatherers therefore arbitrate by `AgentId`: one may take the last units and later completions receive typed `ResourceDepleted` without underflow. Drinking requires the agent to remain at its access target with resident same/cardinal lake or river water; ocean-only, unloaded, outside-world, and stale/nonadjacent attempts fail. Eating consumes exactly one food. Eating reduces hunger by 4,000 and drinking reduces thirst by 5,000 after exact analytical rebasing; both invalidate and reschedule threshold events without changing the other needs.
+
+Unit tests cover compact layouts, per-kind overflow, gather-capable policy selection, carried-food eating selection, exact atomic eating/no-food behavior, and ocean/unloaded drink rejection. Public `physical_agent_slice4` coverage proves two equal-time gatherers deplete one 12-unit berry feature into exactly one sparse delta while the generated `BaseResource` remains unchanged. The updated Slice 3 replay proves successful drinking and thirst relief. The ignored release harness records exact inventory reservation for 20, 100, and 10,000 agents plus repeated same-feature gather timing and delta retention in `PERFORMANCE.md`. D-041 records the durable inventory, yield, need-effect, depletion, access, and ordering decisions.
 
 ## Slice 5: Rest and sleep
 

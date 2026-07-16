@@ -3,6 +3,7 @@
 mod agent;
 mod needs;
 mod policy;
+mod resources;
 mod routing;
 mod scheduler;
 mod spatial;
@@ -26,6 +27,10 @@ pub use policy::{
     PhysicalGoal, PhysicalPolicyView, PolicyActivationError, PolicyDiagnostic,
     PolicyDiagnosticKind, PolicyFailureReason, PolicyReason,
 };
+pub use resources::{
+    DRINK_THIRST_RELIEF, EAT_HUNGER_RELIEF, FOOD_CONSUMPTION, GATHER_YIELD,
+    INVENTORY_CAPACITY_PER_KIND, InventoryView,
+};
 pub use routing::{MAX_ROUTE_EXPANSIONS, RouteRequest, RouteRequestError};
 pub use world::{
     BaseResource, BiomeType, CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkInspection,
@@ -40,8 +45,9 @@ pub use world::{
 
 use std::time::Duration;
 
-use agent::Population;
+use agent::{ActionEffectError, Population};
 use policy::{PolicyAction, PolicySelection, retry_delay, select};
+use resources::ResourceDeltas;
 use routing::RoutePlanner;
 use scheduler::{EventClass, MAX_DUE_EVENTS_PER_TICK, Scheduler};
 
@@ -128,6 +134,7 @@ pub struct Engine {
     need_outcomes: Vec<NeedThresholdEventOutcome>,
     policy_diagnostics: Vec<PolicyDiagnostic>,
     policy_active: bool,
+    resource_deltas: ResourceDeltas,
     route_planner: RoutePlanner,
 }
 
@@ -151,6 +158,7 @@ impl Engine {
             need_outcomes: Vec::new(),
             policy_diagnostics: Vec::new(),
             policy_active: false,
+            resource_deltas: ResourceDeltas::default(),
             route_planner: RoutePlanner::default(),
         }
     }
@@ -181,6 +189,7 @@ impl Engine {
                 self.need_outcomes.clear();
                 self.policy_diagnostics.clear();
                 self.policy_active = false;
+                self.resource_deltas = ResourceDeltas::default();
                 self.route_planner = RoutePlanner::default();
                 EngineCommandOutcome::Applied
             }
@@ -427,7 +436,8 @@ impl Engine {
         agent: AgentId,
         radius: u8,
     ) -> Result<PhysicalPerception, PerceptionError> {
-        self.population.perceive(&self.world, agent, radius)
+        self.population
+            .perceive(&self.world, &self.resource_deltas, agent, radius)
     }
 
     /// Returns objective facts for a bounded half-open rectangle inside the active area.
@@ -436,7 +446,8 @@ impl Engine {
         agent: AgentId,
         area: WorldRect,
     ) -> Result<PhysicalPerception, PerceptionError> {
-        self.population.perceive_area(&self.world, agent, area)
+        self.population
+            .perceive_area(&self.world, &self.resource_deltas, agent, area)
     }
 
     /// Returns at most `limit` canonical read-only views in ascending ID order.
@@ -462,6 +473,24 @@ impl Engine {
     /// Analytically evaluates one agent's physical needs at current simulation time.
     pub fn physical_needs(&self, agent: AgentId) -> Result<PhysicalNeedsView, NeedQueryError> {
         self.population.needs_view(agent, self.time)
+    }
+
+    /// Returns compact carried resource amounts for one living agent.
+    pub fn inventory(&self, agent: AgentId) -> Option<InventoryView> {
+        self.population.inventory(agent)
+    }
+
+    /// Composes immutable generated capacity with sparse simulation-owned depletion.
+    pub fn available_resource_at(
+        &self,
+        position: WorldPosition,
+    ) -> Result<Option<BaseResource>, WorldQueryError> {
+        self.resource_deltas.resource_at(&self.world, position)
+    }
+
+    /// Number of generated features with simulation-owned remaining-capacity state.
+    pub fn modified_resource_count(&self) -> usize {
+        self.resource_deltas.len()
     }
 
     /// Activates autonomous physical decisions after population initialization.
@@ -616,7 +645,8 @@ impl Engine {
             });
             return;
         }
-        let Some((view, needs)) = self.population.policy_context(event.agent, self.time) else {
+        let Some((view, needs, inventory)) = self.population.policy_context(event.agent, self.time)
+        else {
             return;
         };
         let perception = match self.perceive_physical(event.agent, PHYSICAL_POLICY_RADIUS) {
@@ -632,7 +662,7 @@ impl Engine {
                 return;
             }
         };
-        let selection = select(view.position, needs, &perception);
+        let selection = select(view.position, needs, inventory, &perception);
         self.policy_diagnostics.push(PolicyDiagnostic {
             agent: event.agent,
             at: self.time,
@@ -689,7 +719,7 @@ impl Engine {
             self.population.clear_route(agent);
             let action_goal = match selection.goal {
                 PhysicalGoal::SeekWater => PhysicalGoal::Drink,
-                PhysicalGoal::SeekFood => PhysicalGoal::Eat,
+                PhysicalGoal::SeekFood => PhysicalGoal::GatherMaterial,
                 goal => goal,
             };
             match self.population.schedule_policy_action(
@@ -757,10 +787,24 @@ impl Engine {
     }
 
     fn apply_policy_action_completion(&mut self, event: scheduler::ScheduledEvent) {
-        let Some((goal, target, reason)) = self
+        let completion = self
             .population
-            .complete_policy_action(&mut self.scheduler, event)
-        else {
+            .complete_policy_action(&mut self.scheduler, event);
+        let Some((goal, target, reason)) = (match completion {
+            Ok(completion) => completion,
+            Err(error) => {
+                self.policy_diagnostics.push(PolicyDiagnostic {
+                    agent: event.agent,
+                    at: self.time,
+                    goal: event.goal,
+                    target: Some(event.target.world()),
+                    reason: PolicyReason::Retry,
+                    kind: PolicyDiagnosticKind::ActionCompleted,
+                    failure: Some(move_failure(error)),
+                });
+                return;
+            }
+        }) else {
             self.policy_diagnostics.push(PolicyDiagnostic {
                 agent: event.agent,
                 at: self.time,
@@ -772,22 +816,228 @@ impl Engine {
             });
             return;
         };
-        self.policy_diagnostics.push(PolicyDiagnostic {
-            agent: event.agent,
-            at: self.time,
-            goal,
-            target: Some(target),
-            reason,
-            kind: PolicyDiagnosticKind::ActionDeferred,
-            failure: Some(PolicyFailureReason::DeferredToLaterSlice),
+        let result = match goal {
+            PhysicalGoal::Drink => self.apply_drink(event.agent, target),
+            PhysicalGoal::Eat => self.apply_eat(event.agent),
+            PhysicalGoal::GatherMaterial => self.apply_gather(event.agent, reason),
+            PhysicalGoal::Sleep
+            | PhysicalGoal::SeekShelter
+            | PhysicalGoal::BuildShelter
+            | PhysicalGoal::Incapacitated => Err(PolicyFailureReason::DeferredToLaterSlice),
+            PhysicalGoal::SeekWater | PhysicalGoal::SeekFood | PhysicalGoal::Wait => {
+                Err(PolicyFailureReason::InconsistentState)
+            }
+        };
+        match result {
+            Ok(()) => {
+                self.policy_diagnostics.push(PolicyDiagnostic {
+                    agent: event.agent,
+                    at: self.time,
+                    goal,
+                    target: Some(target),
+                    reason,
+                    kind: PolicyDiagnosticKind::ActionCompleted,
+                    failure: None,
+                });
+                if let Err(error) = self.population.schedule_policy_decision(
+                    &mut self.scheduler,
+                    self.time,
+                    event.agent,
+                    1,
+                    PolicyReason::ActionCompleted,
+                    false,
+                ) {
+                    self.schedule_policy_retry(
+                        event.agent,
+                        goal,
+                        Some(target),
+                        PolicyReason::Retry,
+                        move_failure(error),
+                    );
+                }
+            }
+            Err(failure) => {
+                let deferred = failure == PolicyFailureReason::DeferredToLaterSlice;
+                self.policy_diagnostics.push(PolicyDiagnostic {
+                    agent: event.agent,
+                    at: self.time,
+                    goal,
+                    target: Some(target),
+                    reason,
+                    kind: if deferred {
+                        PolicyDiagnosticKind::ActionDeferred
+                    } else {
+                        PolicyDiagnosticKind::ActionCompleted
+                    },
+                    failure: Some(failure),
+                });
+                self.schedule_policy_retry(
+                    event.agent,
+                    goal,
+                    Some(target),
+                    PolicyReason::Retry,
+                    failure,
+                );
+            }
+        }
+    }
+
+    fn apply_drink(
+        &mut self,
+        agent: AgentId,
+        target: WorldPosition,
+    ) -> Result<(), PolicyFailureReason> {
+        let position = self
+            .population
+            .view(agent)
+            .ok_or(PolicyFailureReason::InconsistentState)?
+            .position;
+        if position != target || !self.has_adjacent_drinkable_water(position)? {
+            return Err(PolicyFailureReason::InvalidWaterAccess);
+        }
+        self.population
+            .apply_need_relief(
+                &mut self.scheduler,
+                self.time,
+                agent,
+                NeedKind::Thirst,
+                DRINK_THIRST_RELIEF,
+                false,
+            )
+            .map_err(action_effect_failure)
+    }
+
+    fn apply_eat(&mut self, agent: AgentId) -> Result<(), PolicyFailureReason> {
+        self.population
+            .apply_need_relief(
+                &mut self.scheduler,
+                self.time,
+                agent,
+                NeedKind::Hunger,
+                EAT_HUNGER_RELIEF,
+                true,
+            )
+            .map_err(action_effect_failure)
+    }
+
+    fn apply_gather(
+        &mut self,
+        agent: AgentId,
+        reason: PolicyReason,
+    ) -> Result<(), PolicyFailureReason> {
+        let position = self
+            .population
+            .view(agent)
+            .ok_or(PolicyFailureReason::InconsistentState)?
+            .position;
+        let inventory = self
+            .population
+            .inventory(agent)
+            .ok_or(PolicyFailureReason::InconsistentState)?;
+        let candidate = [
+            WorldPosition {
+                x: position.x,
+                y: position.y - 1,
+            },
+            WorldPosition {
+                x: position.x - 1,
+                y: position.y,
+            },
+            position,
+            WorldPosition {
+                x: position.x + 1,
+                y: position.y,
+            },
+            WorldPosition {
+                x: position.x,
+                y: position.y + 1,
+            },
+        ]
+        .into_iter()
+        .filter_map(|candidate| {
+            self.resource_deltas
+                .resource_at(&self.world, candidate)
+                .ok()
+                .flatten()
+                .filter(|resource| {
+                    inventory.can_add(resource.kind)
+                        && (reason != PolicyReason::HungerThreshold
+                            || resource.kind == ResourceKind::Food)
+                })
+                .map(|resource| (candidate, resource))
+        })
+        .min_by_key(|(candidate, resource)| {
+            (
+                position.x.abs_diff(candidate.x) + position.y.abs_diff(candidate.y),
+                candidate.y,
+                candidate.x,
+                resource.kind as u8,
+            )
         });
-        self.schedule_policy_retry(
-            event.agent,
-            goal,
-            Some(target),
-            PolicyReason::Retry,
-            PolicyFailureReason::DeferredToLaterSlice,
-        );
+        let Some((resource_position, resource)) = candidate else {
+            return Err(
+                if [ResourceKind::Food, ResourceKind::Wood, ResourceKind::Stone]
+                    .into_iter()
+                    .all(|kind| !inventory.can_add(kind))
+                {
+                    PolicyFailureReason::InventoryFull
+                } else {
+                    PolicyFailureReason::ResourceDepleted
+                },
+            );
+        };
+        let maximum = inventory
+            .remaining_capacity(resource.kind)
+            .min(GATHER_YIELD);
+        let Some((kind, gathered)) = self
+            .resource_deltas
+            .gather(&self.world, resource_position, maximum)
+            .map_err(|_| PolicyFailureReason::TargetUnavailable)?
+        else {
+            return Err(PolicyFailureReason::ResourceDepleted);
+        };
+        let accepted = self.population.add_inventory(agent, kind, gathered);
+        debug_assert_eq!(accepted, gathered);
+        Ok(())
+    }
+
+    fn has_adjacent_drinkable_water(
+        &self,
+        position: WorldPosition,
+    ) -> Result<bool, PolicyFailureReason> {
+        let mut failure = None;
+        for candidate in [
+            position,
+            WorldPosition {
+                x: position.x,
+                y: position.y - 1,
+            },
+            WorldPosition {
+                x: position.x - 1,
+                y: position.y,
+            },
+            WorldPosition {
+                x: position.x + 1,
+                y: position.y,
+            },
+            WorldPosition {
+                x: position.x,
+                y: position.y + 1,
+            },
+        ] {
+            match self.world.water_at(candidate) {
+                Ok(Some(source)) if source.is_drinkable() => return Ok(true),
+                Ok(_) => {}
+                Err(WorldQueryError::Unloaded) => failure = Some(PolicyFailureReason::Unloaded),
+                Err(WorldQueryError::OutsideWorldBounds) => {
+                    failure.get_or_insert(PolicyFailureReason::OutsideWorld);
+                }
+                Err(WorldQueryError::NonCardinalStep) => {
+                    return Err(PolicyFailureReason::InconsistentState);
+                }
+            }
+        }
+        failure.map_or(Ok(false), Err)
     }
 
     fn schedule_policy_retry(
@@ -974,6 +1224,13 @@ fn move_failure(error: MoveRequestError) -> PolicyFailureReason {
     }
 }
 
+fn action_effect_failure(error: ActionEffectError) -> PolicyFailureReason {
+    match error {
+        ActionEffectError::NoEdibleInventory => PolicyFailureReason::NoEdibleInventory,
+        ActionEffectError::EventSequenceExhausted => PolicyFailureReason::EventSequenceExhausted,
+    }
+}
+
 impl Default for Engine {
     fn default() -> Self {
         Self::new(EngineConfig::default())
@@ -1034,6 +1291,247 @@ mod tests {
         });
         engine.materialize_initial_area().unwrap();
         engine
+    }
+
+    #[test]
+    fn eating_consumes_one_food_and_rebases_only_hunger() {
+        let mut engine = resident_engine(64);
+        let position = standable_steps(&engine, 1)[0].0;
+        engine
+            .initialize_population(
+                PopulationInit {
+                    active_area: engine.world().initial_bounds(),
+                    population: 1,
+                },
+                &[position],
+            )
+            .unwrap();
+        engine.time = SimTime::from_ticks(210_000);
+        assert_eq!(
+            engine
+                .population
+                .add_inventory(AgentId::new(0), ResourceKind::Food, 2),
+            2
+        );
+        let before = engine.physical_needs(AgentId::new(0)).unwrap();
+        engine.apply_eat(AgentId::new(0)).unwrap();
+        let after = engine.physical_needs(AgentId::new(0)).unwrap();
+        assert_eq!(engine.inventory(AgentId::new(0)).unwrap().food, 1);
+        assert_eq!(after.hunger.value, before.hunger.value - EAT_HUNGER_RELIEF);
+        assert_eq!(after.thirst.value, before.thirst.value);
+        assert_eq!(after.rest.value, before.rest.value);
+        assert_eq!(after.exposure.value, before.exposure.value);
+        assert_eq!(
+            after.next_threshold,
+            Some(NeedThreshold {
+                kind: NeedKind::Hunger,
+                due: SimTime::from_ticks(330_000),
+            })
+        );
+    }
+
+    #[test]
+    fn eating_without_food_is_an_explicit_atomic_failure() {
+        let mut engine = resident_engine(64);
+        let position = standable_steps(&engine, 1)[0].0;
+        engine
+            .initialize_population(
+                PopulationInit {
+                    active_area: engine.world().initial_bounds(),
+                    population: 1,
+                },
+                &[position],
+            )
+            .unwrap();
+        engine.time = SimTime::from_ticks(210_000);
+        let before = engine.physical_needs(AgentId::new(0)).unwrap();
+        assert_eq!(
+            engine.apply_eat(AgentId::new(0)),
+            Err(PolicyFailureReason::NoEdibleInventory)
+        );
+        assert_eq!(engine.physical_needs(AgentId::new(0)).unwrap(), before);
+        assert_eq!(engine.inventory(AgentId::new(0)).unwrap().food, 0);
+    }
+
+    #[test]
+    fn inventory_addition_clamps_at_the_per_kind_capacity() {
+        let mut engine = resident_engine(64);
+        let position = standable_steps(&engine, 1)[0].0;
+        engine
+            .initialize_population(
+                PopulationInit {
+                    active_area: engine.world().initial_bounds(),
+                    population: 1,
+                },
+                &[position],
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .population
+                .add_inventory(AgentId::new(0), ResourceKind::Wood, u8::MAX),
+            INVENTORY_CAPACITY_PER_KIND
+        );
+        assert_eq!(
+            engine
+                .population
+                .add_inventory(AgentId::new(0), ResourceKind::Wood, 1),
+            0
+        );
+        assert_eq!(
+            engine.inventory(AgentId::new(0)).unwrap().wood,
+            INVENTORY_CAPACITY_PER_KIND
+        );
+    }
+
+    #[test]
+    fn action_completion_sequence_exhaustion_settles_idle_without_applying_effects() {
+        let mut engine = resident_engine(64);
+        let position = standable_steps(&engine, 1)[0].0;
+        engine
+            .initialize_population(
+                PopulationInit {
+                    active_area: engine.world().initial_bounds(),
+                    population: 1,
+                },
+                &[position],
+            )
+            .unwrap();
+        engine
+            .population
+            .schedule_policy_action(
+                &mut engine.scheduler,
+                SimTime::ZERO,
+                AgentId::new(0),
+                PolicyAction {
+                    goal: PhysicalGoal::GatherMaterial,
+                    target: position,
+                    reason: PolicyReason::NoUrgentNeed,
+                    duration: 1,
+                },
+            )
+            .unwrap();
+        engine.scheduler.exhaust_sequence();
+        engine.tick();
+        assert_eq!(
+            engine.agent_views(1).next().unwrap().activity,
+            AgentActivity::Idle
+        );
+        assert!(!engine.physical_policy(AgentId::new(0)).unwrap().committed);
+        assert_eq!(engine.modified_resource_count(), 0);
+        assert!(engine.policy_diagnostics().iter().any(|diagnostic| {
+            diagnostic.kind == PolicyDiagnosticKind::ActionCompleted
+                && diagnostic.failure == Some(PolicyFailureReason::EventSequenceExhausted)
+        }));
+    }
+
+    #[test]
+    fn drinking_rejects_ocean_only_and_unloaded_access() {
+        let coast = WorldRect {
+            min: WorldPosition {
+                x: -16_128,
+                y: -16_896,
+            },
+            max: WorldPosition {
+                x: -15_104,
+                y: -15_872,
+            },
+        };
+        let mut ocean_engine = Engine::new(EngineConfig {
+            seed: 1,
+            world: WorldConfig::new(64, 64).unwrap(),
+            ..EngineConfig::default()
+        });
+        ocean_engine.command(EngineCommand::GenerateWorldArea(coast));
+        let bounds = coast;
+        let ocean_access = (bounds.min.y + 1..bounds.max.y - 1)
+            .flat_map(|y| (bounds.min.x + 1..bounds.max.x - 1).map(move |x| WorldPosition { x, y }))
+            .find(|&position| {
+                ocean_engine.world().standability_at(position) == Ok(Standability::Standable)
+                    && [
+                        WorldPosition {
+                            x: position.x,
+                            y: position.y - 1,
+                        },
+                        WorldPosition {
+                            x: position.x - 1,
+                            y: position.y,
+                        },
+                        WorldPosition {
+                            x: position.x + 1,
+                            y: position.y,
+                        },
+                        WorldPosition {
+                            x: position.x,
+                            y: position.y + 1,
+                        },
+                    ]
+                    .into_iter()
+                    .any(|candidate| {
+                        ocean_engine.world().water_at(candidate) == Ok(Some(WaterSource::Ocean))
+                    })
+            })
+            .expect("seeded resident area should contain an ocean shore");
+        ocean_engine
+            .initialize_population(
+                PopulationInit {
+                    active_area: bounds,
+                    population: 1,
+                },
+                &[ocean_access],
+            )
+            .unwrap();
+        assert_eq!(
+            ocean_engine.apply_drink(AgentId::new(0), ocean_access),
+            Err(PolicyFailureReason::InvalidWaterAccess)
+        );
+
+        let mut unloaded_engine = resident_engine(64);
+        let bounds = unloaded_engine.world().initial_bounds();
+        let unloaded_access = (bounds.min.y..bounds.max.y)
+            .map(|y| WorldPosition {
+                x: bounds.max.x - 1,
+                y,
+            })
+            .find(|&position| {
+                unloaded_engine.world().standability_at(position) == Ok(Standability::Standable)
+                    && [
+                        position,
+                        WorldPosition {
+                            x: position.x,
+                            y: position.y - 1,
+                        },
+                        WorldPosition {
+                            x: position.x - 1,
+                            y: position.y,
+                        },
+                        WorldPosition {
+                            x: position.x,
+                            y: position.y + 1,
+                        },
+                    ]
+                    .into_iter()
+                    .all(|candidate| {
+                        unloaded_engine
+                            .world()
+                            .water_at(candidate)
+                            .is_ok_and(|source| !source.is_some_and(WaterSource::is_drinkable))
+                    })
+            })
+            .expect("seeded boundary should contain a dry standable access");
+        unloaded_engine
+            .initialize_population(
+                PopulationInit {
+                    active_area: bounds,
+                    population: 1,
+                },
+                &[unloaded_access],
+            )
+            .unwrap();
+        assert_eq!(
+            unloaded_engine.apply_drink(AgentId::new(0), unloaded_access),
+            Err(PolicyFailureReason::Unloaded)
+        );
     }
 
     fn standable_steps(engine: &Engine, count: usize) -> Vec<(WorldPosition, WorldPosition)> {
@@ -1732,6 +2230,68 @@ mod tests {
                 std::mem::align_of::<scheduler::ScheduledEvent>(),
             );
         }
+    }
+
+    #[test]
+    #[ignore = "release-only Slice 4 inventory and resource-delta measurement"]
+    fn release_physical_agent_slice_four_measurement() {
+        assert!(
+            !std::hint::black_box(cfg!(debug_assertions)),
+            "run this measurement in release mode"
+        );
+        eprintln!(
+            "population\tinventory_size\tinventory_align\tinventory_capacity\tinventory_logical_bytes"
+        );
+        for population in [20_u32, 100, 10_000] {
+            let mut engine = resident_engine(512);
+            engine
+                .initialize_population(
+                    PopulationInit {
+                        active_area: engine.world().initial_bounds(),
+                        population,
+                    },
+                    &[],
+                )
+                .unwrap();
+            let inventory_capacity = engine.population.inventory_capacity();
+            eprintln!(
+                "{population}\t{}\t{}\t{inventory_capacity}\t{}",
+                size_of::<InventoryView>(),
+                std::mem::align_of::<InventoryView>(),
+                inventory_capacity * size_of::<InventoryView>(),
+            );
+        }
+
+        let engine = resident_engine(256);
+        let bounds = engine.world().initial_bounds();
+        let position = (bounds.min.y..bounds.max.y)
+            .flat_map(|y| (bounds.min.x..bounds.max.x).map(move |x| WorldPosition { x, y }))
+            .find(|&position| {
+                engine
+                    .world()
+                    .resource_at(position)
+                    .is_ok_and(|value| value.is_some())
+            })
+            .expect("measurement world should contain one generated resource");
+        let base = engine.world().resource_at(position).unwrap().unwrap();
+        let mut deltas = ResourceDeltas::default();
+        let start = Instant::now();
+        let mut gathered = 0_u16;
+        while let Some((_, amount)) = deltas.gather(engine.world(), position, 1).unwrap() {
+            gathered += u16::from(amount);
+        }
+        let gather_ns = start.elapsed().as_nanos();
+        assert_eq!(gathered, base.capacity);
+        assert_eq!(deltas.len(), 1);
+        eprintln!(
+            "resource_kind={:?}\tbase_capacity={}\tdelta_entry_size={}\tdelta_entry_align={}\tdelta_records={}\tgather_completions={}\tgather_total_ns={gather_ns}",
+            base.kind,
+            base.capacity,
+            size_of::<resources::ResourceDelta>(),
+            std::mem::align_of::<resources::ResourceDelta>(),
+            deltas.len(),
+            gathered,
+        );
     }
 
     #[test]
