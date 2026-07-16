@@ -139,10 +139,32 @@ impl NeedState {
         true
     }
 
+    #[cfg(test)]
     pub(crate) fn sleep_recovery_due(self, quality: SleepQuality, now: SimTime) -> Option<SimTime> {
+        self.sleep_recovery_due_for(quality, now, false)
+    }
+
+    pub(crate) fn sleep_recovery_due_for(
+        self,
+        quality: SleepQuality,
+        now: SimTime,
+        recover_exposure: bool,
+    ) -> Option<SimTime> {
         let remaining = self.numerator(NeedKind::Rest, now);
         let recovery = u128::from(quality.rest_recovery_per_period());
-        let elapsed = remaining.div_ceil(recovery).max(1);
+        let rest_elapsed = remaining.div_ceil(recovery);
+        let exposure_elapsed = if recover_exposure {
+            let target =
+                u128::from(threshold(NeedKind::Exposure) - 1) * u128::from(NEED_RATE_PERIOD_TICKS);
+            let remaining = self
+                .numerator(NeedKind::Exposure, now)
+                .saturating_sub(target);
+            let recovery = u128::from(quality.exposure_rate_per_period().unsigned_abs());
+            remaining.div_ceil(recovery)
+        } else {
+            0
+        };
+        let elapsed = rest_elapsed.max(exposure_elapsed).max(1);
         now.checked_add(u64::try_from(elapsed).ok()?)
     }
 
@@ -262,6 +284,7 @@ const fn rates_for(activity: AgentActivity) -> [i8; 4] {
 const fn sleep_rates(quality: SleepQuality) -> [i8; 4] {
     let mut rates = ACTIVITY_RATES[4];
     rates[NeedKind::Rest as usize] = -(quality.rest_recovery_per_period() as i8);
+    rates[NeedKind::Exposure as usize] = quality.exposure_rate_per_period();
     rates
 }
 
@@ -370,6 +393,37 @@ mod tests {
                 SimTime::from_ticks(open_due.ticks() - 1),
             ),
             Some(open_due)
+        );
+    }
+
+    #[test]
+    fn sheltered_sleep_reduces_exposure_while_open_ground_increases_it() {
+        let mut open = NeedState::new(SimTime::ZERO);
+        open.values[NeedKind::Exposure.index()] = 100;
+        let mut sheltered = open;
+        open.transition_sleep(SleepQuality::OpenGround, SimTime::ZERO);
+        sheltered.transition_sleep(SleepQuality::Sheltered, SimTime::ZERO);
+        let at = SimTime::from_ticks(60);
+        assert_eq!(open.view(AgentId::new(0), at).exposure.value, 102);
+        assert_eq!(sheltered.view(AgentId::new(0), at).exposure.value, 96);
+    }
+
+    #[test]
+    fn exposure_driven_shelter_sleep_predicts_one_below_threshold_interval() {
+        let mut state = NeedState::new(SimTime::ZERO);
+        state.values[NeedKind::Rest.index()] = 0;
+        state.values[NeedKind::Exposure.index()] = threshold(NeedKind::Exposure);
+        assert_eq!(
+            state.sleep_recovery_due_for(SleepQuality::Sheltered, SimTime::ZERO, true),
+            Some(SimTime::from_ticks(15))
+        );
+        state.transition_sleep(SleepQuality::Sheltered, SimTime::ZERO);
+        assert!(
+            state
+                .view(AgentId::new(0), SimTime::from_ticks(15))
+                .exposure
+                .value
+                < threshold(NeedKind::Exposure)
         );
     }
 

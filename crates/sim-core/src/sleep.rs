@@ -1,6 +1,6 @@
 use std::{error::Error, fmt};
 
-use crate::{AgentId, SimTime, WorldPosition};
+use crate::{AgentId, SimTime, StructureId, WorldPosition};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -14,6 +14,13 @@ impl SleepQuality {
         match self {
             Self::OpenGround => 8,
             Self::Sheltered => 12,
+        }
+    }
+
+    pub(crate) const fn exposure_rate_per_period(self) -> i8 {
+        match self {
+            Self::OpenGround => 2,
+            Self::Sheltered => -4,
         }
     }
 }
@@ -63,6 +70,7 @@ pub enum SleepRequestError {
     Water,
     BlockingFeature,
     Occupied(AgentId),
+    StructureOccupied(StructureId),
     UnsafeExposure,
     NotAtLocation,
     TimeOverflow,

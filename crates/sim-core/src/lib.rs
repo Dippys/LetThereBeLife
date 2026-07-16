@@ -8,6 +8,7 @@ mod routing;
 mod scheduler;
 mod sleep;
 mod spatial;
+mod structures;
 mod world;
 mod worldgen;
 
@@ -37,6 +38,11 @@ pub use sleep::{
     SleepDiagnostic, SleepDiagnosticKind, SleepInterruptionReason, SleepQuality, SleepRequestError,
     SleepView,
 };
+pub use structures::{
+    BuildShelterError, SHELTER_BUILD_TICKS, SHELTER_STONE_COST, SHELTER_WOOD_COST,
+    StructureDiagnostic, StructureDiagnosticKind, StructureId, StructureKind, StructureState,
+    StructureView,
+};
 pub use world::{
     BaseResource, BiomeType, CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkInspection,
     ChunkLoadRequest, ChunkLocalPosition, ChunkPresence, ClimateSample, DEFAULT_INITIAL_WORLD_SIZE,
@@ -50,12 +56,13 @@ pub use world::{
 
 use std::time::Duration;
 
-use agent::{ActionEffectError, Population};
+use agent::{ActionEffectError, MovementEnvironment, Population};
 use policy::{PolicyAction, PolicySelection, retry_delay, select};
 use resources::ResourceDeltas;
-use routing::RoutePlanner;
+use routing::{RouteEnvironment, RoutePlanner};
 use scheduler::{EventClass, MAX_DUE_EVENTS_PER_TICK, Scheduler};
 use sleep::interruption_for_need;
+use structures::StructureStore;
 
 /// Immutable settings used to construct or reset a simulation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,6 +130,7 @@ pub struct SimulationSnapshot {
     pub seed: u64,
     pub agent_count: u32,
     pub scheduled_event_count: u32,
+    pub structure_count: u32,
 }
 
 /// Owns simulation state. Presentation code must not mutate its fields directly.
@@ -140,8 +148,10 @@ pub struct Engine {
     need_outcomes: Vec<NeedThresholdEventOutcome>,
     policy_diagnostics: Vec<PolicyDiagnostic>,
     sleep_diagnostics: Vec<SleepDiagnostic>,
+    structure_diagnostics: Vec<StructureDiagnostic>,
     policy_active: bool,
     resource_deltas: ResourceDeltas,
+    structures: StructureStore,
     route_planner: RoutePlanner,
 }
 
@@ -165,8 +175,10 @@ impl Engine {
             need_outcomes: Vec::new(),
             policy_diagnostics: Vec::new(),
             sleep_diagnostics: Vec::new(),
+            structure_diagnostics: Vec::new(),
             policy_active: false,
             resource_deltas: ResourceDeltas::default(),
+            structures: StructureStore::default(),
             route_planner: RoutePlanner::default(),
         }
     }
@@ -197,8 +209,10 @@ impl Engine {
                 self.need_outcomes.clear();
                 self.policy_diagnostics.clear();
                 self.sleep_diagnostics.clear();
+                self.structure_diagnostics.clear();
                 self.policy_active = false;
                 self.resource_deltas = ResourceDeltas::default();
+                self.structures = StructureStore::default();
                 self.route_planner = RoutePlanner::default();
                 EngineCommandOutcome::Applied
             }
@@ -226,6 +240,7 @@ impl Engine {
         self.need_outcomes.clear();
         self.policy_diagnostics.clear();
         self.sleep_diagnostics.clear();
+        self.structure_diagnostics.clear();
         let mut processed = 0_usize;
         while processed < MAX_DUE_EVENTS_PER_TICK {
             let Some(event) = self.scheduler.pop_due(self.time) else {
@@ -234,9 +249,23 @@ impl Engine {
             if event.class == EventClass::NeedThreshold {
                 let outcome = self.population.apply_need_threshold(event);
                 if outcome.outcome == NeedThresholdOutcomeKind::Reached {
+                    let construction_cancelled = self.cancel_construction(outcome.agent);
                     let sleeping = self.population.sleep_view(outcome.agent);
                     let interruption = interruption_for_need(outcome.kind);
-                    if sleeping.is_some() && interruption.is_some() {
+                    if construction_cancelled {
+                        if self
+                            .population
+                            .interrupt_for_policy_decision(
+                                &mut self.scheduler,
+                                self.time,
+                                outcome.agent,
+                                self.policy_active,
+                            )
+                            .is_err()
+                        {
+                            self.population.force_settle_idle(self.time, outcome.agent);
+                        }
+                    } else if sleeping.is_some() && interruption.is_some() {
                         let result = self.population.interrupt_for_policy_decision(
                             &mut self.scheduler,
                             self.time,
@@ -259,13 +288,18 @@ impl Engine {
                                 interruption: Some(reason),
                             });
                         }
-                    } else if self.policy_active {
-                        let _ = self.population.interrupt_for_policy_decision(
-                            &mut self.scheduler,
-                            self.time,
-                            outcome.agent,
-                            true,
-                        );
+                    } else if self.policy_active
+                        && self
+                            .population
+                            .interrupt_for_policy_decision(
+                                &mut self.scheduler,
+                                self.time,
+                                outcome.agent,
+                                true,
+                            )
+                            .is_err()
+                    {
+                        self.population.force_settle_idle(self.time, outcome.agent);
                     }
                 }
                 self.need_outcomes.push(outcome);
@@ -282,9 +316,14 @@ impl Engine {
                 processed += 1;
                 continue;
             }
-            let outcome = self
-                .population
-                .apply_movement(&mut self.scheduler, &self.world, event);
+            let outcome = self.population.apply_movement(
+                &mut self.scheduler,
+                MovementEnvironment {
+                    world: &self.world,
+                    structures: &self.structures,
+                },
+                event,
+            );
             let agent = outcome.agent;
             let kind = outcome.kind;
             self.movement_outcomes.push(outcome);
@@ -302,7 +341,8 @@ impl Engine {
                 | MovementOutcomeKind::Unloaded
                 | MovementOutcomeKind::OutsideWorld
                 | MovementOutcomeKind::OutsideActiveArea
-                | MovementOutcomeKind::Blocked(_) => {
+                | MovementOutcomeKind::Blocked(_)
+                | MovementOutcomeKind::BlockedByStructure(_) => {
                     if self.population.route_request(agent).is_some() {
                         self.finish_route(agent, map_movement_route_failure(kind));
                     }
@@ -415,7 +455,10 @@ impl Engine {
         self.compact_scheduler_if_needed();
         self.population.schedule_movement(
             &mut self.scheduler,
-            &self.world,
+            MovementEnvironment {
+                world: &self.world,
+                structures: &self.structures,
+            },
             self.time,
             agent,
             target,
@@ -442,9 +485,12 @@ impl Engine {
         self.compact_scheduler_if_needed();
         let (origin, active_area) = self.population.route_context(agent)?;
         let plan = self.route_planner.plan(
-            &self.world,
-            self.population.spatial(),
-            active_area,
+            RouteEnvironment {
+                world: &self.world,
+                occupancy: self.population.spatial(),
+                structures: &self.structures,
+                active_area,
+            },
             agent,
             origin,
             request,
@@ -453,7 +499,10 @@ impl Engine {
             .population
             .schedule_route_step(
                 &mut self.scheduler,
-                &self.world,
+                MovementEnvironment {
+                    world: &self.world,
+                    structures: &self.structures,
+                },
                 self.time,
                 agent,
                 request,
@@ -474,8 +523,13 @@ impl Engine {
         agent: AgentId,
         radius: u8,
     ) -> Result<PhysicalPerception, PerceptionError> {
-        self.population
-            .perceive(&self.world, &self.resource_deltas, agent, radius)
+        self.population.perceive(
+            &self.world,
+            &self.resource_deltas,
+            &self.structures,
+            agent,
+            radius,
+        )
     }
 
     /// Returns objective facts for a bounded half-open rectangle inside the active area.
@@ -484,8 +538,13 @@ impl Engine {
         agent: AgentId,
         area: WorldRect,
     ) -> Result<PhysicalPerception, PerceptionError> {
-        self.population
-            .perceive_area(&self.world, &self.resource_deltas, agent, area)
+        self.population.perceive_area(
+            &self.world,
+            &self.resource_deltas,
+            &self.structures,
+            agent,
+            area,
+        )
     }
 
     /// Returns at most `limit` canonical read-only views in ascending ID order.
@@ -540,9 +599,14 @@ impl Engine {
         if self.policy_active {
             return Err(SleepRequestError::PolicyControlled);
         }
-        let quality =
-            self.population
-                .validate_sleep_location(&self.world, self.time, agent, position)?;
+        let quality = self.population.validate_sleep_location(
+            &self.world,
+            self.time,
+            agent,
+            position,
+            self.structures.is_sheltered_access(position),
+            self.structures.structure_at(position),
+        )?;
         self.compact_scheduler_if_needed();
         let sleep = self.population.schedule_sleep(
             &mut self.scheduler,
@@ -569,6 +633,28 @@ impl Engine {
     /// Sleep starts, planned wakes, and threshold interruptions from the latest advancing tick.
     pub fn sleep_diagnostics(&self) -> &[SleepDiagnostic] {
         &self.sleep_diagnostics
+    }
+
+    /// Starts a one-cell shelter build from a cardinally adjacent access cell.
+    pub fn request_build_shelter(
+        &mut self,
+        agent: AgentId,
+        site: WorldPosition,
+    ) -> Result<StructureView, BuildShelterError> {
+        if self.policy_active {
+            return Err(BuildShelterError::PolicyControlled);
+        }
+        self.start_shelter_build(agent, site, PolicyReason::NoUrgentNeed)
+    }
+
+    /// Returns at most `limit` live structures in stable identity order.
+    pub fn structure_views(&self, limit: usize) -> impl Iterator<Item = StructureView> + '_ {
+        self.structures.views(limit)
+    }
+
+    /// Construction starts, completions, and cancellations from the latest advancing tick.
+    pub fn structure_diagnostics(&self) -> &[StructureDiagnostic] {
+        &self.structure_diagnostics
     }
 
     /// Activates autonomous physical decisions after population initialization.
@@ -615,6 +701,7 @@ impl Engine {
             seed: self.config.seed,
             agent_count: self.population.len() as u32,
             scheduled_event_count: self.scheduler.len() as u32,
+            structure_count: self.structures.len() as u32,
         }
     }
 
@@ -632,9 +719,12 @@ impl Engine {
             return;
         }
         match self.route_planner.plan(
-            &self.world,
-            self.population.spatial(),
-            active_area,
+            RouteEnvironment {
+                world: &self.world,
+                occupancy: self.population.spatial(),
+                structures: &self.structures,
+                active_area,
+            },
             agent,
             origin,
             request,
@@ -642,7 +732,10 @@ impl Engine {
             Ok(plan) => {
                 if let Err(error) = self.population.schedule_route_step(
                     &mut self.scheduler,
-                    &self.world,
+                    MovementEnvironment {
+                        world: &self.world,
+                        structures: &self.structures,
+                    },
                     self.time,
                     agent,
                     request,
@@ -773,6 +866,27 @@ impl Engine {
             );
             return;
         };
+        if selection.goal == PhysicalGoal::BuildShelter {
+            match self.start_shelter_build(agent, target, selection.reason) {
+                Ok(structure) => self.policy_diagnostics.push(PolicyDiagnostic {
+                    agent,
+                    at: self.time,
+                    goal: selection.goal,
+                    target: Some(structure.position),
+                    reason: selection.reason,
+                    kind: PolicyDiagnosticKind::ActionStarted,
+                    failure: None,
+                }),
+                Err(error) => self.schedule_policy_retry(
+                    agent,
+                    selection.goal,
+                    Some(target),
+                    selection.reason,
+                    build_failure(error),
+                ),
+            }
+            return;
+        }
         if selection.goal == PhysicalGoal::Wait {
             self.population.clear_route(agent);
             if let Err(error) = self.population.schedule_policy_decision(
@@ -806,6 +920,8 @@ impl Engine {
                     self.time,
                     agent,
                     target,
+                    self.structures.is_sheltered_access(target),
+                    self.structures.structure_at(target),
                 ) {
                     Ok(quality) => quality,
                     Err(error) => {
@@ -925,6 +1041,9 @@ impl Engine {
         let Some((goal, target, reason)) = (match completion {
             Ok(completion) => completion,
             Err(error) => {
+                if event.goal == PhysicalGoal::BuildShelter {
+                    self.cancel_construction(event.agent);
+                }
                 self.policy_diagnostics.push(PolicyDiagnostic {
                     agent: event.agent,
                     at: self.time,
@@ -966,9 +1085,10 @@ impl Engine {
                     Err(PolicyFailureReason::InconsistentState)
                 }
             }
-            PhysicalGoal::SeekShelter
-            | PhysicalGoal::BuildShelter
-            | PhysicalGoal::Incapacitated => Err(PolicyFailureReason::DeferredToLaterSlice),
+            PhysicalGoal::BuildShelter => self.apply_build_completion(event.agent),
+            PhysicalGoal::SeekShelter | PhysicalGoal::Incapacitated => {
+                Err(PolicyFailureReason::DeferredToLaterSlice)
+            }
             PhysicalGoal::SeekWater | PhysicalGoal::SeekFood | PhysicalGoal::Wait => {
                 Err(PolicyFailureReason::InconsistentState)
             }
@@ -1018,13 +1138,15 @@ impl Engine {
                     },
                     failure: Some(failure),
                 });
-                self.schedule_policy_retry(
-                    event.agent,
-                    goal,
-                    Some(target),
-                    PolicyReason::Retry,
-                    failure,
-                );
+                if self.policy_active {
+                    self.schedule_policy_retry(
+                        event.agent,
+                        goal,
+                        Some(target),
+                        PolicyReason::Retry,
+                        failure,
+                    );
+                }
             }
         }
     }
@@ -1110,6 +1232,9 @@ impl Engine {
                     inventory.can_add(resource.kind)
                         && (reason != PolicyReason::HungerThreshold
                             || resource.kind == ResourceKind::Food)
+                        && (reason != PolicyReason::ShelterMaterials
+                            || (resource.kind == ResourceKind::Wood
+                                && inventory.wood < SHELTER_WOOD_COST))
                 })
                 .map(|resource| (candidate, resource))
         })
@@ -1187,6 +1312,116 @@ impl Engine {
         failure.map_or(Ok(false), Err)
     }
 
+    fn start_shelter_build(
+        &mut self,
+        agent: AgentId,
+        site: WorldPosition,
+        reason: PolicyReason,
+    ) -> Result<StructureView, BuildShelterError> {
+        let view = self
+            .population
+            .view(agent)
+            .ok_or(BuildShelterError::MissingAgent)?;
+        if view.activity == AgentActivity::Dead {
+            return Err(BuildShelterError::DeadAgent);
+        }
+        if view.activity != AgentActivity::Idle {
+            return Err(BuildShelterError::AgentCommitted);
+        }
+        if !WORLD_GENERATION_BOUNDS.contains(site) {
+            return Err(BuildShelterError::OutsideWorld);
+        }
+        if !self
+            .population
+            .active_area()
+            .is_some_and(|area| area.contains(site))
+        {
+            return Err(BuildShelterError::OutsideActiveArea);
+        }
+        if view.position.x.abs_diff(site.x) + view.position.y.abs_diff(site.y) != 1 {
+            return Err(BuildShelterError::NotCardinallyAdjacent);
+        }
+        self.structures.can_start(agent, site)?;
+        if let Some(occupant) = self.population.spatial().occupant(site) {
+            return Err(BuildShelterError::Occupied(occupant));
+        }
+        match self.world.standability_at(site) {
+            Ok(Standability::Standable) => {}
+            Ok(Standability::BlockedByWater) => return Err(BuildShelterError::Water),
+            Ok(Standability::BlockedByFeature) => {
+                return Err(BuildShelterError::BlockingFeature);
+            }
+            Err(WorldQueryError::Unloaded) => return Err(BuildShelterError::Unloaded),
+            Err(WorldQueryError::OutsideWorldBounds) => {
+                return Err(BuildShelterError::OutsideWorld);
+            }
+            Err(WorldQueryError::NonCardinalStep) => unreachable!("standing queries have no step"),
+        }
+        if !self.population.can_build_shelter(agent) {
+            return Err(BuildShelterError::InsufficientMaterials);
+        }
+        self.compact_scheduler_if_needed();
+        let due = self
+            .population
+            .schedule_policy_action(
+                &mut self.scheduler,
+                self.time,
+                agent,
+                PolicyAction {
+                    goal: PhysicalGoal::BuildShelter,
+                    target: site,
+                    reason,
+                    duration: SHELTER_BUILD_TICKS,
+                },
+            )
+            .map_err(map_build_schedule_error)?;
+        let structure = self
+            .structures
+            .start(agent, site, self.time, due)
+            .expect("construction capacity and conflicts were prevalidated");
+        self.population
+            .consume_shelter_materials(agent)
+            .expect("shelter recipe was prevalidated");
+        self.structure_diagnostics.push(StructureDiagnostic {
+            structure,
+            at: self.time,
+            kind: StructureDiagnosticKind::Started,
+            refunded_wood: 0,
+            refunded_stone: 0,
+        });
+        Ok(structure)
+    }
+
+    fn apply_build_completion(&mut self, agent: AgentId) -> Result<(), PolicyFailureReason> {
+        let structure = self
+            .structures
+            .complete_for_builder(agent)
+            .ok_or(PolicyFailureReason::InconsistentState)?;
+        self.structure_diagnostics.push(StructureDiagnostic {
+            structure,
+            at: self.time,
+            kind: StructureDiagnosticKind::Completed,
+            refunded_wood: 0,
+            refunded_stone: 0,
+        });
+        Ok(())
+    }
+
+    fn cancel_construction(&mut self, agent: AgentId) -> bool {
+        let Some(structure) = self.structures.cancel_for_builder(agent) else {
+            return false;
+        };
+        self.population.refund_shelter_materials(agent);
+        self.structure_diagnostics.push(StructureDiagnostic {
+            structure,
+            at: self.time,
+            kind: StructureDiagnosticKind::Cancelled,
+            refunded_wood: SHELTER_WOOD_COST,
+            refunded_stone: SHELTER_STONE_COST,
+        });
+        true
+    }
+
     fn schedule_policy_retry(
         &mut self,
         agent: AgentId,
@@ -1246,6 +1481,9 @@ fn map_move_route_error(error: MoveRequestError) -> RouteRequestError {
         MoveRequestError::OutsideActiveArea => RouteRequestError::OutsideActiveArea,
         MoveRequestError::Blocked(kind) => RouteRequestError::Blocked(kind),
         MoveRequestError::Occupied(agent) => RouteRequestError::Occupied(agent),
+        MoveRequestError::BlockedByStructure(structure) => {
+            RouteRequestError::BlockedByStructure(structure)
+        }
         MoveRequestError::TimeOverflow => RouteRequestError::TimeOverflow,
         MoveRequestError::RescheduleLimit => RouteRequestError::RescheduleLimit,
         MoveRequestError::EventSequenceExhausted => RouteRequestError::EventSequenceExhausted,
@@ -1270,6 +1508,9 @@ fn map_route_failure_kind(error: RouteRequestError) -> RouteOutcomeKind {
         RouteRequestError::OutsideWorld => RouteOutcomeKind::OutsideWorld,
         RouteRequestError::OutsideActiveArea => RouteOutcomeKind::OutsideActiveArea,
         RouteRequestError::Blocked(kind) => RouteOutcomeKind::Blocked(kind),
+        RouteRequestError::BlockedByStructure(structure) => {
+            RouteOutcomeKind::BlockedByStructure(structure)
+        }
         RouteRequestError::TimeOverflow => RouteOutcomeKind::TimeOverflow,
         RouteRequestError::RescheduleLimit => RouteOutcomeKind::RescheduleLimit,
         RouteRequestError::EventSequenceExhausted => RouteOutcomeKind::EventSequenceExhausted,
@@ -1288,6 +1529,9 @@ fn map_movement_route_failure(kind: MovementOutcomeKind) -> RouteOutcomeKind {
         MovementOutcomeKind::OutsideWorld => RouteOutcomeKind::OutsideWorld,
         MovementOutcomeKind::OutsideActiveArea => RouteOutcomeKind::OutsideActiveArea,
         MovementOutcomeKind::Blocked(kind) => RouteOutcomeKind::Blocked(kind),
+        MovementOutcomeKind::BlockedByStructure(structure) => {
+            RouteOutcomeKind::BlockedByStructure(structure)
+        }
         MovementOutcomeKind::Occupied(agent) => RouteOutcomeKind::Occupied(agent),
         MovementOutcomeKind::InconsistentOccupancy
         | MovementOutcomeKind::EventSequenceExhausted
@@ -1321,9 +1565,9 @@ fn request_failure(error: RouteRequestError) -> PolicyFailureReason {
         RouteRequestError::Unloaded => PolicyFailureReason::Unloaded,
         RouteRequestError::OutsideWorld => PolicyFailureReason::OutsideWorld,
         RouteRequestError::OutsideActiveArea => PolicyFailureReason::OutsideActiveArea,
-        RouteRequestError::Blocked(_) | RouteRequestError::AlreadyAtDestination => {
-            PolicyFailureReason::TargetUnavailable
-        }
+        RouteRequestError::Blocked(_)
+        | RouteRequestError::BlockedByStructure(_)
+        | RouteRequestError::AlreadyAtDestination => PolicyFailureReason::TargetUnavailable,
         RouteRequestError::TimeOverflow => PolicyFailureReason::TimeOverflow,
         RouteRequestError::RescheduleLimit => PolicyFailureReason::RescheduleLimit,
         RouteRequestError::EventSequenceExhausted => PolicyFailureReason::EventSequenceExhausted,
@@ -1343,7 +1587,9 @@ fn route_failure(kind: RouteOutcomeKind) -> PolicyFailureReason {
         RouteOutcomeKind::Unloaded => PolicyFailureReason::Unloaded,
         RouteOutcomeKind::OutsideWorld => PolicyFailureReason::OutsideWorld,
         RouteOutcomeKind::OutsideActiveArea => PolicyFailureReason::OutsideActiveArea,
-        RouteOutcomeKind::Blocked(_) => PolicyFailureReason::TargetUnavailable,
+        RouteOutcomeKind::Blocked(_) | RouteOutcomeKind::BlockedByStructure(_) => {
+            PolicyFailureReason::TargetUnavailable
+        }
         RouteOutcomeKind::TimeOverflow => PolicyFailureReason::TimeOverflow,
         RouteOutcomeKind::RescheduleLimit => PolicyFailureReason::RescheduleLimit,
         RouteOutcomeKind::EventSequenceExhausted => PolicyFailureReason::EventSequenceExhausted,
@@ -1359,9 +1605,9 @@ fn move_failure(error: MoveRequestError) -> PolicyFailureReason {
         MoveRequestError::Unloaded => PolicyFailureReason::Unloaded,
         MoveRequestError::OutsideWorld => PolicyFailureReason::OutsideWorld,
         MoveRequestError::OutsideActiveArea => PolicyFailureReason::OutsideActiveArea,
-        MoveRequestError::Blocked(_) | MoveRequestError::InvalidStep => {
-            PolicyFailureReason::TargetUnavailable
-        }
+        MoveRequestError::Blocked(_)
+        | MoveRequestError::BlockedByStructure(_)
+        | MoveRequestError::InvalidStep => PolicyFailureReason::TargetUnavailable,
         MoveRequestError::TimeOverflow => PolicyFailureReason::TimeOverflow,
         MoveRequestError::RescheduleLimit => PolicyFailureReason::RescheduleLimit,
         MoveRequestError::EventSequenceExhausted => PolicyFailureReason::EventSequenceExhausted,
@@ -1376,6 +1622,7 @@ fn sleep_failure(error: SleepRequestError) -> PolicyFailureReason {
         SleepRequestError::Water => PolicyFailureReason::SleepLocationWater,
         SleepRequestError::BlockingFeature => PolicyFailureReason::SleepLocationBlocked,
         SleepRequestError::Occupied(_) => PolicyFailureReason::SleepLocationOccupied,
+        SleepRequestError::StructureOccupied(_) => PolicyFailureReason::SleepLocationOccupied,
         SleepRequestError::UnsafeExposure => PolicyFailureReason::SleepLocationUnsafe,
         SleepRequestError::OutsideActiveArea
         | SleepRequestError::OutsideWorld
@@ -1395,6 +1642,47 @@ fn action_effect_failure(error: ActionEffectError) -> PolicyFailureReason {
     match error {
         ActionEffectError::NoEdibleInventory => PolicyFailureReason::NoEdibleInventory,
         ActionEffectError::EventSequenceExhausted => PolicyFailureReason::EventSequenceExhausted,
+    }
+}
+
+fn map_build_schedule_error(error: MoveRequestError) -> BuildShelterError {
+    match error {
+        MoveRequestError::MissingAgent => BuildShelterError::MissingAgent,
+        MoveRequestError::DeadAgent => BuildShelterError::DeadAgent,
+        MoveRequestError::TimeOverflow => BuildShelterError::TimeOverflow,
+        MoveRequestError::RescheduleLimit => BuildShelterError::RescheduleLimit,
+        MoveRequestError::EventSequenceExhausted => BuildShelterError::EventSequenceExhausted,
+        MoveRequestError::PolicyControlled
+        | MoveRequestError::InvalidStep
+        | MoveRequestError::Unloaded
+        | MoveRequestError::OutsideWorld
+        | MoveRequestError::OutsideActiveArea
+        | MoveRequestError::Blocked(_)
+        | MoveRequestError::Occupied(_)
+        | MoveRequestError::BlockedByStructure(_) => BuildShelterError::AgentCommitted,
+    }
+}
+
+fn build_failure(error: BuildShelterError) -> PolicyFailureReason {
+    match error {
+        BuildShelterError::InsufficientMaterials => PolicyFailureReason::InsufficientMaterials,
+        BuildShelterError::Occupied(_) | BuildShelterError::StructureOccupied(_) => {
+            PolicyFailureReason::Occupied
+        }
+        BuildShelterError::Unloaded => PolicyFailureReason::Unloaded,
+        BuildShelterError::OutsideWorld => PolicyFailureReason::OutsideWorld,
+        BuildShelterError::OutsideActiveArea => PolicyFailureReason::OutsideActiveArea,
+        BuildShelterError::TimeOverflow => PolicyFailureReason::TimeOverflow,
+        BuildShelterError::RescheduleLimit => PolicyFailureReason::RescheduleLimit,
+        BuildShelterError::EventSequenceExhausted => PolicyFailureReason::EventSequenceExhausted,
+        BuildShelterError::Water
+        | BuildShelterError::BlockingFeature
+        | BuildShelterError::NotCardinallyAdjacent => PolicyFailureReason::BuildSiteInvalid,
+        BuildShelterError::MissingAgent
+        | BuildShelterError::DeadAgent
+        | BuildShelterError::PolicyControlled
+        | BuildShelterError::AgentCommitted
+        | BuildShelterError::StructureLimit => PolicyFailureReason::InconsistentState,
     }
 }
 
@@ -1458,6 +1746,317 @@ mod tests {
         });
         engine.materialize_initial_area().unwrap();
         engine
+    }
+
+    fn standable_shelter_site(engine: &Engine) -> (WorldPosition, WorldPosition) {
+        standable_steps(engine, 1)[0]
+    }
+
+    #[test]
+    fn shelter_build_blocks_travel_completes_and_enables_safer_sleep() {
+        let mut engine = resident_engine(64);
+        let (access, site) = standable_shelter_site(&engine);
+        engine
+            .initialize_population(
+                PopulationInit {
+                    active_area: engine.world().initial_bounds(),
+                    population: 1,
+                },
+                &[access],
+            )
+            .unwrap();
+        engine
+            .population
+            .add_inventory(AgentId::new(0), ResourceKind::Wood, SHELTER_WOOD_COST);
+        engine
+            .population
+            .add_inventory(AgentId::new(0), ResourceKind::Stone, SHELTER_STONE_COST);
+
+        let started = engine.request_build_shelter(AgentId::new(0), site).unwrap();
+        assert_eq!(started.state, StructureState::UnderConstruction);
+        assert_eq!(engine.snapshot().structure_count, 1);
+        assert_eq!(engine.inventory(AgentId::new(0)).unwrap().wood, 0);
+        assert_eq!(engine.inventory(AgentId::new(0)).unwrap().stone, 0);
+        let perception = engine.perceive_physical(AgentId::new(0), 2).unwrap();
+        assert_eq!(perception.structures, [started]);
+        assert!(!perception.traversable_cells.contains(&site));
+        assert_eq!(
+            engine.request_move(AgentId::new(0), site),
+            Err(MoveRequestError::BlockedByStructure(started.id))
+        );
+        assert_eq!(
+            engine.request_route(
+                AgentId::new(0),
+                RouteRequest {
+                    destination: site,
+                    max_expansions: 16,
+                },
+            ),
+            Err(RouteRequestError::BlockedByStructure(started.id))
+        );
+
+        while engine.snapshot().tick < started.completes_at.ticks() {
+            engine.tick();
+        }
+        let completed = engine.structure_views(1).next().unwrap();
+        assert_eq!(completed.state, StructureState::Complete);
+        assert_eq!(completed.builder, None);
+        assert_eq!(engine.structure_diagnostics().len(), 1);
+        assert_eq!(
+            engine.structure_diagnostics()[0].kind,
+            StructureDiagnosticKind::Completed
+        );
+
+        let exposure_before = engine
+            .physical_needs(AgentId::new(0))
+            .unwrap()
+            .exposure
+            .value;
+        let sleep = engine.request_sleep(AgentId::new(0), access).unwrap();
+        assert_eq!(sleep.quality, SleepQuality::Sheltered);
+        for _ in 0..60 {
+            engine.tick();
+        }
+        assert!(
+            engine
+                .physical_needs(AgentId::new(0))
+                .unwrap()
+                .exposure
+                .value
+                < exposure_before
+        );
+    }
+
+    #[test]
+    fn construction_interruption_refunds_once_and_stale_completion_is_harmless() {
+        let mut engine = resident_engine(64);
+        let (access, site) = standable_shelter_site(&engine);
+        engine
+            .initialize_population(
+                PopulationInit {
+                    active_area: engine.world().initial_bounds(),
+                    population: 1,
+                },
+                &[access],
+            )
+            .unwrap();
+        engine
+            .population
+            .add_inventory(AgentId::new(0), ResourceKind::Wood, SHELTER_WOOD_COST);
+        engine
+            .population
+            .add_inventory(AgentId::new(0), ResourceKind::Stone, SHELTER_STONE_COST);
+        engine.time = SimTime::from_ticks(89_950);
+        let started = engine
+            .start_shelter_build(AgentId::new(0), site, PolicyReason::NoUrgentNeed)
+            .unwrap();
+
+        while engine.snapshot().structure_count != 0 {
+            engine.tick();
+        }
+        let cancelled_at = engine.snapshot().tick;
+        assert_eq!(engine.snapshot().structure_count, 0);
+        assert_eq!(
+            engine.inventory(AgentId::new(0)).unwrap().wood,
+            SHELTER_WOOD_COST
+        );
+        assert_eq!(
+            engine.inventory(AgentId::new(0)).unwrap().stone,
+            SHELTER_STONE_COST
+        );
+        assert_eq!(
+            engine.structure_diagnostics()[0].kind,
+            StructureDiagnosticKind::Cancelled
+        );
+        assert_eq!(
+            engine.agent_views(1).next().unwrap().activity,
+            AgentActivity::Idle
+        );
+        while engine.snapshot().tick <= started.completes_at.ticks().max(cancelled_at) {
+            engine.tick();
+        }
+        assert_eq!(engine.snapshot().structure_count, 0);
+        assert_eq!(
+            engine.inventory(AgentId::new(0)).unwrap().wood,
+            SHELTER_WOOD_COST
+        );
+    }
+
+    #[test]
+    fn structure_reserved_after_move_request_blocks_at_movement_completion() {
+        let mut engine = resident_engine(128);
+        let bounds = engine.world().initial_bounds();
+        let mut found = None;
+        'rows: for y in bounds.min.y + 1..bounds.max.y - 1 {
+            for x in bounds.min.x + 1..bounds.max.x - 1 {
+                let site = WorldPosition { x, y };
+                let from = WorldPosition { x: x - 1, y };
+                let builder = WorldPosition { x: x + 1, y };
+                if [from, site, builder].into_iter().all(|position| {
+                    engine.world().standability_at(position) == Ok(Standability::Standable)
+                }) {
+                    found = Some((from, site, builder));
+                    break 'rows;
+                }
+            }
+        }
+        let (from, site, builder) =
+            found.expect("seeded world should contain three horizontal standable cells");
+        engine
+            .initialize_population(
+                PopulationInit {
+                    active_area: bounds,
+                    population: 2,
+                },
+                &[from, builder],
+            )
+            .unwrap();
+        engine
+            .population
+            .add_inventory(AgentId::new(1), ResourceKind::Wood, SHELTER_WOOD_COST);
+        let movement = engine.request_move(AgentId::new(0), site).unwrap();
+        let shelter = engine.request_build_shelter(AgentId::new(1), site).unwrap();
+        while engine.snapshot().tick < movement.completes_at.ticks() {
+            engine.tick();
+        }
+        assert_eq!(
+            engine.movement_outcomes()[0].kind,
+            MovementOutcomeKind::BlockedByStructure(shelter.id)
+        );
+        assert_eq!(engine.agent_views(1).next().unwrap().position, from);
+    }
+
+    #[test]
+    fn equal_time_builders_resolve_overlap_by_agent_id_without_double_spending() {
+        let mut engine = resident_engine(128);
+        let bounds = engine.world().initial_bounds();
+        let center = (bounds.min.y + 2..bounds.max.y - 2)
+            .flat_map(|y| (bounds.min.x + 2..bounds.max.x - 2).map(move |x| WorldPosition { x, y }))
+            .find(|center| {
+                (-2..=2).all(|dx| {
+                    (-1..=1).all(|dy| {
+                        engine.world().standability_at(WorldPosition {
+                            x: center.x + dx,
+                            y: center.y + dy,
+                        }) == Ok(Standability::Standable)
+                    })
+                })
+            })
+            .expect("seeded world should contain a standable 5x3 construction test patch");
+        let positions = [
+            WorldPosition {
+                x: center.x - 1,
+                y: center.y,
+            },
+            WorldPosition {
+                x: center.x + 1,
+                y: center.y,
+            },
+            WorldPosition {
+                x: center.x - 2,
+                y: center.y,
+            },
+            WorldPosition {
+                x: center.x - 1,
+                y: center.y - 1,
+            },
+            WorldPosition {
+                x: center.x - 1,
+                y: center.y + 1,
+            },
+            WorldPosition {
+                x: center.x + 2,
+                y: center.y,
+            },
+            WorldPosition {
+                x: center.x + 1,
+                y: center.y - 1,
+            },
+            WorldPosition {
+                x: center.x + 1,
+                y: center.y + 1,
+            },
+        ];
+        engine
+            .initialize_population(
+                PopulationInit {
+                    active_area: bounds,
+                    population: positions.len() as u32,
+                },
+                &positions,
+            )
+            .unwrap();
+        for agent in [AgentId::new(0), AgentId::new(1)] {
+            engine
+                .population
+                .add_inventory(agent, ResourceKind::Wood, SHELTER_WOOD_COST);
+            engine
+                .population
+                .add_inventory(agent, ResourceKind::Stone, SHELTER_STONE_COST);
+        }
+        engine.activate_physical_policy().unwrap();
+        engine.tick();
+
+        let structure = engine.structure_views(1).next().unwrap();
+        assert_eq!(structure.position, center);
+        assert_eq!(structure.builder, Some(AgentId::new(0)));
+        assert_eq!(engine.inventory(AgentId::new(0)).unwrap().wood, 0);
+        assert_eq!(
+            engine.inventory(AgentId::new(1)).unwrap().wood,
+            SHELTER_WOOD_COST
+        );
+    }
+
+    #[test]
+    #[ignore = "release-only Slice 6 structure layout and scheduler concentration measurement"]
+    fn release_slice6_structure_measurement() {
+        for count in [20_u32, 100, 10_000] {
+            let mut store = StructureStore::default();
+            let mut scheduler = Scheduler::with_capacity(count as usize);
+            let build_start = Instant::now();
+            for raw in 0..count {
+                store
+                    .start(
+                        AgentId::new(raw),
+                        WorldPosition {
+                            x: i64::from(raw % 200),
+                            y: i64::from(raw / 200),
+                        },
+                        SimTime::ZERO,
+                        SimTime::from_ticks(SHELTER_BUILD_TICKS),
+                    )
+                    .unwrap();
+                scheduler
+                    .schedule_action_completion(
+                        SimTime::from_ticks(SHELTER_BUILD_TICKS),
+                        AgentId::new(raw),
+                        1,
+                        PhysicalGoal::BuildShelter,
+                        agent::CompactPosition {
+                            x: (raw % 200) as i16,
+                            y: (raw / 200) as i16,
+                        },
+                    )
+                    .unwrap();
+            }
+            let build_ns = build_start.elapsed().as_nanos();
+            let extraction_start = Instant::now();
+            while scheduler
+                .pop_due(SimTime::from_ticks(SHELTER_BUILD_TICKS))
+                .is_some()
+            {}
+            println!(
+                "slice6 structures={count} record_bytes={} slot_bytes={} index_entry_bytes={} event_bytes={} retained_slots={} logical_record_bytes={} build_schedule_ns={} due_extract_ns={}",
+                size_of::<structures::StructureRecord>(),
+                size_of::<Option<structures::StructureRecord>>(),
+                size_of::<((i16, i16), StructureId)>(),
+                size_of::<scheduler::ScheduledEvent>(),
+                store.retained_slots(),
+                store.retained_slots() * size_of::<Option<structures::StructureRecord>>(),
+                build_ns,
+                extraction_start.elapsed().as_nanos(),
+            );
+        }
     }
 
     #[test]
@@ -2641,9 +3240,12 @@ mod tests {
                         max_expansions: MAX_ROUTE_EXPANSIONS,
                     };
                     if let Ok(plan) = engine.route_planner.plan(
-                        &engine.world,
-                        engine.population.spatial(),
-                        active_area,
+                        RouteEnvironment {
+                            world: &engine.world,
+                            occupancy: engine.population.spatial(),
+                            structures: &engine.structures,
+                            active_area,
+                        },
                         AgentId::new(0),
                         origin,
                         request,
@@ -2664,9 +3266,12 @@ mod tests {
             let plan = engine
                 .route_planner
                 .plan(
-                    &engine.world,
-                    engine.population.spatial(),
-                    active_area,
+                    RouteEnvironment {
+                        world: &engine.world,
+                        occupancy: engine.population.spatial(),
+                        structures: &engine.structures,
+                        active_area,
+                    },
                     AgentId::new(0),
                     origin,
                     request,

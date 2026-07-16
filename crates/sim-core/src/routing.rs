@@ -7,7 +7,9 @@ use std::{
 
 use crate::{
     AgentId, TraversalKind, World, WorldPosition, WorldQueryError, WorldRect,
-    agent::CompactPosition, spatial::SpatialIndex,
+    agent::CompactPosition,
+    spatial::SpatialIndex,
+    structures::{StructureId, StructureStore},
 };
 
 pub const MAX_ROUTE_EXPANSIONS: u16 = 4_096;
@@ -31,6 +33,7 @@ pub enum RouteRequestError {
     Unloaded,
     Blocked(TraversalKind),
     Occupied(AgentId),
+    BlockedByStructure(StructureId),
     NoPath { expansions: u16 },
     BudgetExhausted { expansions: u16 },
     TimeOverflow,
@@ -50,6 +53,14 @@ impl Error for RouteRequestError {}
 pub(crate) struct RoutePlan {
     pub(crate) next: WorldPosition,
     pub(crate) expansions: u16,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct RouteEnvironment<'a> {
+    pub(crate) world: &'a World,
+    pub(crate) occupancy: &'a SpatialIndex,
+    pub(crate) structures: &'a StructureStore,
+    pub(crate) active_area: WorldRect,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,14 +105,12 @@ pub(crate) struct RoutePlanner {
 impl RoutePlanner {
     pub(crate) fn plan(
         &mut self,
-        world: &World,
-        occupancy: &SpatialIndex,
-        active_area: WorldRect,
+        environment: RouteEnvironment<'_>,
         agent: AgentId,
         origin: WorldPosition,
         request: RouteRequest,
     ) -> Result<RoutePlan, RouteRequestError> {
-        validate_request(world, occupancy, active_area, agent, origin, request)?;
+        validate_request(environment, agent, origin, request)?;
         self.nodes.clear();
         self.by_position.clear();
         self.open.clear();
@@ -142,14 +151,17 @@ impl RoutePlanner {
                     x: current.x + dx,
                     y: current.y + dy,
                 };
-                if !active_area.contains(neighbor)
-                    || occupancy
+                if !environment.active_area.contains(neighbor)
+                    || environment
+                        .occupancy
                         .occupant(neighbor)
                         .is_some_and(|occupant| occupant != agent)
+                    || environment.structures.structure_at(neighbor).is_some()
                 {
                     continue;
                 }
-                let step = world
+                let step = environment
+                    .world
                     .traversal_step(current, neighbor)
                     .map_err(map_query_error)?;
                 let Some(step_cost) = step.cost() else {
@@ -223,9 +235,7 @@ impl RoutePlanner {
 }
 
 fn validate_request(
-    world: &World,
-    occupancy: &SpatialIndex,
-    active_area: WorldRect,
+    environment: RouteEnvironment<'_>,
     agent: AgentId,
     origin: WorldPosition,
     request: RouteRequest,
@@ -245,15 +255,18 @@ fn validate_request(
     if !crate::WORLD_GENERATION_BOUNDS.contains(request.destination) {
         return Err(RouteRequestError::OutsideWorld);
     }
-    if !active_area.contains(request.destination) {
+    if !environment.active_area.contains(request.destination) {
         return Err(RouteRequestError::OutsideActiveArea);
     }
-    if let Some(occupant) = occupancy.occupant(request.destination)
+    if let Some(occupant) = environment.occupancy.occupant(request.destination)
         && occupant != agent
     {
         return Err(RouteRequestError::Occupied(occupant));
     }
-    match world.standability_at(request.destination) {
+    if let Some(structure) = environment.structures.structure_at(request.destination) {
+        return Err(RouteRequestError::BlockedByStructure(structure));
+    }
+    match environment.world.standability_at(request.destination) {
         Ok(crate::Standability::Standable) => Ok(()),
         Ok(crate::Standability::BlockedByWater) => {
             Err(RouteRequestError::Blocked(TraversalKind::BlockedByWater))

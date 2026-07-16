@@ -40,15 +40,15 @@ Last synchronized: 2026-07-16.
 
 ## Active
 
-- Execute the ordered Phase 2 [physical-agent loop implementation plan](PHYSICAL_AGENT_PLAN.md) one coherent slice at a time. Slices 0-5 are complete; Slice 6 is next: simulation-owned minimal shelter construction and sleep benefit.
+- Execute the ordered Phase 2 [physical-agent loop implementation plan](PHYSICAL_AGENT_PLAN.md) one coherent slice at a time. Slices 0-6 are complete; Slice 7 is next: health, safety consequences, terminal death, and causal reporting.
 - Treat generated terrain as intentionally unstable while there is no save/load or other persisted world output. Seed output may still change if an observed physical-agent failure proves a foundational correction necessary; generator versioning is not current work.
 
 ## Next
 
 The completed Phase 1 sequence remains recorded in [WORLD_FOUNDATION_PLAN.md](WORLD_FOUNDATION_PLAN.md). Phase 2 scope, dependencies, per-slice deliverables, acceptance criteria, measurements, documentation duties, and explicit deferrals are canonical in [PHYSICAL_AGENT_PLAN.md](PHYSICAL_AGENT_PLAN.md).
 
-- Complete Slice 6: gathered-material construction, sparse authoritative structures, bounded access, and sheltered sleep quality.
-- Continue in dependency order through shelter, health/death, and the integrated 20-100-agent survival proof.
+- Complete Slice 7: connect hunger, thirst, and exposure severity to health, terminal death, occupancy/event cleanup, and causal reporting.
+- Continue in dependency order through health/death and the integrated 20-100-agent survival proof.
 - Stop after each slice for review, documentation synchronization, validation, and an explicit handoff to the next slice.
 - Use the representative-seed review set only when an observed agent-loop failure requires another generator change.
 

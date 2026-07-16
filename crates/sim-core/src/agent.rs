@@ -13,6 +13,9 @@ use crate::{
     scheduler::{EventClass, ScheduleError, ScheduledEvent, Scheduler},
     sleep::{SleepQuality, SleepRequestError, SleepState, SleepView},
     spatial::{SpatialIndex, TransferError},
+    structures::{
+        BuildShelterError, SHELTER_WOOD_COST, StructureId, StructureStore, StructureView,
+    },
 };
 
 pub const MAX_POPULATION: u32 = 10_000_000;
@@ -254,6 +257,7 @@ pub enum MoveRequestError {
     OutsideActiveArea,
     Blocked(TraversalKind),
     Occupied(AgentId),
+    BlockedByStructure(StructureId),
     TimeOverflow,
     RescheduleLimit,
     EventSequenceExhausted,
@@ -279,6 +283,7 @@ pub enum MovementOutcomeKind {
     OutsideActiveArea,
     Blocked(TraversalKind),
     Occupied(AgentId),
+    BlockedByStructure(StructureId),
     InconsistentOccupancy,
     EventSequenceExhausted,
 }
@@ -303,6 +308,7 @@ pub enum RouteOutcomeKind {
     OutsideWorld,
     OutsideActiveArea,
     Blocked(TraversalKind),
+    BlockedByStructure(StructureId),
     TimeOverflow,
     RescheduleLimit,
     EventSequenceExhausted,
@@ -338,6 +344,7 @@ pub struct PhysicalPerception {
     pub agents: Vec<AgentView>,
     pub drinkable_water: Vec<PerceivedWater>,
     pub resources: Vec<PerceivedResource>,
+    pub structures: Vec<StructureView>,
     pub traversable_cells: Vec<WorldPosition>,
 }
 
@@ -367,6 +374,12 @@ impl Error for PerceptionError {}
 pub(crate) struct RouteState {
     destination: CompactPosition,
     max_expansions: u16,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct MovementEnvironment<'a> {
+    pub(crate) world: &'a World,
+    pub(crate) structures: &'a StructureStore,
 }
 
 #[derive(Debug, Default)]
@@ -529,12 +542,12 @@ impl Population {
     pub(crate) fn schedule_movement(
         &mut self,
         scheduler: &mut Scheduler,
-        world: &World,
+        environment: MovementEnvironment<'_>,
         now: SimTime,
         agent: AgentId,
         target: WorldPosition,
     ) -> Result<MovementScheduled, MoveRequestError> {
-        let scheduled = self.schedule_step(scheduler, world, now, agent, target)?;
+        let scheduled = self.schedule_step(scheduler, environment, now, agent, target)?;
         self.routes[agent.0 as usize] = None;
         Ok(scheduled)
     }
@@ -542,7 +555,7 @@ impl Population {
     fn schedule_step(
         &mut self,
         scheduler: &mut Scheduler,
-        world: &World,
+        environment: MovementEnvironment<'_>,
         now: SimTime,
         agent: AgentId,
         target: WorldPosition,
@@ -573,7 +586,11 @@ impl Population {
         {
             return Err(MoveRequestError::Occupied(occupant));
         }
-        let step = world
+        if let Some(structure) = environment.structures.structure_at(target) {
+            return Err(MoveRequestError::BlockedByStructure(structure));
+        }
+        let step = environment
+            .world
             .traversal_step(record.position.world(), target)
             .map_err(map_query_error)?;
         let cost = step.cost().ok_or(MoveRequestError::Blocked(step.kind()))?;
@@ -604,7 +621,7 @@ impl Population {
     pub(crate) fn schedule_route_step(
         &mut self,
         scheduler: &mut Scheduler,
-        world: &World,
+        environment: MovementEnvironment<'_>,
         now: SimTime,
         agent: AgentId,
         request: RouteRequest,
@@ -612,7 +629,7 @@ impl Population {
     ) -> Result<MovementScheduled, MoveRequestError> {
         let destination =
             CompactPosition::checked(request.destination).ok_or(MoveRequestError::OutsideWorld)?;
-        let scheduled = self.schedule_step(scheduler, world, now, agent, target)?;
+        let scheduled = self.schedule_step(scheduler, environment, now, agent, target)?;
         self.routes[agent.0 as usize] = Some(RouteState {
             destination,
             max_expansions: request.max_expansions,
@@ -623,7 +640,7 @@ impl Population {
     pub(crate) fn apply_movement(
         &mut self,
         scheduler: &mut Scheduler,
-        world: &World,
+        environment: MovementEnvironment<'_>,
         event: ScheduledEvent,
     ) -> MovementEventOutcome {
         let target = event.target.world();
@@ -670,23 +687,27 @@ impl Population {
                 .expect("event sequence capacity was prechecked");
             return outcome;
         }
-        let kind = match world.traversal_step(from, target) {
-            Ok(step) if step.is_passable() => {
-                match self.spatial.transfer(event.agent, from, target) {
-                    Ok(()) => {
-                        record.position = event.target;
-                        MovementOutcomeKind::Moved
-                    }
-                    Err(TransferError::Occupied(occupant)) => {
-                        MovementOutcomeKind::Occupied(occupant)
-                    }
-                    Err(TransferError::SourceMismatch) => {
-                        MovementOutcomeKind::InconsistentOccupancy
+        let kind = if let Some(structure) = environment.structures.structure_at(target) {
+            MovementOutcomeKind::BlockedByStructure(structure)
+        } else {
+            match environment.world.traversal_step(from, target) {
+                Ok(step) if step.is_passable() => {
+                    match self.spatial.transfer(event.agent, from, target) {
+                        Ok(()) => {
+                            record.position = event.target;
+                            MovementOutcomeKind::Moved
+                        }
+                        Err(TransferError::Occupied(occupant)) => {
+                            MovementOutcomeKind::Occupied(occupant)
+                        }
+                        Err(TransferError::SourceMismatch) => {
+                            MovementOutcomeKind::InconsistentOccupancy
+                        }
                     }
                 }
+                Ok(step) => MovementOutcomeKind::Blocked(step.kind()),
+                Err(error) => map_event_query_error(error),
             }
-            Ok(step) => MovementOutcomeKind::Blocked(step.kind()),
-            Err(error) => map_event_query_error(error),
         };
         let outcome = movement_outcome(event, Some(from), target, kind);
         let route_continues = self.routes[index].is_some()
@@ -952,12 +973,24 @@ impl Population {
         Some(state)
     }
 
+    pub(crate) fn force_settle_idle(&mut self, now: SimTime, agent: AgentId) {
+        let index = agent.0 as usize;
+        if index >= self.records.len() || self.records[index].activity == AgentActivity::Dead {
+            return;
+        }
+        self.settle_activity_without_events(now, agent, AgentActivity::Idle);
+        self.policies[index].phase = PolicyPhase::Dormant;
+        self.sleeps[index] = SleepState::default();
+    }
+
     pub(crate) fn validate_sleep_location(
         &self,
         world: &World,
         now: SimTime,
         agent: AgentId,
         position: WorldPosition,
+        sheltered: bool,
+        structure: Option<StructureId>,
     ) -> Result<SleepQuality, SleepRequestError> {
         let index = agent.0 as usize;
         let record = self
@@ -994,17 +1027,25 @@ impl Population {
         {
             return Err(SleepRequestError::Occupied(occupant));
         }
-        if self.needs[index]
-            .view(agent, now)
-            .exposure
-            .threshold_reached
+        if let Some(structure) = structure {
+            return Err(SleepRequestError::StructureOccupied(structure));
+        }
+        if !sheltered
+            && self.needs[index]
+                .view(agent, now)
+                .exposure
+                .threshold_reached
         {
             return Err(SleepRequestError::UnsafeExposure);
         }
         if record.position.world() != position {
             return Err(SleepRequestError::NotAtLocation);
         }
-        Ok(SleepQuality::OpenGround)
+        Ok(if sheltered {
+            SleepQuality::Sheltered
+        } else {
+            SleepQuality::OpenGround
+        })
     }
 
     pub(crate) fn schedule_sleep(
@@ -1019,7 +1060,7 @@ impl Population {
         let index = agent.0 as usize;
         let compact = CompactPosition::checked(position).ok_or(SleepRequestError::OutsideWorld)?;
         let due = self.needs[index]
-            .sleep_recovery_due(quality, now)
+            .sleep_recovery_due_for(quality, now, reason == PolicyReason::ExposureThreshold)
             .ok_or(SleepRequestError::TimeOverflow)?;
         if self.policies[index].generation == u32::MAX {
             return Err(SleepRequestError::RescheduleLimit);
@@ -1148,6 +1189,31 @@ impl Population {
             .get(index)
             .is_some_and(|record| record.activity != AgentActivity::Dead)
             .then(|| self.inventories[index])
+    }
+
+    pub(crate) fn can_build_shelter(&self, agent: AgentId) -> bool {
+        self.inventory(agent)
+            .is_some_and(|inventory| inventory.wood >= SHELTER_WOOD_COST)
+    }
+
+    pub(crate) fn consume_shelter_materials(
+        &mut self,
+        agent: AgentId,
+    ) -> Result<(), BuildShelterError> {
+        let inventory = self
+            .inventories
+            .get_mut(agent.0 as usize)
+            .ok_or(BuildShelterError::MissingAgent)?;
+        if inventory.wood < SHELTER_WOOD_COST {
+            return Err(BuildShelterError::InsufficientMaterials);
+        }
+        inventory.wood -= SHELTER_WOOD_COST;
+        Ok(())
+    }
+
+    pub(crate) fn refund_shelter_materials(&mut self, agent: AgentId) {
+        let inventory = &mut self.inventories[agent.0 as usize];
+        inventory.wood = inventory.wood.saturating_add(SHELTER_WOOD_COST);
     }
 
     pub(crate) fn add_inventory(
@@ -1305,10 +1371,15 @@ impl Population {
         &self.spatial
     }
 
+    pub(crate) fn active_area(&self) -> Option<WorldRect> {
+        self.active_area
+    }
+
     pub(crate) fn perceive(
         &self,
         world: &World,
         resource_deltas: &ResourceDeltas,
+        structures: &StructureStore,
         agent: AgentId,
         radius: u8,
     ) -> Result<PhysicalPerception, PerceptionError> {
@@ -1337,13 +1408,14 @@ impl Population {
         let area = active
             .intersection(requested)
             .ok_or(PerceptionError::OutsideWorld)?;
-        self.perceive_area(world, resource_deltas, agent, area)
+        self.perceive_area(world, resource_deltas, structures, agent, area)
     }
 
     pub(crate) fn perceive_area(
         &self,
         world: &World,
         resource_deltas: &ResourceDeltas,
+        structures: &StructureStore,
         agent: AgentId,
         area: WorldRect,
     ) -> Result<PhysicalPerception, PerceptionError> {
@@ -1390,6 +1462,11 @@ impl Population {
         agents.extend(agent_ids.into_iter().filter_map(|id| self.view(id)));
         let mut drinkable_water = Vec::new();
         let mut resources = Vec::new();
+        let mut perceived_structures = Vec::new();
+        perceived_structures
+            .try_reserve(structures.len().min(cell_count))
+            .map_err(|_| PerceptionError::AllocationFailed)?;
+        structures.push_views_in(area, &mut perceived_structures);
         let mut traversable_cells = Vec::new();
         traversable_cells
             .try_reserve(cell_count)
@@ -1401,7 +1478,10 @@ impl Population {
                     .standability_at(position)
                     .map_err(map_perception_query_error)?
                 {
-                    Standability::Standable => traversable_cells.push(position),
+                    Standability::Standable if structures.structure_at(position).is_none() => {
+                        traversable_cells.push(position)
+                    }
+                    Standability::Standable => {}
                     Standability::BlockedByWater | Standability::BlockedByFeature => {}
                 }
                 if let Some(source) = world
@@ -1424,6 +1504,7 @@ impl Population {
             agents,
             drinkable_water,
             resources,
+            structures: perceived_structures,
             traversable_cells,
         })
     }

@@ -2,7 +2,9 @@ use std::{error::Error, fmt};
 
 use crate::{
     AgentId, InventoryView, NeedKind, PhysicalNeedsView, PhysicalPerception, ResourceKind, SimTime,
-    WorldPosition, agent::CompactPosition,
+    WorldPosition,
+    agent::CompactPosition,
+    structures::{SHELTER_WOOD_COST, StructureState},
 };
 
 pub const PHYSICAL_POLICY_RADIUS: u8 = 8;
@@ -54,6 +56,7 @@ pub enum PolicyReason {
     NoUrgentNeed,
     RouteArrived,
     ActionCompleted,
+    ShelterMaterials,
     Retry,
 }
 
@@ -77,6 +80,8 @@ pub enum PolicyFailureReason {
     SleepLocationOccupied,
     SleepLocationUnsafe,
     SleepLocationUnavailable,
+    BuildSiteInvalid,
+    InsufficientMaterials,
     TimeOverflow,
     RescheduleLimit,
     EventSequenceExhausted,
@@ -234,27 +239,119 @@ pub(crate) fn select(
         },
         Some(NeedKind::Rest) => PolicySelection {
             goal: PhysicalGoal::Sleep,
-            target: Some(origin),
+            target: nearest_shelter_access(origin, perception).or(Some(origin)),
             reason: PolicyReason::RestThreshold,
         },
-        Some(NeedKind::Exposure) => PolicySelection {
-            goal: PhysicalGoal::SeekShelter,
-            target: None,
-            reason: PolicyReason::ExposureThreshold,
-        },
-        None => nearest_resource_access(origin, perception, |kind| inventory.can_add(kind)).map_or(
+        Some(NeedKind::Exposure) => shelter_selection(
+            origin,
+            inventory,
+            perception,
+            PolicyReason::ExposureThreshold,
+        ),
+        None => shelter_selection(origin, inventory, perception, PolicyReason::NoUrgentNeed),
+    }
+}
+
+fn shelter_selection(
+    origin: WorldPosition,
+    inventory: InventoryView,
+    perception: &PhysicalPerception,
+    reason: PolicyReason,
+) -> PolicySelection {
+    if let Some(access) = nearest_shelter_access(origin, perception) {
+        if reason == PolicyReason::ExposureThreshold {
+            return PolicySelection {
+                goal: if access == origin {
+                    PhysicalGoal::Sleep
+                } else {
+                    PhysicalGoal::SeekShelter
+                },
+                target: Some(access),
+                reason,
+            };
+        }
+        return nearest_resource_access(origin, perception, |kind| inventory.can_add(kind)).map_or(
             PolicySelection {
                 goal: PhysicalGoal::Wait,
                 target: Some(origin),
-                reason: PolicyReason::NoUrgentNeed,
+                reason,
             },
             |target| PolicySelection {
                 goal: PhysicalGoal::GatherMaterial,
                 target: Some(target),
-                reason: PolicyReason::NoUrgentNeed,
+                reason,
             },
-        ),
+        );
     }
+
+    if inventory.wood >= SHELTER_WOOD_COST {
+        if let Some(site) = nearest_build_site(origin, perception) {
+            return PolicySelection {
+                goal: PhysicalGoal::BuildShelter,
+                target: Some(site),
+                reason,
+            };
+        }
+    }
+
+    let needs_wood = inventory.wood < SHELTER_WOOD_COST;
+    let material = nearest_resource_access(origin, perception, |kind| {
+        inventory.can_add(kind) && needs_wood && kind == ResourceKind::Wood
+    });
+    let fallback = (reason == PolicyReason::NoUrgentNeed)
+        .then(|| nearest_resource_access(origin, perception, |kind| inventory.can_add(kind)))
+        .flatten();
+    material.or(fallback).map_or(
+        PolicySelection {
+            goal: PhysicalGoal::Wait,
+            target: Some(origin),
+            reason,
+        },
+        |target| PolicySelection {
+            goal: PhysicalGoal::GatherMaterial,
+            target: Some(target),
+            reason: if material.is_some() {
+                PolicyReason::ShelterMaterials
+            } else {
+                reason
+            },
+        },
+    )
+}
+
+fn nearest_shelter_access(
+    origin: WorldPosition,
+    perception: &PhysicalPerception,
+) -> Option<WorldPosition> {
+    perception
+        .structures
+        .iter()
+        .filter(|structure| structure.state == StructureState::Complete)
+        .flat_map(|structure| cardinal_neighbors(structure.position))
+        .filter(|candidate| traversable(perception, *candidate))
+        .filter(|candidate| {
+            *candidate == origin
+                || !perception
+                    .agents
+                    .iter()
+                    .any(|agent| agent.position == *candidate)
+        })
+        .min_by_key(|candidate| target_key(origin, *candidate))
+}
+
+fn nearest_build_site(
+    origin: WorldPosition,
+    perception: &PhysicalPerception,
+) -> Option<WorldPosition> {
+    cardinal_neighbors(origin)
+        .filter(|candidate| traversable(perception, *candidate))
+        .filter(|candidate| {
+            !perception
+                .agents
+                .iter()
+                .any(|agent| agent.position == *candidate)
+        })
+        .min_by_key(|candidate| (candidate.y, candidate.x))
 }
 
 const fn urgency_score(value: u16, threshold: u16) -> u32 {
@@ -410,6 +507,7 @@ mod tests {
                     kind: ResourceKind::Food,
                 },
             }],
+            structures: Vec::new(),
             traversable_cells: vec![
                 WorldPosition { x: 0, y: 0 },
                 WorldPosition { x: 1, y: 0 },
@@ -496,7 +594,7 @@ mod tests {
         };
         assert_eq!(
             select(origin, needs(0, 0, 0, 0), full, &facts).goal,
-            PhysicalGoal::Wait
+            PhysicalGoal::BuildShelter
         );
     }
 

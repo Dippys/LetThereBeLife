@@ -2,7 +2,7 @@
 
 Last synchronized: 2026-07-16.
 
-Status: **Active plan**. Phase 1 world foundation and Phase 2 Slices 0-5 are complete. Slice 6 is the next implementation target; later slices are planned and must be completed in order unless this document records a reviewed dependency change.
+Status: **Active plan**. Phase 1 world foundation and Phase 2 Slices 0-6 are complete. Slice 7 is the next implementation target; later slices are planned and must be completed in order unless this document records a reviewed dependency change.
 
 ## Purpose
 
@@ -39,7 +39,7 @@ The repository already provides the world-side contracts needed to begin:
 - deterministic resident cell/feature visitation and the Phase 1 settlement-candidate scenario provide bounded search building blocks.
 - `sim-headless` eagerly materializes the configured bootstrap area before ticking; `sim-viewer` streams terrain asynchronously and currently has no agent presentation.
 
-Slices 0-5 now provide compact agent storage and inventory, scheduled movement, one-agent-per-cell occupancy, bounded objective perception, deterministic local routes, analytical physical needs, an explicitly activated deterministic physical policy, effective gather/eat/drink actions, sparse permanent generated-resource depletion, and scheduled interruptible sleep with analytical recovery. Not yet implemented are structures, health, death, or richer agent-specific snapshots.
+Slices 0-6 now provide compact agent storage and inventory, scheduled movement, one-agent-per-cell occupancy, bounded objective perception, deterministic local routes, analytical physical needs, an explicitly activated deterministic physical policy, effective gather/eat/drink actions, sparse permanent generated-resource depletion, scheduled interruptible sleep, and sparse minimal shelters with adjacent sheltered sleep. Not yet implemented are health, death, or richer agent-specific snapshots.
 
 ## Non-negotiable constraints
 
@@ -345,7 +345,7 @@ Unit coverage fixes the 24-byte/alignment-eight sleep layout, exact open-ground/
 
 ## Slice 6: Minimal shelter
 
-Status: **Planned**. Depends on Slices 0-5.
+Status: **Implemented** on 2026-07-16.
 
 ### Objective
 
@@ -373,6 +373,16 @@ Let agents gather materials, choose a valid nearby site, construct a minimal she
 - Structures do not enter generated world records and cannot be created on unloaded or invalid terrain.
 - Shelter benefit is measurable in the need/exposure model and cannot grant unrelated social or cognitive state.
 - Structure record size, spatial-index bytes, and build-event cost are recorded.
+
+### Implemented result
+
+Private `sim-core::structures` owns sparse one-cell shelter footprints separately from `World`. A shelter has monotonic dense `u32` identity, a 32-byte pointer-free lifecycle record, and a row-major `BTreeMap` footprint index; cancelled identities leave compact vector tombstones so a published handle is never reused. The provisional Phase 2 lean-to recipe consumes eight wood and no stone at construction start and takes 600 ticks. The wood-only recipe is deliberate: canonical seed-42 trials found timber locally within the radius-eight policy boundary while an 8-wood/4-stone candidate could not find both regionally separated resource types even in a 512 x 512 bootstrap. Shelters are unowned and shareable after completion; their blocking footprint is used only from a cardinal standable access cell.
+
+`Engine::request_build_shelter` and the autonomous policy validate resident dry standable terrain, active-area membership, cardinal access, agent and structure vacancy, recipe inventory, scheduler capacity, and construction identity before committing. Materials are consumed atomically at start. Need interruption cancels the reservation, refunds the complete recipe exactly once, and makes the old completion harmlessly stale. Equal-time policy decisions use the existing total event order, so lower `AgentId` reserves a contested footprint first without double spending.
+
+Structure footprints are returned in bounded row-major `PhysicalPerception`, removed from traversable cells, rejected by direct movement and route requests, and rechecked when a scheduled movement completes. Completed adjacent shelters select `SleepQuality::Sheltered`: rest recovers at 12 rather than eight units per 60 ticks and exposure falls by four rather than rising by two. Exposure-driven shelter use predicts one wake at the later of full rest recovery or crossing exposure below its actionable threshold, avoiding per-tick sleep/wake churn. `StructureView`, latest-tick diagnostics, snapshot count, headless counters, and reset complete the inspection boundary; no generated terrain or feature record changes.
+
+Focused unit coverage fixes layout and exposure arithmetic; proves overlap arbitration, interruption refund, stale completion, perception, direct/route blocking, and the in-flight movement race. Public `physical_agent_slice6` coverage lets one autonomous agent gather timber and complete a shelter, then proves bounded perception and reset. The ignored release harness records 20/100/10,000 structure/index/event layouts and construction scheduling/due-extraction observations in `PERFORMANCE.md`. D-043 records the durable representation, recipe, access, cancellation, and sheltered-rate decisions.
 
 ## Slice 7: Health, safety, and simple death
 

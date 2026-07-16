@@ -1,7 +1,7 @@
 use sim_config::{AppConfig, DEFAULT_CONFIG_PATH};
 use sim_core::{
     AgentActivity, Engine, MovementOutcomeKind, PolicyDiagnosticKind, PopulationInit,
-    RouteOutcomeKind, SleepDiagnosticKind,
+    RouteOutcomeKind, SleepDiagnosticKind, StructureDiagnosticKind,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -53,6 +53,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut sleep_starts = 0_u32;
     let mut planned_wakes = 0_u32;
     let mut interrupted_wakes = 0_u32;
+    let mut shelter_starts = 0_u32;
+    let mut shelter_completions = 0_u32;
+    let mut shelter_cancellations = 0_u32;
     for _ in 0..ticks {
         engine.tick();
         completed_movements += engine
@@ -84,6 +87,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 SleepDiagnosticKind::Interrupted => interrupted_wakes += 1,
             }
         }
+        for diagnostic in engine.structure_diagnostics() {
+            match diagnostic.kind {
+                StructureDiagnosticKind::Started => shelter_starts += 1,
+                StructureDiagnosticKind::Completed => shelter_completions += 1,
+                StructureDiagnosticKind::Cancelled => shelter_cancellations += 1,
+            }
+        }
     }
 
     let snapshot = engine.snapshot();
@@ -96,7 +106,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .filter(|agent| agent.activity == AgentActivity::Sleeping)
         .count();
     println!(
-        "completed tick={} simulated_seconds={:.3} seed={} initial_world={}x{} agents={} routes={} route_failures={} movements={} moving={} policy_selections={} policy_failures={} sleep_starts={} planned_wakes={} interrupted_wakes={} sleeping={}",
+        "completed tick={} simulated_seconds={:.3} seed={} initial_world={}x{} agents={} routes={} route_failures={} movements={} moving={} policy_selections={} policy_failures={} sleep_starts={} planned_wakes={} interrupted_wakes={} sleeping={} shelter_starts={} shelter_completions={} shelter_cancellations={} structures={}",
         snapshot.tick,
         snapshot.simulated_seconds,
         snapshot.seed,
@@ -113,6 +123,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         planned_wakes,
         interrupted_wakes,
         sleeping_agents,
+        shelter_starts,
+        shelter_completions,
+        shelter_cancellations,
+        snapshot.structure_count,
     );
     Ok(())
 }

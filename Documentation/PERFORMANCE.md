@@ -279,6 +279,26 @@ Camera movement, resize, zoom, and hover perform no terrain-demand allocation, p
 
 The in-game HUD reuses a 512-byte text string and a fixed 4,096-entry CPU screen-overlay vector; its matching GPU buffer uses the existing size-asserted 20-byte `Instance`. Their logical reserved payloads are 512 bytes, 80 KiB, and 80 KiB respectively before allocator/GPU metadata. Bitmap text is emitted as contiguous horizontal glyph runs rather than one rectangle per lit pixel, and a regression exercises idle, bootstrap, manual, cancelling, unavailable-worker, no-cursor, loaded-cell, outside-world, maximum-number, and maximum-selection layouts against the fixed instance ceiling. This is a representation calculation and capacity invariant, not a frame-time measurement.
 
+### Phase 2 Slice 6 minimal shelters
+
+`sim-core::structures::StructureRecord` and its optional retained slot are size-asserted at 32 bytes/alignment eight. The logical row/column-plus-`StructureId` footprint entry is eight bytes before `BTreeMap` node pointers, allocator metadata, and the separate active-builder index. `ScheduledEvent` remains 32 bytes, so construction reuses the existing action-completion payload rather than adding an event allocation or per-tick progress record. The store is sparse: only started structures allocate records/index entries. Cancelled builds leave compact tombstones to preserve monotonic non-reused identities; cancellation frequency and allocator-attributed map bytes remain later scale budgets.
+
+The focused command was:
+
+```powershell
+cargo test --release -p sim-core release_slice6_structure_measurement -- --ignored --nocapture --test-threads=1
+```
+
+One optimized run on 2026-07-16 recorded:
+
+| Structures | Retained slots | Slot bytes | Logical live footprint-index bytes | Insert structures + schedule events | Extract equal-time completions |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 20 | 32 | 1,024 | 160 | 14,500 ns | 3,200 ns |
+| 100 | 128 | 4,096 | 800 | 17,900 ns | 3,600 ns |
+| 10,000 | 16,384 | 524,288 | 80,000 | 1,962,200 ns | 513,800 ns |
+
+The timings include deterministic `BTreeMap` footprint/builder insertion plus binary-heap scheduling, or due extraction respectively. They are single-run observations, not regression limits. Slot bytes include geometric spare `Vec` capacity; index bytes are only the eight-byte logical key/value payload and exclude tree nodes and allocation overhead. The public seed-42 Slice 6 scenario also established the algorithmic recipe boundary: an 8-wood/4-stone candidate could not satisfy bounded radius-eight gathering even with a 512 x 512 bootstrap because tree and outcrop regions were separated, while the implemented eight-wood lean-to completes through two local four-unit gathers without a global search.
+
 ## Required measurement conditions
 
 - Use release builds and a recorded compiler version.
