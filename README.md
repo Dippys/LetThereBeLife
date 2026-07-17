@@ -25,7 +25,10 @@ All launch entries build the selected binary first, use the repository root as t
 The configured bootstrap area in [`config/simulation.toml`](config/simulation.toml) currently
 requests 4,096 x 4,096 cells. The Rust fallback is 1,024 x 1,024 when dimensions are omitted.
 The viewer opens first, then streams that bootstrap area in prioritized chunk pages; the headless
-runner explicitly materializes it before ticking. This is a deterministic loading target, not the
+runner explicitly materializes it before ticking. The viewer holds simulation time at tick zero until
+its fixed centered 2,048 x 2,048 simulation rectangle is completely resident, then waits for
+individual `T` cursor spawns rather than creating agents automatically. The viewer presents up to
+4,096 deterministic physical agents and activates the core-owned policy. This is a deterministic loading target, not the
 intended maximum world size. Restarting with the same configuration reproduces the same continental oceans, coasts,
 plate/climate fields, whole-envelope static lakes, cross-region major river channels, and sparse
 surface features. These channels are static deterministic terrain generation, not a
@@ -55,18 +58,23 @@ Cargo builds copy the default file to `target/<profile>/config/simulation.toml`,
 
 Viewer controls:
 
-- The in-game HUD shows run/pause state, speed, simulated time, tick, seed, loaded chunks, world revision, and generation status. Move the pointer over the map to add world, chunk, and chunk-local coordinates plus unloaded-initial, unloaded-partial-initial, initial, partial-initial, retained, retained partial-initial, or missing coverage. Loaded cells also show terrain, elevation, temperature, zero-to-255 moisture, prevailing wind (`NW` or `SE`), and feature; without a hovered cell, the HUD shows a compact control guide. The inspected chunk is outlined gray while configured but unloaded, blue for initial, yellow for partial-initial, green for retained (including retained partial-initial), or red for missing coverage when it is large enough to read on screen.
+- The in-game HUD shows run/pause state, speed, simulated time, tick, seed, loaded chunks, world revision, generation status, and total/living/active/dead agent counts. Move the pointer over the map to add world, chunk, and chunk-local coordinates plus unloaded-initial, unloaded-partial-initial, initial, partial-initial, retained, retained partial-initial, or missing coverage. A hovered agent also reports its stable ID and activity. Loaded cells show terrain, elevation, temperature, zero-to-255 moisture, prevailing wind (`NW` or `SE`), and feature; without a hovered cell, the HUD shows a compact control guide. The inspected chunk is outlined gray while configured but unloaded, blue for initial, yellow for partial-initial, green for retained (including retained partial-initial), or red for missing coverage when it is large enough to read on screen.
 - Scroll the mouse wheel to zoom in or out around the pointer. Maximum zoom-out fits the complete red world square; with the repository's 4,096 x 4,096 bootstrap this is 1/16x of the initial fit.
 - Hold the left mouse button and drag to move the camera within the centered world envelope. Camera movement, resizing, and zooming do not generate terrain.
 - Hold the right mouse button and drag to preview a translucent selection. A drag started inside the red maximum-world boundary caps at that boundary if the pointer moves beyond it. The preview is yellow while the bounded request is within the missing-chunk and expansion-capacity limits; otherwise it is red. Release generates the accepted in-bounds missing terrain and queues it ahead of bootstrap work. Outside the configured bootstrap area, this is the only viewer action that requests terrain.
 - A selection may span more than 65,536 chunks when it overlaps loaded terrain, but one release can add at most 65,536 previously missing chunks. The complete world envelope is exactly 1,024 x 1,024 chunks (1,048,576 chunks) from `-32,768` inclusive to `32,768` exclusive on both axes. Its 4,294,967,296 cells equal 16 GiB of raw four-byte terrain only; sparse features, maps, and allocator overhead are additional.
 - Startup bootstrap generation streams deterministic origin-centered 32 x 32 chunk pages through the bounded generation pool and applies completed chunks in request order. Right-drag work preempts this background bootstrap; camera/view changes never queue terrain. A persistent red square marks the maximum generatable boundary.
+- Physical agents and one-cell shelter footprints are read-only colored GPU rectangles at close and moderate zoom. After the fixed simulation rectangle finishes loading, move the cursor over a standable cell and press `T` for each agent you want to add. Viewer agents use deterministic, directionally persistent bounded exploration when no local objective is visible; they do not abandon valid fresh-water or completed-shelter access merely to wander. Hover an agent to see its current search heading with the rest of its physical state.
+- Press numpad `5` to open the bottom-left spawn menu. Use numpad `2`/`8` (or `4`/`6`) to select tree, berries, rock, or fresh water, then press numpad `5` again to enter placement mode. Left-click repeatedly on resident empty cells to place the selected kind; press numpad `5` to return to the menu or numpad `0` to close it and restore left-drag panning. Placed trees/rocks block movement and provide wood/stone, berries remain passable and provide food, and placed water is drinkable but blocks walking. `R` clears these spawned objects with the rest of dynamic simulation state.
 - The bottom time-square remains visible on a subtle rail and traverses it once per 60 simulated seconds; pausing also stops this motion.
 - Already loaded chunks and selection portions fully covered by the initial rectangle consume none of the manual-request budget. A boundary chunk still counts when the selection extends from its initial-area portion into unloaded terrain. At distant zoom levels, rendering samples terrain near screen-pixel density and splits large instance uploads into bounded GPU buffers.
 - `C`: stop remaining generation work and drop pending bootstrap pages/selections (chunks already applied stay loaded); later accepted right-drag selections can queue new manual work
 - `Space`: pause/resume simulation
-- `1`, `2`, `3`, `4`: set simulation speed to 1x, 2x, 4x, or 8x
-- `R`: reset to the configured seed
+- `1` through `9`: set simulation speed to 1x, 2x, 4x, 8x, 16x, 32x, 64x, 128x, or 256x
+- `T`: spawn one physical agent on any standable resident cursor cell (up to the 4,096-agent viewer presentation limit); later spawns expand the active rectangle when the terrain between them is loaded
+- Numpad `5`: open the spawn menu, or confirm/return from placement; numpad `2`/`8` and `4`/`6`: change selection; numpad `0`: end spawning
+- Hover an agent to open its top-right inspection card with identity, position, activity, goal/target, retry state, needs/rates/next threshold, inventory, health/next consequence, and sleep/wake state
+- `R`: reset simulation time and dynamic state to zero agents while retaining terrain
 - `Escape`: close
 
 Run the headless engine smoke test with:
@@ -84,7 +92,7 @@ cargo run --release -p sim-headless -- --canonical --agents 20 --batch-size 1000
 cargo run --release -p sim-headless -- --canonical --agents 100 --batch-size 10000
 ```
 
-Canonical mode fixes seed 1, a 2,048 x 2,048 resident world, 600,000 driver ticks, fresh-water and concentrated wood cohorts, 32 starting food units per agent, and eight starting shelter-wood units for the fresh-water cohort. The report includes final populations, causal death counts, actions/failures, resource/structure changes, scheduler/stale/retry work, and soak invariant results. These starting supplies are explicit scenario inputs, not generated-world mutations. The viewer intentionally starts with no agents until it gains an equivalent deterministic complete-residency gate and read-only presentation path.
+Canonical mode fixes seed 1, a 2,048 x 2,048 resident world, 600,000 driver ticks, fresh-water and concentrated wood cohorts, 32 starting food units per agent, and eight starting shelter-wood units for the fresh-water cohort. The report includes final populations, causal death counts, actions/failures, resource/structure changes, scheduler/stale/retry work, and soak invariant results. These starting supplies are explicit scenario inputs, not generated-world mutations. The viewer starts with zero agents; each `T` press adds one exact cursor spawn and the first spawn activates the core-owned policy with bounded exploration.
 
 Verify the workspace with `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings`.
 

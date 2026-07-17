@@ -4,6 +4,7 @@ mod agent;
 mod diagnostics;
 mod health;
 mod needs;
+mod placements;
 mod policy;
 mod resources;
 mod routing;
@@ -15,11 +16,11 @@ mod world;
 mod worldgen;
 
 pub use agent::{
-    AgentActivity, AgentId, AgentView, EventId, MAX_PERCEPTION_CELLS, MAX_PERCEPTION_RADIUS,
-    MAX_POPULATION, MoveRequestError, MovementEventOutcome, MovementOutcomeKind, MovementScheduled,
-    PerceivedResource, PerceivedWater, PerceptionError, PhysicalPerception, PopulationInit,
-    PopulationInitError, PopulationInitOutcome, RouteEventOutcome, RouteOutcomeKind,
-    RouteScheduled, SimTime, SpawnInvalidReason,
+    AgentActivity, AgentId, AgentSpawnError, AgentView, EventId, MAX_PERCEPTION_CELLS,
+    MAX_PERCEPTION_RADIUS, MAX_POPULATION, MoveRequestError, MovementEventOutcome,
+    MovementOutcomeKind, MovementScheduled, PerceivedResource, PerceivedWater, PerceptionError,
+    PhysicalPerception, PopulationInit, PopulationInitError, PopulationInitOutcome,
+    RouteEventOutcome, RouteOutcomeKind, RouteScheduled, SimTime, SpawnInvalidReason,
 };
 pub use diagnostics::{EngineCapacityMetrics, EngineDiagnostics, EngineWorkMetrics};
 pub use health::{
@@ -30,8 +31,9 @@ pub use needs::{
     NEED_MAX, NEED_RATE_PERIOD_TICKS, NeedKind, NeedLevelView, NeedQueryError, NeedThreshold,
     NeedThresholdEventOutcome, NeedThresholdOutcomeKind, PhysicalNeedsView,
 };
+pub use placements::{SpawnKind, SpawnObjectError, SpawnedObjectView};
 pub use policy::{
-    PHYSICAL_POLICY_ACTION_TICKS, PHYSICAL_POLICY_IDLE_RECHECK_TICKS,
+    ExplorationHeading, PHYSICAL_POLICY_ACTION_TICKS, PHYSICAL_POLICY_IDLE_RECHECK_TICKS,
     PHYSICAL_POLICY_MAX_BACKOFF_TICKS, PHYSICAL_POLICY_RADIUS, PHYSICAL_POLICY_ROUTE_BUDGET,
     PhysicalGoal, PhysicalPolicyView, PolicyActivationError, PolicyDiagnostic,
     PolicyDiagnosticKind, PolicyFailureReason, PolicyReason,
@@ -65,7 +67,8 @@ use std::time::Duration;
 
 use agent::{ActionEffectError, MovementEnvironment, Population};
 use diagnostics::RuntimeCounters;
-use policy::{PolicyAction, PolicySelection, retry_delay, select};
+use placements::SpawnedObjects;
+use policy::{PolicyAction, PolicySelection, retry_delay, select_with_exploration};
 use resources::ResourceDeltas;
 use routing::{RouteEnvironment, RoutePlanner};
 use scheduler::{EventClass, MAX_DUE_EVENTS_PER_TICK, Scheduler};
@@ -79,6 +82,8 @@ pub struct EngineConfig {
     pub ticks_per_second: u32,
     pub world: WorldConfig,
 }
+
+pub const MAX_SIMULATION_SPEED: f32 = 256.0;
 
 impl Default for EngineConfig {
     fn default() -> Self {
@@ -163,7 +168,9 @@ pub struct Engine {
     health_diagnostics: Vec<HealthDiagnostic>,
     death_records: Vec<DeathRecord>,
     policy_active: bool,
+    policy_exploration: bool,
     resource_deltas: ResourceDeltas,
+    spawned_objects: SpawnedObjects,
     structures: StructureStore,
     route_planner: RoutePlanner,
     runtime_counters: RuntimeCounters,
@@ -193,7 +200,9 @@ impl Engine {
             health_diagnostics: Vec::new(),
             death_records: Vec::new(),
             policy_active: false,
+            policy_exploration: false,
             resource_deltas: ResourceDeltas::default(),
+            spawned_objects: SpawnedObjects::default(),
             structures: StructureStore::default(),
             route_planner: RoutePlanner::default(),
             runtime_counters: RuntimeCounters::default(),
@@ -211,7 +220,7 @@ impl Engine {
                 EngineCommandOutcome::Applied
             }
             EngineCommand::SetSpeed(speed) if speed.is_finite() => {
-                self.speed = speed.clamp(0.0, 64.0);
+                self.speed = speed.clamp(0.0, MAX_SIMULATION_SPEED);
                 EngineCommandOutcome::Applied
             }
             EngineCommand::SetSpeed(_) => EngineCommandOutcome::Ignored,
@@ -230,7 +239,9 @@ impl Engine {
                 self.health_diagnostics.clear();
                 self.death_records.clear();
                 self.policy_active = false;
+                self.policy_exploration = false;
                 self.resource_deltas = ResourceDeltas::default();
+                self.spawned_objects = SpawnedObjects::default();
                 self.structures = StructureStore::default();
                 self.route_planner = RoutePlanner::default();
                 self.runtime_counters = RuntimeCounters::default();
@@ -372,6 +383,7 @@ impl Engine {
                 &mut self.scheduler,
                 MovementEnvironment {
                     world: &self.world,
+                    spawned_objects: &self.spawned_objects,
                     structures: &self.structures,
                 },
                 event,
@@ -470,7 +482,13 @@ impl Engine {
             return Err(PopulationInitError::AlreadyInitialized);
         }
         let mut population = Population::default();
-        let outcome = population.initialize(&self.world, self.time, init, requested_positions)?;
+        let outcome = population.initialize(
+            &self.world,
+            &self.spawned_objects,
+            self.time,
+            init,
+            requested_positions,
+        )?;
         let scheduler_capacity = (init.population as usize)
             .checked_mul(5)
             .ok_or(PopulationInitError::AllocationFailed)?;
@@ -503,10 +521,28 @@ impl Engine {
         self.health_diagnostics.clear();
         self.death_records.clear();
         self.policy_active = false;
+        self.policy_exploration = false;
         self.route_outcomes.clear();
         self.route_planner = RoutePlanner::default();
         self.runtime_counters = RuntimeCounters::default();
         Ok(outcome)
+    }
+
+    /// Adds one dense authoritative agent at an exact standable, unoccupied position.
+    /// When autonomy is active, the new agent receives its first decision on the next tick.
+    pub fn spawn_agent(&mut self, position: WorldPosition) -> Result<AgentId, AgentSpawnError> {
+        self.compact_scheduler_if_needed();
+        self.population.spawn_agent(
+            &mut self.scheduler,
+            MovementEnvironment {
+                world: &self.world,
+                spawned_objects: &self.spawned_objects,
+                structures: &self.structures,
+            },
+            self.time,
+            position,
+            self.policy_active,
+        )
     }
 
     pub fn request_move(
@@ -522,6 +558,7 @@ impl Engine {
             &mut self.scheduler,
             MovementEnvironment {
                 world: &self.world,
+                spawned_objects: &self.spawned_objects,
                 structures: &self.structures,
             },
             self.time,
@@ -553,6 +590,7 @@ impl Engine {
         let plan = self.route_planner.plan(
             RouteEnvironment {
                 world: &self.world,
+                spawned_objects: &self.spawned_objects,
                 occupancy: self.population.spatial(),
                 structures: &self.structures,
                 active_area,
@@ -577,6 +615,7 @@ impl Engine {
                 &mut self.scheduler,
                 MovementEnvironment {
                     world: &self.world,
+                    spawned_objects: &self.spawned_objects,
                     structures: &self.structures,
                 },
                 self.time,
@@ -601,6 +640,7 @@ impl Engine {
     ) -> Result<PhysicalPerception, PerceptionError> {
         self.population.perceive(
             &self.world,
+            &self.spawned_objects,
             &self.resource_deltas,
             &self.structures,
             agent,
@@ -616,6 +656,7 @@ impl Engine {
     ) -> Result<PhysicalPerception, PerceptionError> {
         self.population.perceive_area(
             &self.world,
+            &self.spawned_objects,
             &self.resource_deltas,
             &self.structures,
             agent,
@@ -688,7 +729,82 @@ impl Engine {
         &self,
         position: WorldPosition,
     ) -> Result<Option<BaseResource>, WorldQueryError> {
+        if let Some(resource) = self.spawned_objects.resource_at(position) {
+            // Preserve the same typed residency contract as generated resources.
+            self.world.cell(position).ok_or_else(|| {
+                if WORLD_GENERATION_BOUNDS.contains(position) {
+                    WorldQueryError::Unloaded
+                } else {
+                    WorldQueryError::OutsideWorldBounds
+                }
+            })?;
+            return Ok(Some(resource));
+        }
         self.resource_deltas.resource_at(&self.world, position)
+    }
+
+    /// Places one sparse simulation-owned object on a resident, empty cell.
+    pub fn spawn_object(
+        &mut self,
+        kind: SpawnKind,
+        position: WorldPosition,
+    ) -> Result<(), SpawnObjectError> {
+        let standability = self
+            .world
+            .standability_at(position)
+            .map_err(|error| match error {
+                WorldQueryError::OutsideWorldBounds => SpawnObjectError::OutsideWorld,
+                WorldQueryError::Unloaded => SpawnObjectError::Unloaded,
+                WorldQueryError::NonCardinalStep => unreachable!("standing queries are not steps"),
+            })?;
+        match standability {
+            Standability::Standable => {}
+            Standability::BlockedByWater => return Err(SpawnObjectError::BlockedByWater),
+            Standability::BlockedByFeature => return Err(SpawnObjectError::BlockedByFeature),
+        }
+        if self.spawned_objects.at(position).is_some() {
+            return Err(SpawnObjectError::ExistingObject);
+        }
+        if self.population.spatial().occupant(position).is_some() {
+            return Err(SpawnObjectError::Occupied);
+        }
+        if self.structures.structure_at(position).is_some() {
+            return Err(SpawnObjectError::BlockedByStructure);
+        }
+        self.spawned_objects.insert(position, kind);
+        Ok(())
+    }
+
+    pub fn spawned_object_at(&self, position: WorldPosition) -> Option<SpawnedObjectView> {
+        self.spawned_objects.at(position)
+    }
+
+    pub fn spawned_object_views(&self) -> impl Iterator<Item = SpawnedObjectView> + '_ {
+        self.spawned_objects.views()
+    }
+
+    pub fn spawned_object_count(&self) -> usize {
+        self.spawned_objects.len()
+    }
+
+    pub fn spawned_object_revision(&self) -> u64 {
+        self.spawned_objects.revision()
+    }
+
+    /// Composes generated terrain with sparse user-spawned blockers.
+    pub fn physical_standability_at(
+        &self,
+        position: WorldPosition,
+    ) -> Result<Standability, WorldQueryError> {
+        self.spawned_objects.standability_at(&self.world, position)
+    }
+
+    /// Composes generated hydrology with explicitly placed fresh-water cells.
+    pub fn available_water_at(
+        &self,
+        position: WorldPosition,
+    ) -> Result<Option<WaterSource>, WorldQueryError> {
+        self.spawned_objects.water_at(&self.world, position)
     }
 
     /// Number of generated features with simulation-owned remaining-capacity state.
@@ -711,7 +827,11 @@ impl Engine {
             return Err(SleepRequestError::PolicyControlled);
         }
         let quality = self.population.validate_sleep_location(
-            &self.world,
+            MovementEnvironment {
+                world: &self.world,
+                spawned_objects: &self.spawned_objects,
+                structures: &self.structures,
+            },
             self.time,
             agent,
             position,
@@ -770,6 +890,21 @@ impl Engine {
 
     /// Activates autonomous physical decisions after population initialization.
     pub fn activate_physical_policy(&mut self) -> Result<(), PolicyActivationError> {
+        self.activate_physical_policy_mode(false)
+    }
+
+    /// Activates autonomous physical decisions with bounded deterministic wandering
+    /// whenever the local perception window contains no actionable objective.
+    pub fn activate_physical_policy_with_exploration(
+        &mut self,
+    ) -> Result<(), PolicyActivationError> {
+        self.activate_physical_policy_mode(true)
+    }
+
+    fn activate_physical_policy_mode(
+        &mut self,
+        explore_when_unresolved: bool,
+    ) -> Result<(), PolicyActivationError> {
         if !self.population.is_initialized() {
             return Err(PolicyActivationError::PopulationNotInitialized);
         }
@@ -790,6 +925,7 @@ impl Engine {
             .activate_policy(&mut self.scheduler, due)
             .map_err(|_| PolicyActivationError::EventSequenceExhausted)?;
         self.policy_active = true;
+        self.policy_exploration = explore_when_unresolved;
         Ok(())
     }
 
@@ -876,6 +1012,7 @@ impl Engine {
         match self.route_planner.plan(
             RouteEnvironment {
                 world: &self.world,
+                spawned_objects: &self.spawned_objects,
                 occupancy: self.population.spatial(),
                 structures: &self.structures,
                 active_area,
@@ -889,6 +1026,7 @@ impl Engine {
                     &mut self.scheduler,
                     MovementEnvironment {
                         world: &self.world,
+                        spawned_objects: &self.spawned_objects,
                         structures: &self.structures,
                     },
                     self.time,
@@ -993,7 +1131,17 @@ impl Engine {
         let width = (perception.area.max.x - perception.area.min.x) as u64;
         let height = (perception.area.max.y - perception.area.min.y) as u64;
         self.runtime_counters.policy_perceived_cells += width * height;
-        let selection = select(view.position, needs, inventory, &perception);
+        let exploration_heading = self
+            .policy_exploration
+            .then(|| self.population.exploration_heading(event.agent))
+            .flatten();
+        let (selection, selected_heading) = select_with_exploration(
+            view.position,
+            needs,
+            inventory,
+            &perception,
+            exploration_heading,
+        );
         self.policy_diagnostics.push(PolicyDiagnostic {
             agent: event.agent,
             at: self.time,
@@ -1003,7 +1151,7 @@ impl Engine {
             kind: PolicyDiagnosticKind::Selected,
             failure: None,
         });
-        self.apply_policy_selection(event.agent, view.position, selection);
+        self.apply_policy_selection(event.agent, view.position, selection, selected_heading);
     }
 
     fn apply_policy_selection(
@@ -1011,6 +1159,7 @@ impl Engine {
         agent: AgentId,
         origin: WorldPosition,
         selection: PolicySelection,
+        exploration_heading: Option<ExplorationHeading>,
     ) {
         let Some(target) = selection.target else {
             self.schedule_policy_retry(
@@ -1076,7 +1225,11 @@ impl Engine {
             };
             if action_goal == PhysicalGoal::Sleep {
                 let quality = match self.population.validate_sleep_location(
-                    &self.world,
+                    MovementEnvironment {
+                        world: &self.world,
+                        spawned_objects: &self.spawned_objects,
+                        structures: &self.structures,
+                    },
                     self.time,
                     agent,
                     target,
@@ -1173,6 +1326,7 @@ impl Engine {
                     selection.goal,
                     target,
                     selection.reason,
+                    exploration_heading,
                 );
                 self.policy_diagnostics.push(PolicyDiagnostic {
                     agent,
@@ -1250,9 +1404,10 @@ impl Engine {
             PhysicalGoal::SeekShelter | PhysicalGoal::Incapacitated => {
                 Err(PolicyFailureReason::DeferredToLaterSlice)
             }
-            PhysicalGoal::SeekWater | PhysicalGoal::SeekFood | PhysicalGoal::Wait => {
-                Err(PolicyFailureReason::InconsistentState)
-            }
+            PhysicalGoal::SeekWater
+            | PhysicalGoal::SeekFood
+            | PhysicalGoal::Explore
+            | PhysicalGoal::Wait => Err(PolicyFailureReason::InconsistentState),
         };
         match result {
             Ok(()) => {
@@ -1385,8 +1540,7 @@ impl Engine {
         ]
         .into_iter()
         .filter_map(|candidate| {
-            self.resource_deltas
-                .resource_at(&self.world, candidate)
+            self.available_resource_at(candidate)
                 .ok()
                 .flatten()
                 .filter(|resource| {
@@ -1422,11 +1576,14 @@ impl Engine {
         let maximum = inventory
             .remaining_capacity(resource.kind)
             .min(GATHER_YIELD);
-        let Some((kind, gathered)) = self
-            .resource_deltas
-            .gather(&self.world, resource_position, maximum)
-            .map_err(|_| PolicyFailureReason::TargetUnavailable)?
-        else {
+        let gathered = if self.spawned_objects.at(resource_position).is_some() {
+            self.spawned_objects.gather(resource_position, maximum)
+        } else {
+            self.resource_deltas
+                .gather(&self.world, resource_position, maximum)
+                .map_err(|_| PolicyFailureReason::TargetUnavailable)?
+        };
+        let Some((kind, gathered)) = gathered else {
             return Err(PolicyFailureReason::ResourceDepleted);
         };
         let accepted = self.population.add_inventory(agent, kind, gathered);
@@ -1458,7 +1615,7 @@ impl Engine {
                 y: position.y + 1,
             },
         ] {
-            match self.world.water_at(candidate) {
+            match self.spawned_objects.water_at(&self.world, candidate) {
                 Ok(Some(source)) if source.is_drinkable() => return Ok(true),
                 Ok(_) => {}
                 Err(WorldQueryError::Unloaded) => failure = Some(PolicyFailureReason::Unloaded),
@@ -1506,7 +1663,7 @@ impl Engine {
         if let Some(occupant) = self.population.spatial().occupant(site) {
             return Err(BuildShelterError::Occupied(occupant));
         }
-        match self.world.standability_at(site) {
+        match self.spawned_objects.standability_at(&self.world, site) {
             Ok(Standability::Standable) => {}
             Ok(Standability::BlockedByWater) => return Err(BuildShelterError::Water),
             Ok(Standability::BlockedByFeature) => {
@@ -1592,6 +1749,7 @@ impl Engine {
         failure: PolicyFailureReason,
     ) {
         self.population.clear_route(agent);
+        self.population.record_policy_retry(agent, goal, target);
         let retry_depth = self.population.policy_retries(agent);
         let delay = retry_delay(retry_depth);
         self.runtime_counters.policy_retries += 1;
@@ -1913,6 +2071,310 @@ mod tests {
         });
         engine.materialize_initial_area().unwrap();
         engine
+    }
+
+    #[test]
+    fn additive_spawn_expands_across_contiguous_resident_terrain() {
+        let mut engine = resident_engine(128);
+        let initial = engine.world().initial_bounds();
+        let left = WorldRect {
+            min: initial.min,
+            max: WorldPosition {
+                x: 0,
+                y: initial.max.y,
+            },
+        };
+        let standable_in = |bounds: WorldRect| {
+            (bounds.min.y..bounds.max.y)
+                .flat_map(|y| (bounds.min.x..bounds.max.x).map(move |x| WorldPosition { x, y }))
+                .find(|position| {
+                    engine.world().standability_at(*position) == Ok(Standability::Standable)
+                })
+                .unwrap()
+        };
+        let first = standable_in(left);
+        let second = standable_in(WorldRect {
+            min: WorldPosition {
+                x: 0,
+                y: initial.min.y,
+            },
+            max: initial.max,
+        });
+        engine
+            .initialize_population(
+                PopulationInit {
+                    active_area: left,
+                    population: 1,
+                },
+                &[first],
+            )
+            .unwrap();
+        engine.activate_physical_policy_with_exploration().unwrap();
+
+        assert_eq!(engine.spawn_agent(second), Ok(AgentId::new(1)));
+        assert_eq!(engine.population.active_area(), Some(initial));
+        assert_eq!(engine.snapshot().agent_count, 2);
+        assert_eq!(engine.agent_views(2).last().unwrap().position, second);
+    }
+
+    #[test]
+    fn crowded_water_seekers_claim_distinct_access_and_both_drink() {
+        let mut engine = resident_engine(128);
+        let bounds = engine.world().initial_bounds();
+        let water = (bounds.min.y + 4..bounds.max.y - 4)
+            .flat_map(|y| (bounds.min.x + 4..bounds.max.x - 4).map(move |x| WorldPosition { x, y }))
+            .find(|center| {
+                let patch = WorldRect {
+                    min: WorldPosition {
+                        x: center.x - 3,
+                        y: center.y - 4,
+                    },
+                    max: WorldPosition {
+                        x: center.x + 4,
+                        y: center.y + 4,
+                    },
+                };
+                (patch.min.y..patch.max.y).all(|y| {
+                    (patch.min.x..patch.max.x).all(|x| {
+                        let position = WorldPosition { x, y };
+                        engine.world().standability_at(position) == Ok(Standability::Standable)
+                            && engine.available_resource_at(position) == Ok(None)
+                            && [(1, 0), (0, 1)].into_iter().all(|(dx, dy)| {
+                                let neighbor = WorldPosition {
+                                    x: x + dx,
+                                    y: y + dy,
+                                };
+                                !patch.contains(neighbor)
+                                    || engine
+                                        .world()
+                                        .traversal_step(position, neighbor)
+                                        .is_ok_and(|step| step.is_passable())
+                            })
+                    })
+                })
+            })
+            .expect("seeded resident terrain should contain a small passable patch");
+        engine.spawn_object(SpawnKind::Water, water).unwrap();
+        let positions = [
+            WorldPosition {
+                x: water.x,
+                y: water.y - 3,
+            },
+            WorldPosition {
+                x: water.x,
+                y: water.y - 4,
+            },
+        ];
+        engine
+            .initialize_population(
+                PopulationInit {
+                    active_area: bounds,
+                    population: 2,
+                },
+                &positions,
+            )
+            .unwrap();
+        for agent in [AgentId::new(0), AgentId::new(1)] {
+            engine.population.set_need_value_for_test(
+                agent,
+                NeedKind::Thirst,
+                6_000,
+                SimTime::ZERO,
+            );
+        }
+        engine.activate_physical_policy_with_exploration().unwrap();
+        engine.tick();
+
+        let first = engine.physical_policy(AgentId::new(0)).unwrap();
+        let second = engine.physical_policy(AgentId::new(1)).unwrap();
+        assert_eq!(first.goal, PhysicalGoal::SeekWater);
+        assert_eq!(second.goal, PhysicalGoal::SeekWater);
+        assert_ne!(first.target, second.target);
+        assert_eq!(first.retry_count, 0);
+        assert_eq!(second.retry_count, 0);
+
+        let mut drank = [false; 2];
+        for _ in 0..2_000 {
+            engine.tick();
+            for diagnostic in engine.policy_diagnostics() {
+                if diagnostic.kind == PolicyDiagnosticKind::ActionCompleted
+                    && diagnostic.goal == PhysicalGoal::Drink
+                    && diagnostic.failure.is_none()
+                {
+                    drank[diagnostic.agent.get() as usize] = true;
+                }
+            }
+            if drank.into_iter().all(|completed| completed) {
+                break;
+            }
+        }
+        assert_eq!(drank, [true, true]);
+
+        let anchored = [
+            engine.agent_views(2).next().unwrap().position,
+            engine.agent_views(2).nth(1).unwrap().position,
+        ];
+        for _ in 0..1_000 {
+            engine.tick();
+        }
+        for (index, position) in anchored.into_iter().enumerate() {
+            let agent = AgentId::new(index as u32);
+            assert_eq!(engine.agent_views(2).nth(index).unwrap().position, position);
+            assert!(matches!(
+                engine.physical_policy(agent).unwrap().goal,
+                PhysicalGoal::Wait | PhysicalGoal::Drink
+            ));
+            assert!(engine.has_adjacent_drinkable_water(position).unwrap());
+        }
+    }
+
+    #[test]
+    fn perception_excludes_terrain_disconnected_cells_from_autonomous_targets() {
+        let mut engine = resident_engine(128);
+        let bounds = engine.world().initial_bounds();
+        let center = (bounds.min.y + 3..bounds.max.y - 3)
+            .flat_map(|y| (bounds.min.x + 3..bounds.max.x - 3).map(move |x| WorldPosition { x, y }))
+            .find(|center| {
+                let patch = WorldRect {
+                    min: WorldPosition {
+                        x: center.x - 2,
+                        y: center.y - 2,
+                    },
+                    max: WorldPosition {
+                        x: center.x + 3,
+                        y: center.y + 3,
+                    },
+                };
+                (patch.min.y..patch.max.y).all(|y| {
+                    (patch.min.x..patch.max.x).all(|x| {
+                        let position = WorldPosition { x, y };
+                        engine.world().standability_at(position) == Ok(Standability::Standable)
+                            && engine.available_resource_at(position) == Ok(None)
+                            && [(1, 0), (0, 1)].into_iter().all(|(dx, dy)| {
+                                let neighbor = WorldPosition {
+                                    x: x + dx,
+                                    y: y + dy,
+                                };
+                                !patch.contains(neighbor)
+                                    || engine
+                                        .world()
+                                        .traversal_step(position, neighbor)
+                                        .is_ok_and(TraversalStep::is_passable)
+                            })
+                    })
+                })
+            })
+            .expect("seeded terrain should contain a resource-free passable patch");
+        for position in [
+            WorldPosition {
+                x: center.x,
+                y: center.y - 1,
+            },
+            WorldPosition {
+                x: center.x - 1,
+                y: center.y,
+            },
+            WorldPosition {
+                x: center.x + 1,
+                y: center.y,
+            },
+            WorldPosition {
+                x: center.x,
+                y: center.y + 1,
+            },
+        ] {
+            engine.spawn_object(SpawnKind::Water, position).unwrap();
+        }
+        engine
+            .initialize_population(
+                PopulationInit {
+                    active_area: bounds,
+                    population: 1,
+                },
+                &[center],
+            )
+            .unwrap();
+
+        let perception = engine.perceive_physical(AgentId::new(0), 2).unwrap();
+        assert!(perception.traversable_cells.len() > 1);
+        assert_eq!(perception.reachable_cells, [center]);
+        let (_, needs, inventory) = engine
+            .population
+            .policy_context(AgentId::new(0), SimTime::ZERO)
+            .unwrap();
+        let (selection, _) = select_with_exploration(
+            center,
+            needs,
+            inventory,
+            &perception,
+            Some(ExplorationHeading::North),
+        );
+        assert_eq!(selection.goal, PhysicalGoal::Wait);
+        assert_eq!(selection.target, Some(center));
+    }
+
+    #[test]
+    fn isolated_agent_explores_a_full_local_window_without_route_backoff() {
+        let mut engine = resident_engine(128);
+        let bounds = engine.world().initial_bounds();
+        let origin = (bounds.min.y + 8..bounds.max.y - 8)
+            .flat_map(|y| (bounds.min.x + 8..bounds.max.x - 8).map(move |x| WorldPosition { x, y }))
+            .find(|origin| {
+                let patch = WorldRect {
+                    min: WorldPosition {
+                        x: origin.x - 8,
+                        y: origin.y - 8,
+                    },
+                    max: WorldPosition {
+                        x: origin.x + 9,
+                        y: origin.y + 9,
+                    },
+                };
+                (patch.min.y..patch.max.y).all(|y| {
+                    (patch.min.x..patch.max.x).all(|x| {
+                        let position = WorldPosition { x, y };
+                        engine.world().standability_at(position) == Ok(Standability::Standable)
+                            && engine.available_resource_at(position) == Ok(None)
+                            && engine.world().water_at(position) == Ok(None)
+                            && [(1, 0), (0, 1)].into_iter().all(|(dx, dy)| {
+                                let neighbor = WorldPosition {
+                                    x: x + dx,
+                                    y: y + dy,
+                                };
+                                !patch.contains(neighbor)
+                                    || engine
+                                        .world()
+                                        .traversal_step(position, neighbor)
+                                        .is_ok_and(TraversalStep::is_passable)
+                            })
+                    })
+                })
+            })
+            .expect("seeded terrain should contain a clear local exploration window");
+        engine
+            .initialize_population(
+                PopulationInit {
+                    active_area: bounds,
+                    population: 1,
+                },
+                &[origin],
+            )
+            .unwrap();
+        engine.activate_physical_policy_with_exploration().unwrap();
+
+        engine.tick();
+
+        let policy = engine.physical_policy(AgentId::new(0)).unwrap();
+        assert_eq!(policy.goal, PhysicalGoal::Explore);
+        assert!(policy.committed);
+        assert_eq!(policy.retry_count, 0);
+        assert_eq!(
+            engine.agent_views(1).next().unwrap().activity,
+            AgentActivity::Moving
+        );
+        assert!(engine.policy_diagnostics().iter().all(|diagnostic| {
+            diagnostic.failure != Some(PolicyFailureReason::RouteBudgetExhausted)
+        }));
     }
 
     fn standable_shelter_site(engine: &Engine) -> (WorldPosition, WorldPosition) {
@@ -2644,6 +3106,18 @@ mod tests {
         assert_eq!(engine.config(), config);
         assert_eq!(engine.snapshot().tick, 0);
         assert_eq!(engine.snapshot().speed, 1.0);
+    }
+
+    #[test]
+    fn simulation_speed_accepts_the_nine_key_ceiling() {
+        let mut engine = Engine::default();
+        assert_eq!(
+            engine.command(EngineCommand::SetSpeed(256.0)),
+            EngineCommandOutcome::Applied
+        );
+        assert_eq!(engine.snapshot().speed, MAX_SIMULATION_SPEED);
+        engine.command(EngineCommand::SetSpeed(512.0));
+        assert_eq!(engine.snapshot().speed, MAX_SIMULATION_SPEED);
     }
 
     #[test]
@@ -3497,6 +3971,7 @@ mod tests {
                     if let Ok(plan) = engine.route_planner.plan(
                         RouteEnvironment {
                             world: &engine.world,
+                            spawned_objects: &engine.spawned_objects,
                             occupancy: engine.population.spatial(),
                             structures: &engine.structures,
                             active_area,
@@ -3523,6 +3998,7 @@ mod tests {
                 .plan(
                     RouteEnvironment {
                         world: &engine.world,
+                        spawned_objects: &engine.spawned_objects,
                         occupancy: engine.population.spatial(),
                         structures: &engine.structures,
                         active_area,
@@ -3631,7 +4107,7 @@ mod tests {
             let schedule_start = Instant::now();
             for (raw, state) in states.iter_mut().enumerate() {
                 let generation = state.next_generation().unwrap();
-                state.phase = policy::PolicyPhase::DecisionPending;
+                state.set_phase(policy::PolicyPhase::DecisionPending);
                 scheduler
                     .schedule_decision(
                         SimTime::from_ticks(1),

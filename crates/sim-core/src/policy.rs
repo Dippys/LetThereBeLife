@@ -43,6 +43,7 @@ pub enum PhysicalGoal {
     BuildShelter = 7,
     Wait = 8,
     Incapacitated = 9,
+    Explore = 10,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,6 +120,52 @@ pub struct PhysicalPolicyView {
     pub target: Option<WorldPosition>,
     pub committed: bool,
     pub retry_count: u8,
+    pub exploration_heading: ExplorationHeading,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ExplorationHeading {
+    North = 0,
+    NorthEast = 1,
+    East = 2,
+    SouthEast = 3,
+    South = 4,
+    SouthWest = 5,
+    West = 6,
+    NorthWest = 7,
+}
+
+impl ExplorationHeading {
+    const fn from_rank(rank: u8) -> Self {
+        match rank & 7 {
+            0 => Self::North,
+            1 => Self::NorthEast,
+            2 => Self::East,
+            3 => Self::SouthEast,
+            4 => Self::South,
+            5 => Self::SouthWest,
+            6 => Self::West,
+            _ => Self::NorthWest,
+        }
+    }
+
+    const fn rotated(self, offset: i8) -> Self {
+        Self::from_rank((self as i8).wrapping_add(offset) as u8)
+    }
+
+    const fn delta(self) -> (i64, i64) {
+        match self {
+            Self::North => (0, -1),
+            Self::NorthEast => (1, -1),
+            Self::East => (1, 0),
+            Self::SouthEast => (1, 1),
+            Self::South => (0, 1),
+            Self::SouthWest => (-1, 1),
+            Self::West => (-1, 0),
+            Self::NorthWest => (-1, -1),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,12 +179,47 @@ pub(crate) enum PolicyPhase {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(transparent)]
+pub(crate) struct PolicyNavigation(u8);
+
+impl PolicyNavigation {
+    const PHASE_MASK: u8 = 0b111;
+    const HEADING_SHIFT: u8 = 3;
+
+    const fn new(phase: PolicyPhase, heading: ExplorationHeading) -> Self {
+        Self((phase as u8) | ((heading as u8) << Self::HEADING_SHIFT))
+    }
+
+    pub(crate) const fn phase(self) -> PolicyPhase {
+        match self.0 & Self::PHASE_MASK {
+            0 => PolicyPhase::Dormant,
+            1 => PolicyPhase::DecisionPending,
+            2 => PolicyPhase::Routing,
+            3 => PolicyPhase::Acting,
+            _ => PolicyPhase::Backoff,
+        }
+    }
+
+    pub(crate) const fn heading(self) -> ExplorationHeading {
+        ExplorationHeading::from_rank(self.0 >> Self::HEADING_SHIFT)
+    }
+
+    pub(crate) fn set_phase(&mut self, phase: PolicyPhase) {
+        self.0 = (self.0 & !Self::PHASE_MASK) | phase as u8;
+    }
+
+    pub(crate) fn set_heading(&mut self, heading: ExplorationHeading) {
+        self.0 = (self.0 & Self::PHASE_MASK) | ((heading as u8) << Self::HEADING_SHIFT);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub(crate) struct PolicyState {
     pub(crate) target: CompactPosition,
     pub(crate) generation: u32,
+    pub(crate) navigation: PolicyNavigation,
     pub(crate) goal: PhysicalGoal,
-    pub(crate) phase: PolicyPhase,
     pub(crate) retries: u8,
     pub(crate) reason: PolicyReason,
 }
@@ -147,8 +229,8 @@ impl Default for PolicyState {
         Self {
             target: CompactPosition { x: 0, y: 0 },
             generation: 0,
+            navigation: PolicyNavigation::new(PolicyPhase::Dormant, ExplorationHeading::North),
             goal: PhysicalGoal::Wait,
-            phase: PolicyPhase::Dormant,
             retries: 0,
             reason: PolicyReason::InitialDecision,
         }
@@ -156,14 +238,42 @@ impl Default for PolicyState {
 }
 
 impl PolicyState {
+    pub(crate) fn for_agent(agent: AgentId) -> Self {
+        let mut state = Self::default();
+        let mut key = agent.get().wrapping_mul(0x9e37_79b9);
+        key ^= key >> 16;
+        state
+            .navigation
+            .set_heading(ExplorationHeading::from_rank(key as u8));
+        state
+    }
+
+    pub(crate) const fn phase(self) -> PolicyPhase {
+        self.navigation.phase()
+    }
+
+    pub(crate) fn set_phase(&mut self, phase: PolicyPhase) {
+        self.navigation.set_phase(phase);
+    }
+
+    pub(crate) const fn exploration_heading(self) -> ExplorationHeading {
+        self.navigation.heading()
+    }
+
+    pub(crate) fn set_exploration_heading(&mut self, heading: ExplorationHeading) {
+        self.navigation.set_heading(heading);
+    }
+
     pub(crate) fn view(self, agent: AgentId) -> PhysicalPolicyView {
+        let phase = self.phase();
         PhysicalPolicyView {
             agent,
             goal: self.goal,
-            target: matches!(self.phase, PolicyPhase::Routing | PolicyPhase::Acting)
+            target: matches!(phase, PolicyPhase::Routing | PolicyPhase::Acting)
                 .then(|| self.target.world()),
-            committed: matches!(self.phase, PolicyPhase::Routing | PolicyPhase::Acting),
+            committed: matches!(phase, PolicyPhase::Routing | PolicyPhase::Acting),
             retry_count: self.retries,
+            exploration_heading: self.exploration_heading(),
         }
     }
 
@@ -175,7 +285,7 @@ impl PolicyState {
     pub(crate) const fn event_is_current(self, generation: u32) -> bool {
         self.generation == generation
             && matches!(
-                self.phase,
+                self.phase(),
                 PolicyPhase::DecisionPending | PolicyPhase::Backoff | PolicyPhase::Acting
             )
     }
@@ -196,12 +306,23 @@ pub(crate) struct PolicyAction {
     pub(crate) duration: u64,
 }
 
+#[cfg(test)]
 pub(crate) fn select(
     origin: WorldPosition,
     needs: PhysicalNeedsView,
     inventory: InventoryView,
     perception: &PhysicalPerception,
 ) -> PolicySelection {
+    select_with_exploration(origin, needs, inventory, perception, None).0
+}
+
+pub(crate) fn select_with_exploration(
+    origin: WorldPosition,
+    needs: PhysicalNeedsView,
+    inventory: InventoryView,
+    perception: &PhysicalPerception,
+    exploration_heading: Option<ExplorationHeading>,
+) -> (PolicySelection, Option<ExplorationHeading>) {
     let urgent = NeedKind::ALL
         .into_iter()
         .filter_map(|kind| {
@@ -219,7 +340,7 @@ pub(crate) fn select(
         })
         .max_by_key(|&(score, tie, _)| (score, tie));
 
-    match urgent.map(|(_, _, kind)| kind) {
+    let selection = match urgent.map(|(_, _, kind)| kind) {
         Some(NeedKind::Thirst) => PolicySelection {
             goal: PhysicalGoal::SeekWater,
             target: nearest_water_access(origin, perception),
@@ -249,7 +370,94 @@ pub(crate) fn select(
             PolicyReason::ExposureThreshold,
         ),
         None => shelter_selection(origin, inventory, perception, PolicyReason::NoUrgentNeed),
+    };
+    let Some(heading) = exploration_heading else {
+        return (selection, None);
+    };
+    if (selection.target.is_some() && selection.goal != PhysicalGoal::Wait)
+        || (selection.goal == PhysicalGoal::Wait && is_safe_anchor(origin, perception))
+    {
+        return (selection, None);
     }
+    let heading = varied_exploration_heading(needs.agent, origin, heading);
+    exploration_target(origin, perception, heading).map_or(
+        (selection, None),
+        |(target, heading)| {
+            (
+                PolicySelection {
+                    goal: PhysicalGoal::Explore,
+                    target: Some(target),
+                    reason: selection.reason,
+                },
+                Some(heading),
+            )
+        },
+    )
+}
+
+fn is_safe_anchor(origin: WorldPosition, perception: &PhysicalPerception) -> bool {
+    perception
+        .drinkable_water
+        .iter()
+        .any(|water| origin.x.abs_diff(water.position.x) + origin.y.abs_diff(water.position.y) <= 1)
+        || nearest_shelter_access(origin, perception) == Some(origin)
+}
+
+fn varied_exploration_heading(
+    agent: AgentId,
+    origin: WorldPosition,
+    heading: ExplorationHeading,
+) -> ExplorationHeading {
+    let mut key = u64::from(agent.get()) ^ (origin.x as u64).rotate_left(17);
+    key ^= (origin.y as u64).rotate_left(41);
+    key = (key ^ (key >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    key = (key ^ (key >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    key ^= key >> 31;
+    let turn = match key >> 61 {
+        0 => -2,
+        1 | 2 => -1,
+        3..=5 => 0,
+        6 => 1,
+        _ => 2,
+    };
+    heading.rotated(turn)
+}
+
+fn exploration_target(
+    origin: WorldPosition,
+    perception: &PhysicalPerception,
+    heading: ExplorationHeading,
+) -> Option<(WorldPosition, ExplorationHeading)> {
+    [0_i8, 1, -1, 2, -2, 3, -3, 4].into_iter().find_map(|turn| {
+        let heading = heading.rotated(turn);
+        let (heading_x, heading_y) = heading.delta();
+        perception
+            .reachable_cells
+            .iter()
+            .copied()
+            .filter(|candidate| *candidate != origin)
+            .filter(|candidate| candidate_available(origin, perception, *candidate))
+            .filter_map(|candidate| {
+                let dx = candidate.x - origin.x;
+                let dy = candidate.y - origin.y;
+                let projection = dx * heading_x + dy * heading_y;
+                (projection > 0).then(|| {
+                    let lateral = (dx * heading_y - dy * heading_x).unsigned_abs();
+                    let distance = dx.unsigned_abs() + dy.unsigned_abs();
+                    (candidate, projection, lateral, distance)
+                })
+            })
+            .max_by_key(|(candidate, projection, lateral, distance)| {
+                (
+                    *projection,
+                    u64::MAX - *lateral,
+                    *distance,
+                    candidate.y,
+                    candidate.x,
+                )
+            })
+            .map(|(target, _, _, _)| (target, heading))
+    })
 }
 
 fn shelter_selection(
@@ -328,14 +536,7 @@ fn nearest_shelter_access(
         .iter()
         .filter(|structure| structure.state == StructureState::Complete)
         .flat_map(|structure| cardinal_neighbors(structure.position))
-        .filter(|candidate| traversable(perception, *candidate))
-        .filter(|candidate| {
-            *candidate == origin
-                || !perception
-                    .agents
-                    .iter()
-                    .any(|agent| agent.position == *candidate)
-        })
+        .filter(|candidate| candidate_available(origin, perception, *candidate))
         .min_by_key(|candidate| target_key(origin, *candidate))
 }
 
@@ -344,13 +545,7 @@ fn nearest_build_site(
     perception: &PhysicalPerception,
 ) -> Option<WorldPosition> {
     cardinal_neighbors(origin)
-        .filter(|candidate| traversable(perception, *candidate))
-        .filter(|candidate| {
-            !perception
-                .agents
-                .iter()
-                .any(|agent| agent.position == *candidate)
-        })
+        .filter(|candidate| candidate_available(origin, perception, *candidate))
         .min_by_key(|candidate| (candidate.y, candidate.x))
 }
 
@@ -375,7 +570,7 @@ fn nearest_water_access(
         .drinkable_water
         .iter()
         .flat_map(|water| cardinal_neighbors(water.position))
-        .filter(|candidate| traversable(perception, *candidate))
+        .filter(|candidate| candidate_available(origin, perception, *candidate))
         .min_by_key(|candidate| target_key(origin, *candidate))
 }
 
@@ -391,7 +586,7 @@ fn nearest_resource_access(
         .flat_map(|resource| {
             std::iter::once(resource.position).chain(cardinal_neighbors(resource.position))
         })
-        .filter(|candidate| traversable(perception, *candidate))
+        .filter(|candidate| candidate_available(origin, perception, *candidate))
         .min_by_key(|candidate| target_key(origin, *candidate))
 }
 
@@ -419,11 +614,28 @@ fn cardinal_neighbors(position: WorldPosition) -> std::array::IntoIter<WorldPosi
 
 fn traversable(perception: &PhysicalPerception, position: WorldPosition) -> bool {
     perception
-        .traversable_cells
+        .reachable_cells
         .binary_search_by_key(&(position.y, position.x), |candidate| {
             (candidate.y, candidate.x)
         })
         .is_ok()
+}
+
+fn candidate_available(
+    origin: WorldPosition,
+    perception: &PhysicalPerception,
+    position: WorldPosition,
+) -> bool {
+    traversable(perception, position)
+        && (position == origin
+            || (!perception
+                .agents
+                .iter()
+                .any(|agent| agent.position == position)
+                && perception
+                    .claimed_targets
+                    .binary_search_by_key(&(position.y, position.x), |target| (target.y, target.x))
+                    .is_err()))
 }
 
 fn target_key(origin: WorldPosition, target: WorldPosition) -> (u64, i64, i64) {
@@ -457,8 +669,18 @@ mod tests {
     fn policy_state_has_a_fixed_pointer_free_layout() {
         assert_eq!(size_of::<PolicyState>(), 12);
         assert_eq!(align_of::<PolicyState>(), 4);
+        assert_eq!(size_of::<PolicyNavigation>(), 1);
+        assert_eq!(size_of::<ExplorationHeading>(), 1);
         assert_eq!(size_of::<PolicyDiagnostic>(), 40);
         assert_eq!(align_of::<PolicyDiagnostic>(), 8);
+
+        let mut state = PolicyState::for_agent(AgentId::new(7));
+        state.set_phase(PolicyPhase::Routing);
+        let heading = state.exploration_heading();
+        state.set_phase(PolicyPhase::Backoff);
+        assert_eq!(state.exploration_heading(), heading);
+        state.set_exploration_heading(ExplorationHeading::SouthWest);
+        assert_eq!(state.phase(), PolicyPhase::Backoff);
     }
 
     #[test]
@@ -496,6 +718,7 @@ mod tests {
                 max: WorldPosition { x: 5, y: 5 },
             },
             agents: Vec::new(),
+            claimed_targets: Vec::new(),
             drinkable_water: vec![PerceivedWater {
                 position: WorldPosition { x: 2, y: 0 },
                 source: WaterSource::Lake,
@@ -509,6 +732,11 @@ mod tests {
             }],
             structures: Vec::new(),
             traversable_cells: vec![
+                WorldPosition { x: 0, y: 0 },
+                WorldPosition { x: 1, y: 0 },
+                WorldPosition { x: 0, y: 2 },
+            ],
+            reachable_cells: vec![
                 WorldPosition { x: 0, y: 0 },
                 WorldPosition { x: 1, y: 0 },
                 WorldPosition { x: 0, y: 2 },
@@ -572,6 +800,64 @@ mod tests {
     }
 
     #[test]
+    fn disconnected_objective_access_is_not_selected_for_repeated_failure() {
+        let origin = WorldPosition { x: 0, y: 0 };
+        let mut facts = perception();
+        facts.reachable_cells = vec![origin];
+
+        let (selection, _) = select_with_exploration(
+            origin,
+            needs(0, 6_000, 0, 0),
+            InventoryView::default(),
+            &facts,
+            Some(ExplorationHeading::North),
+        );
+
+        assert_eq!(selection.goal, PhysicalGoal::SeekWater);
+        assert_eq!(selection.target, None);
+    }
+
+    #[test]
+    fn occupied_and_claimed_objective_cells_select_distinct_fallbacks() {
+        let origin = WorldPosition { x: 0, y: 0 };
+        let mut facts = perception();
+        facts.traversable_cells.extend([
+            WorldPosition { x: 2, y: -1 },
+            WorldPosition { x: 3, y: 0 },
+            WorldPosition { x: 2, y: 1 },
+            WorldPosition { x: 0, y: 1 },
+            WorldPosition { x: -1, y: 2 },
+            WorldPosition { x: 1, y: 2 },
+            WorldPosition { x: 0, y: 3 },
+        ]);
+        facts
+            .traversable_cells
+            .sort_unstable_by_key(|position| (position.y, position.x));
+        facts.reachable_cells = facts.traversable_cells.clone();
+        facts.agents.push(crate::AgentView {
+            id: AgentId::new(1),
+            position: WorldPosition { x: 1, y: 0 },
+            activity: crate::AgentActivity::Moving,
+        });
+        facts.claimed_targets = vec![WorldPosition { x: 2, y: -1 }];
+
+        let water = select(
+            origin,
+            needs(0, 6_000, 0, 0),
+            InventoryView::default(),
+            &facts,
+        );
+        assert_eq!(water.goal, PhysicalGoal::SeekWater);
+        assert_eq!(water.target, Some(WorldPosition { x: 3, y: 0 }));
+
+        facts.agents[0].position = WorldPosition { x: 0, y: 1 };
+        facts.claimed_targets = vec![WorldPosition { x: 0, y: 2 }];
+        let resource = select(origin, needs(0, 0, 0, 0), InventoryView::default(), &facts);
+        assert_eq!(resource.goal, PhysicalGoal::GatherMaterial);
+        assert_eq!(resource.target, Some(WorldPosition { x: -1, y: 2 }));
+    }
+
+    #[test]
     fn carried_food_turns_hunger_into_eating_and_idle_agents_gather_capacity() {
         let origin = WorldPosition { x: 0, y: 0 };
         let facts = perception();
@@ -611,5 +897,95 @@ mod tests {
         assert_eq!(PhysicalGoal::BuildShelter as u8, 7);
         assert_eq!(PhysicalGoal::Wait as u8, 8);
         assert_eq!(PhysicalGoal::Incapacitated as u8, 9);
+        assert_eq!(PhysicalGoal::Explore as u8, 10);
+    }
+
+    #[test]
+    fn agents_explore_when_no_local_objective_exists() {
+        let origin = WorldPosition { x: 0, y: 0 };
+        let mut facts = perception();
+        facts.resources.clear();
+        facts.drinkable_water.clear();
+        facts.area = WorldRect {
+            min: WorldPosition { x: -8, y: -8 },
+            max: WorldPosition { x: 9, y: 9 },
+        };
+        facts.traversable_cells = (-8..=8)
+            .flat_map(|y| (-8..=8).map(move |x| WorldPosition { x, y }))
+            .collect();
+        facts.reachable_cells = facts.traversable_cells.clone();
+        let (selection, heading) = select_with_exploration(
+            origin,
+            needs(0, 0, 0, 0),
+            InventoryView::default(),
+            &facts,
+            Some(ExplorationHeading::NorthEast),
+        );
+        assert_eq!(selection.goal, PhysicalGoal::Explore);
+        assert_ne!(selection.target, Some(origin));
+        let heading = heading.unwrap();
+        let first_target = selection.target.unwrap();
+
+        facts.area = WorldRect {
+            min: WorldPosition {
+                x: first_target.x - 8,
+                y: first_target.y - 8,
+            },
+            max: WorldPosition {
+                x: first_target.x + 9,
+                y: first_target.y + 9,
+            },
+        };
+        facts.traversable_cells = (facts.area.min.y..facts.area.max.y)
+            .flat_map(|y| (facts.area.min.x..facts.area.max.x).map(move |x| WorldPosition { x, y }))
+            .collect();
+        facts.reachable_cells = facts.traversable_cells.clone();
+        let (continued, _) = select_with_exploration(
+            first_target,
+            needs(0, 0, 0, 0),
+            InventoryView::default(),
+            &facts,
+            Some(heading),
+        );
+        let continued_target = continued.target.unwrap();
+        let first_dx = first_target.x - origin.x;
+        let first_dy = first_target.y - origin.y;
+        let next_dx = continued_target.x - first_target.x;
+        let next_dy = continued_target.y - first_target.y;
+        assert!(first_dx * next_dx + first_dy * next_dy >= 0);
+        assert_ne!(continued_target, origin);
+
+        let (urgent, _) = select_with_exploration(
+            origin,
+            needs(0, 6_000, 0, 0),
+            InventoryView::default(),
+            &facts,
+            Some(ExplorationHeading::NorthEast),
+        );
+        assert_eq!(urgent.goal, PhysicalGoal::Explore);
+        assert_eq!(urgent.reason, PolicyReason::ThirstThreshold);
+    }
+
+    #[test]
+    fn safe_water_access_is_not_abandoned_by_optional_exploration() {
+        let origin = WorldPosition { x: 1, y: 0 };
+        let mut facts = perception();
+        facts.resources.clear();
+        facts.reachable_cells.push(origin);
+        facts
+            .reachable_cells
+            .sort_unstable_by_key(|position| (position.y, position.x));
+
+        let (selection, heading) = select_with_exploration(
+            origin,
+            needs(0, 0, 0, 0),
+            InventoryView::default(),
+            &facts,
+            Some(ExplorationHeading::East),
+        );
+
+        assert_eq!(selection.goal, PhysicalGoal::Wait);
+        assert_eq!(selection.target, Some(origin));
+        assert_eq!(heading, None);
     }
 }

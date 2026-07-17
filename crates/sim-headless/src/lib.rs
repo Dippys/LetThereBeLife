@@ -817,6 +817,7 @@ fn semantic_hash(engine: &Engine, report: &ScenarioReport, spawns: &[WorldPositi
             hash.u8(policy.goal as u8);
             hash.u8(policy.committed as u8);
             hash.u8(policy.retry_count);
+            hash.u8(policy.exploration_heading as u8);
             hash.optional_position(policy.target);
         }
     }

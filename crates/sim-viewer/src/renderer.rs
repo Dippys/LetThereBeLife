@@ -3,9 +3,12 @@ use std::{borrow::Cow, collections::BTreeMap, fmt::Write, sync::Arc, time::Insta
 use bytemuck::{Pod, Zeroable};
 use rayon::prelude::*;
 use sim_core::{
-    BiomeType, CHUNK_SIZE, ChunkCoord, ChunkInspection, ChunkPresence, FeatureKind,
-    GenerateAreaError, PrevailingWind, ResourceKind, SimulationSnapshot, SurfaceType, TerrainCell,
-    WORLD_GENERATION_BOUNDS, World, WorldPosition, WorldRect,
+    AgentActivity, AgentView, BiomeType, CHUNK_SIZE, ChunkCoord, ChunkInspection, ChunkPresence,
+    Engine, ExplorationHeading, FeatureKind, GenerateAreaError, HealthStatus, HealthView,
+    InventoryView, NeedKind, PhysicalGoal, PhysicalNeedsView, PhysicalPolicyView, PrevailingWind,
+    ResourceKind, SimulationSnapshot, SleepQuality, SleepView, SpawnKind, SpawnedObjectView,
+    StructureState, StructureView, SurfaceType, TerrainCell, WORLD_GENERATION_BOUNDS, World,
+    WorldPosition, WorldRect,
 };
 use wgpu::util::DeviceExt;
 use winit::window::Window;
@@ -17,11 +20,32 @@ pub struct RenderState {
     pub camera: Camera,
     pub ui_scale: f32,
     pub cursor_world: Option<WorldPosition>,
+    pub cursor_spawned_object: Option<SpawnedObjectView>,
     pub inspected: Option<ChunkInspection>,
     pub hovered: Option<WorldPosition>,
     pub selection: Option<WorldRect>,
     pub selection_valid: bool,
     pub generation_status: GenerationStatus,
+    pub population_status: PopulationStatus,
+    pub hovered_agent: Option<AgentInspection>,
+    pub spawn_message: Option<String>,
+    pub spawn_menu: Option<SpawnMenuView>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpawnMenuView {
+    pub selected: SpawnKind,
+    pub placing: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct AgentInspection {
+    pub view: AgentView,
+    pub needs: Option<PhysicalNeedsView>,
+    pub inventory: Option<InventoryView>,
+    pub health: Option<HealthView>,
+    pub policy: Option<PhysicalPolicyView>,
+    pub sleep: Option<SleepView>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +55,14 @@ pub enum GenerationStatus {
     Manual,
     Cancelling,
     WorkerUnavailable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PopulationStatus {
+    Waiting,
+    Ready,
+    Active,
+    Failed,
 }
 
 pub struct Renderer {
@@ -43,11 +75,18 @@ pub struct Renderer {
     screen_camera: CameraBinding,
     terrain: StaticInstanceBuffers,
     features: StaticInstanceBuffers,
+    spawned_objects: InstanceBuffer,
+    spawned_object_instances: Vec<Instance>,
+    structures: InstanceBuffer,
+    structure_instances: Vec<Instance>,
+    agents: InstanceBuffer,
+    agent_instances: Vec<Instance>,
     world_overlay: InstanceBuffer,
     world_overlay_instances: Vec<Instance>,
     screen_overlay: InstanceBuffer,
     screen_overlay_instances: Vec<Instance>,
     hud_text: String,
+    agent_text: String,
     world_revision: u64,
     cached_bounds: Option<WorldRect>,
     cached_step: u32,
@@ -156,6 +195,20 @@ impl Renderer {
             surface,
             terrain: StaticInstanceBuffers::new(&device, "terrain instances", &[]),
             features: StaticInstanceBuffers::new(&device, "feature instances", &[]),
+            spawned_objects: InstanceBuffer::dynamic(
+                &device,
+                "spawned object instances",
+                MAX_SPAWNED_OBJECT_INSTANCES,
+            ),
+            spawned_object_instances: Vec::new(),
+            structures: InstanceBuffer::dynamic(
+                &device,
+                "structure instances",
+                MAX_STRUCTURE_INSTANCES,
+            ),
+            structure_instances: Vec::with_capacity(MAX_STRUCTURE_INSTANCES),
+            agents: InstanceBuffer::dynamic(&device, "agent instances", MAX_AGENT_INSTANCES),
+            agent_instances: Vec::with_capacity(MAX_AGENT_INSTANCES),
             world_overlay: InstanceBuffer::dynamic(
                 &device,
                 "world overlay",
@@ -169,6 +222,7 @@ impl Renderer {
             ),
             screen_overlay_instances: Vec::with_capacity(SCREEN_OVERLAY_CAPACITY),
             hud_text: String::with_capacity(HUD_TEXT_CAPACITY),
+            agent_text: String::with_capacity(AGENT_TEXT_CAPACITY),
             world_revision: world.revision(),
             cached_bounds: None,
             cached_step: 1,
@@ -255,11 +309,12 @@ impl Renderer {
 
     pub fn render(
         &mut self,
-        world: &World,
+        engine: &Engine,
         state: RenderState,
         allow_world_sync: bool,
         changed_bounds: Option<WorldRect>,
     ) -> Result<(), wgpu::SurfaceError> {
+        let world = engine.world();
         let view = state.camera.view(
             self.config.width,
             self.config.height,
@@ -293,6 +348,32 @@ impl Renderer {
             ),
         );
 
+        build_structure_instances(
+            engine.structure_views(MAX_STRUCTURE_INSTANCES),
+            view.world_bounds(),
+            view.scale() as f32,
+            &mut self.structure_instances,
+        );
+        debug_assert!(self.structure_instances.len() <= MAX_STRUCTURE_INSTANCES);
+        self.structures
+            .write(&self.queue, &self.structure_instances);
+        build_agent_instances(
+            engine.agent_views(MAX_AGENT_INSTANCES),
+            view.world_bounds(),
+            view.scale() as f32,
+            &mut self.agent_instances,
+        );
+        debug_assert!(self.agent_instances.len() <= MAX_AGENT_INSTANCES);
+        self.agents.write(&self.queue, &self.agent_instances);
+        build_spawned_object_instances(
+            engine.spawned_object_views(),
+            view.world_bounds(),
+            view.scale() as f32,
+            &mut self.spawned_object_instances,
+        );
+        self.spawned_objects
+            .write(&self.queue, &self.spawned_object_instances);
+
         let world_overlay = &mut self.world_overlay_instances;
         world_overlay.clear();
         if let Some(position) = state.hovered {
@@ -323,9 +404,11 @@ impl Renderer {
         self.world_overlay.write(&self.queue, world_overlay);
 
         write_hud_text(&mut self.hud_text, world, &state);
+        write_agent_text(&mut self.agent_text, state.hovered_agent);
         build_screen_overlay(
             &mut self.screen_overlay_instances,
             &self.hud_text,
+            (!self.agent_text.is_empty()).then_some(self.agent_text.as_str()),
             &state,
             self.config.width,
             self.config.height,
@@ -366,6 +449,9 @@ impl Renderer {
             pass.set_bind_group(0, &self.world_camera.bind_group, &[]);
             self.terrain.draw(&mut pass);
             self.features.draw(&mut pass);
+            self.spawned_objects.draw(&mut pass);
+            self.structures.draw(&mut pass);
+            self.agents.draw(&mut pass);
             self.world_overlay.draw(&mut pass);
             pass.set_bind_group(0, &self.screen_camera.bind_group, &[]);
             self.screen_overlay.draw(&mut pass);
@@ -478,11 +564,117 @@ const MAX_INSTANCES_PER_BUFFER: usize = 1_000_000;
 const MIN_TERRAIN_SAMPLE_PIXELS: f32 = 2.0;
 const CACHE_MARGIN_PIXELS: f32 = 128.0;
 const WORLD_OVERLAY_CAPACITY: usize = 10;
-const SCREEN_OVERLAY_CAPACITY: usize = 4_096;
-const HUD_TEXT_CAPACITY: usize = 512;
+const SCREEN_OVERLAY_CAPACITY: usize = 8_192;
+const HUD_TEXT_CAPACITY: usize = 640;
+const AGENT_TEXT_CAPACITY: usize = 512;
+const MAX_AGENT_INSTANCES: usize = 4_096;
+const MAX_STRUCTURE_INSTANCES: usize = 4_096;
+const MAX_SPAWNED_OBJECT_INSTANCES: usize = 16_384;
+const MIN_DYNAMIC_INSTANCE_PIXELS: f32 = 1.25;
 const MIN_CHUNK_OUTLINE_PIXELS: f32 = 4.0;
 const MAX_CHUNK_OUTLINE_WORLD_WIDTH: f32 = 8.0;
 const MAX_WORLD_BORDER_WIDTH: f32 = 32.0;
+
+fn build_spawned_object_instances(
+    views: impl IntoIterator<Item = SpawnedObjectView>,
+    visible: WorldRect,
+    scale: f32,
+    output: &mut Vec<Instance>,
+) {
+    output.clear();
+    if scale < MIN_DYNAMIC_INSTANCE_PIXELS {
+        return;
+    }
+    for object in views
+        .into_iter()
+        .filter(|object| visible.contains(object.position))
+        .take(MAX_SPAWNED_OBJECT_INSTANCES)
+    {
+        let inset = match object.kind {
+            SpawnKind::Water => 0.0,
+            SpawnKind::Tree | SpawnKind::Rock => 0.08,
+            SpawnKind::BerryBush => 0.18,
+        };
+        output.push(Instance::new(
+            object.position.x as f32 + inset,
+            object.position.y as f32 + inset,
+            1.0 - inset * 2.0,
+            1.0 - inset * 2.0,
+            spawn_kind_color(object.kind),
+        ));
+    }
+}
+
+fn build_agent_instances(
+    views: impl IntoIterator<Item = AgentView>,
+    visible: WorldRect,
+    scale: f32,
+    output: &mut Vec<Instance>,
+) {
+    output.clear();
+    if scale < MIN_DYNAMIC_INSTANCE_PIXELS {
+        return;
+    }
+    for agent in views.into_iter().take(MAX_AGENT_INSTANCES) {
+        if !visible.contains(agent.position) {
+            continue;
+        }
+        let inset = if matches!(agent.activity, AgentActivity::Dead) {
+            0.08
+        } else {
+            0.14
+        };
+        output.push(Instance::new(
+            agent.position.x as f32 + inset,
+            agent.position.y as f32 + inset,
+            1.0 - inset * 2.0,
+            1.0 - inset * 2.0,
+            agent_color(agent.activity),
+        ));
+    }
+}
+
+fn build_structure_instances(
+    views: impl IntoIterator<Item = StructureView>,
+    visible: WorldRect,
+    scale: f32,
+    output: &mut Vec<Instance>,
+) {
+    output.clear();
+    if scale < MIN_DYNAMIC_INSTANCE_PIXELS {
+        return;
+    }
+    for structure in views.into_iter().take(MAX_STRUCTURE_INSTANCES) {
+        if visible.contains(structure.position) {
+            output.push(Instance::new(
+                structure.position.x as f32 + 0.05,
+                structure.position.y as f32 + 0.05,
+                0.9,
+                0.9,
+                structure_color(structure.state),
+            ));
+        }
+    }
+}
+
+const fn structure_color(state: StructureState) -> u32 {
+    match state {
+        StructureState::UnderConstruction => rgba(224, 170, 72, 230),
+        StructureState::Complete => rgba(116, 72, 38, 255),
+    }
+}
+
+const fn agent_color(activity: AgentActivity) -> u32 {
+    match activity {
+        AgentActivity::Idle => rgba(244, 238, 210, 255),
+        AgentActivity::Moving => rgba(72, 232, 126, 255),
+        AgentActivity::Gathering => rgba(250, 206, 74, 255),
+        AgentActivity::Building => rgba(240, 142, 62, 255),
+        AgentActivity::Sleeping => rgba(92, 164, 246, 255),
+        AgentActivity::Incapacitated => rgba(180, 72, 214, 255),
+        AgentActivity::Dead => rgba(118, 28, 32, 255),
+    }
+}
 
 struct StaticInstanceBuffers {
     buffers: Vec<InstanceBuffer>,
@@ -970,6 +1162,15 @@ const fn feature_color(kind: FeatureKind) -> u32 {
     }
 }
 
+const fn spawn_kind_color(kind: SpawnKind) -> u32 {
+    match kind {
+        SpawnKind::Tree => feature_color(FeatureKind::Tree),
+        SpawnKind::BerryBush => feature_color(FeatureKind::BerryBush),
+        SpawnKind::Rock => feature_color(FeatureKind::Rock),
+        SpawnKind::Water => rgba(45, 132, 202, 235),
+    }
+}
+
 const fn summary_feature_color(kind: FeatureKind) -> u32 {
     match kind {
         FeatureKind::Tree => rgba(24, 72, 28, 230),
@@ -1119,6 +1320,9 @@ fn write_hud_text(output: &mut String, world: &World, state: &RenderState) {
         state.snapshot.tick
     )
     .expect("writing to String cannot fail");
+    if let Some(message) = &state.spawn_message {
+        writeln!(output, "{message}").expect("writing to String cannot fail");
+    }
     writeln!(
         output,
         "SEED {}  LOADED {}  REV {}",
@@ -1129,7 +1333,16 @@ fn write_hud_text(output: &mut String, world: &World, state: &RenderState) {
     .expect("writing to String cannot fail");
     writeln!(output, "GEN {}", generation_label(state.generation_status))
         .expect("writing to String cannot fail");
-
+    writeln!(
+        output,
+        "AGENTS {}  TOTAL {}  LIVING {}  ACTIVE {}  DEAD {}",
+        population_label(state.population_status),
+        state.snapshot.agent_count,
+        state.snapshot.living_agent_count,
+        state.snapshot.active_agent_count,
+        state.snapshot.death_count,
+    )
+    .expect("writing to String cannot fail");
     if let Some(selection) = state.selection {
         writeln!(
             output,
@@ -1149,7 +1362,8 @@ fn write_hud_text(output: &mut String, world: &World, state: &RenderState) {
         writeln!(output, "CURSOR  MOVE OVER MAP TO INSPECT")
             .expect("writing to String cannot fail");
         writeln!(output, "L-DRAG PAN  R-DRAG GENERATE").expect("writing to String cannot fail");
-        write!(output, "SPACE PAUSE  1-4 SPEED  C CANCEL").expect("writing to String cannot fail");
+        writeln!(output, "T AGENT  NUM5 OBJECT MENU").expect("writing to String cannot fail");
+        write!(output, "SPACE PAUSE  1-9 SPEED  C CANCEL").expect("writing to String cannot fail");
         return;
     };
 
@@ -1182,7 +1396,24 @@ fn write_hud_text(output: &mut String, world: &World, state: &RenderState) {
                     .expect("writing to String cannot fail");
                     write!(output, "WIND {}  FEATURE ", wind_label(climate.wind))
                         .expect("writing to String cannot fail");
-                    if let Some(feature) = world.feature_at(position) {
+                    if let Some(object) = state.cursor_spawned_object {
+                        match object.remaining {
+                            Some(remaining) => write!(
+                                output,
+                                "SPAWNED {}  {} CAP {}",
+                                spawn_kind_label(object.kind),
+                                resource_label(object.kind.resource().expect("resource kind").kind),
+                                remaining
+                            )
+                            .expect("writing to String cannot fail"),
+                            None => write!(
+                                output,
+                                "SPAWNED {}  DRINKABLE",
+                                spawn_kind_label(object.kind)
+                            )
+                            .expect("writing to String cannot fail"),
+                        }
+                    } else if let Some(feature) = world.feature_at(position) {
                         let resource = feature.base_resource();
                         write!(
                             output,
@@ -1209,6 +1440,104 @@ fn write_hud_text(output: &mut String, world: &World, state: &RenderState) {
     }
 }
 
+fn write_agent_text(output: &mut String, inspection: Option<AgentInspection>) {
+    output.clear();
+    let Some(agent) = inspection else {
+        return;
+    };
+    writeln!(output, "AGENT {}", agent.view.id.get()).unwrap();
+    writeln!(
+        output,
+        "POSITION X {}  Y {}",
+        agent.view.position.x, agent.view.position.y
+    )
+    .unwrap();
+    writeln!(output, "ACTIVITY {}", activity_label(agent.view.activity)).unwrap();
+    if let Some(policy) = agent.policy {
+        writeln!(output, "GOAL {}", goal_label(policy.goal)).unwrap();
+        if let Some(target) = policy.target {
+            writeln!(output, "TARGET X {}  Y {}", target.x, target.y).unwrap();
+        } else {
+            writeln!(output, "TARGET NONE").unwrap();
+        }
+        writeln!(
+            output,
+            "STATUS {}  RETRIES {}",
+            policy_status_label(agent.view.activity, policy),
+            policy.retry_count
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "SEARCH HEADING {}",
+            exploration_heading_label(policy.exploration_heading)
+        )
+        .unwrap();
+    } else {
+        writeln!(output, "POLICY NONE").unwrap();
+    }
+    if let Some(needs) = agent.needs {
+        write_need(output, "HUNGER", needs.hunger);
+        write_need(output, "THIRST", needs.thirst);
+        write_need(output, "REST", needs.rest);
+        write_need(output, "EXPOSURE", needs.exposure);
+        if let Some(next) = needs.next_threshold {
+            writeln!(
+                output,
+                "NEXT {} AT TICK {}",
+                need_label(next.kind),
+                next.due.ticks()
+            )
+            .unwrap();
+        } else {
+            writeln!(output, "NEXT NEED NONE").unwrap();
+        }
+    } else {
+        writeln!(output, "NEEDS UNAVAILABLE").unwrap();
+    }
+    if let Some(inventory) = agent.inventory {
+        writeln!(
+            output,
+            "INVENTORY F {}  W {}  S {}",
+            inventory.food, inventory.wood, inventory.stone
+        )
+        .unwrap();
+    }
+    if let Some(health) = agent.health {
+        writeln!(
+            output,
+            "HEALTH {}  {}",
+            health.value,
+            health_label(health.status)
+        )
+        .unwrap();
+        if let Some(due) = health.next_consequence {
+            writeln!(output, "NEXT DAMAGE TICK {}", due.ticks()).unwrap();
+        }
+    }
+    if let Some(sleep) = agent.sleep {
+        writeln!(
+            output,
+            "SLEEP {}  WAKE {}",
+            sleep_quality_label(sleep.quality),
+            sleep.planned_wake.ticks()
+        )
+        .unwrap();
+    } else {
+        writeln!(output, "SLEEP NONE").unwrap();
+    }
+    debug_assert!(output.len() <= AGENT_TEXT_CAPACITY);
+}
+
+fn write_need(output: &mut String, label: &str, need: sim_core::NeedLevelView) {
+    writeln!(
+        output,
+        "{label} {} OF {}  RATE {:+}",
+        need.value, need.threshold, need.rate_per_period
+    )
+    .unwrap();
+}
+
 const fn generation_label(status: GenerationStatus) -> &'static str {
     match status {
         GenerationStatus::Idle => "READY",
@@ -1216,6 +1545,92 @@ const fn generation_label(status: GenerationStatus) -> &'static str {
         GenerationStatus::Manual => "GENERATING SELECTION",
         GenerationStatus::Cancelling => "CANCELLING",
         GenerationStatus::WorkerUnavailable => "WORKER OFFLINE",
+    }
+}
+
+const fn population_label(status: PopulationStatus) -> &'static str {
+    match status {
+        PopulationStatus::Waiting => "WAITING FOR WORLD",
+        PopulationStatus::Ready => "READY - PRESS T",
+        PopulationStatus::Active => "ACTIVE",
+        PopulationStatus::Failed => "STARTUP FAILED",
+    }
+}
+
+const fn activity_label(activity: AgentActivity) -> &'static str {
+    match activity {
+        AgentActivity::Idle => "IDLE",
+        AgentActivity::Moving => "MOVING",
+        AgentActivity::Gathering => "GATHERING",
+        AgentActivity::Building => "BUILDING",
+        AgentActivity::Sleeping => "SLEEPING",
+        AgentActivity::Incapacitated => "INCAPACITATED",
+        AgentActivity::Dead => "DEAD",
+    }
+}
+
+const fn goal_label(goal: PhysicalGoal) -> &'static str {
+    match goal {
+        PhysicalGoal::SeekWater => "SEEK WATER",
+        PhysicalGoal::SeekFood => "SEEK FOOD",
+        PhysicalGoal::GatherMaterial => "GATHER MATERIAL",
+        PhysicalGoal::Eat => "EAT",
+        PhysicalGoal::Drink => "DRINK",
+        PhysicalGoal::Sleep => "SLEEP",
+        PhysicalGoal::SeekShelter => "SEEK SHELTER",
+        PhysicalGoal::BuildShelter => "BUILD SHELTER",
+        PhysicalGoal::Wait => "WAIT",
+        PhysicalGoal::Incapacitated => "INCAPACITATED",
+        PhysicalGoal::Explore => "EXPLORE",
+    }
+}
+
+const fn need_label(need: NeedKind) -> &'static str {
+    match need {
+        NeedKind::Hunger => "HUNGER",
+        NeedKind::Thirst => "THIRST",
+        NeedKind::Rest => "REST",
+        NeedKind::Exposure => "EXPOSURE",
+    }
+}
+
+const fn health_label(status: HealthStatus) -> &'static str {
+    match status {
+        HealthStatus::Healthy => "HEALTHY",
+        HealthStatus::Incapacitated => "INCAPACITATED",
+        HealthStatus::Dead => "DEAD",
+    }
+}
+
+const fn sleep_quality_label(quality: SleepQuality) -> &'static str {
+    match quality {
+        SleepQuality::OpenGround => "OPEN GROUND",
+        SleepQuality::Sheltered => "SHELTERED",
+    }
+}
+
+const fn policy_status_label(activity: AgentActivity, policy: PhysicalPolicyView) -> &'static str {
+    if matches!(activity, AgentActivity::Incapacitated | AgentActivity::Dead) {
+        "INACTIVE"
+    } else if policy.committed {
+        "COMMITTED"
+    } else if policy.retry_count > 0 {
+        "BACKOFF"
+    } else {
+        "DECIDING"
+    }
+}
+
+const fn exploration_heading_label(heading: ExplorationHeading) -> &'static str {
+    match heading {
+        ExplorationHeading::North => "N",
+        ExplorationHeading::NorthEast => "NE",
+        ExplorationHeading::East => "E",
+        ExplorationHeading::SouthEast => "SE",
+        ExplorationHeading::South => "S",
+        ExplorationHeading::SouthWest => "SW",
+        ExplorationHeading::West => "W",
+        ExplorationHeading::NorthWest => "NW",
     }
 }
 
@@ -1285,6 +1700,7 @@ const fn resource_label(resource: ResourceKind) -> &'static str {
 fn build_screen_overlay(
     instances: &mut Vec<Instance>,
     text: &str,
+    agent_text: Option<&str>,
     state: &RenderState,
     width: u32,
     height: u32,
@@ -1359,6 +1775,13 @@ fn build_screen_overlay(
         );
     }
 
+    if let Some(agent_text) = agent_text {
+        push_agent_panel(instances, agent_text, width as f32, margin, scale);
+    }
+    if let Some(menu) = state.spawn_menu {
+        push_spawn_menu(instances, menu, height as f32, margin, scale);
+    }
+
     let rail_margin = 28.0 * scale;
     let square = 14.0 * scale;
     let rail_width = (width as f32 - rail_margin * 2.0).max(square);
@@ -1387,6 +1810,161 @@ fn build_screen_overlay(
         square,
         rgba(235, 216, 130, 255),
     ));
+}
+
+fn push_spawn_menu(
+    instances: &mut Vec<Instance>,
+    menu: SpawnMenuView,
+    screen_height: f32,
+    margin: f32,
+    scale: f32,
+) {
+    let pixel = 2.0 * scale;
+    let line_height = 9.0 * pixel;
+    let panel_width = 180.0 * scale;
+    let panel_height = 7.0 * line_height + 18.0 * scale;
+    let x = margin;
+    let y = (screen_height - panel_height - 38.0 * scale).max(margin);
+    instances.push(Instance::new(
+        x + 3.0 * scale,
+        y + 3.0 * scale,
+        panel_width,
+        panel_height,
+        rgba(0, 0, 0, 105),
+    ));
+    instances.push(Instance::new(
+        x,
+        y,
+        panel_width,
+        panel_height,
+        rgba(8, 15, 20, 240),
+    ));
+    instances.push(Instance::new(
+        x,
+        y,
+        4.0 * scale,
+        panel_height,
+        rgba(235, 216, 130, 255),
+    ));
+    push_bitmap_text(
+        instances,
+        if menu.placing {
+            "PLACE MODE"
+        } else {
+            "SPAWN MENU"
+        },
+        x + 14.0 * scale,
+        y + 9.0 * scale,
+        pixel,
+        rgba(245, 226, 145, 255),
+    );
+    for (index, kind) in SpawnKind::ALL.into_iter().enumerate() {
+        let row_y = y + 9.0 * scale + (index as f32 + 1.5) * line_height;
+        let selected = kind == menu.selected;
+        if selected {
+            instances.push(Instance::new(
+                x + 9.0 * scale,
+                row_y - 2.0 * scale,
+                panel_width - 18.0 * scale,
+                line_height,
+                spawn_kind_color(kind) & 0x7fff_ffff,
+            ));
+        }
+        push_bitmap_text(
+            instances,
+            spawn_kind_label(kind),
+            x + 18.0 * scale,
+            row_y,
+            pixel,
+            if selected {
+                rgba(255, 255, 255, 255)
+            } else {
+                rgba(185, 199, 198, 255)
+            },
+        );
+    }
+    push_bitmap_text(
+        instances,
+        if menu.placing {
+            "L CLICK PLACE  5 MENU  0 END"
+        } else {
+            "2/8 SELECT  5 PLACE  0 CLOSE"
+        },
+        x + 14.0 * scale,
+        y + panel_height - line_height - 5.0 * scale,
+        pixel,
+        rgba(218, 229, 226, 255),
+    );
+}
+
+const fn spawn_kind_label(kind: SpawnKind) -> &'static str {
+    match kind {
+        SpawnKind::Tree => "TREE",
+        SpawnKind::BerryBush => "BERRIES",
+        SpawnKind::Rock => "ROCK",
+        SpawnKind::Water => "WATER",
+    }
+}
+
+fn push_agent_panel(
+    instances: &mut Vec<Instance>,
+    text: &str,
+    screen_width: f32,
+    margin: f32,
+    scale: f32,
+) {
+    let pixel = 2.0 * scale;
+    let advance = 6.0 * pixel;
+    let line_height = 9.0 * pixel;
+    let line_count = text.lines().count().max(1);
+    let longest_line = text.lines().map(str::len).max().unwrap_or(1) as f32;
+    let panel_width = longest_line * advance + 28.0 * scale;
+    let panel_height = line_count as f32 * line_height + 20.0 * scale;
+    let panel_x = (screen_width - margin - panel_width).max(margin);
+    let text_x = panel_x + 14.0 * scale;
+    let text_y = margin + 10.0 * scale;
+    instances.push(Instance::new(
+        panel_x + 3.0 * scale,
+        margin + 3.0 * scale,
+        panel_width,
+        panel_height,
+        rgba(0, 0, 0, 105),
+    ));
+    instances.push(Instance::new(
+        panel_x,
+        margin,
+        panel_width,
+        panel_height,
+        rgba(8, 15, 20, 232),
+    ));
+    instances.push(Instance::new(
+        panel_x + panel_width - 4.0 * scale,
+        margin,
+        4.0 * scale,
+        panel_height,
+        rgba(71, 190, 194, 255),
+    ));
+    instances.push(Instance::new(
+        text_x,
+        text_y + line_height - 3.0 * scale,
+        panel_width - 28.0 * scale,
+        scale,
+        rgba(71, 190, 194, 100),
+    ));
+    for (line_index, line) in text.lines().enumerate() {
+        push_bitmap_text(
+            instances,
+            line,
+            text_x,
+            text_y + line_index as f32 * line_height,
+            pixel,
+            if line_index == 0 {
+                rgba(151, 232, 229, 255)
+            } else {
+                rgba(218, 229, 226, 255)
+            },
+        );
+    }
 }
 
 fn push_bitmap_text(
@@ -1507,11 +2085,16 @@ mod tests {
             camera: Camera::at_origin(),
             ui_scale: 1.0,
             cursor_world,
+            cursor_spawned_object: None,
             inspected: None,
             hovered: None,
             selection: None,
             selection_valid: true,
             generation_status: GenerationStatus::Idle,
+            population_status: PopulationStatus::Active,
+            hovered_agent: None,
+            spawn_message: None,
+            spawn_menu: None,
         }
     }
 
@@ -1872,6 +2455,7 @@ mod tests {
         assert!(text.contains("RUNNING  SPEED 4X"));
         assert!(text.contains("SIM 0000:01:02.0  TICK 3721"));
         assert!(text.contains("SEED 7  LOADED "));
+        assert!(text.contains("AGENTS ACTIVE  TOTAL 0  LIVING 0  ACTIVE 0  DEAD 0"));
         assert!(text.contains("  REV "));
         assert!(text.contains("CURSOR X 0  Y 0"));
         assert!(text.contains("CHUNK X 0 Y 0  LOCAL 0,0"));
@@ -1909,6 +2493,10 @@ mod tests {
         state.snapshot.speed = 64.0;
         state.selection = Some(WORLD_GENERATION_BOUNDS);
         state.selection_valid = false;
+        state.spawn_menu = Some(SpawnMenuView {
+            selected: SpawnKind::BerryBush,
+            placing: true,
+        });
         let mut text = String::new();
         let mut instances = Vec::new();
 
@@ -1931,9 +2519,292 @@ mod tests {
                 state.generation_status = status;
                 write_hud_text(&mut text, &world, &state);
                 assert!(text.len() <= HUD_TEXT_CAPACITY);
-                build_screen_overlay(&mut instances, &text, &state, 1_920, 1_080);
+                build_screen_overlay(&mut instances, &text, None, &state, 1_920, 1_080);
                 assert!(instances.len() <= SCREEN_OVERLAY_CAPACITY);
             }
         }
+    }
+
+    #[test]
+    fn hovered_agent_panel_reports_authoritative_physical_state() {
+        let view = AgentView {
+            id: sim_core::AgentId::new(7),
+            position: WorldPosition { x: 12, y: -9 },
+            activity: AgentActivity::Moving,
+        };
+        let level = sim_core::NeedLevelView {
+            value: 1_234,
+            rate_per_period: 6,
+            threshold: 6_000,
+            threshold_reached: false,
+        };
+        let inspection = AgentInspection {
+            view,
+            needs: Some(PhysicalNeedsView {
+                agent: view.id,
+                at: sim_core::SimTime::from_ticks(90),
+                hunger: level,
+                thirst: level,
+                rest: level,
+                exposure: level,
+                next_threshold: Some(sim_core::NeedThreshold {
+                    kind: NeedKind::Thirst,
+                    due: sim_core::SimTime::from_ticks(1_000),
+                }),
+            }),
+            inventory: Some(InventoryView {
+                food: 2,
+                wood: 3,
+                stone: 4,
+            }),
+            health: Some(HealthView {
+                agent: view.id,
+                value: 9_000,
+                status: HealthStatus::Healthy,
+                next_consequence: None,
+            }),
+            policy: Some(PhysicalPolicyView {
+                agent: view.id,
+                goal: PhysicalGoal::Explore,
+                target: Some(WorldPosition { x: 20, y: -4 }),
+                committed: true,
+                retry_count: 1,
+                exploration_heading: ExplorationHeading::NorthEast,
+            }),
+            sleep: None,
+        };
+        let mut text = String::with_capacity(AGENT_TEXT_CAPACITY);
+        write_agent_text(&mut text, Some(inspection));
+        assert!(text.contains("AGENT 7"));
+        assert!(text.contains("ACTIVITY MOVING"));
+        assert!(text.contains("GOAL EXPLORE"));
+        assert!(text.contains("STATUS COMMITTED  RETRIES 1"));
+        assert!(text.contains("THIRST 1234 OF 6000  RATE +6"));
+        assert!(text.contains("INVENTORY F 2  W 3  S 4"));
+        assert!(text.contains("HEALTH 9000  HEALTHY"));
+        assert!(text.contains("SLEEP NONE"));
+        assert!(text.len() <= AGENT_TEXT_CAPACITY);
+
+        let mut backoff = inspection;
+        backoff.policy = Some(PhysicalPolicyView {
+            goal: PhysicalGoal::SeekWater,
+            target: None,
+            committed: false,
+            retry_count: u8::MAX,
+            ..backoff.policy.unwrap()
+        });
+        write_agent_text(&mut text, Some(backoff));
+        assert!(text.contains("GOAL SEEK WATER"));
+        assert!(text.contains("STATUS BACKOFF  RETRIES 255"));
+
+        let budget_view = AgentView {
+            id: sim_core::AgentId::new(u32::MAX),
+            position: WorldPosition {
+                x: -32_768,
+                y: 32_767,
+            },
+            activity: AgentActivity::Incapacitated,
+        };
+        let budget_level = sim_core::NeedLevelView {
+            value: 10_000,
+            rate_per_period: -12,
+            threshold: 10_000,
+            threshold_reached: true,
+        };
+        let budget_inspection = AgentInspection {
+            view: budget_view,
+            needs: Some(PhysicalNeedsView {
+                agent: budget_view.id,
+                at: sim_core::SimTime::from_ticks(u64::MAX),
+                hunger: budget_level,
+                thirst: budget_level,
+                rest: budget_level,
+                exposure: budget_level,
+                next_threshold: Some(sim_core::NeedThreshold {
+                    kind: NeedKind::Exposure,
+                    due: sim_core::SimTime::from_ticks(u64::MAX),
+                }),
+            }),
+            inventory: Some(InventoryView {
+                food: u8::MAX,
+                wood: u8::MAX,
+                stone: u8::MAX,
+            }),
+            health: Some(HealthView {
+                agent: budget_view.id,
+                value: 10_000,
+                status: HealthStatus::Incapacitated,
+                next_consequence: Some(sim_core::SimTime::from_ticks(u64::MAX)),
+            }),
+            policy: Some(PhysicalPolicyView {
+                agent: budget_view.id,
+                goal: PhysicalGoal::Incapacitated,
+                target: Some(WorldPosition {
+                    x: -32_768,
+                    y: 32_767,
+                }),
+                committed: true,
+                retry_count: u8::MAX,
+                exploration_heading: ExplorationHeading::SouthWest,
+            }),
+            sleep: Some(SleepView {
+                agent: budget_view.id,
+                position: budget_view.position,
+                started_at: sim_core::SimTime::from_ticks(u64::MAX),
+                planned_wake: sim_core::SimTime::from_ticks(u64::MAX),
+                quality: SleepQuality::OpenGround,
+            }),
+        };
+        let mut budget_text = String::with_capacity(AGENT_TEXT_CAPACITY);
+        write_agent_text(&mut budget_text, Some(budget_inspection));
+        assert!(budget_text.len() <= AGENT_TEXT_CAPACITY);
+
+        let world = World::generate(u64::MAX, WorldConfig::new(64, 64).unwrap());
+        let mut state = test_render_state(Some(view.position));
+        state.snapshot.tick = u64::MAX;
+        state.snapshot.simulated_seconds = u64::MAX as f64 / 60.0;
+        state.snapshot.seed = u64::MAX;
+        state.snapshot.speed = 256.0;
+        state.selection = Some(WORLD_GENERATION_BOUNDS);
+        state.selection_valid = false;
+        state.generation_status = GenerationStatus::WorkerUnavailable;
+        state.spawn_message =
+            Some("SPAWN FAILED - CELL IS OCCUPIED BY AGENT 4294967295".to_owned());
+        let mut hud_text = String::with_capacity(HUD_TEXT_CAPACITY);
+        write_hud_text(&mut hud_text, &world, &state);
+        let mut instances = Vec::with_capacity(SCREEN_OVERLAY_CAPACITY);
+        build_screen_overlay(
+            &mut instances,
+            &hud_text,
+            Some(&budget_text),
+            &state,
+            1_920,
+            1_080,
+        );
+        assert!(
+            instances.len() > 4_096,
+            "the regression layout must exercise the former undersized budget"
+        );
+        assert!(instances.len() <= SCREEN_OVERLAY_CAPACITY);
+    }
+
+    #[test]
+    fn agent_instances_reflect_position_activity_and_bounded_far_zoom_culling() {
+        let bounds = WorldRect {
+            min: WorldPosition { x: -4, y: -4 },
+            max: WorldPosition { x: 4, y: 4 },
+        };
+        let activities = [
+            AgentActivity::Idle,
+            AgentActivity::Moving,
+            AgentActivity::Gathering,
+            AgentActivity::Building,
+            AgentActivity::Sleeping,
+            AgentActivity::Incapacitated,
+            AgentActivity::Dead,
+        ];
+        let views = activities
+            .into_iter()
+            .enumerate()
+            .map(|(index, activity)| AgentView {
+                id: sim_core::AgentId::new(index as u32),
+                position: WorldPosition {
+                    x: index as i64 - 3,
+                    y: 0,
+                },
+                activity,
+            });
+        let mut instances = Vec::new();
+        build_agent_instances(views, bounds, 2.0, &mut instances);
+        assert_eq!(instances.len(), activities.len());
+        assert_eq!(instances[0].color, agent_color(AgentActivity::Idle));
+        assert_eq!(
+            instances[5].color,
+            agent_color(AgentActivity::Incapacitated)
+        );
+        assert_eq!(instances[6].color, agent_color(AgentActivity::Dead));
+        assert_ne!(instances[5].color, instances[6].color);
+        assert_eq!(instances[0].position, [-2.86, 0.14]);
+
+        build_agent_instances(
+            std::iter::repeat_n(
+                AgentView {
+                    id: sim_core::AgentId::new(0),
+                    position: WorldPosition { x: 0, y: 0 },
+                    activity: AgentActivity::Moving,
+                },
+                MAX_AGENT_INSTANCES + 100,
+            ),
+            bounds,
+            2.0,
+            &mut instances,
+        );
+        assert_eq!(instances.len(), MAX_AGENT_INSTANCES);
+        build_agent_instances(std::iter::empty(), bounds, 0.5, &mut instances);
+        assert!(instances.is_empty());
+    }
+
+    #[test]
+    fn spawned_object_instances_use_kind_geometry_culling_and_capacity() {
+        let bounds = WorldRect {
+            min: WorldPosition { x: -2, y: -2 },
+            max: WorldPosition { x: 3, y: 3 },
+        };
+        let views = SpawnKind::ALL
+            .into_iter()
+            .enumerate()
+            .map(|(index, kind)| SpawnedObjectView {
+                position: WorldPosition {
+                    x: index as i64 - 1,
+                    y: 0,
+                },
+                kind,
+                remaining: kind.resource().map(|resource| resource.capacity),
+            });
+        let mut instances = Vec::new();
+        build_spawned_object_instances(views, bounds, 2.0, &mut instances);
+        assert_eq!(instances.len(), 4);
+        assert_eq!(instances[0].color, spawn_kind_color(SpawnKind::Tree));
+        assert_eq!(instances[3].size, [1.0, 1.0]);
+
+        let repeated = std::iter::repeat_n(
+            SpawnedObjectView {
+                position: WorldPosition { x: 0, y: 0 },
+                kind: SpawnKind::Rock,
+                remaining: Some(80),
+            },
+            MAX_SPAWNED_OBJECT_INSTANCES + 1,
+        );
+        build_spawned_object_instances(repeated, bounds, 2.0, &mut instances);
+        assert_eq!(instances.len(), MAX_SPAWNED_OBJECT_INSTANCES);
+        build_spawned_object_instances(std::iter::empty(), bounds, 0.5, &mut instances);
+        assert!(instances.is_empty());
+    }
+
+    #[test]
+    fn dynamic_agents_do_not_enter_the_immutable_terrain_cache_key() {
+        let before = AgentView {
+            id: sim_core::AgentId::new(0),
+            position: WorldPosition { x: 0, y: 0 },
+            activity: AgentActivity::Idle,
+        };
+        let after = AgentView {
+            position: WorldPosition { x: 1, y: 0 },
+            activity: AgentActivity::Moving,
+            ..before
+        };
+        assert_ne!(before, after);
+        assert_eq!(
+            cache_sync_action(true, true, false, false, false),
+            CacheSyncAction::Skip
+        );
+    }
+
+    #[test]
+    fn shelter_lifecycle_states_have_distinct_footprint_colors() {
+        assert_ne!(
+            structure_color(StructureState::UnderConstruction),
+            structure_color(StructureState::Complete)
+        );
     }
 }

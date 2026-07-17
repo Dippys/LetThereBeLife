@@ -1,15 +1,18 @@
 use std::{collections::BTreeSet, error::Error, fmt};
 
 use crate::{
-    BaseResource, NeedKind, NeedQueryError, NeedThresholdEventOutcome, NeedThresholdOutcomeKind,
-    PhysicalNeedsView, Standability, TraversalKind, WORLD_GENERATION_BOUNDS, WaterSource, World,
-    WorldPosition, WorldQueryError, WorldRect,
+    BaseResource, ChunkCoord, MAX_TRAVERSABLE_ELEVATION_DELTA, NeedKind, NeedQueryError,
+    NeedThresholdEventOutcome, NeedThresholdOutcomeKind, PhysicalNeedsView, Standability,
+    TraversalKind, WORLD_GENERATION_BOUNDS, WaterSource, World, WorldPosition, WorldQueryError,
+    WorldRect,
     health::{
         DeathCause, DeathRecord, HealthDiagnostic, HealthDiagnosticKind, HealthState, HealthView,
     },
     needs::NeedState,
+    placements::SpawnedObjects,
     policy::{
-        PhysicalGoal, PhysicalPolicyView, PolicyAction, PolicyPhase, PolicyReason, PolicyState,
+        ExplorationHeading, PhysicalGoal, PhysicalPolicyView, PolicyAction, PolicyPhase,
+        PolicyReason, PolicyState,
     },
     resources::{FOOD_CONSUMPTION, InitialInventoryError, InventoryView, ResourceDeltas},
     routing::{RouteRequest, RouteRequestError},
@@ -220,6 +223,29 @@ impl fmt::Display for PopulationInitError {
 impl Error for PopulationInitError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentSpawnError {
+    PopulationNotInitialized,
+    PopulationFull,
+    OutsideActiveArea,
+    OutsideWorld,
+    Unloaded,
+    InvalidSpawn(SpawnInvalidReason),
+    Occupied(AgentId),
+    BlockedByStructure(StructureId),
+    AllocationFailed,
+    TimeOverflow,
+    EventSequenceExhausted,
+}
+
+impl fmt::Display for AgentSpawnError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "agent spawn failed: {self:?}")
+    }
+}
+
+impl Error for AgentSpawnError {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PopulationInit {
     pub active_area: WorldRect,
     pub population: u32,
@@ -352,10 +378,17 @@ pub struct PerceivedResource {
 pub struct PhysicalPerception {
     pub area: WorldRect,
     pub agents: Vec<AgentView>,
+    /// Active autonomous destinations already claimed by perceived agents.
+    /// Kept in row-major order so policy candidate checks stay deterministic
+    /// and logarithmic without introducing a second persistent spatial index.
+    pub claimed_targets: Vec<WorldPosition>,
     pub drinkable_water: Vec<PerceivedWater>,
     pub resources: Vec<PerceivedResource>,
     pub structures: Vec<StructureView>,
     pub traversable_cells: Vec<WorldPosition>,
+    /// Terrain-connected standable cells reachable from this agent inside the
+    /// perception area. Kept row-major for deterministic policy selection.
+    pub reachable_cells: Vec<WorldPosition>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -389,6 +422,7 @@ pub(crate) struct RouteState {
 #[derive(Clone, Copy)]
 pub(crate) struct MovementEnvironment<'a> {
     pub(crate) world: &'a World,
+    pub(crate) spawned_objects: &'a SpawnedObjects,
     pub(crate) structures: &'a StructureStore,
 }
 
@@ -428,6 +462,7 @@ impl Population {
     pub(crate) fn initialize(
         &mut self,
         world: &World,
+        spawned_objects: &SpawnedObjects,
         now: SimTime,
         init: PopulationInit,
         requested_positions: &[WorldPosition],
@@ -477,7 +512,7 @@ impl Population {
             if !occupied.insert(compact) {
                 return Err(PopulationInitError::DuplicatePosition { position });
             }
-            if let Some(reason) = invalid_spawn_reason(world, position)? {
+            if let Some(reason) = invalid_spawn_reason(world, spawned_objects, position)? {
                 return Err(PopulationInitError::InvalidSpawn { position, reason });
             }
             positions.push(compact);
@@ -491,7 +526,9 @@ impl Population {
                 let position = WorldPosition { x, y };
                 let compact = CompactPosition::checked(position)
                     .ok_or(PopulationInitError::ActiveAreaOutsideWorld)?;
-                if occupied.contains(&compact) || invalid_spawn_reason(world, position)?.is_some() {
+                if occupied.contains(&compact)
+                    || invalid_spawn_reason(world, spawned_objects, position)?.is_some()
+                {
                     continue;
                 }
                 occupied.insert(compact);
@@ -532,7 +569,7 @@ impl Population {
         policies
             .try_reserve_exact(capacity)
             .map_err(|_| PopulationInitError::AllocationFailed)?;
-        policies.resize(capacity, PolicyState::default());
+        policies.extend((0..capacity).map(|raw| PolicyState::for_agent(AgentId(raw as u32))));
         let mut inventories = Vec::new();
         inventories
             .try_reserve_exact(capacity)
@@ -573,6 +610,134 @@ impl Population {
             count: init.population,
             active_area: init.active_area,
         })
+    }
+
+    pub(crate) fn spawn_agent(
+        &mut self,
+        scheduler: &mut Scheduler,
+        environment: MovementEnvironment<'_>,
+        now: SimTime,
+        position: WorldPosition,
+        policy_active: bool,
+    ) -> Result<AgentId, AgentSpawnError> {
+        if !self.initialized {
+            return Err(AgentSpawnError::PopulationNotInitialized);
+        }
+        if self.records.len() >= MAX_POPULATION as usize {
+            return Err(AgentSpawnError::PopulationFull);
+        }
+        if !WORLD_GENERATION_BOUNDS.contains(position) {
+            return Err(AgentSpawnError::OutsideWorld);
+        }
+        let current_area = self
+            .active_area
+            .expect("initialized population has an active area");
+        let expanded_area = if current_area.contains(position) {
+            current_area
+        } else {
+            let spawn_chunk = ChunkCoord::from_world_position(position)
+                .bounds()
+                .map_err(|_| AgentSpawnError::OutsideWorld)?;
+            WorldRect {
+                min: WorldPosition {
+                    x: current_area.min.x.min(spawn_chunk.min.x),
+                    y: current_area.min.y.min(spawn_chunk.min.y),
+                },
+                max: WorldPosition {
+                    x: current_area.max.x.max(spawn_chunk.max.x),
+                    y: current_area.max.y.max(spawn_chunk.max.y),
+                },
+            }
+        };
+        if !environment.world.area_is_generated(expanded_area) {
+            return Err(AgentSpawnError::Unloaded);
+        }
+        let compact = CompactPosition::checked(position).ok_or(AgentSpawnError::OutsideWorld)?;
+        if let Some(occupant) = self.spatial.occupant(position) {
+            return Err(AgentSpawnError::Occupied(occupant));
+        }
+        if let Some(structure) = environment.structures.structure_at(position) {
+            return Err(AgentSpawnError::BlockedByStructure(structure));
+        }
+        match invalid_spawn_reason(environment.world, environment.spawned_objects, position) {
+            Ok(Some(reason)) => return Err(AgentSpawnError::InvalidSpawn(reason)),
+            Ok(None) => {}
+            Err(PopulationInitError::IncompleteResidency) => {
+                return Err(AgentSpawnError::Unloaded);
+            }
+            Err(_) => return Err(AgentSpawnError::OutsideWorld),
+        }
+        let needs = NeedState::new(now);
+        let threshold_events = NeedKind::ALL
+            .into_iter()
+            .filter(|kind| needs.threshold_due(*kind, now).is_some())
+            .count();
+        let due = policy_active
+            .then(|| now.checked_add(1).ok_or(AgentSpawnError::TimeOverflow))
+            .transpose()?;
+        let event_count = threshold_events + usize::from(policy_active);
+        if !scheduler.can_schedule(event_count as u64) {
+            return Err(AgentSpawnError::EventSequenceExhausted);
+        }
+        scheduler
+            .try_reserve(event_count)
+            .map_err(|_| AgentSpawnError::AllocationFailed)?;
+        self.records
+            .try_reserve(1)
+            .map_err(|_| AgentSpawnError::AllocationFailed)?;
+        self.movement_generations
+            .try_reserve(1)
+            .map_err(|_| AgentSpawnError::AllocationFailed)?;
+        self.routes
+            .try_reserve(1)
+            .map_err(|_| AgentSpawnError::AllocationFailed)?;
+        self.needs
+            .try_reserve(1)
+            .map_err(|_| AgentSpawnError::AllocationFailed)?;
+        self.policies
+            .try_reserve(1)
+            .map_err(|_| AgentSpawnError::AllocationFailed)?;
+        self.inventories
+            .try_reserve(1)
+            .map_err(|_| AgentSpawnError::AllocationFailed)?;
+        self.sleeps
+            .try_reserve(1)
+            .map_err(|_| AgentSpawnError::AllocationFailed)?;
+        self.health
+            .try_reserve(1)
+            .map_err(|_| AgentSpawnError::AllocationFailed)?;
+
+        let agent = AgentId(self.records.len() as u32);
+        self.records.push(AgentRecord {
+            position: compact,
+            activity: AgentActivity::Idle,
+        });
+        self.movement_generations.push(0);
+        self.routes.push(None);
+        self.needs.push(needs);
+        self.policies.push(PolicyState::for_agent(agent));
+        self.inventories.push(InventoryView::default());
+        self.sleeps.push(SleepState::default());
+        self.health.push(HealthState::default());
+        self.active_area = Some(expanded_area);
+        let inserted = self.spatial.insert(agent, position);
+        debug_assert!(inserted, "spawn occupancy was validated before insertion");
+        self.living_count += 1;
+        self.active_count += 1;
+        self.schedule_need_thresholds(scheduler, agent, needs, now)
+            .expect("event sequence capacity was prechecked");
+        if let Some(due) = due {
+            self.schedule_policy_decision(
+                scheduler,
+                now,
+                agent,
+                due.ticks().saturating_sub(now.ticks()),
+                PolicyReason::InitialDecision,
+                false,
+            )
+            .expect("event sequence capacity was prechecked");
+        }
+        Ok(agent)
     }
 
     pub(crate) fn schedule_movement(
@@ -626,8 +791,8 @@ impl Population {
             return Err(MoveRequestError::BlockedByStructure(structure));
         }
         let step = environment
-            .world
-            .traversal_step(record.position.world(), target)
+            .spawned_objects
+            .traversal_step(environment.world, record.position.world(), target)
             .map_err(map_query_error)?;
         let cost = step.cost().ok_or(MoveRequestError::Blocked(step.kind()))?;
         let due = now
@@ -726,7 +891,10 @@ impl Population {
         let kind = if let Some(structure) = environment.structures.structure_at(target) {
             MovementOutcomeKind::BlockedByStructure(structure)
         } else {
-            match environment.world.traversal_step(from, target) {
+            match environment
+                .spawned_objects
+                .traversal_step(environment.world, from, target)
+            {
                 Ok(step) if step.is_passable() => {
                     match self.spatial.transfer(event.agent, from, target) {
                         Ok(()) => {
@@ -853,7 +1021,7 @@ impl Population {
         }
         self.routes[index] = None;
         self.movement_generations[index] = self.movement_generations[index].wrapping_add(1);
-        self.policies[index].phase = PolicyPhase::Dormant;
+        self.policies[index].set_phase(PolicyPhase::Dormant);
         self.policies[index].generation = self.policies[index].generation.wrapping_add(1);
         self.sleeps[index] = SleepState::default();
         self.active_count = self.active_count.saturating_sub(1);
@@ -875,7 +1043,7 @@ impl Population {
         let was_active = !record.activity.is_terminal();
         self.routes[index] = None;
         self.movement_generations[index] = self.movement_generations[index].wrapping_add(1);
-        self.policies[index].phase = PolicyPhase::Dormant;
+        self.policies[index].set_phase(PolicyPhase::Dormant);
         self.policies[index].generation = self.policies[index].generation.wrapping_add(1);
         self.sleeps[index] = SleepState::default();
         self.spatial.remove(agent, position);
@@ -946,7 +1114,7 @@ impl Population {
             let generation = state
                 .next_generation()
                 .ok_or(ScheduleError::SequenceExhausted)?;
-            state.phase = PolicyPhase::DecisionPending;
+            state.set_phase(PolicyPhase::DecisionPending);
             state.goal = PhysicalGoal::Wait;
             state.reason = PolicyReason::InitialDecision;
             scheduler.schedule_decision(
@@ -988,13 +1156,33 @@ impl Population {
         goal: PhysicalGoal,
         target: WorldPosition,
         reason: PolicyReason,
+        exploration_heading: Option<ExplorationHeading>,
     ) {
         let state = &mut self.policies[agent.0 as usize];
         state.goal = goal;
         state.target =
             CompactPosition::checked(target).expect("policy target is inside active area");
         state.reason = reason;
-        state.phase = PolicyPhase::Routing;
+        if let Some(heading) = exploration_heading {
+            state.set_exploration_heading(heading);
+        }
+        state.set_phase(PolicyPhase::Routing);
+        state.retries = 0;
+    }
+
+    pub(crate) fn record_policy_retry(
+        &mut self,
+        agent: AgentId,
+        goal: PhysicalGoal,
+        target: Option<WorldPosition>,
+    ) {
+        let Some(state) = self.policies.get_mut(agent.0 as usize) else {
+            return;
+        };
+        state.goal = goal;
+        if let Some(target) = target.and_then(CompactPosition::checked) {
+            state.target = target;
+        }
     }
 
     pub(crate) fn policy_commitment(
@@ -1002,8 +1190,15 @@ impl Population {
         agent: AgentId,
     ) -> Option<(PhysicalGoal, WorldPosition, PolicyReason)> {
         let state = *self.policies.get(agent.0 as usize)?;
-        matches!(state.phase, PolicyPhase::Routing | PolicyPhase::Acting)
+        matches!(state.phase(), PolicyPhase::Routing | PolicyPhase::Acting)
             .then(|| (state.goal, state.target.world(), state.reason))
+    }
+
+    pub(crate) fn exploration_heading(&self, agent: AgentId) -> Option<ExplorationHeading> {
+        self.policies
+            .get(agent.0 as usize)
+            .copied()
+            .map(PolicyState::exploration_heading)
     }
 
     pub(crate) fn schedule_policy_decision(
@@ -1032,12 +1227,14 @@ impl Population {
             .schedule_decision(due, agent, generation, state.goal)
             .map_err(|_| MoveRequestError::EventSequenceExhausted)?;
         state.reason = reason;
-        state.phase = if retry {
+        let phase = if retry {
             state.retries = state.retries.saturating_add(1);
             PolicyPhase::Backoff
         } else {
+            state.retries = 0;
             PolicyPhase::DecisionPending
         };
+        state.set_phase(phase);
         Ok(due)
     }
 
@@ -1090,7 +1287,7 @@ impl Population {
         if schedule_decision {
             self.schedule_policy_decision(scheduler, now, agent, 1, PolicyReason::Retry, false)?;
         } else {
-            self.policies[index].phase = PolicyPhase::Dormant;
+            self.policies[index].set_phase(PolicyPhase::Dormant);
         }
         Ok((due, interrupted_sleep))
     }
@@ -1108,7 +1305,7 @@ impl Population {
             .is_active()
             .then_some(self.sleeps[index])?;
         self.settle_activity_without_events(now, agent, AgentActivity::Idle);
-        self.policies[index].phase = PolicyPhase::Dormant;
+        self.policies[index].set_phase(PolicyPhase::Dormant);
         self.sleeps[index] = SleepState::default();
         Some(state)
     }
@@ -1119,13 +1316,13 @@ impl Population {
             return;
         }
         self.settle_activity_without_events(now, agent, AgentActivity::Idle);
-        self.policies[index].phase = PolicyPhase::Dormant;
+        self.policies[index].set_phase(PolicyPhase::Dormant);
         self.sleeps[index] = SleepState::default();
     }
 
     pub(crate) fn validate_sleep_location(
         &self,
-        world: &World,
+        environment: MovementEnvironment<'_>,
         now: SimTime,
         agent: AgentId,
         position: WorldPosition,
@@ -1150,7 +1347,10 @@ impl Population {
         {
             return Err(SleepRequestError::OutsideActiveArea);
         }
-        match world.standability_at(position) {
+        match environment
+            .spawned_objects
+            .standability_at(environment.world, position)
+        {
             Ok(Standability::Standable) => {}
             Ok(Standability::BlockedByWater) => return Err(SleepRequestError::Water),
             Ok(Standability::BlockedByFeature) => {
@@ -1231,7 +1431,7 @@ impl Population {
         state.goal = PhysicalGoal::Sleep;
         state.target = compact;
         state.reason = reason;
-        state.phase = PolicyPhase::Acting;
+        state.set_phase(PolicyPhase::Acting);
         state.retries = 0;
         self.sleeps[index] = SleepState::active(now, due, quality);
         Ok(self.sleep_view(agent).expect("sleep was just activated"))
@@ -1274,6 +1474,7 @@ impl Population {
             | PhysicalGoal::Drink
             | PhysicalGoal::Eat
             | PhysicalGoal::SeekShelter
+            | PhysicalGoal::Explore
             | PhysicalGoal::Wait => AgentActivity::Idle,
             PhysicalGoal::Incapacitated => AgentActivity::Incapacitated,
         };
@@ -1299,7 +1500,7 @@ impl Population {
         state.goal = action.goal;
         state.target = compact;
         state.reason = action.reason;
-        state.phase = PolicyPhase::Acting;
+        state.set_phase(PolicyPhase::Acting);
         state.retries = 0;
         Ok(due)
     }
@@ -1318,10 +1519,10 @@ impl Population {
             self.transition_activity(scheduler, event.due, event.agent, AgentActivity::Idle)
         {
             self.settle_activity_without_events(event.due, event.agent, AgentActivity::Idle);
-            self.policies[index].phase = PolicyPhase::Dormant;
+            self.policies[index].set_phase(PolicyPhase::Dormant);
             return Err(error);
         }
-        self.policies[index].phase = PolicyPhase::Dormant;
+        self.policies[index].set_phase(PolicyPhase::Dormant);
         Ok(Some((state.goal, state.target.world(), state.reason)))
     }
 
@@ -1557,6 +1758,7 @@ impl Population {
     pub(crate) fn perceive(
         &self,
         world: &World,
+        spawned_objects: &SpawnedObjects,
         resource_deltas: &ResourceDeltas,
         structures: &StructureStore,
         agent: AgentId,
@@ -1587,12 +1789,20 @@ impl Population {
         let area = active
             .intersection(requested)
             .ok_or(PerceptionError::OutsideWorld)?;
-        self.perceive_area(world, resource_deltas, structures, agent, area)
+        self.perceive_area(
+            world,
+            spawned_objects,
+            resource_deltas,
+            structures,
+            agent,
+            area,
+        )
     }
 
     pub(crate) fn perceive_area(
         &self,
         world: &World,
+        spawned_objects: &SpawnedObjects,
         resource_deltas: &ResourceDeltas,
         structures: &StructureStore,
         agent: AgentId,
@@ -1638,7 +1848,22 @@ impl Population {
         agents
             .try_reserve(agent_ids.len())
             .map_err(|_| PerceptionError::AllocationFailed)?;
-        agents.extend(agent_ids.into_iter().filter_map(|id| self.view(id)));
+        let mut claimed_targets = Vec::new();
+        claimed_targets
+            .try_reserve(agent_ids.len())
+            .map_err(|_| PerceptionError::AllocationFailed)?;
+        for id in agent_ids {
+            if let Some(view) = self.view(id) {
+                agents.push(view);
+            }
+            if id != agent
+                && let Some((_, target, _)) = self.policy_commitment(id)
+            {
+                claimed_targets.push(target);
+            }
+        }
+        claimed_targets.sort_unstable_by_key(|position| (position.y, position.x));
+        claimed_targets.dedup();
         let mut drinkable_water = Vec::new();
         let mut resources = Vec::new();
         let mut perceived_structures = Vec::new();
@@ -1650,11 +1875,21 @@ impl Population {
         traversable_cells
             .try_reserve(cell_count)
             .map_err(|_| PerceptionError::AllocationFailed)?;
+        let mut elevations = Vec::new();
+        elevations
+            .try_reserve_exact(cell_count)
+            .map_err(|_| PerceptionError::AllocationFailed)?;
         for y in area.min.y..area.max.y {
             for x in area.min.x..area.max.x {
                 let position = WorldPosition { x, y };
-                match world
-                    .standability_at(position)
+                elevations.push(
+                    world
+                        .cell(position)
+                        .ok_or(PerceptionError::Unloaded)?
+                        .elevation,
+                );
+                match spawned_objects
+                    .standability_at(world, position)
                     .map_err(map_perception_query_error)?
                 {
                     Standability::Standable if structures.structure_at(position).is_none() => {
@@ -1663,28 +1898,36 @@ impl Population {
                     Standability::Standable => {}
                     Standability::BlockedByWater | Standability::BlockedByFeature => {}
                 }
-                if let Some(source) = world
-                    .water_at(position)
+                if let Some(source) = spawned_objects
+                    .water_at(world, position)
                     .map_err(map_perception_query_error)?
                     && source.is_drinkable()
                 {
                     try_push(&mut drinkable_water, PerceivedWater { position, source })?;
                 }
-                if let Some(resource) = resource_deltas
-                    .resource_at(world, position)
-                    .map_err(map_perception_query_error)?
-                {
+                let resource = if let Some(resource) = spawned_objects.resource_at(position) {
+                    Some(resource)
+                } else {
+                    resource_deltas
+                        .resource_at(world, position)
+                        .map_err(map_perception_query_error)?
+                };
+                if let Some(resource) = resource {
                     try_push(&mut resources, PerceivedResource { position, resource })?;
                 }
             }
         }
+        let reachable_cells =
+            reachable_cells(area, view.position, &traversable_cells, &elevations)?;
         Ok(PhysicalPerception {
             area,
             agents,
+            claimed_targets,
             drinkable_water,
             resources,
             structures: perceived_structures,
             traversable_cells,
+            reachable_cells,
         })
     }
 
@@ -1778,6 +2021,88 @@ impl Population {
     }
 }
 
+fn reachable_cells(
+    area: WorldRect,
+    origin: WorldPosition,
+    traversable_cells: &[WorldPosition],
+    elevations: &[u16],
+) -> Result<Vec<WorldPosition>, PerceptionError> {
+    let width =
+        usize::try_from(area.max.x - area.min.x).map_err(|_| PerceptionError::AreaOutsideActive)?;
+    let height =
+        usize::try_from(area.max.y - area.min.y).map_err(|_| PerceptionError::AreaOutsideActive)?;
+    let cell_count = width
+        .checked_mul(height)
+        .ok_or(PerceptionError::AreaTooLarge {
+            requested: u64::MAX,
+            maximum: MAX_PERCEPTION_CELLS,
+        })?;
+    let cell_index = |position: WorldPosition| {
+        (position.y - area.min.y) as usize * width + (position.x - area.min.x) as usize
+    };
+    let mut reachability = Vec::new();
+    reachability
+        .try_reserve_exact(cell_count)
+        .map_err(|_| PerceptionError::AllocationFailed)?;
+    reachability.resize(cell_count, 0_u8);
+    for &position in traversable_cells {
+        reachability[cell_index(position)] = 1;
+    }
+    let mut queue = Vec::new();
+    queue
+        .try_reserve(traversable_cells.len())
+        .map_err(|_| PerceptionError::AllocationFailed)?;
+    if reachability[cell_index(origin)] == 1 {
+        reachability[cell_index(origin)] = 2;
+        queue.push(origin);
+    }
+
+    let mut head = 0;
+    while let Some(&current) = queue.get(head) {
+        head += 1;
+        for neighbor in [
+            WorldPosition {
+                x: current.x,
+                y: current.y - 1,
+            },
+            WorldPosition {
+                x: current.x - 1,
+                y: current.y,
+            },
+            WorldPosition {
+                x: current.x + 1,
+                y: current.y,
+            },
+            WorldPosition {
+                x: current.x,
+                y: current.y + 1,
+            },
+        ] {
+            if !area.contains(neighbor) || reachability[cell_index(neighbor)] != 1 {
+                continue;
+            }
+            if elevations[cell_index(current)].abs_diff(elevations[cell_index(neighbor)])
+                <= MAX_TRAVERSABLE_ELEVATION_DELTA
+            {
+                reachability[cell_index(neighbor)] = 2;
+                queue.push(neighbor);
+            }
+        }
+    }
+
+    let mut reachable = Vec::new();
+    reachable
+        .try_reserve(queue.len())
+        .map_err(|_| PerceptionError::AllocationFailed)?;
+    reachable.extend(
+        traversable_cells
+            .iter()
+            .copied()
+            .filter(|position| reachability[cell_index(*position)] == 2),
+    );
+    Ok(reachable)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ActionEffectError {
     NoEdibleInventory,
@@ -1786,10 +2111,11 @@ pub(crate) enum ActionEffectError {
 
 fn invalid_spawn_reason(
     world: &World,
+    spawned_objects: &SpawnedObjects,
     position: WorldPosition,
 ) -> Result<Option<SpawnInvalidReason>, PopulationInitError> {
-    match world
-        .standability_at(position)
+    match spawned_objects
+        .standability_at(world, position)
         .map_err(|_| PopulationInitError::IncompleteResidency)?
     {
         Standability::Standable => Ok(None),

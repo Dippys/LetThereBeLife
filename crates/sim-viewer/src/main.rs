@@ -1,6 +1,8 @@
 mod camera;
 mod generation;
 mod renderer;
+mod spawn_menu;
+mod startup;
 
 use std::{
     sync::{Arc, mpsc},
@@ -17,6 +19,8 @@ use sim_core::{
     ChunkInspection, ChunkLoadRequest, Engine, EngineCommand, GenerateAreaError,
     WORLD_GENERATION_BOUNDS, World, WorldChunkLoad, WorldPosition, WorldRect,
 };
+use spawn_menu::{SpawnMenu, SpawnMenuMode};
+use startup::{reset, residency_ready, spawn_at};
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
@@ -111,6 +115,17 @@ struct ViewerApp {
     dirty: bool,
     smoke_frames: Option<u32>,
     smoke_deadline: Option<Instant>,
+    population_status: PopulationStatus,
+    spawn_message: Option<String>,
+    spawn_menu: SpawnMenu,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PopulationStatus {
+    WaitingForResidency,
+    Ready,
+    Active,
+    Failed,
 }
 
 impl ViewerApp {
@@ -146,6 +161,9 @@ impl ViewerApp {
             dirty: true,
             smoke_frames,
             smoke_deadline: smoke_frames.map(|_| Instant::now() + SMOKE_TIMEOUT),
+            population_status: PopulationStatus::WaitingForResidency,
+            spawn_message: None,
+            spawn_menu: SpawnMenu::default(),
         }
     }
 }
@@ -170,7 +188,7 @@ impl ViewerApp {
         let now = Instant::now();
         let elapsed = now.duration_since(self.last_frame.replace(now).unwrap_or(now));
         let snapshot = self.engine.snapshot();
-        if !snapshot.paused {
+        if self.population_status == PopulationStatus::Active && !snapshot.paused {
             self.accumulator += elapsed.as_secs_f64().min(0.25) * f64::from(snapshot.speed);
             let tick_seconds = self.engine.config().tick_duration().as_secs_f64();
             while self.accumulator >= tick_seconds {
@@ -183,6 +201,28 @@ impl ViewerApp {
     fn render(&mut self) -> bool {
         let selection_valid = self.selection_preview_is_valid();
         let generation_status = self.generation_status();
+        let hovered_agent = self.hovered.and_then(|position| {
+            self.engine
+                .agent_views(startup::VIEWER_AGENT_LIMIT)
+                .filter(|agent| agent.position == position)
+                .reduce(|selected, candidate| {
+                    if selected.activity == sim_core::AgentActivity::Dead
+                        && candidate.activity != sim_core::AgentActivity::Dead
+                    {
+                        candidate
+                    } else {
+                        selected
+                    }
+                })
+                .map(|view| renderer::AgentInspection {
+                    view,
+                    needs: self.engine.physical_needs(view.id).ok(),
+                    inventory: self.engine.inventory(view.id),
+                    health: self.engine.health(view.id),
+                    policy: self.engine.physical_policy(view.id),
+                    sleep: self.engine.sleep(view.id),
+                })
+        });
         let (Some(window), Some(renderer)) = (&self.window, &mut self.renderer) else {
             return false;
         };
@@ -194,17 +234,34 @@ impl ViewerApp {
             .pending_world_changes
             .is_some_and(|_| Instant::now() >= self.next_world_sync);
         let result = renderer.render(
-            self.engine.world(),
+            &self.engine,
             renderer::RenderState {
                 snapshot: self.engine.snapshot(),
                 camera: self.camera,
                 ui_scale: window.scale_factor() as f32,
                 cursor_world: self.cursor_world,
+                cursor_spawned_object: self
+                    .cursor_world
+                    .and_then(|position| self.engine.spawned_object_at(position)),
                 inspected: self.inspected,
                 hovered: self.hovered,
                 selection: self.selection,
                 selection_valid,
                 generation_status,
+                population_status: match self.population_status {
+                    PopulationStatus::WaitingForResidency => renderer::PopulationStatus::Waiting,
+                    PopulationStatus::Ready => renderer::PopulationStatus::Ready,
+                    PopulationStatus::Active => renderer::PopulationStatus::Active,
+                    PopulationStatus::Failed => renderer::PopulationStatus::Failed,
+                },
+                hovered_agent,
+                spawn_message: self.spawn_message.clone(),
+                spawn_menu: (self.spawn_menu.mode() != SpawnMenuMode::Closed).then_some(
+                    renderer::SpawnMenuView {
+                        selected: self.spawn_menu.selected(),
+                        placing: self.spawn_menu.is_placing(),
+                    },
+                ),
             },
             allow_world_sync,
             self.pending_world_changes,
@@ -234,7 +291,10 @@ impl ViewerApp {
         let Some(frames) = self.smoke_frames else {
             return false;
         };
-        if self.engine.world().loaded_chunk_count() == 0 {
+        if matches!(
+            self.population_status,
+            PopulationStatus::WaitingForResidency | PopulationStatus::Failed
+        ) {
             return false;
         }
         assert!(
@@ -323,6 +383,7 @@ impl ViewerApp {
                             });
                         }
                         changed = true;
+                        self.update_residency_status();
                     }
                     Ok(_) => {}
                     Err(error) => {
@@ -377,6 +438,76 @@ impl ViewerApp {
         self.inspected =
             position.and_then(|position| self.engine.world().inspect_chunk_at(position).ok());
         self.hovered = position.filter(|position| self.engine.world().cell(*position).is_some());
+    }
+
+    fn update_residency_status(&mut self) {
+        if self.population_status != PopulationStatus::WaitingForResidency {
+            return;
+        }
+        match residency_ready(self.engine.world()) {
+            Ok(false) => {}
+            Ok(true) => {
+                self.population_status = PopulationStatus::Ready;
+                self.spawn_message = Some("READY - MOVE CURSOR AND PRESS T".to_owned());
+                self.dirty = true;
+            }
+            Err(error) => {
+                eprintln!("viewer residency gate failed: {error}");
+                self.population_status = PopulationStatus::Failed;
+                self.dirty = true;
+            }
+        }
+    }
+
+    fn reset_population(&mut self) {
+        reset(&mut self.engine);
+        self.population_status = PopulationStatus::WaitingForResidency;
+        self.spawn_message = Some("POPULATION RESET".to_owned());
+        self.update_residency_status();
+        self.accumulator = 0.0;
+        self.last_frame = Some(Instant::now());
+        self.next_frame = Instant::now();
+    }
+
+    fn spawn_agent_at_cursor(&mut self) {
+        let Some(position) = self.cursor_world else {
+            self.spawn_message = Some("SPAWN FAILED - MOVE CURSOR OVER MAP".to_owned());
+            return;
+        };
+        match spawn_at(&mut self.engine, position) {
+            Ok(agent) => {
+                self.population_status = PopulationStatus::Active;
+                self.spawn_message = Some(format!(
+                    "SPAWNED AGENT {} AT {},{}",
+                    agent.get(),
+                    position.x,
+                    position.y
+                ));
+                self.accumulator = 0.0;
+                self.last_frame = Some(Instant::now());
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                self.spawn_message = Some(format!("SPAWN FAILED - {error}"));
+            }
+        }
+    }
+
+    fn spawn_object_at_cursor(&mut self) {
+        let Some(position) = self.cursor_world else {
+            self.spawn_message = Some("PLACE FAILED - MOVE CURSOR OVER MAP".to_owned());
+            return;
+        };
+        let kind = self.spawn_menu.selected();
+        match self.engine.spawn_object(kind, position) {
+            Ok(()) => {
+                self.spawn_message =
+                    Some(format!("PLACED {kind:?} AT {},{}", position.x, position.y));
+            }
+            Err(error) => {
+                self.spawn_message = Some(format!("PLACE FAILED - {error}"));
+            }
+        }
     }
 
     fn generation_status(&self) -> renderer::GenerationStatus {
@@ -558,13 +689,37 @@ impl ViewerApp {
     }
 
     fn handle_key(&mut self, code: KeyCode, event_loop: &ActiveEventLoop) {
+        if self.spawn_menu.handle_key(code) {
+            self.dragging = false;
+            self.spawn_message = match self.spawn_menu.mode() {
+                SpawnMenuMode::Closed => Some("SPAWN MODE CLOSED".to_owned()),
+                SpawnMenuMode::Browsing => Some("SPAWN MENU - NUMPAD 2/8 THEN 5".to_owned()),
+                SpawnMenuMode::Placing => Some(format!(
+                    "PLACING {:?} - LEFT CLICK, NUMPAD 0 TO END",
+                    self.spawn_menu.selected()
+                )),
+            };
+            return;
+        }
         let command = match code {
             KeyCode::Space => Some(EngineCommand::TogglePause),
             KeyCode::Digit1 => Some(EngineCommand::SetSpeed(1.0)),
             KeyCode::Digit2 => Some(EngineCommand::SetSpeed(2.0)),
             KeyCode::Digit3 => Some(EngineCommand::SetSpeed(4.0)),
             KeyCode::Digit4 => Some(EngineCommand::SetSpeed(8.0)),
-            KeyCode::KeyR => Some(EngineCommand::Reset),
+            KeyCode::Digit5 => Some(EngineCommand::SetSpeed(16.0)),
+            KeyCode::Digit6 => Some(EngineCommand::SetSpeed(32.0)),
+            KeyCode::Digit7 => Some(EngineCommand::SetSpeed(64.0)),
+            KeyCode::Digit8 => Some(EngineCommand::SetSpeed(128.0)),
+            KeyCode::Digit9 => Some(EngineCommand::SetSpeed(256.0)),
+            KeyCode::KeyR => {
+                self.reset_population();
+                None
+            }
+            KeyCode::KeyT => {
+                self.spawn_agent_at_cursor();
+                None
+            }
             KeyCode::KeyC => {
                 self.cancel_pending_generation();
                 None
@@ -659,7 +814,14 @@ impl ApplicationHandler for ViewerApp {
                 button: MouseButton::Left,
                 ..
             } => {
-                self.dragging = state == ElementState::Pressed;
+                if self.spawn_menu.is_placing() {
+                    self.dragging = false;
+                    if state == ElementState::Pressed {
+                        self.spawn_object_at_cursor();
+                    }
+                } else {
+                    self.dragging = state == ElementState::Pressed;
+                }
                 self.dirty = true;
             }
             WindowEvent::MouseInput {

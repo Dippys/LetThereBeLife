@@ -12,6 +12,7 @@ This directory describes the code that is currently implemented and the decision
 - [Roadmap](ROADMAP.md): completed, active, next, and deferred work.
 - [World foundation improvement plan](WORLD_FOUNDATION_PLAN.md): ordered Phase 1 terrain, hydrology, climate, feature, rendering, and agent-readiness slices with acceptance criteria.
 - [Physical agent loop implementation plan](PHYSICAL_AGENT_PLAN.md): ordered Phase 2 agent, scheduling, movement, perception, needs, survival, shelter, and death slices with per-slice acceptance gates.
+- [Phase 3 beliefs, memory, and relationships implementation plan](PHASE3_BELIEFS_RELATIONSHIPS_PLAN.md): ordered cognitive storage, observation, landmark belief, survival planning, episodic memory, sparse relationship, and integrated-proof slices.
 - [Testing](TESTING.md): validation commands, existing coverage, and known gaps.
 - [Performance](PERFORMANCE.md): compact-data rules, budgets, measurements, and optimization evidence.
 

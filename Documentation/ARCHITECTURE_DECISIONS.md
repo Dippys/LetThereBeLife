@@ -551,3 +551,99 @@ Version semantic report encoding independently from Rust layout. Write explicit 
 **Reason:** Phase 2 needs one repeatable integration artifact without making a test harness authoritative state or importing reporting concerns into the engine. Explicit starting supplies acknowledge that the implemented fixed world can separate fresh water, food, and timber beyond the radius-eight physical policy; silently altering generation or adding cognition would widen the slice. Narrow counters make scheduler growth and work measurable while preserving engine ownership and idle-tick complexity.
 
 **Consequences:** Repeated release reports are equality stable for both populations. The 20-agent run retains 15 survivors/five dehydration deaths and peaks at 379 queued events; the 100-agent run retains 75 survivors/25 dehydration deaths and peaks at 1,805. Both complete gather/eat/drink/sleep/build paths, report no due backlog, cap retry depth at 68/22, and produce zero sampled invariant violations across 1,001 samples. Peak working set was 24,956,928 and 25,108,480 bytes in the recorded runs. Starting supplies, abstract inventory, fixed spawn roles, FNV-1a format version 1, the binary heap, lack of allocator-call attribution, and absence of persistence/replay files remain explicit limitations rather than hidden future contracts.
+
+## D-046: Deterministic viewer population gate and bounded read-only physical presentation
+
+Date: 2026-07-16
+
+**Extends:** D-037 through D-045 without changing authoritative Phase 2 behavior or the canonical headless scenario.
+
+**Decision:** Keep `Engine::new` population-empty. The viewer uses a centered 2,048 x 2,048 rectangle, clipped only for smaller configured bootstrap worlds, as a readiness gate and holds simulation time at zero until it is resident. The gate is not a spawn boundary. Each `T` press requests one exact resident cursor spawn: the first initializes with the fully resident initial rectangle when available or the cursor's resident chunk otherwise and activates viewer exploration mode. Later presses use `Engine::spawn_agent`; a position outside the current active rectangle expands it to the deterministic rectangular union only when every intervening cell is resident, then appends one dense authoritative row with current-time needs and policy scheduling. Invalid or disconnected-unloaded cells produce typed HUD feedback and publish neither the expansion nor an agent. Reset retains terrain, clears wall-clock accumulation, and returns to the ready zero-agent state.
+
+Render ascending-ID `AgentView` and `StructureView` values only. Reuse separate fixed 4,096-instance CPU/GPU dynamic buffers for agents and one-cell shelter footprints; never store simulation truth in those rectangles or invalidate terrain/feature buffers when they change. Cull outside the camera and hide both layers below 1.25 pixels per world cell. Use activity/lifecycle colors, distinct construction/completion shelter colors, snapshot population counts, and cursor-cell agent ID/activity in the in-game HUD. Sprites, animation, aggregation, and a general inspection/asset system remain outside this decision.
+
+**Reason:** A complete fixed residency gate removes render timing, frame rate, camera position, worker completion order, and cache timing from population startup. Reusing core views and the fixed-step engine preserves simulation/presentation ownership. Fixed capacity and far-zoom hiding bound upload/storage work while making the already implemented physical loop inspectable now.
+
+**Consequences:** Normal startup retains zero agents and tick zero regardless of how loads arrived. The user controls spawn count and exact standable positions up to the 4,096-agent viewer presentation bound. Two 4,096-entry CPU vectors plus two matching GPU buffers reserve 320 KiB of logical `Instance` payload across agent and structure layers/copies; initial agent upload is zero and each accepted spawn adds one 20-byte instance before culling. Terrain buffer construction remains keyed only by world revision, camera bounds, and sampling step. Colored rectangles are deliberately legible presentation, not sprites or persistent entities; far zoom shows counts rather than map aggregation.
+
+## D-047: Opt-in bounded exploration for interactive physical agents
+
+Date: 2026-07-16
+
+**Extends:** D-041 and D-046. It leaves D-045's canonical headless scenario and hashes on the established local-only policy mode.
+
+**Decision:** Add `PhysicalGoal::Explore` and an explicit `Engine::activate_physical_policy_with_exploration` boundary. When enabled and a radius-eight perception has no actionable objective, select a deterministic unoccupied traversable destination from that same bounded perception using agent identity, origin, distance, and stable integer mixing. Travel uses the existing authoritative bounded route scheduler; arrival immediately reconsiders current needs and newly perceived objectives. The viewer enables this mode on its first `T` spawn. Ordinary `activate_physical_policy` remains local-only for canonical headless compatibility.
+
+**Reason:** A local-only agent placed away from resources can wait before its first threshold, then retry an unresolved water/food target forever without changing position. This was the observed 100,000-tick idle symptom, not a renderer refresh failure. Bounded exploration makes interactive agents visibly and physically search without viewer-issued moves, frame-time inputs, world-scale queries, stored paths, or cognition.
+
+**Consequences:** Viewer agents produce deterministic route work even in locally empty terrain and can discover objectives beyond their initial perception window. Stateless local exploration is wandering rather than a guaranteed complete world search, but it cannot remain in the policy's unresolved `Wait`/no-target loop while a different traversable local destination exists. The one-byte goal domain gains discriminant 10; the 12-byte policy state and 32-byte scheduled event remain unchanged. Canonical headless reports retain the local-only activation API and therefore do not change.
+
+## D-048: Extended viewer time controls and mirrored agent inspection
+
+Date: 2026-07-16
+
+**Extends:** D-046 and D-047 without making presentation state authoritative.
+
+**Decision:** Map number keys `1` through `9` to exact powers-of-two simulation speed from 1x through 256x and raise the engine command clamp to the same explicit ceiling. When the cursor cell contains an agent, copy its existing `AgentView`, `PhysicalNeedsView`, `InventoryView`, `HealthView`, `PhysicalPolicyView`, and optional `SleepView` into a frame-local viewer inspection value. Render a mirrored top-right card only while that hover exists. Reuse one 512-byte text string and the fixed 8,192-instance screen-overlay buffer sized for the composed worst-case HUD/card layout; do not retain a selected agent, add simulation fields, or allocate per agent.
+
+**Reason:** Eight-times speed is too slow for long physical thresholds, while a bare `IDLE` activity label hides scheduled needs, policy goals, retries, inventory, and health state. Higher fixed multipliers accelerate observation without changing deterministic tick semantics. The complete read-only card makes current physical behavior inspectable while preserving the engine/viewer ownership boundary.
+
+**Consequences:** Viewer speed can request up to 15,360 fixed ticks per wall-clock second at the configured 60 Hz, so the highest settings intentionally trade visual smoothness and CPU time for rapid observation. A delayed frame may process a larger accumulated fixed-tick batch under the existing 250 ms wall-clock cap. The agent card adds 512 retained text bytes but no new GPU buffer, simulation record, per-agent allocation, or world-revision invalidation. Hover lookup remains bounded by the 4,096-agent presentation limit.
+
+## D-049: Sparse authoritative spawned-world objects and numpad placement
+
+Date: 2026-07-16
+
+**Extends:** D-036, D-040, D-041, and D-046 while preserving immutable generated chunks and the simulation/viewer ownership boundary.
+
+**Decision:** Store explicit tree, berry-bush, rock, and fresh-water placements in an `Engine`-owned `SpawnedObjects` layer keyed by checked compact row/column coordinates. One cell holds at most one placed object. Accept a placement only when its terrain is resident and generated-world standability is clear, with no existing placed object, agent occupancy, or structure footprint. Trees/rocks block standing and traversal and expose the established generated-kind wood/stone capacities; berries remain passable and expose food; placed fresh water is represented to physical queries as drinkable lake water and blocks walking. Store placed-resource remaining capacity in the placed record, keep depleted objects visible, and clear all placements on `EngineCommand::Reset`.
+
+Require every physical consumer to use the composed layer: population initialization/addition, bounded perception, policy resource/water revalidation, route planning, scheduled movement completion, sleep validation, and shelter placement. Expose only copied `SpawnedObjectView` iteration in deterministic row-major order. In `sim-viewer`, use numpad `5` to open/confirm/return, `2`/`8` or `4`/`6` to navigate, and `0` to exit. Placement mode redirects left-click from panning to repeated core commands; right-drag generation and main-row speed keys retain their existing meanings. Render only read-only visible proxies through a separate capped dynamic buffer.
+
+**Reason:** Editing procedural chunks would mix user commands with generator identity and force renderer cache invalidation, while presentation-only markers would be invisible to agents. A sparse simulation overlay matches the existing generated-base-plus-deltas design and charges state only for explicit placements. Completion-time composition is necessary because an object can be placed after a route step is scheduled.
+
+**Consequences:** The compact key and placed payload are each size-asserted at four bytes/alignment two before `BTreeMap` nodes and allocator overhead. Point lookup is allocation-free and ordered iteration is deterministic; bounded perception adds one tree lookup per composed physical fact. The viewer reserves one 16,384-instance GPU buffer (320 KiB logical `Instance` payload) and grows its CPU staging vector only as visible placement demand requires. The authoritative store is not limited by that presentation cap, but rendering beyond 16,384 simultaneously visible spawned objects is deferred. Removal tools, persistence, regrowth, water quantity/flow, terrain painting, undo, and multi-cell objects remain open.
+
+## D-050: Occupancy-aware autonomous objective coordination
+
+Date: 2026-07-16
+
+**Extends:** D-038, D-040, D-041, and D-047 without replacing authoritative occupancy or adding hard route reservations.
+
+**Decision:** Keep distance, row, and column as the physical target order, but define a usable autonomous destination as traversable, not occupied by another perceived agent, and not the active routing/acting target of another perceived agent. Build the active-claim list while bounded perception is already collecting nearby agent IDs, sort and deduplicate it in row-major order, and return it as transient `PhysicalPerception` output. Apply the same availability predicate to water, food/material, shelter, build-site, and exploration candidates. The current agent's own occupied origin remains valid for immediate drink/eat/sleep actions.
+
+Claims coordinate selection only. They do not reserve cells, block manual movement, alter the occupancy index, or bypass completion-time revalidation; dynamic conflicts still resolve through scheduled `AgentId` order. Retry count represents a consecutive failure chain: starting a route/action or scheduling an ordinary decision resets it. A backoff stores the failed goal before scheduling so read-only inspection reports the attempted objective rather than a stale `Wait` goal.
+
+**Reason:** Crowded deterministic agents previously selected the same nearest water/resource access even after it became occupied. Losers repeatedly retried that one destination, reached the 1,920-tick backoff cap while health consequences repeated every 600 ticks, and could die beside an otherwise usable objective. Shortening backoff or granting supplies would hide the ownership defect. Bounded claim-aware selection lets already-visible physical state produce distinct nearest alternatives while preserving deterministic simulation and the established collision authority.
+
+**Consequences:** `PolicyState`, `AgentRecord`, `ScheduledEvent`, and persistent occupancy storage do not grow. Each perception result gains one `Vec` header and at most one 16-byte `WorldPosition` claim per perceived agent, capped by the existing 289-cell radius-eight decision area; the vector is released with the other transient perception facts. Focused policy coverage rejects occupied/claimed water and resource cells, while a deterministic two-agent placed-water fixture proves distinct same-tick access claims and two successful drink completions. After D-051's navigation-aware selection, the canonical 20/100-agent release scenarios remain replay-stable with 15/75 survivors, zero sampled invariant violations, and semantic hashes `ac5c6c805d69353a` / `5c98a0b7b039d7e4`.
+
+## D-051: Terrain-connected policy perception and goal-directed bounded routing
+
+Date: 2026-07-16
+
+**Extends:** D-038, D-047, and D-050 without adding persistent paths, global navigation state, or viewer-issued movement.
+
+**Decision:** Keep objective standability and route reachability distinct. Every bounded physical perception returns both all standable cells and the row-major terrain-connected component reachable from the observing agent inside that perception area. Build the component with a bounded flood fill over composed standability and the exact maximum elevation-delta rule; dynamic agents remain completion-time occupancy obstacles rather than durable terrain disconnections. Autonomous water, resource, shelter, build, and exploration targets must belong to this reachable component before occupancy and active-claim checks.
+
+Replace the reusable bounded Dijkstra frontier priority with A*. The retained route node still stores exact accumulated traversal cost and parent; the open key adds an admissible Manhattan-distance estimate multiplied by the world's explicit minimum passable step cost. Stable position/node tie-breaks, fixed neighbor order, the caller expansion budget, per-waypoint replanning, and all typed failures remain authoritative.
+
+**Reason:** Viewer exploration selected a far edge of its 17 x 17 perception window while the uninformed route search was capped at 256 expansions even though the window contains 289 cells. An agent on ordinary open terrain could therefore enter `Explore`, exhaust the route budget before its first move, and repeat backoff forever. Separately, Manhattan-nearest water/resource access could lie across an impassable slope, water, feature, or structure barrier, causing the same deterministic failed target to be selected forever. Raising a timeout or granting resources would not repair either navigation contract.
+
+**Consequences:** No per-agent or persistent route record grows. A perception result adds one transient reachable-cell vector; construction uses bounded transient elevation, one-byte reachability, and queue arrays capped by the existing perception-cell limit, then releases them with the result. Focused regressions prove a clear full radius-eight window commits exploration without budget backoff, disconnected objective access is not selected, a water-ring fixture exposes only the origin as reachable despite other standable cells, and crowded distinct water access still completes both drinks. In the canonical 100-agent soak, route expansions fall from 21,920 to 418 and peak retry depth from 51 to 21. The exact connectivity work raises the combined repeated 20/100-agent release-soak observation from 6.20 to 7.71 seconds on the same machine; it is accepted as bounded correctness work and remains visible for later profiling.
+
+## D-052: Directionally persistent bounded exploration and safe objective anchors
+
+Date: 2026-07-16
+
+**Extends:** D-047, D-050, and D-051 without adding global terrain knowledge, stored paths, or a settlement planner.
+
+**Decision:** Give each policy-controlled agent one authoritative eight-way exploration heading. Pack it with `PolicyPhase` in one private navigation byte inside the existing 12-byte `PolicyState`. Seed the initial heading from stable agent identity. After each exploration arrival, derive a deterministic bounded turn from agent identity, origin, and prior heading, excluding the immediate reverse direction; choose the reachable unoccupied/unclaimed perception-edge cell with maximum forward projection and minimum lateral deviation, rotating through bounded alternative headings if terrain blocks the preferred direction.
+
+Treat fresh-water and completed-shelter access as safe anchors. If ordinary physical policy has resolved the current decision to `Wait` while the agent is at same/cardinal drinkable-water access or completed-shelter access, optional viewer exploration must preserve that wait. Urgent actionable needs and visible physical objectives retain priority, and drinking may alternate naturally with waiting as thirst grows. Include heading in `PhysicalPolicyView`, viewer inspection, and semantic scenario hashing because it affects future authoritative decisions.
+
+**Reason:** Stateless exploration mixed each new origin into a fresh edge target. Adjacent perception windows could therefore select opposite edges, producing the observed repeated northeast/southwest path until death even though routing itself succeeded. Separately, the viewer exploration override replaced a correct local `Wait` after reaching water or shelter, making an agent leave the resource it had just discovered. Retry/backoff changes, wider route budgets, or supplied resources would not repair either decision-state defect.
+
+**Consequences:** `PolicyState` remains 12 bytes/alignment four, `AgentRecord` remains six bytes, and `ScheduledEvent` remains 32 bytes; no per-tick population scan or world-scale query is added. Unit coverage proves packed phase/heading independence, consecutive exploration without immediate reversal, and preservation of a valid water wait. An engine regression proves two crowded seekers both drink and stay on their distinct access cells through another 1,000 ticks while legitimately alternating between `Wait` and `Drink`. Canonical local-only scenario outcomes remain 15/75 survivors and zero sampled invariant violations; semantic hashes change to `60a28c6e1d17a8ed` / `f6536990a0f25cf0` because the newly authoritative heading is encoded.
+
+This remains bounded local exploration, not guaranteed world coverage or remote hydrology knowledge. A viewer agent spawned in a large dry region can still die before finding water. A seed-1 diagnostic at the reported `(395, -1074)` area found the closest fresh water approximately 2,023 Manhattan cells away, far beyond radius-eight perception; guaranteeing survival there would require a separate explicit long-range knowledge, memory, or settlement-planning decision.

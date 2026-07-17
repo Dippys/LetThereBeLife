@@ -92,6 +92,10 @@ impl Scheduler {
         self.next_sequence.checked_add(count).is_some()
     }
 
+    pub(crate) fn try_reserve(&mut self, additional: usize) -> Result<(), ()> {
+        self.events.try_reserve(additional).map_err(|_| ())
+    }
+
     #[cfg(test)]
     pub(crate) fn with_capacity(capacity: usize) -> Self {
         Self {

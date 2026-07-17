@@ -8,8 +8,10 @@ use std::{
 use crate::{
     AgentId, TraversalKind, World, WorldPosition, WorldQueryError, WorldRect,
     agent::CompactPosition,
+    placements::SpawnedObjects,
     spatial::SpatialIndex,
     structures::{StructureId, StructureStore},
+    world::MIN_TRAVERSAL_COST,
 };
 
 pub const MAX_ROUTE_EXPANSIONS: u16 = 4_096;
@@ -58,6 +60,7 @@ pub(crate) struct RoutePlan {
 #[derive(Clone, Copy)]
 pub(crate) struct RouteEnvironment<'a> {
     pub(crate) world: &'a World,
+    pub(crate) spawned_objects: &'a SpawnedObjects,
     pub(crate) occupancy: &'a SpatialIndex,
     pub(crate) structures: &'a StructureStore,
     pub(crate) active_area: WorldRect,
@@ -73,7 +76,7 @@ struct RouteNode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct OpenNode {
-    cost: u32,
+    estimated_cost: u32,
     position: CompactPosition,
     node: u16,
 }
@@ -81,8 +84,8 @@ struct OpenNode {
 impl Ord for OpenNode {
     fn cmp(&self, other: &Self) -> Ordering {
         other
-            .cost
-            .cmp(&self.cost)
+            .estimated_cost
+            .cmp(&self.estimated_cost)
             .then_with(|| other.position.y.cmp(&self.position.y))
             .then_with(|| other.position.x.cmp(&self.position.x))
             .then_with(|| other.node.cmp(&self.node))
@@ -126,7 +129,7 @@ impl RoutePlanner {
         });
         self.by_position.insert(origin, 0);
         self.open.push(OpenNode {
-            cost: 0,
+            estimated_cost: route_heuristic(origin, destination),
             position: origin,
             node: 0,
         });
@@ -134,7 +137,7 @@ impl RoutePlanner {
         let mut expansions = 0_u16;
         while let Some(open) = self.open.pop() {
             let index = usize::from(open.node);
-            if self.nodes[index].closed || self.nodes[index].cost != open.cost {
+            if self.nodes[index].closed {
                 continue;
             }
             self.nodes[index].closed = true;
@@ -161,13 +164,13 @@ impl RoutePlanner {
                     continue;
                 }
                 let step = environment
-                    .world
-                    .traversal_step(current, neighbor)
+                    .spawned_objects
+                    .traversal_step(environment.world, current, neighbor)
                     .map_err(map_query_error)?;
                 let Some(step_cost) = step.cost() else {
                     continue;
                 };
-                let Some(cost) = open.cost.checked_add(u32::from(step_cost)) else {
+                let Some(cost) = self.nodes[index].cost.checked_add(u32::from(step_cost)) else {
                     continue;
                 };
                 let compact =
@@ -178,7 +181,8 @@ impl RoutePlanner {
                         existing.cost = cost;
                         existing.parent = open.node;
                         self.open.push(OpenNode {
-                            cost,
+                            estimated_cost: cost
+                                .saturating_add(route_heuristic(compact, destination)),
                             position: compact,
                             node: raw,
                         });
@@ -195,7 +199,7 @@ impl RoutePlanner {
                 });
                 self.by_position.insert(compact, raw);
                 self.open.push(OpenNode {
-                    cost,
+                    estimated_cost: cost.saturating_add(route_heuristic(compact, destination)),
                     position: compact,
                     node: raw,
                 });
@@ -203,7 +207,7 @@ impl RoutePlanner {
             if expansions == request.max_expansions {
                 while self.open.peek().is_some_and(|entry| {
                     let node = self.nodes[usize::from(entry.node)];
-                    node.closed || node.cost != entry.cost
+                    node.closed
                 }) {
                     self.open.pop();
                 }
@@ -232,6 +236,12 @@ impl RoutePlanner {
             self.open.capacity(),
         )
     }
+}
+
+fn route_heuristic(from: CompactPosition, destination: CompactPosition) -> u32 {
+    let dx = i32::from(from.x).abs_diff(i32::from(destination.x));
+    let dy = i32::from(from.y).abs_diff(i32::from(destination.y));
+    (dx + dy).saturating_mul(u32::from(MIN_TRAVERSAL_COST))
 }
 
 fn validate_request(
@@ -266,7 +276,10 @@ fn validate_request(
     if let Some(structure) = environment.structures.structure_at(request.destination) {
         return Err(RouteRequestError::BlockedByStructure(structure));
     }
-    match environment.world.standability_at(request.destination) {
+    match environment
+        .spawned_objects
+        .standability_at(environment.world, request.destination)
+    {
         Ok(crate::Standability::Standable) => Ok(()),
         Ok(crate::Standability::BlockedByWater) => {
             Err(RouteRequestError::Blocked(TraversalKind::BlockedByWater))

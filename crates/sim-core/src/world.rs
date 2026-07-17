@@ -401,6 +401,14 @@ pub struct TraversalStep {
 }
 
 impl TraversalStep {
+    pub(crate) const fn blocked(elevation_delta: i32, kind: TraversalKind) -> Self {
+        Self {
+            elevation_delta,
+            cost: 0,
+            kind,
+        }
+    }
+
     pub const fn kind(self) -> TraversalKind {
         self.kind
     }
@@ -1300,10 +1308,14 @@ fn water_source(cell: TerrainCell) -> Option<WaterSource> {
     }
 }
 
+/// Lower bound used by route heuristics; it must not exceed any passable
+/// surface's base traversal cost.
+pub(crate) const MIN_TRAVERSAL_COST: u16 = 10;
+
 fn surface_traversal_cost(surface: SurfaceType) -> u16 {
     match surface {
         SurfaceType::Sand => 14,
-        SurfaceType::Soil => 10,
+        SurfaceType::Soil => MIN_TRAVERSAL_COST,
         SurfaceType::Hill => 18,
         SurfaceType::Rock => 22,
         SurfaceType::SnowIce => 20,

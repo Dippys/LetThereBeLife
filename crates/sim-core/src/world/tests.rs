@@ -1,6 +1,19 @@
 use super::*;
 
 #[test]
+fn route_heuristic_floor_is_admissible_for_every_passable_surface() {
+    for surface in [
+        SurfaceType::Sand,
+        SurfaceType::Soil,
+        SurfaceType::Hill,
+        SurfaceType::Rock,
+        SurfaceType::SnowIce,
+    ] {
+        assert!(surface_traversal_cost(surface) >= MIN_TRAVERSAL_COST);
+    }
+}
+
+#[test]
 fn generation_is_deterministic() {
     assert_eq!(
         World::generate_square(42, 128),

@@ -54,7 +54,7 @@ impl SpatialIndex {
         index
     }
 
-    fn insert(&mut self, agent: AgentId, position: WorldPosition) -> bool {
+    pub(crate) fn insert(&mut self, agent: AgentId, position: WorldPosition) -> bool {
         let bucket = SpatialBucket::at(position);
         let local_cell = bucket.local_cell(position);
         let occupants = self.buckets.entry(bucket).or_default();

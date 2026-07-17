@@ -39,29 +39,32 @@ Last synchronized: 2026-07-16.
 - Physical-agent Slice 6: sparse simulation-owned one-cell lean-to construction, atomic eight-wood reservation/refund, structure-aware perception/traversal, completed adjacent sheltered sleep, deterministic overlap arbitration, and recorded structure/index/event measurements.
 - Physical-agent Slice 7: 16-byte scheduled health state, explicit severe hunger/thirst/rest/exposure consequences, stable multi-cause precedence, incapacitation, terminal physical death with occupancy/event cleanup, retained causal records, public health/death inspection, and headless cause counts.
 - Physical-agent Slice 8 and Phase 2 exit: reusable canonical seed-1 20/100-agent headless scenarios over a 2,048-cell square, explicit recorded starting supplies and freshwater/fallback spawn roles, equality-stable causal reports plus versioned semantic hashes, replay/divergence/batching/reset proofs, cumulative scheduler/route/perception/capacity diagnostics, 600,000-tick release soaks with mixed survival/dehydration outcomes, and zero sampled invariant violations.
+- Physical-agent viewer presentation: tick-zero readiness gating on a fully resident centered 2,048 x 2,048 rectangle, zero automatic agents, individual exact resident cursor spawning with `T`, deterministic active-area expansion across loaded terrain, bounded exploration for unresolved local objectives, 1-9 power-of-two speed controls through 256x, reset to zero agents, read-only capped agent/shelter GPU instances, activity/lifecycle colors, far-zoom hiding, population HUD counts, spawn feedback, and a complete mirrored top-right agent hover card.
+- Interactive world-object spawning: a numpad-navigated bottom-left viewer menu and repeated left-click placement for trees, berries, rocks, and fresh water, backed by a deterministic sparse `sim-core` overlay composed into agent perception, resources, drinking, routing, movement revalidation, spawn/sleep/build validity, read-only rendering, and reset.
 - `sim-core` maintainability pass: split world queries and deterministic visitation into responsibility-focused private modules, and move the large world/worldgen unit suites out of production entry files without changing public APIs or test paths.
 
 ## Active
 
-- Phase 2 is complete. Define the canonical Phase 3 beliefs/relationships plan before implementation, preserving the physical-agent report and deterministic engine boundaries established by [PHYSICAL_AGENT_PLAN.md](PHYSICAL_AGENT_PLAN.md).
+- Phase 2 is complete. Phase 3 is now defined by the canonical [beliefs, memory, and relationships implementation plan](PHASE3_BELIEFS_RELATIONSHIPS_PLAN.md). Slice 0, cognitive storage and event foundation, is the next implementation boundary.
 - Treat generated terrain as intentionally unstable while there is no save/load or other persisted world output. Generator versioning is not current work.
 
 ## Next
 
 The completed Phase 1 sequence remains recorded in [WORLD_FOUNDATION_PLAN.md](WORLD_FOUNDATION_PLAN.md). Phase 2 scope, dependencies, per-slice deliverables, acceptance criteria, measurements, documentation duties, and explicit deferrals are canonical in [PHYSICAL_AGENT_PLAN.md](PHYSICAL_AGENT_PLAN.md).
 
-- Create one canonical Phase 3 slice-by-slice plan for beliefs, memory, and relationships before changing engine behavior.
-- Keep agent/structure presentation read-only when viewer work begins; the viewer still owns no authoritative physical state.
+- Implement only Phase 3 Slice 0: benchmark and establish compact cognitive storage, validated record identity, bounded cognition triggers, reset/death semantics, copied diagnostics, and exact performance evidence before semantic belief records affect behavior.
+- After Slice 0 validates the storage boundary, proceed one coherent slice at a time through direct observation, environmental beliefs, survival planning, episodic memory, sparse relationships, consequences, and the integrated Phase 3 proof.
+- Keep future agent/structure presentation extensions read-only; the viewer still owns no authoritative physical state.
 - Use the representative-seed review set only when an observed simulation failure requires another generator change.
 
 ## Deferred
 
 - Generator versioning, save/load, chunk persistence, and unloading policy are deferred until persisted world output is about to be introduced and the generator is ready to stabilize. Version identifiers must still be added before the first durable world format ships.
-- Society and later presentation phases remain deferred until their canonical plans establish concrete requirements.
+- Society and richer sprite/animation/asset presentation remain deferred until canonical plans establish concrete requirements.
 
 ## Planned
 
-Phase 3 beliefs and relationships may begin only through a reviewed canonical plan using the relevant `InitialDocumentation/` files as immutable design input. Phase 2 physical-agent behavior is now an implemented dependency, not active feature work.
+Phase 3 implementation follows [PHASE3_BELIEFS_RELATIONSHIPS_PLAN.md](PHASE3_BELIEFS_RELATIONSHIPS_PLAN.md). Phase 2 physical-agent behavior is an implemented dependency, not active feature work. Nonverbal communication, language, families, settlements, economy, and institutions remain later phases.
 
 ## Open
 
