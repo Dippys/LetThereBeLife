@@ -591,11 +591,9 @@ impl Engine {
             RouteEnvironment {
                 world: &self.world,
                 spawned_objects: &self.spawned_objects,
-                occupancy: self.population.spatial(),
                 structures: &self.structures,
                 active_area,
             },
-            agent,
             origin,
             request,
         );
@@ -764,6 +762,12 @@ impl Engine {
         }
         if self.spawned_objects.at(position).is_some() {
             return Err(SpawnObjectError::ExistingObject);
+        }
+        if self
+            .spawned_objects
+            .reserves_exclusive_use_at(&self.world, position)
+        {
+            return Err(SpawnObjectError::BlockedByFeature);
         }
         if self.population.spatial().occupant(position).is_some() {
             return Err(SpawnObjectError::Occupied);
@@ -1013,11 +1017,9 @@ impl Engine {
             RouteEnvironment {
                 world: &self.world,
                 spawned_objects: &self.spawned_objects,
-                occupancy: self.population.spatial(),
                 structures: &self.structures,
                 active_area,
             },
-            agent,
             origin,
             request,
         ) {
@@ -1674,6 +1676,12 @@ impl Engine {
                 return Err(BuildShelterError::OutsideWorld);
             }
             Err(WorldQueryError::NonCardinalStep) => unreachable!("standing queries have no step"),
+        }
+        if self
+            .spawned_objects
+            .reserves_exclusive_use_at(&self.world, site)
+        {
+            return Err(BuildShelterError::BlockingFeature);
         }
         if !self.population.can_build_shelter(agent) {
             return Err(BuildShelterError::InsufficientMaterials);
@@ -2963,16 +2971,16 @@ mod tests {
     }
 
     #[test]
-    fn lethal_health_consequence_precedes_movement_and_releases_occupancy() {
+    fn lethal_health_consequence_releases_the_cell_for_other_agents() {
         let mut engine = resident_engine(64);
         let (from, target) = standable_steps(&engine, 1)[0];
         engine
             .initialize_population(
                 PopulationInit {
                     active_area: engine.world().initial_bounds(),
-                    population: 1,
+                    population: 2,
                 },
-                &[from],
+                &[from, target],
             )
             .unwrap();
         engine.population.set_need_value_for_test(
@@ -2995,12 +3003,21 @@ mod tests {
         assert_eq!(engine.death_records()[0].cause, DeathCause::Dehydration);
         assert_eq!(engine.death_records()[0].at, SimTime::ZERO);
         assert_eq!(engine.population.spatial().occupant(from), None);
-        assert_eq!(engine.population.spatial().occupant(target), None);
-        assert_eq!(engine.snapshot().living_agent_count, 0);
+        assert_eq!(
+            engine.population.spatial().occupant(target),
+            Some(AgentId::new(1))
+        );
+        assert_eq!(engine.snapshot().living_agent_count, 1);
         assert_eq!(
             engine.health_diagnostics().last().unwrap().kind,
             HealthDiagnosticKind::Died
         );
+
+        let movement = engine.request_move(AgentId::new(1), from).unwrap();
+        while engine.snapshot().tick < movement.completes_at.ticks() {
+            engine.tick();
+        }
+        assert_eq!(engine.agent_views(2).nth(1).unwrap().position, from);
     }
 
     #[test]
@@ -3044,33 +3061,6 @@ mod tests {
         }
         assert_eq!(engine.snapshot().structure_count, 0);
         assert_eq!(engine.death_records().len(), 1);
-    }
-
-    fn blocked_step(engine: &Engine) -> (WorldPosition, WorldPosition, TraversalKind) {
-        let bounds = engine.world().initial_bounds();
-        for y in bounds.min.y..bounds.max.y {
-            for x in bounds.min.x..bounds.max.x {
-                let from = WorldPosition { x, y };
-                if engine.world().standability_at(from) != Ok(Standability::Standable) {
-                    continue;
-                }
-                for (dx, dy) in [(1, 0), (0, 1), (-1, 0), (0, -1)] {
-                    let target = WorldPosition {
-                        x: x + dx,
-                        y: y + dy,
-                    };
-                    if !bounds.contains(target) {
-                        continue;
-                    }
-                    if let Ok(step) = engine.world().traversal_step(from, target)
-                        && !step.is_passable()
-                    {
-                        return (from, target, step.kind());
-                    }
-                }
-            }
-        }
-        panic!("seeded test area should contain a blocked cardinal step");
     }
 
     #[test]
@@ -3254,19 +3244,17 @@ mod tests {
             .cells()
             .map(|(position, _)| position)
             .find(|&position| {
-                engine.world().standability_at(position) != Ok(Standability::Standable)
+                position != pair.0
+                    && position != pair.1
+                    && engine.world().standability_at(position) == Ok(Standability::Standable)
             })
-            .expect("seeded test area should contain a blocked spawn");
-        let blocked_reason = match engine.world().standability_at(blocked).unwrap() {
-            Standability::BlockedByWater => SpawnInvalidReason::Water,
-            Standability::BlockedByFeature => SpawnInvalidReason::BlockingFeature,
-            Standability::Standable => unreachable!(),
-        };
+            .expect("seeded test area should contain another standable spawn");
+        engine.spawn_object(SpawnKind::Water, blocked).unwrap();
         assert_eq!(
             engine.initialize_population(init, &[blocked]),
             Err(PopulationInitError::InvalidSpawn {
                 position: blocked,
-                reason: blocked_reason,
+                reason: SpawnInvalidReason::Water,
             })
         );
         assert_eq!(engine.snapshot().agent_count, 0);
@@ -3403,7 +3391,7 @@ mod tests {
     #[test]
     fn movement_rejections_are_typed_and_do_not_mutate_agent_or_world() {
         let mut engine = resident_engine(64);
-        let (from, target, blocked_kind) = blocked_step(&engine);
+        let (from, target) = standable_steps(&engine, 1)[0];
         engine
             .initialize_population(
                 PopulationInit {
@@ -3413,6 +3401,7 @@ mod tests {
                 &[from],
             )
             .unwrap();
+        engine.spawn_object(SpawnKind::Water, target).unwrap();
         let revision = engine.world().revision();
         assert_eq!(
             engine.request_move(AgentId::new(0), from),
@@ -3424,7 +3413,7 @@ mod tests {
         );
         assert_eq!(
             engine.request_move(AgentId::new(0), target),
-            Err(MoveRequestError::Blocked(blocked_kind))
+            Err(MoveRequestError::Blocked(TraversalKind::BlockedByWater))
         );
         assert_eq!(
             engine.request_move(
@@ -3972,11 +3961,9 @@ mod tests {
                         RouteEnvironment {
                             world: &engine.world,
                             spawned_objects: &engine.spawned_objects,
-                            occupancy: engine.population.spatial(),
                             structures: &engine.structures,
                             active_area,
                         },
-                        AgentId::new(0),
                         origin,
                         request,
                     ) && plan.expansions >= 64
@@ -3999,11 +3986,9 @@ mod tests {
                     RouteEnvironment {
                         world: &engine.world,
                         spawned_objects: &engine.spawned_objects,
-                        occupancy: engine.population.spatial(),
                         structures: &engine.structures,
                         active_area,
                     },
-                    AgentId::new(0),
                     origin,
                     request,
                 )

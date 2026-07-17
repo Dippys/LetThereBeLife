@@ -1,5 +1,5 @@
 use sim_core::{
-    AgentActivity, AgentId, Engine, EngineCommand, EngineConfig, PopulationInit,
+    AgentActivity, AgentId, Engine, EngineCommand, EngineConfig, FeatureKind, PopulationInit,
     SleepDiagnosticKind, SleepInterruptionReason, SleepQuality, SleepRequestError, Standability,
     WorldConfig, WorldPosition, WorldRect,
 };
@@ -180,14 +180,16 @@ fn sleep_location_validation_accepts_self_and_rejects_other_occupants_and_water(
         engine.request_sleep(AgentId::new(0), water),
         Err(SleepRequestError::Water)
     );
-    let blocking_feature = (bounds.min.y..bounds.max.y)
+    let exclusive_feature = (bounds.min.y..bounds.max.y)
         .flat_map(|y| (bounds.min.x..bounds.max.x).map(move |x| WorldPosition { x, y }))
         .find(|&position| {
-            engine.world().standability_at(position) == Ok(Standability::BlockedByFeature)
+            engine.world().feature_at(position).is_some_and(|feature| {
+                matches!(feature.kind, FeatureKind::Tree | FeatureKind::Rock)
+            })
         })
-        .expect("seeded resident area should contain a blocking feature");
+        .expect("seeded resident area should contain an exclusive natural feature");
     assert_eq!(
-        engine.request_sleep(AgentId::new(0), blocking_feature),
+        engine.request_sleep(AgentId::new(0), exclusive_feature),
         Err(SleepRequestError::BlockingFeature)
     );
 

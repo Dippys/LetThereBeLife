@@ -1,6 +1,6 @@
 use sim_core::{
-    AgentId, Engine, EngineConfig, MovementOutcomeKind, PopulationInit, RouteOutcomeKind,
-    RouteRequest, RouteRequestError, Standability, TraversalStep, WorldConfig, WorldPosition,
+    AgentId, Engine, EngineConfig, PopulationInit, RouteOutcomeKind, RouteRequest,
+    RouteRequestError, SpawnKind, Standability, TraversalStep, WorldConfig, WorldPosition,
     WorldRect,
 };
 
@@ -72,7 +72,7 @@ fn passable_corridor(engine: &Engine) -> [WorldPosition; 3] {
 }
 
 #[test]
-fn equal_time_route_contention_is_agent_ordered_and_index_consistent() {
+fn equal_time_routes_can_share_a_destination_and_preserve_both_agents() {
     let base = resident_engine();
     let (target, origins) = equal_cost_contention(&base);
     let mut forward = resident_engine();
@@ -97,40 +97,20 @@ fn equal_time_route_contention_is_agent_ordered_and_index_consistent() {
     reverse.request_route(AgentId::new(1), request).unwrap();
     reverse.request_route(AgentId::new(0), request).unwrap();
 
-    let mut forward_occupied = 0;
-    let mut reverse_occupied = 0;
     let mut forward_routes = Vec::new();
     let mut reverse_routes = Vec::new();
     for _ in 0..64 {
         forward.tick();
         reverse.tick();
-        forward_occupied += forward
-            .movement_outcomes()
-            .iter()
-            .filter(|outcome| matches!(outcome.kind, MovementOutcomeKind::Occupied(_)))
-            .count();
-        reverse_occupied += reverse
-            .movement_outcomes()
-            .iter()
-            .filter(|outcome| matches!(outcome.kind, MovementOutcomeKind::Occupied(_)))
-            .count();
         forward_routes.extend(forward.route_outcomes().iter().map(|outcome| outcome.kind));
         reverse_routes.extend(reverse.route_outcomes().iter().map(|outcome| outcome.kind));
     }
     let forward_views: Vec<_> = forward.agent_views(2).collect();
     assert_eq!(forward_views, reverse.agent_views(2).collect::<Vec<_>>());
     assert_eq!(forward_views[0].position, target);
-    assert_eq!(forward_views[1].position, origins[1]);
-    assert_eq!(forward_occupied, 1);
-    assert_eq!(reverse_occupied, 1);
+    assert_eq!(forward_views[1].position, target);
     assert_eq!(forward_routes, reverse_routes);
-    assert_eq!(
-        forward_routes,
-        [
-            RouteOutcomeKind::Arrived,
-            RouteOutcomeKind::Occupied(AgentId::new(0))
-        ]
-    );
+    assert_eq!(forward_routes, [RouteOutcomeKind::Arrived; 2]);
     assert_eq!(forward.snapshot(), reverse.snapshot());
 
     let perception = forward.perceive_physical(AgentId::new(0), 2).unwrap();
@@ -199,11 +179,12 @@ fn bounded_routes_distinguish_budget_exhaustion_no_path_and_arrival() {
         .initialize_population(
             PopulationInit {
                 active_area,
-                population: 2,
+                population: 1,
             },
-            &[corridor[0], corridor[1]],
+            &[corridor[0]],
         )
         .unwrap();
+    blocked.spawn_object(SpawnKind::Water, corridor[1]).unwrap();
     assert_eq!(
         blocked.request_route(
             AgentId::new(0),

@@ -64,7 +64,7 @@ pub fn spawn_at(engine: &mut Engine, position: WorldPosition) -> Result<AgentId,
             .map_err(ViewerSpawnError::Agent);
     }
 
-    let active_area = initial_spawn_area(engine.world(), position)?;
+    let active_area = initial_active_area(engine.world(), position)?;
     let outcome = engine
         .initialize_population(
             PopulationInit {
@@ -81,30 +81,35 @@ pub fn spawn_at(engine: &mut Engine, position: WorldPosition) -> Result<AgentId,
     Ok(outcome.first_id)
 }
 
-fn initial_spawn_area(
+fn initial_active_area(
     world: &World,
     position: WorldPosition,
 ) -> Result<WorldRect, ViewerSpawnError> {
     if world.standability_at(position).is_err() {
         return Err(ViewerSpawnError::NotReady);
     }
-    let initial = world.initial_bounds();
-    if initial.contains(position) && world.area_is_generated(initial) {
-        return Ok(initial);
-    }
-    let chunk = ChunkCoord::from_world_position(position)
-        .bounds()
-        .map_err(|_| ViewerSpawnError::NotReady)?;
-    if world.area_is_generated(chunk) {
-        return Ok(chunk);
-    }
-    Ok(WorldRect {
-        min: position,
-        max: WorldPosition {
-            x: position.x + 1,
-            y: position.y + 1,
-        },
-    })
+    let ready = simulation_bounds(world);
+    let active_area = if ready.contains(position) {
+        ready
+    } else {
+        let chunk = ChunkCoord::from_world_position(position)
+            .bounds()
+            .map_err(|_| ViewerSpawnError::NotReady)?;
+        WorldRect {
+            min: WorldPosition {
+                x: ready.min.x.min(chunk.min.x),
+                y: ready.min.y.min(chunk.min.y),
+            },
+            max: WorldPosition {
+                x: ready.max.x.max(chunk.max.x),
+                y: ready.max.y.max(chunk.max.y),
+            },
+        }
+    };
+    world
+        .area_is_generated(active_area)
+        .then_some(active_area)
+        .ok_or(ViewerSpawnError::NotReady)
 }
 
 pub fn reset(engine: &mut Engine) {
@@ -217,6 +222,51 @@ mod tests {
             forward.agent_views(1).next().unwrap().position,
             position,
             "viewer exploration mode must produce authoritative movement"
+        );
+    }
+
+    #[test]
+    fn first_spawn_uses_ready_area_before_outer_bootstrap_finishes() {
+        let mut engine = Engine::new(EngineConfig {
+            seed: 7,
+            ticks_per_second: 60,
+            world: WorldConfig::new(VIEWER_SIMULATION_SIDE as u32 + 64, 64).unwrap(),
+        });
+        let ready = simulation_bounds(engine.world());
+        let loads = engine
+            .world()
+            .missing_chunk_load_requests(ready)
+            .unwrap()
+            .into_iter()
+            .map(|request| World::generate_chunk_load(7, request))
+            .collect();
+        engine.apply_world_chunk_loads(loads).unwrap();
+
+        assert!(residency_ready(engine.world()).unwrap());
+        assert!(
+            !engine
+                .world()
+                .area_is_generated(engine.world().initial_bounds())
+        );
+        let position = (ready.min.y..ready.max.y)
+            .flat_map(|y| (ready.min.x + 8..ready.max.x - 8).map(move |x| WorldPosition { x, y }))
+            .find(|position| {
+                let local_x = position.x.rem_euclid(sim_core::CHUNK_SIZE);
+                (local_x <= 7 || local_x >= sim_core::CHUNK_SIZE - 8)
+                    && engine.world().standability_at(*position)
+                        == Ok(sim_core::Standability::Standable)
+            })
+            .expect("seeded ready area exposes a standable chunk-edge position");
+        let spawn_chunk = ChunkCoord::from_world_position(position).bounds().unwrap();
+
+        let agent = spawn_at(&mut engine, position).unwrap();
+        let perception = engine.perceive_physical(agent, 8).unwrap();
+
+        assert_eq!(agent, AgentId::new(0));
+        assert!(ready.contains_rect(perception.area));
+        assert!(
+            !spawn_chunk.contains_rect(perception.area),
+            "first-spawn perception must cross storage chunks inside the ready simulation area"
         );
     }
 }

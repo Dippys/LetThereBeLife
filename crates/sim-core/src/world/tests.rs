@@ -140,7 +140,7 @@ fn physical_world_queries_are_explicit_and_derived_from_resident_base_data() {
     );
     assert_eq!(
         world.standability_at(WorldPosition { x: 1, y: 1 }),
-        Ok(Standability::BlockedByFeature)
+        Ok(Standability::Standable)
     );
     assert_eq!(
         world.standability_at(WorldPosition { x: 2, y: 1 }),
@@ -189,7 +189,7 @@ fn physical_world_queries_are_explicit_and_derived_from_resident_base_data() {
             .traversal_step(WorldPosition { x: 0, y: 1 }, WorldPosition { x: 1, y: 1 })
             .unwrap()
             .kind(),
-        TraversalKind::BlockedByFeature
+        TraversalKind::Passable
     );
     assert!(
         world
@@ -202,7 +202,7 @@ fn physical_world_queries_are_explicit_and_derived_from_resident_base_data() {
             .traversal_step(WorldPosition { x: 2, y: 1 }, WorldPosition { x: 3, y: 1 })
             .unwrap()
             .kind(),
-        TraversalKind::BlockedByFeature
+        TraversalKind::Passable
     );
 
     assert_eq!(world.resource_at(WorldPosition { x: 0, y: 0 }), Ok(None));

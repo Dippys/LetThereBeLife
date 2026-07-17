@@ -221,6 +221,12 @@ impl ViewerApp {
                     health: self.engine.health(view.id),
                     policy: self.engine.physical_policy(view.id),
                     sleep: self.engine.sleep(view.id),
+                    death: self
+                        .engine
+                        .death_records()
+                        .iter()
+                        .find(|record| record.agent == view.id)
+                        .copied(),
                 })
         });
         let (Some(window), Some(renderer)) = (&self.window, &mut self.renderer) else {

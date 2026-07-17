@@ -121,6 +121,15 @@ impl SpawnedObjects {
         })
     }
 
+    pub(crate) fn reserves_exclusive_use_at(&self, world: &World, position: WorldPosition) -> bool {
+        world
+            .feature_at(position)
+            .is_some_and(|feature| matches!(feature.kind, FeatureKind::Tree | FeatureKind::Rock))
+            || self
+                .at(position)
+                .is_some_and(|object| matches!(object.kind, SpawnKind::Tree | SpawnKind::Rock))
+    }
+
     pub(crate) fn standability_at(
         &self,
         world: &World,
@@ -131,9 +140,10 @@ impl SpawnedObjects {
             return Ok(base);
         }
         Ok(match self.at(position).map(|object| object.kind) {
-            Some(SpawnKind::Tree | SpawnKind::Rock) => Standability::BlockedByFeature,
             Some(SpawnKind::Water) => Standability::BlockedByWater,
-            Some(SpawnKind::BerryBush) | None => Standability::Standable,
+            Some(SpawnKind::Tree | SpawnKind::BerryBush | SpawnKind::Rock) | None => {
+                Standability::Standable
+            }
         })
     }
 
@@ -148,9 +158,10 @@ impl SpawnedObjects {
             return Ok(step);
         }
         let kind = match self.at(to).map(|object| object.kind) {
-            Some(SpawnKind::Tree | SpawnKind::Rock) => TraversalKind::BlockedByFeature,
             Some(SpawnKind::Water) => TraversalKind::BlockedByWater,
-            Some(SpawnKind::BerryBush) | None => return Ok(step),
+            Some(SpawnKind::Tree | SpawnKind::BerryBush | SpawnKind::Rock) | None => {
+                return Ok(step);
+            }
         };
         Ok(TraversalStep::blocked(step.elevation_delta(), kind))
     }

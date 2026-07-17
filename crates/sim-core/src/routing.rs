@@ -9,7 +9,6 @@ use crate::{
     AgentId, TraversalKind, World, WorldPosition, WorldQueryError, WorldRect,
     agent::CompactPosition,
     placements::SpawnedObjects,
-    spatial::SpatialIndex,
     structures::{StructureId, StructureStore},
     world::MIN_TRAVERSAL_COST,
 };
@@ -61,7 +60,6 @@ pub(crate) struct RoutePlan {
 pub(crate) struct RouteEnvironment<'a> {
     pub(crate) world: &'a World,
     pub(crate) spawned_objects: &'a SpawnedObjects,
-    pub(crate) occupancy: &'a SpatialIndex,
     pub(crate) structures: &'a StructureStore,
     pub(crate) active_area: WorldRect,
 }
@@ -109,11 +107,10 @@ impl RoutePlanner {
     pub(crate) fn plan(
         &mut self,
         environment: RouteEnvironment<'_>,
-        agent: AgentId,
         origin: WorldPosition,
         request: RouteRequest,
     ) -> Result<RoutePlan, RouteRequestError> {
-        validate_request(environment, agent, origin, request)?;
+        validate_request(environment, origin, request)?;
         self.nodes.clear();
         self.by_position.clear();
         self.open.clear();
@@ -155,10 +152,6 @@ impl RoutePlanner {
                     y: current.y + dy,
                 };
                 if !environment.active_area.contains(neighbor)
-                    || environment
-                        .occupancy
-                        .occupant(neighbor)
-                        .is_some_and(|occupant| occupant != agent)
                     || environment.structures.structure_at(neighbor).is_some()
                 {
                     continue;
@@ -246,7 +239,6 @@ fn route_heuristic(from: CompactPosition, destination: CompactPosition) -> u32 {
 
 fn validate_request(
     environment: RouteEnvironment<'_>,
-    agent: AgentId,
     origin: WorldPosition,
     request: RouteRequest,
 ) -> Result<(), RouteRequestError> {
@@ -267,11 +259,6 @@ fn validate_request(
     }
     if !environment.active_area.contains(request.destination) {
         return Err(RouteRequestError::OutsideActiveArea);
-    }
-    if let Some(occupant) = environment.occupancy.occupant(request.destination)
-        && occupant != agent
-    {
-        return Err(RouteRequestError::Occupied(occupant));
     }
     if let Some(structure) = environment.structures.structure_at(request.destination) {
         return Err(RouteRequestError::BlockedByStructure(structure));

@@ -782,11 +782,6 @@ impl Population {
         {
             return Err(MoveRequestError::OutsideActiveArea);
         }
-        if let Some(occupant) = self.spatial.occupant(target)
-            && occupant != agent
-        {
-            return Err(MoveRequestError::Occupied(occupant));
-        }
         if let Some(structure) = environment.structures.structure_at(target) {
             return Err(MoveRequestError::BlockedByStructure(structure));
         }
@@ -901,9 +896,6 @@ impl Population {
                             record.position = event.target;
                             MovementOutcomeKind::Moved
                         }
-                        Err(TransferError::Occupied(occupant)) => {
-                            MovementOutcomeKind::Occupied(occupant)
-                        }
                         Err(TransferError::SourceMismatch) => {
                             MovementOutcomeKind::InconsistentOccupancy
                         }
@@ -914,11 +906,7 @@ impl Population {
             }
         };
         let outcome = movement_outcome(event, Some(from), target, kind);
-        let route_continues = self.routes[index].is_some()
-            && matches!(
-                kind,
-                MovementOutcomeKind::Moved | MovementOutcomeKind::Occupied(_)
-            );
+        let route_continues = self.routes[index].is_some() && kind == MovementOutcomeKind::Moved;
         if !route_continues {
             self.transition_activity(scheduler, event.due, event.agent, AgentActivity::Idle)
                 .expect("event sequence capacity was prechecked");
@@ -1362,9 +1350,13 @@ impl Population {
             }
             Err(WorldQueryError::NonCardinalStep) => unreachable!("standing queries have no step"),
         }
-        if let Some(occupant) = self.spatial.occupant(position)
-            && occupant != agent
+        if environment
+            .spawned_objects
+            .reserves_exclusive_use_at(environment.world, position)
         {
+            return Err(SleepRequestError::BlockingFeature);
+        }
+        if let Some(occupant) = self.spatial.occupant_except(position, agent) {
             return Err(SleepRequestError::Occupied(occupant));
         }
         if let Some(structure) = structure {

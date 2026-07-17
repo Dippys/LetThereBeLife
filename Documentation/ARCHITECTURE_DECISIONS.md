@@ -647,3 +647,41 @@ Treat fresh-water and completed-shelter access as safe anchors. If ordinary phys
 **Consequences:** `PolicyState` remains 12 bytes/alignment four, `AgentRecord` remains six bytes, and `ScheduledEvent` remains 32 bytes; no per-tick population scan or world-scale query is added. Unit coverage proves packed phase/heading independence, consecutive exploration without immediate reversal, and preservation of a valid water wait. An engine regression proves two crowded seekers both drink and stay on their distinct access cells through another 1,000 ticks while legitimately alternating between `Wait` and `Drink`. Canonical local-only scenario outcomes remain 15/75 survivors and zero sampled invariant violations; semantic hashes change to `60a28c6e1d17a8ed` / `f6536990a0f25cf0` because the newly authoritative heading is encoded.
 
 This remains bounded local exploration, not guaranteed world coverage or remote hydrology knowledge. A viewer agent spawned in a large dry region can still die before finding water. A seed-1 diagnostic at the reported `(395, -1074)` area found the closest fresh water approximately 2,023 Manhattan cells away, far beyond radius-eight perception; guaranteeing survival there would require a separate explicit long-range knowledge, memory, or settlement-planning decision.
+
+## D-053: Population-independent viewer execution baseline
+
+Date: 2026-07-17
+
+**Supersedes:** D-046's first-spawn fallback to the cursor's resident chunk. It preserves D-046's tick-zero residency gate, exact cursor spawning, additive expansion, and presentation ownership, and does not change D-047 through D-052's bounded exploration policy.
+
+**Decision:** Use the complete centered 2,048 x 2,048 viewer readiness rectangle, clipped only for smaller configured bootstrap worlds, as the baseline authoritative population execution area. The first cursor spawn inside that rectangle initializes the population with the complete baseline even when the configured outer bootstrap is still streaming. A first spawn outside the baseline computes the same rectangular union with its storage chunk used by additive spawning and succeeds only when that entire union is resident. Perception, exploration targets, and routes remain bounded by the authoritative execution rectangle and physical terrain, never by the storage chunk containing the first agent.
+
+**Reason:** D-046 treated the readiness rectangle only as a startup gate and fell back to one 64 x 64 chunk unless the entire configured bootstrap was already resident. Because population perception and routing correctly clip to the declared active rectangle, an agent spawned during normal asynchronous bootstrap could not intentionally cross its spawn chunk. Waiting for unrelated outer terrain to finish or widening policy perception would hide the initialization defect rather than restore the intended simulation boundary.
+
+**Consequences:** First-spawn behavior no longer depends on whether unrelated outer bootstrap pages completed before `T`; worker order, camera, and render timing remain non-authoritative. No agent, policy, scheduler, route, or world record grows, and no world-scale query enters the event path. A focused viewer regression materializes the readiness rectangle while leaving outer configured terrain unfinished, spawns at a 64-cell boundary, and proves radius-eight physical perception crosses the containing storage chunk. Exploration remains bounded local wandering; Phase 3 environmental beliefs and survival plans remain responsible for remembered landmarks and long-range intent.
+
+## D-054: Physical decision and terminal-cause viewer inspection
+
+Date: 2026-07-17
+
+**Extends:** D-048 and D-052 without introducing cognition, persistent viewer state, or presentation-owned truth.
+
+**Decision:** Include the existing retained `PolicyState::reason` in copied `PhysicalPolicyView` output and show it beside the current goal in the top-right hover card. When the inspected stable agent identity has a persistent `DeathRecord`, copy that cold record into the frame-local inspection and show its typed dehydration, exposure, starvation, or exhaustion cause plus terminal tick. Keep current goal/reason, needs, inventory, health, sleep, and death facts visually distinct rather than presenting the Phase 2 physical policy as a mind or belief system.
+
+**Reason:** The engine already retained deterministic goal-selection reasons and terminal causes, but the viewer omitted both. A dead agent therefore showed only `DEAD`, while a living agent showed what it was doing without why the physical policy selected that goal. Adding new cognition or a viewer-side event history would duplicate or invent simulation truth; copying the existing records makes current behavior inspectable at the correct ownership boundary.
+
+**Consequences:** The 12-byte persistent `PolicyState`, cold `DeathRecord`, scheduler, and semantic scenario state do not grow. `PhysicalPolicyView` gains one copied enum field, and the viewer's one reusable agent-card string reserve grows from 512 to 640 bytes; the fixed 8,192-instance screen-overlay budget remains sufficient under its worst-case regression. Death lookup runs only for the currently hovered agent and scans at most the viewer's bounded 4,096 retained identities. This exposes the current physical executor, not beliefs, memories, utility candidates, personality, or an internal monologue; those remain Phase 3 work.
+
+## D-055: Overlap-tolerant agents and walkable sparse natural features
+
+Date: 2026-07-17
+
+**Supersedes:** D-038's one-living-agent-per-cell rule, D-045's occupancy-uniqueness soak invariant, and D-036/D-049 only where they made trees or rocks block standing and traversal. It preserves compact chunk-bucketed spatial indexing, bounded perception/routes, spatial entry-count validation, water and slope blocking, structure footprints, resource identity/capacity, and deterministic scheduled movement.
+
+**Decision:** Permit multiple living agents at one world cell. Keep one eight-byte spatial entry per living agent, sorted within each signed 64 x 64 bucket by `(local cell, AgentId)`, and validate transfers against the exact source pair. Movement requests, route validation/expansion, and movement completion do not consult agent occupancy. Same-cell perception returns every living agent in deterministic cell/ID order. Dead agents continue to leave the live spatial index, so their retained record and rendered proxy never block movement.
+
+Treat generated and explicitly spawned trees, berry bushes, and rocks as walkable sparse resource features. Water, excessive elevation change, and structure footprints remain the current physical blockers. Autonomous policy may still prefer unoccupied or unclaimed objective access cells to spread work, but that preference is not collision authority and does not make agents impassable.
+
+**Reason:** Agents could become trapped by crowds and dense natural-resource markers even though the current presentation has no footprint-scale local avoidance. Retaining hard one-cell collision made other people and ordinary trees/rocks function as walls. Shared entries preserve discoverability without an all-pairs scan, while passable sparse natural features keep resources authoritative without turning their render proxy into blocking geometry.
+
+**Consequences:** `CellOccupant` remains eight bytes/alignment four and persistent spatial storage remains one entry per living agent; no new population record, allocation, or route field is added. A cell may contain up to the population cap, so perception must enumerate the full equal-cell range rather than return only one occupant. Agent spawning may use walkable natural-feature cells; object placement, sleep, and shelter construction retain exclusive tree/rock footprint validation. Focused tests prove shared-target routes, complete same-cell perception, exact source validation, movement through spawned rocks, generated tree/rock traversal, and movement into a dead agent's former position.

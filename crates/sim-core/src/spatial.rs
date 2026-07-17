@@ -32,11 +32,13 @@ pub(crate) struct CellOccupant {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TransferError {
-    Occupied(AgentId),
     SourceMismatch,
 }
 
-/// Sparse authoritative occupancy grouped by the world's existing 64-cell chunks.
+/// Sparse authoritative agent positions grouped by the world's existing 64-cell chunks.
+///
+/// Entries are ordered by cell and then agent so multiple living agents can share a cell
+/// without losing deterministic perception or source-validated movement.
 #[derive(Debug, Default)]
 pub(crate) struct SpatialIndex {
     buckets: BTreeMap<SpatialBucket, Vec<CellOccupant>>,
@@ -58,7 +60,9 @@ impl SpatialIndex {
         let bucket = SpatialBucket::at(position);
         let local_cell = bucket.local_cell(position);
         let occupants = self.buckets.entry(bucket).or_default();
-        match occupants.binary_search_by_key(&local_cell, |entry| entry.local_cell) {
+        match occupants.binary_search_by_key(&(local_cell, agent), |entry| {
+            (entry.local_cell, entry.agent)
+        }) {
             Ok(_) => false,
             Err(index) => {
                 occupants.insert(index, CellOccupant { local_cell, agent });
@@ -71,10 +75,27 @@ impl SpatialIndex {
         let bucket = SpatialBucket::at(position);
         let local_cell = bucket.local_cell(position);
         let occupants = self.buckets.get(&bucket)?;
+        let index = occupants.partition_point(|entry| entry.local_cell < local_cell);
         occupants
-            .binary_search_by_key(&local_cell, |entry| entry.local_cell)
-            .ok()
-            .map(|index| occupants[index].agent)
+            .get(index)
+            .filter(|entry| entry.local_cell == local_cell)
+            .map(|entry| entry.agent)
+    }
+
+    pub(crate) fn occupant_except(
+        &self,
+        position: WorldPosition,
+        excluded: AgentId,
+    ) -> Option<AgentId> {
+        let bucket = SpatialBucket::at(position);
+        let local_cell = bucket.local_cell(position);
+        let occupants = self.buckets.get(&bucket)?;
+        let start = occupants.partition_point(|entry| entry.local_cell < local_cell);
+        occupants[start..]
+            .iter()
+            .take_while(|entry| entry.local_cell == local_cell)
+            .find(|entry| entry.agent != excluded)
+            .map(|entry| entry.agent)
     }
 
     pub(crate) fn remove(&mut self, agent: AgentId, position: WorldPosition) -> bool {
@@ -83,13 +104,11 @@ impl SpatialIndex {
         let Some(occupants) = self.buckets.get_mut(&bucket) else {
             return false;
         };
-        let Ok(index) = occupants.binary_search_by_key(&local_cell, |entry| entry.local_cell)
-        else {
+        let Ok(index) = occupants.binary_search_by_key(&(local_cell, agent), |entry| {
+            (entry.local_cell, entry.agent)
+        }) else {
             return false;
         };
-        if occupants[index].agent != agent {
-            return false;
-        }
         occupants.remove(index);
         if occupants.is_empty() {
             self.buckets.remove(&bucket);
@@ -103,23 +122,16 @@ impl SpatialIndex {
         from: WorldPosition,
         target: WorldPosition,
     ) -> Result<(), TransferError> {
-        if let Some(occupant) = self.occupant(target) {
-            return Err(TransferError::Occupied(occupant));
-        }
-
         let from_bucket = SpatialBucket::at(from);
         let from_cell = from_bucket.local_cell(from);
         let Some(source_entries) = self.buckets.get_mut(&from_bucket) else {
             return Err(TransferError::SourceMismatch);
         };
-        let Ok(source_index) =
-            source_entries.binary_search_by_key(&from_cell, |entry| entry.local_cell)
+        let Ok(source_index) = source_entries
+            .binary_search_by_key(&(from_cell, agent), |entry| (entry.local_cell, entry.agent))
         else {
             return Err(TransferError::SourceMismatch);
         };
-        if source_entries[source_index].agent != agent {
-            return Err(TransferError::SourceMismatch);
-        }
         source_entries.remove(source_index);
         if source_entries.is_empty() {
             self.buckets.remove(&from_bucket);
@@ -140,9 +152,19 @@ impl SpatialIndex {
         output.clear();
         for y in area.min.y..area.max.y {
             for x in area.min.x..area.max.x {
-                if let Some(agent) = self.occupant(WorldPosition { x, y }) {
-                    output.push(agent);
-                }
+                let position = WorldPosition { x, y };
+                let bucket = SpatialBucket::at(position);
+                let local_cell = bucket.local_cell(position);
+                let Some(occupants) = self.buckets.get(&bucket) else {
+                    continue;
+                };
+                let start = occupants.partition_point(|entry| entry.local_cell < local_cell);
+                output.extend(
+                    occupants[start..]
+                        .iter()
+                        .take_while(|entry| entry.local_cell == local_cell)
+                        .map(|entry| entry.agent),
+                );
             }
         }
     }
@@ -193,18 +215,31 @@ mod tests {
     }
 
     #[test]
-    fn transfer_is_atomic_on_occupied_target_or_source_mismatch() {
+    fn shared_cells_preserve_all_agents_and_source_validated_transfers() {
         let left = WorldPosition { x: 63, y: -1 };
         let right = WorldPosition { x: 64, y: -1 };
         let mut index =
             SpatialIndex::from_positions([(AgentId::new(0), left), (AgentId::new(1), right)]);
 
+        assert_eq!(index.transfer(AgentId::new(0), left, right), Ok(()));
+        assert_eq!(index.occupant(left), None);
+        assert_eq!(index.occupant(right), Some(AgentId::new(0)));
         assert_eq!(
-            index.transfer(AgentId::new(0), left, right),
-            Err(TransferError::Occupied(AgentId::new(1)))
+            index.occupant_except(right, AgentId::new(0)),
+            Some(AgentId::new(1))
         );
-        assert_eq!(index.occupant(left), Some(AgentId::new(0)));
-        assert_eq!(index.occupant(right), Some(AgentId::new(1)));
+        let mut agents = Vec::new();
+        index.agents_in(
+            WorldRect {
+                min: right,
+                max: WorldPosition {
+                    x: right.x + 1,
+                    y: right.y + 1,
+                },
+            },
+            &mut agents,
+        );
+        assert_eq!(agents, [AgentId::new(0), AgentId::new(1)]);
         assert_eq!(
             index.transfer(
                 AgentId::new(0),

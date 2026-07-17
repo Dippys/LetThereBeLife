@@ -1,6 +1,6 @@
 # Phase 3 Beliefs, Memory, and Relationships Implementation Plan
 
-Last synchronized: 2026-07-16.
+Last synchronized: 2026-07-17.
 
 Status: **Planned**. This is the canonical Phase 3 execution plan. Phase 2 is the implemented physical foundation; Phase 3 implementation begins with Slice 0 and must remain in dependency order unless a reviewed decision updates this document.
 
@@ -13,6 +13,7 @@ Phase 3 ends when 20-100 agents can:
 - observe only physically available facts;
 - retain uncertain and potentially stale beliefs about important places and agents;
 - remember useful water, food, material, and shelter locations;
+- conduct bounded survival-driven searches when an essential resource has never been observed;
 - select and retain survival goals from needs, inventory, remembered opportunities, confidence, effort, and risk;
 - forget or consolidate routine experience instead of growing memory without bound;
 - form sparse familiarity and trust records only through relevant encounters;
@@ -27,14 +28,17 @@ This is not yet communication, language, family, society, ownership, economy, pe
 The implemented phase must include:
 
 - an explicit direct-observation boundary that never exposes private intent or unseen objective truth;
+- a bounded attention and working-observation boundary that prevents local perception from becoming perfect cognition;
 - compact typed belief records with confidence, provenance, acquisition time, and revalidation state;
 - bounded personal landmark knowledge for water, resources, and shelters;
+- compact deterministic search progress for essential unknown resources without world scans or global knowledge;
 - one compact current cognitive goal/plan boundary above the Phase 2 physical action executor;
 - deterministic plan retention, interruption, failure, and reconsideration;
 - important episodic memories plus deterministic forgetting and consolidation;
 - sparse per-agent relationships with familiarity and trust, without an all-pairs matrix;
 - event-triggered cognition rather than per-tick mind scans;
 - bounded read-only diagnostics explaining observation, belief update, memory change, goal selection, and relationship change;
+- a bounded terminal cognitive summary that keeps long-run survival and death failures inspectable after transient diagnostics expire;
 - a deterministic 20/100-agent headless proof with conflicting or stale beliefs, survival use of remembered landmarks, sparse relationships, bounded memory, and replay-stable reports.
 
 The original 100-agent cognition-correctness gate remains authoritative. Phase 3 must prove believable bounded behavior before population scale increases or later communication and society systems begin.
@@ -164,6 +168,7 @@ Convert currently perceptible physical facts and action outcomes into explicit b
 
 - Define the first compact observation kinds: agent presence/activity, drinkable-water access, resource kind/availability, shelter state/access, movement/action outcome, and objective becoming unavailable.
 - Separate an ephemeral observation payload from stored belief or episodic-memory records.
+- Define bounded attention/salience selection from eligible physical facts and a short working-observation lifetime across one cognition decision without creating permanent memory automatically.
 - Define observer eligibility through position, perception radius, terrain connectivity, visibility assumptions, and event timing.
 - Decide which observations are sampled during an existing cognition wake and which action outcomes notify nearby eligible observers.
 - Define canonical observation ordering, duplicate suppression, per-trigger count limits, and overflow behavior.
@@ -172,6 +177,7 @@ Convert currently perceptible physical facts and action outcomes into explicit b
 ### Deliverables
 
 - Add private typed `Observation` data with observer, subject/fact, position, time, source, and bounded confidence/evidence fields.
+- Add a bounded working-observation set with explicit replacement, expiry, interruption, and overflow behavior.
 - Derive spatial observations only from resident authoritative physical queries and current public/private engine facts allowed to the observer.
 - Prevent `PhysicalGoal`, private policy reason, inventory, health internals, future events, beliefs, and memories from entering another agent's direct observation unless a later observable signal explicitly represents them.
 - Emit bounded observation diagnostics showing what was observed and why an observer was eligible.
@@ -185,6 +191,8 @@ Convert currently perceptible physical facts and action outcomes into explicit b
 - Unloaded and outside-world facts yield typed absence/failure rather than knowledge or terrain generation.
 - Equal observations are emitted in canonical fact/position/agent order independent of map, event insertion, and worker completion order.
 - Observation bursts coalesce within a hard per-trigger budget and cannot create a same-time cognition loop.
+- Task relevance and salience choose among over-budget eligible facts deterministically; being locally perceptible does not guarantee attention or retention.
+- Expired or replaced working observations cannot influence a later decision unless an explicit belief, episode, or summary retained their consequence.
 - Observing alone creates no permanent belief, memory, or relationship record before the owning later slice.
 - The complete validation gate passes.
 
@@ -236,11 +244,12 @@ Use current physical needs, inventory, direct perception, and remembered environ
 
 ### Decision checkpoints
 
-- Define a compact cognitive goal domain above physical commitments: secure water, forage food, collect shelter material, establish shelter, return to water, return to shelter, recover, and wait safely.
+- Define a compact cognitive goal domain above physical commitments: secure water, forage food, collect shelter material, search for an unknown essential resource, establish shelter, return to water, return to shelter, recover, and wait safely.
 - Define deterministic integer utility terms for urgency, expected benefit, carried reserve, confidence, distance/effort, exposure risk, opportunity cost, and plan-switch cost.
 - Define plan retention and hysteresis so agents do not oscillate between similarly scored goals.
 - Define interruption precedence for health/need emergencies, contradiction, target loss, route failure, and stronger goals.
 - Define how remembered targets outside local perception are routed through bounded waypoints without whole-world A* or synchronous generation.
+- Define compact deterministic sector/waypoint search progress for an essential resource with no known target, including effort/risk budgets, searched-direction advancement, interruption, abandonment, and later resumption without retaining a per-cell explored map.
 - Decide the minimum remembered home/survival-anchor representation and when it may change.
 - Define shelter-site requirements from known water, food/material access, standability, and local reachable area without adding a universal score to `World`.
 
@@ -251,6 +260,7 @@ Use current physical needs, inventory, direct perception, and remembered environ
 - Score candidates with fixed-point/integer arithmetic and explicit tie order.
 - Translate the chosen plan into existing Phase 2 route/action/sleep/build commitments rather than duplicating physical execution.
 - Remember water as a return target instead of treating its access cell as a permanent unconditional wait.
+- Start bounded survival-driven search when no viable remembered or perceived target can satisfy an essential need; discovery must flow through ordinary direct observation before it becomes a landmark belief.
 - Permit bounded foraging excursions only when carried reserves, thirst projection, target confidence, and return cost keep the plan viable.
 - Prefer remembered completed shelter for rest/exposure and avoid constructing another shelter while a viable known one exists.
 - Require a new shelter site to be supported by explicit remembered/perceived survival inputs, not simply the first adjacent empty cell after acquiring eight wood.
@@ -259,6 +269,8 @@ Use current physical needs, inventory, direct perception, and remembered environ
 ### Acceptance criteria
 
 - An agent that knows water and food can leave water to forage and return before severe thirst under the deterministic scenario assumptions.
+- A water-anchored agent with no timber in initial perception can conduct a bounded material search, discover timber several storage chunks away through direct observation, remember it, collect eight wood, return to a viable site, and build/use shelter before exhaustion under the focused deterministic scenario assumptions.
+- Search progress remains compact and deterministic across interruption, batching, and replay; an exhausted search budget or unavailable terrain produces a typed inspectable replanning cause rather than blind `Wait`/`Explore` cycling.
 - An agent with carried food does not remain permanently idle at water when a higher-value shelter or reserve plan is viable.
 - An agent prefers a viable remembered shelter over building a duplicate outside its current perception.
 - Shelter placement is reproducible and justified by recorded water/resource/reachability inputs.
@@ -318,6 +330,7 @@ Represent only meaningful personal ties and update familiarity/trust from concre
 - Define the compact initial relationship fields: other `AgentId`, familiarity, trust, confidence/evidence, last interaction, and flags required for family/group expansion later.
 - Define record-creation thresholds so briefly seeing a stranger does not always allocate a permanent tie.
 - Define deterministic evidence for familiarity and trust changes from currently implemented physical encounters and outcomes.
+- Audit which Phase 2 physical outcomes are honestly attributable evidence about another agent. If no existing interaction supports a trust change, keep trust neutral for that case rather than deriving intent from co-presence, ordinary contention, or hidden policy state.
 - Define neutral stranger priors separately from personal records.
 - Define relationship decay, consolidation, capacity, replacement, and behavior after the other agent dies.
 - Define stable iteration and lookup without storing both directions unless each agent independently has evidence.
@@ -328,6 +341,7 @@ Represent only meaningful personal ties and update familiarity/trust from concre
 - Accumulate bounded encounter evidence before promoting a stranger into a retained personal relationship.
 - Increase familiarity from repeated salient co-presence or direct interaction, not mere population membership.
 - Change trust only from explicit observed evidence with a documented positive/negative interpretation.
+- Include at least one concrete, objectively observable Phase 3-compatible interaction whose attributable outcome can change trust, or narrow the implemented behavioral field to familiarity until such evidence exists.
 - Preserve uncertainty and asymmetric relationships.
 - Expose bounded relationship views and evidence diagnostics without exposing them to the related agent.
 - Record relationship count distribution, lookup/update cost, bytes, fragmentation, pruning, and long-run growth.
@@ -338,6 +352,8 @@ Represent only meaningful personal ties and update familiarity/trust from concre
 - A can trust B differently from B's trust in A.
 - An unobserved event cannot alter a relationship magically.
 - Repeated irrelevant proximity does not cause unbounded familiarity records.
+- Mere co-presence, simultaneous resource use, or losing deterministic occupancy contention cannot change trust without an explicitly observed attributable outcome.
+- At least one focused case produces an asymmetric relationship from concrete evidence rather than scenario injection or private-intent leakage.
 - Equal encounter evidence produces equal fixed-point updates and replacement order.
 - Death or record removal leaves no dangling reference that can alias a later agent or relationship.
 - The complete validation gate passes.
@@ -374,6 +390,7 @@ Close the Phase 3 learning loop so observed consequences revise beliefs, future 
 - Failed revalidation changes future selection through an explicit belief update rather than a hidden blacklist.
 - Another agent's private intention never appears in causal diagnostics or relationship evidence.
 - Relationship influence is bounded, asymmetric, and relevant to the selected goal.
+- At least one later relevant physical choice changes for an inspectable relationship-evidence reason; if Phase 3 exposes no honest relationship-dependent choice, trust remains diagnostic state and the behavioral consequence is explicitly deferred rather than fabricated.
 - Causal diagnostics reproduce exactly across replay and tick batching.
 - Retrieval work remains bounded by relevant record limits, not total population cognitive state.
 - The complete validation gate passes.
@@ -388,23 +405,26 @@ Prove that private observations, beliefs, landmark memory, compact plans, episod
 
 ### Decision checkpoints
 
-- Define one canonical Phase 3 scenario without changing generated terrain solely to force desired cognition outcomes.
+- Define one canonical Phase 3 scenario plus focused adversarial scenarios without changing generated terrain solely to force desired cognition outcomes.
 - Define cohorts that receive different observations or encounter histories while sharing objective world state.
 - Decide whether to add a new report type or increment an explicitly versioned semantic format without invalidating the Phase 2 report contract.
 - Define authoritative semantic hashing for cognitive records, handles/generations, plans, diagnostics summaries, and relationships without hashing capacity addresses or debug text.
 - Define soak sampling for pool invariants, record counts, event backlog, cognition work, memory consolidation, relationship sparsity, plan churn, and survival causes.
 - Define the Phase 3 exit threshold for understandable behavior rather than requiring universal survival.
+- Define a compact terminal cognitive summary captured at incapacitation or death with the last retained goal/target, relevant known or missing landmarks, last plan interruption/failure, and the knowledge/action reason the agent could not recover.
 
 ### Deliverables
 
 - Add reusable 20- and 100-agent headless scenarios with explicit observation/encounter inputs and no presentation dependence.
 - Demonstrate at least two agents holding different beliefs about the same objective fact for understandable evidence reasons.
 - Demonstrate remembered water/shelter affecting an excursion, return, sleep, or construction decision outside current perception.
+- Add the water-anchor/distant-timber survival regression: no timber is initially perceived, timber exists several storage chunks away, and bounded search must discover, remember, gather, return, build, and sleep without global knowledge.
 - Demonstrate stale belief revalidation, plan change, important episode retention, routine consolidation/forgetting, and asymmetric sparse relationship state.
 - Report physical outcomes together with observation, belief, memory, plan, and relationship counters and bounded causal samples.
 - Hash authoritative cognitive state through explicit stable encodings.
 - Repeat complete release scenarios from clean instances and compare reports/hashes.
 - Sample pool ownership, handle validity, capacity limits, event due backlog, relationship sparsity, and memory budgets through long runs.
+- Retain one bounded terminal cognitive summary per dead agent or an equivalently queryable bounded terminal record; do not require an unbounded event history to explain a specific death.
 
 ### Acceptance criteria
 
@@ -412,8 +432,10 @@ Prove that private observations, beliefs, landmark memory, compact plans, episod
 - Reversing allowed insertion/batching order cannot change authoritative cognitive outcomes.
 - At least one different-belief case, remembered-landmark plan, stale-belief correction, consolidation, forgetting, and asymmetric relationship is causally visible.
 - Agents forage and return from known water under the supported scenario instead of permanently camping or wandering blindly.
+- Agents can search for at least one initially unknown essential resource under the supported focused scenario instead of requiring every survival target to be pre-observed.
 - Existing viable shelters are used and duplicate construction is avoided when remembered knowledge makes that choice rational.
 - Survival and death remain understandable from physical state plus the agent's private knowledge and selected plan; universal survival is not required.
+- Every canonical-scenario death exposes a bounded terminal explanation distinguishing unknown, stale, unreachable, unavailable, abandoned, interrupted, and lower-utility survival opportunities where applicable.
 - Memory/relationship counts, pool fragmentation, plan switching, cognition events, stale work, and queue growth remain bounded with zero invariant violations.
 - Phase 2 reports and tests continue to pass.
 - The complete validation gate and repeated ignored release scenarios pass.
@@ -426,8 +448,10 @@ Prove that private observations, beliefs, landmark memory, compact plans, episod
 | Determinism | Equal inputs, reversed insertion, batching, reset/replay, stable tie order |
 | Truth separation | Unseen objective fact and another agent's private intent never enter observation/belief |
 | Observation | Eligibility, obstruction/residency, duplicate coalescing, bounded bursts |
+| Attention/working state | Salience, task relevance, replacement, expiry, interruption, no automatic permanent retention |
 | Belief | Reinforcement, contradiction, staleness, revalidation, confidence saturation, forgetting |
 | Planning | Candidate relevance, integer utility, hysteresis, interruption, stale target, bounded retrieval |
+| Unknown-resource search | Water-anchor departure, compact search progress, discovery through observation, return budget, interruption/resumption, typed abandonment |
 | Survival bridge | Water excursion/return, reserve foraging, shelter reuse, justified construction |
 | Memory | Importance, consolidation, decay, replacement, no effect after forgetting |
 | Relationship | Directed asymmetry, sparse creation, evidence update, decay, death/stale identity |
@@ -435,6 +459,7 @@ Prove that private observations, beliefs, landmark memory, compact plans, episod
 | Failure atomicity | Capacity, allocation, sequence/time overflow, missing/dead owner, invalid handle |
 | Scale | 20/100 correctness and soaks; synthetic larger storage/event measurements only |
 | Presentation | Bounded copied views; no viewer-owned cognition or simulation mutation |
+| Postmortem | Bounded terminal goal, relevant knowledge, last failure/interruption, and causal survival explanation |
 
 ## Performance and storage checkpoints
 
@@ -446,10 +471,13 @@ Every slice that adds persistent or scheduled state must record:
 - insertion, lookup, update, removal, compaction, and bounded retrieval cost;
 - cognition events scheduled/processed/stale/compacted and peak due batch/queue;
 - observations considered versus stored beliefs/memories/relationships;
+- eligible observations versus attended, replaced, expired, and discarded working observations;
 - plan candidates considered, retained-plan duration, interruptions, and churn;
+- search starts, waypoints, discoveries, resumptions, abandonments, inspected cells, route work, and retained search bytes;
 - memory creation, consolidation, forgetting, and replacement counts;
 - relationship count distribution and percentage of possible directed pairs retained;
 - semantic report/hash size and repeated release scenario time;
+- terminal cognitive-summary bytes and lookup/report cost;
 - any temporary scratch upper bounds and whether capacity is reused.
 
 Synthetic larger-population measurements test representation and event architecture only. They do not authorize raising the active cognition correctness gate beyond 100 agents.
@@ -492,9 +520,11 @@ Phase 3 is complete only when:
 - objective truth, observation, belief, memory, relationship, and plan domains remain explicit and tested;
 - 20/100-agent scenarios replay identically and expose understandable knowledge-driven behavior;
 - remembered landmarks improve supported survival behavior without global knowledge;
+- bounded search can discover at least one initially unknown essential resource without global knowledge or a retained per-cell explored map;
 - memory and relationships remain sparse, bounded, measurable, and free of aliasing;
 - forgetting/consolidation prevents routine-history growth;
 - private intent and unseen truth never leak across agents;
+- canonical deaths retain bounded inspectable physical and cognitive terminal causes after transient diagnostics expire;
 - Phase 2 physical regressions and reports remain valid;
 - living documentation matches executable reality;
 - the immutable initial-documentation checksum passes; and

@@ -609,7 +609,6 @@ fn invariant_violations(engine: &Engine, diagnostics: EngineDiagnostics) -> u64 
         .iter()
         .filter(|agent| agent.activity != AgentActivity::Dead)
         .count();
-    violations += u64::from(occupied.len() != living);
     violations += u64::from(diagnostics.capacity.occupancy_entries != living);
 
     let structures: Vec<_> = engine.structure_views(usize::MAX).collect();

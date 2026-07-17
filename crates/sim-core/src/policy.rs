@@ -117,6 +117,7 @@ pub struct PolicyDiagnostic {
 pub struct PhysicalPolicyView {
     pub agent: AgentId,
     pub goal: PhysicalGoal,
+    pub reason: PolicyReason,
     pub target: Option<WorldPosition>,
     pub committed: bool,
     pub retry_count: u8,
@@ -269,6 +270,7 @@ impl PolicyState {
         PhysicalPolicyView {
             agent,
             goal: self.goal,
+            reason: self.reason,
             target: matches!(phase, PolicyPhase::Routing | PolicyPhase::Acting)
                 .then(|| self.target.world()),
             committed: matches!(phase, PolicyPhase::Routing | PolicyPhase::Acting),
@@ -680,7 +682,12 @@ mod tests {
         state.set_phase(PolicyPhase::Backoff);
         assert_eq!(state.exploration_heading(), heading);
         state.set_exploration_heading(ExplorationHeading::SouthWest);
+        state.reason = PolicyReason::HungerThreshold;
         assert_eq!(state.phase(), PolicyPhase::Backoff);
+        assert_eq!(
+            state.view(AgentId::new(7)).reason,
+            PolicyReason::HungerThreshold
+        );
     }
 
     #[test]

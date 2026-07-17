@@ -1,6 +1,6 @@
 # Physical Agent Loop Implementation Plan
 
-Last synchronized: 2026-07-16.
+Last synchronized: 2026-07-17.
 
 Status: **Implemented**. Phase 1 world foundation and all Phase 2 Slices 0-8 are complete. Phase 3 work is canonical in [PHASE3_BELIEFS_RELATIONSHIPS_PLAN.md](PHASE3_BELIEFS_RELATIONSHIPS_PLAN.md); later work must remain in dependency order unless a reviewed plan records a dependency change.
 
@@ -37,9 +37,9 @@ The repository already provides the world-side contracts needed to begin:
 - `World::resource_at` exposes immutable generated food, wood, or stone capacity while distinguishing resident absence from unavailable terrain.
 - `Feature::identity` provides a stable generated-feature key within one seed and eventual generator version.
 - deterministic resident cell/feature visitation and the Phase 1 settlement-candidate scenario provide bounded search building blocks.
-- `sim-headless` eagerly materializes the configured bootstrap area before ticking; `sim-viewer` asynchronously streams a fixed centered 2,048 x 2,048 readiness rectangle, holds time at zero until it is complete, then accepts individual exact cursor spawns on resident chunks through `T`, expands the active rectangle across resident terrain as needed, and presents agents through read-only views.
+- `sim-headless` eagerly materializes the configured bootstrap area before ticking; `sim-viewer` asynchronously streams a fixed centered 2,048 x 2,048 readiness rectangle, holds time at zero until it is complete, then uses that same complete rectangle as the baseline authoritative execution area for individual exact cursor spawns through `T`. A first or later spawn outside it expands the active rectangle across resident terrain as needed; storage chunks do not bound perception, exploration, or routing.
 
-Slices 0-8 provide compact agent storage and inventory, scheduled movement, one-agent-per-cell occupancy, bounded objective perception, deterministic local routes, analytical physical needs, an explicitly activated deterministic physical policy, effective gather/eat/drink actions, sparse permanent generated-resource depletion, scheduled interruptible sleep, sparse minimal shelters with adjacent sheltered sleep, compact scheduled health deterioration, incapacitation, terminal physical death, deterministic causal reports, and bounded 20/100-agent survival soaks.
+Slices 0-8 provide compact agent storage and inventory, scheduled overlap-tolerant movement, bounded objective perception, deterministic local routes, analytical physical needs, an explicitly activated deterministic physical policy, effective gather/eat/drink actions, sparse permanent generated-resource depletion, scheduled interruptible sleep, sparse minimal shelters with adjacent sheltered sleep, compact scheduled health deterioration, incapacitation, terminal physical death, deterministic causal reports, and bounded 20/100-agent survival soaks.
 
 ## Non-negotiable constraints
 
@@ -151,12 +151,12 @@ Status: **Implemented** on 2026-07-16.
 
 ### Objective
 
-Let agents discover nearby physical facts and navigate short distances without all-pairs checks, duplicate occupancy, whole-world scans, or a complete path vector stored per agent.
+Let agents discover nearby physical facts and navigate short distances without all-pairs checks, losing overlapped agents, whole-world scans, or a complete path vector stored per agent.
 
 ### Decision checkpoints
 
 - Choose chunk/tile occupancy ownership and deterministic transfer order.
-- Define whether multiple agents may share a cell in Phase 2; if not, define equal-time collision arbitration.
+- Allow multiple agents to share a cell while keeping deterministic per-cell `AgentId` order.
 - Select a bounded short-route algorithm and hard search budget.
 - Decide the compact route representation: shared route, bounded waypoint record, or recomputable destination/progress state.
 
@@ -167,26 +167,26 @@ Let agents discover nearby physical facts and navigate short distances without a
 - Provide bounded radius/rectangle queries returning currently implemented agents, drinkable water, immutable resources, and traversable cells in canonical order. Extend the same objective boundary with structures when Slice 6 introduces their authoritative store; do not invent structure identity or state in Slice 1.
 - Add short deterministic routing over cardinal `World::traversal_step` results with explicit no-path, budget-exhausted, unloaded, and invalid-target outcomes.
 - Schedule route or waypoint progress from traversal costs; do not create a movement event every engine tick.
-- Invalidate only routes affected by changed dynamic occupancy or later structures, not by irrelevant world revisions.
+- Keep living-agent movement from invalidating routes; only durable blockers such as structures affect route edges.
 - Keep perception as objective nearby physical input. Do not add beliefs, memory, attention, or private interpretation.
 
 ### Acceptance criteria
 
 - Each living non-traveling agent belongs to exactly one spatial bucket and one world position.
-- Equal-time movement contention has one documented deterministic winner and leaves every index consistent.
+- Equal-time movers may share a target and leave every spatial entry consistent regardless of request order.
 - Query and route output is stable across insertion order and map/cache state.
 - Normal perception and routing inspect bounded cells/buckets only.
-- Route execution cannot walk through water, excessive slope, blocking features, agents under the chosen collision rule, or unloaded terrain.
+- Route execution cannot walk through water, excessive slope, structures, or unloaded terrain; agents and tree/bush/rock features are passable.
 - Focused tests cover signed coordinates, chunk boundaries, route ties, no-path, search-budget exhaustion, dynamic occupancy, and atomic transfer.
 - Query cost, route-search expansions, temporary allocations, and spatial-index bytes per agent are measured.
 
 ### Implemented result
 
-`sim-core::spatial` owns one-agent-per-cell occupancy in a sparse compact signed chunk map. Each bucket keeps sorted eight-byte `(local cell, AgentId)` entries; moving agents occupy their source until completion, and checked source-to-target transfer is atomic. The existing total scheduler order makes the lower `AgentId` the deterministic equal-time winner for an initially empty target, independent of request insertion order. Already occupied targets are rejected without reserving empty targets.
+`sim-core::spatial` owns sparse living-agent positions in a compact signed chunk map. Each bucket keeps eight-byte `(local cell, AgentId)` entries sorted by both fields, so shared cells retain every agent deterministically. Moving agents occupy their source until completion, and checked source-to-target transfer validates the exact agent entry before inserting at the target. Occupied targets remain legal for direct movement and routes.
 
-`Engine::perceive_physical` performs active-area-clipped radius queries through 31 cells and returns agents, drinkable water, immutable resources, all standable cells, and the observing agent's terrain-connected reachable component in global row-major order. The bounded component uses composed standability and exact slope passability, preventing policy from selecting geometrically near access cells across durable barriers. `Engine::request_route` uses deterministic traversal-cost A* with a caller budget capped at 4,096 expansions and distinct invalid, occupied, no-path, budget-exhausted, unloaded, and terrain-blocked outcomes. Its admissible Manhattan heuristic derives from the explicit minimum world step cost. Optional per-agent route state stores only a compact destination and budget; a reusable engine planner recomputes the next step after each positive-cost completion, so routes carry no path vector and cause no per-tick population scan. Occupancy conflicts trigger bounded replanning, while irrelevant world revision changes have no route state to invalidate.
+`Engine::perceive_physical` performs active-area-clipped radius queries through 31 cells and returns agents, drinkable water, immutable resources, all standable cells, and the observing agent's terrain-connected reachable component in global row-major order. The bounded component uses composed standability and exact slope passability, preventing policy from selecting geometrically near access cells across durable water, slope, or structure barriers. `Engine::request_route` uses deterministic traversal-cost A* with a caller budget capped at 4,096 expansions and distinct invalid, no-path, budget-exhausted, unloaded, and terrain-blocked outcomes. Its admissible Manhattan heuristic derives from the explicit minimum world step cost. Optional per-agent route state stores only a compact destination and budget; a reusable engine planner recomputes the next step after each positive-cost completion, so routes carry no path vector and cause no per-tick population scan.
 
-Unit and public integration regressions cover compact layouts, signed `-65/-64/-1/0/63/64` bucket boundaries, atomic failed transfer, request-order-independent equal-time contention, row-major bounded perception, budget exhaustion, occupied-corridor no-path, and scheduled arrival. `sim-headless` now uses perception and routes for its 20-agent smoke. The ignored release harness records 20/100/10,000-agent spatial capacity and perception work plus a 75-expansion reusable route search. D-038 records the durable ownership, collision, query, route, and structure-deferral decisions.
+Unit and public integration regressions cover compact layouts, signed `-65/-64/-1/0/63/64` bucket boundaries, exact source validation, request-order-independent shared destinations, complete same-cell perception, budget exhaustion, water-blocked no-path, and scheduled arrival. `sim-headless` uses perception and routes for its 20-agent smoke. The ignored release harness records 20/100/10,000-agent spatial capacity and perception work plus a 75-expansion reusable route search. D-055 supersedes D-038's one-agent-per-cell collision rule while retaining its compact index and bounded route ownership.
 
 ## Slice 2: Analytical physical needs
 
@@ -503,7 +503,7 @@ Exact module names may change during implementation, but ownership may not drift
 | Determinism | Repeat, insertion-order variation, tick batching, reset/replay |
 | Residency | Resident success, unloaded/outside typed failure, no implicit generation |
 | Movement | Passable, water/slope/feature blocked, collision, signed/chunk boundaries |
-| Spatial state | Atomic transfer, canonical query order, no duplicate occupancy |
+| Spatial state | Exact source transfer, canonical query order, complete shared-cell entries |
 | Needs | Interpolation, thresholds, saturation, activity rates, stale rescheduling |
 | Resources | Base-plus-delta composition, contention, depletion, inventory conservation |
 | Sleep/shelter | Valid sites, recovery, interruption, construction contention |

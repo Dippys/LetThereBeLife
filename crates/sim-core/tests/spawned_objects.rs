@@ -1,7 +1,7 @@
 use sim_core::{
-    AgentId, Engine, EngineCommand, EngineConfig, MovementOutcomeKind, PopulationInit,
-    ResourceKind, SpawnKind, SpawnObjectError, Standability, TraversalKind, WaterSource,
-    WorldConfig, WorldPosition, WorldRect,
+    AgentId, Engine, EngineCommand, EngineConfig, FeatureKind, MovementOutcomeKind, PopulationInit,
+    ResourceKind, SpawnKind, SpawnObjectError, Standability, WaterSource, WorldConfig,
+    WorldPosition, WorldRect,
 };
 
 fn resident_engine() -> Engine {
@@ -100,7 +100,7 @@ fn spawned_resources_and_fresh_water_are_authoritative_agent_facts() {
     );
     assert_eq!(
         engine.physical_standability_at(tree),
-        Ok(Standability::BlockedByFeature)
+        Ok(Standability::Standable)
     );
     assert_eq!(
         engine.physical_standability_at(water),
@@ -113,7 +113,7 @@ fn spawned_resources_and_fresh_water_are_authoritative_agent_facts() {
 }
 
 #[test]
-fn a_spawned_blocker_revalidates_an_in_flight_movement() {
+fn spawned_trees_and_rocks_do_not_block_in_flight_movement() {
     let mut engine = resident_engine();
     let from = clear_cross(&engine);
     let target = WorldPosition {
@@ -134,15 +134,28 @@ fn a_spawned_blocker_revalidates_an_in_flight_movement() {
     while engine.snapshot().tick < scheduled.completes_at.ticks() {
         engine.tick();
     }
-    assert!(engine.movement_outcomes().iter().any(|outcome| {
-        outcome.kind == MovementOutcomeKind::Blocked(TraversalKind::BlockedByFeature)
-    }));
-    assert_eq!(engine.agent_views(1).next().unwrap().position, from);
+    assert!(
+        engine
+            .movement_outcomes()
+            .iter()
+            .any(|outcome| outcome.kind == MovementOutcomeKind::Moved)
+    );
+    assert_eq!(engine.agent_views(1).next().unwrap().position, target);
 }
 
 #[test]
 fn placement_rejects_conflicts_and_reset_clears_the_sparse_layer() {
     let mut engine = resident_engine();
+    let generated_feature = engine
+        .world()
+        .features_in(engine.world().initial_bounds())
+        .find(|feature| matches!(feature.kind, FeatureKind::Tree | FeatureKind::Rock))
+        .expect("seeded resident world should contain a tree or rock")
+        .position;
+    assert_eq!(
+        engine.spawn_object(SpawnKind::Water, generated_feature),
+        Err(SpawnObjectError::BlockedByFeature)
+    );
     let center = clear_cross(&engine);
     engine.spawn_object(SpawnKind::Tree, center).unwrap();
     assert_eq!(

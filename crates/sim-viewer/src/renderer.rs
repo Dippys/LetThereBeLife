@@ -4,11 +4,11 @@ use bytemuck::{Pod, Zeroable};
 use rayon::prelude::*;
 use sim_core::{
     AgentActivity, AgentView, BiomeType, CHUNK_SIZE, ChunkCoord, ChunkInspection, ChunkPresence,
-    Engine, ExplorationHeading, FeatureKind, GenerateAreaError, HealthStatus, HealthView,
-    InventoryView, NeedKind, PhysicalGoal, PhysicalNeedsView, PhysicalPolicyView, PrevailingWind,
-    ResourceKind, SimulationSnapshot, SleepQuality, SleepView, SpawnKind, SpawnedObjectView,
-    StructureState, StructureView, SurfaceType, TerrainCell, WORLD_GENERATION_BOUNDS, World,
-    WorldPosition, WorldRect,
+    DeathCause, DeathRecord, Engine, ExplorationHeading, FeatureKind, GenerateAreaError,
+    HealthStatus, HealthView, InventoryView, NeedKind, PhysicalGoal, PhysicalNeedsView,
+    PhysicalPolicyView, PolicyReason, PrevailingWind, ResourceKind, SimulationSnapshot,
+    SleepQuality, SleepView, SpawnKind, SpawnedObjectView, StructureState, StructureView,
+    SurfaceType, TerrainCell, WORLD_GENERATION_BOUNDS, World, WorldPosition, WorldRect,
 };
 use wgpu::util::DeviceExt;
 use winit::window::Window;
@@ -46,6 +46,7 @@ pub struct AgentInspection {
     pub health: Option<HealthView>,
     pub policy: Option<PhysicalPolicyView>,
     pub sleep: Option<SleepView>,
+    pub death: Option<DeathRecord>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -566,7 +567,7 @@ const CACHE_MARGIN_PIXELS: f32 = 128.0;
 const WORLD_OVERLAY_CAPACITY: usize = 10;
 const SCREEN_OVERLAY_CAPACITY: usize = 8_192;
 const HUD_TEXT_CAPACITY: usize = 640;
-const AGENT_TEXT_CAPACITY: usize = 512;
+const AGENT_TEXT_CAPACITY: usize = 640;
 const MAX_AGENT_INSTANCES: usize = 4_096;
 const MAX_STRUCTURE_INSTANCES: usize = 4_096;
 const MAX_SPAWNED_OBJECT_INSTANCES: usize = 16_384;
@@ -1455,6 +1456,7 @@ fn write_agent_text(output: &mut String, inspection: Option<AgentInspection>) {
     writeln!(output, "ACTIVITY {}", activity_label(agent.view.activity)).unwrap();
     if let Some(policy) = agent.policy {
         writeln!(output, "GOAL {}", goal_label(policy.goal)).unwrap();
+        writeln!(output, "WHY {}", policy_reason_label(policy.reason)).unwrap();
         if let Some(target) = policy.target {
             writeln!(output, "TARGET X {}  Y {}", target.x, target.y).unwrap();
         } else {
@@ -1514,6 +1516,10 @@ fn write_agent_text(output: &mut String, inspection: Option<AgentInspection>) {
         if let Some(due) = health.next_consequence {
             writeln!(output, "NEXT DAMAGE TICK {}", due.ticks()).unwrap();
         }
+    }
+    if let Some(death) = agent.death {
+        writeln!(output, "DEATH CAUSE {}", death_cause_label(death.cause)).unwrap();
+        writeln!(output, "DIED AT TICK {}", death.at.ticks()).unwrap();
     }
     if let Some(sleep) = agent.sleep {
         writeln!(
@@ -1582,6 +1588,30 @@ const fn goal_label(goal: PhysicalGoal) -> &'static str {
         PhysicalGoal::Wait => "WAIT",
         PhysicalGoal::Incapacitated => "INCAPACITATED",
         PhysicalGoal::Explore => "EXPLORE",
+    }
+}
+
+const fn policy_reason_label(reason: PolicyReason) -> &'static str {
+    match reason {
+        PolicyReason::InitialDecision => "INITIAL DECISION",
+        PolicyReason::ThirstThreshold => "THIRST THRESHOLD",
+        PolicyReason::HungerThreshold => "HUNGER THRESHOLD",
+        PolicyReason::RestThreshold => "REST THRESHOLD",
+        PolicyReason::ExposureThreshold => "EXPOSURE THRESHOLD",
+        PolicyReason::NoUrgentNeed => "NO URGENT NEED",
+        PolicyReason::RouteArrived => "ROUTE ARRIVED",
+        PolicyReason::ActionCompleted => "ACTION COMPLETED",
+        PolicyReason::ShelterMaterials => "SHELTER MATERIALS",
+        PolicyReason::Retry => "RETRY",
+    }
+}
+
+const fn death_cause_label(cause: DeathCause) -> &'static str {
+    match cause {
+        DeathCause::Dehydration => "DEHYDRATION",
+        DeathCause::Exposure => "EXPOSURE",
+        DeathCause::Starvation => "STARVATION",
+        DeathCause::Exhaustion => "EXHAUSTION",
     }
 }
 
@@ -2566,18 +2596,21 @@ mod tests {
             policy: Some(PhysicalPolicyView {
                 agent: view.id,
                 goal: PhysicalGoal::Explore,
+                reason: PolicyReason::NoUrgentNeed,
                 target: Some(WorldPosition { x: 20, y: -4 }),
                 committed: true,
                 retry_count: 1,
                 exploration_heading: ExplorationHeading::NorthEast,
             }),
             sleep: None,
+            death: None,
         };
         let mut text = String::with_capacity(AGENT_TEXT_CAPACITY);
         write_agent_text(&mut text, Some(inspection));
         assert!(text.contains("AGENT 7"));
         assert!(text.contains("ACTIVITY MOVING"));
         assert!(text.contains("GOAL EXPLORE"));
+        assert!(text.contains("WHY NO URGENT NEED"));
         assert!(text.contains("STATUS COMMITTED  RETRIES 1"));
         assert!(text.contains("THIRST 1234 OF 6000  RATE +6"));
         assert!(text.contains("INVENTORY F 2  W 3  S 4"));
@@ -2588,6 +2621,7 @@ mod tests {
         let mut backoff = inspection;
         backoff.policy = Some(PhysicalPolicyView {
             goal: PhysicalGoal::SeekWater,
+            reason: PolicyReason::Retry,
             target: None,
             committed: false,
             retry_count: u8::MAX,
@@ -2595,6 +2629,7 @@ mod tests {
         });
         write_agent_text(&mut text, Some(backoff));
         assert!(text.contains("GOAL SEEK WATER"));
+        assert!(text.contains("WHY RETRY"));
         assert!(text.contains("STATUS BACKOFF  RETRIES 255"));
 
         let budget_view = AgentView {
@@ -2639,6 +2674,7 @@ mod tests {
             policy: Some(PhysicalPolicyView {
                 agent: budget_view.id,
                 goal: PhysicalGoal::Incapacitated,
+                reason: PolicyReason::ExposureThreshold,
                 target: Some(WorldPosition {
                     x: -32_768,
                     y: 32_767,
@@ -2654,9 +2690,18 @@ mod tests {
                 planned_wake: sim_core::SimTime::from_ticks(u64::MAX),
                 quality: SleepQuality::OpenGround,
             }),
+            death: Some(DeathRecord {
+                agent: budget_view.id,
+                cause: DeathCause::Exhaustion,
+                at: sim_core::SimTime::from_ticks(u64::MAX),
+                position: budget_view.position,
+            }),
         };
         let mut budget_text = String::with_capacity(AGENT_TEXT_CAPACITY);
         write_agent_text(&mut budget_text, Some(budget_inspection));
+        assert!(budget_text.contains("WHY EXPOSURE THRESHOLD"));
+        assert!(budget_text.contains("DEATH CAUSE EXHAUSTION"));
+        assert!(budget_text.contains("DIED AT TICK 18446744073709551615"));
         assert!(budget_text.len() <= AGENT_TEXT_CAPACITY);
 
         let world = World::generate(u64::MAX, WorldConfig::new(64, 64).unwrap());

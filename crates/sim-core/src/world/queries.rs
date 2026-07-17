@@ -1,8 +1,8 @@
 use super::{
-    BaseResource, ClimateSample, Feature, FeatureKind, MAX_TRAVERSABLE_ELEVATION_DELTA,
-    Standability, TerrainCell, TraversalKind, TraversalStep, WORLD_GENERATION_BOUNDS, WaterSource,
-    World, WorldPosition, WorldQueryError, WorldRect, chunk_coord, climate_at,
-    surface_traversal_cost, water_source,
+    BaseResource, ClimateSample, Feature, MAX_TRAVERSABLE_ELEVATION_DELTA, Standability,
+    TerrainCell, TraversalKind, TraversalStep, WORLD_GENERATION_BOUNDS, WaterSource, World,
+    WorldPosition, WorldQueryError, WorldRect, chunk_coord, climate_at, surface_traversal_cost,
+    water_source,
 };
 
 impl World {
@@ -15,12 +15,6 @@ impl World {
         let cell = self.resident_cell(position)?;
         if water_source(cell).is_some() {
             return Ok(Standability::BlockedByWater);
-        }
-        if self
-            .feature_at(position)
-            .is_some_and(|feature| matches!(feature.kind, FeatureKind::Tree | FeatureKind::Rock))
-        {
-            return Ok(Standability::BlockedByFeature);
         }
         Ok(Standability::Standable)
     }
@@ -81,11 +75,6 @@ impl World {
             TraversalKind::BlockedByWater
         } else if elevation_delta.unsigned_abs() > u32::from(MAX_TRAVERSABLE_ELEVATION_DELTA) {
             TraversalKind::BlockedBySlope
-        } else if self
-            .feature_at(to)
-            .is_some_and(|feature| matches!(feature.kind, FeatureKind::Tree | FeatureKind::Rock))
-        {
-            TraversalKind::BlockedByFeature
         } else {
             TraversalKind::Passable
         };
