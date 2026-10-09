@@ -3,7 +3,7 @@
 
 use super::noise::{NOISE_HALF, centered_noise, value_noise};
 use super::plates::{SEA_LEVEL, macro_sample};
-use crate::world::{PrevailingWind, WORLD_HALF_EXTENT};
+use crate::{PrevailingWind, WORLD_HALF_EXTENT};
 
 /// One circulation band spans one quarter of the finite north-south envelope.
 const WIND_BAND_WIDTH: i64 = WORLD_HALF_EXTENT / 2;

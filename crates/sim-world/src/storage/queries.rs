@@ -1,8 +1,12 @@
-use super::{
+//! Point queries over resident terrain: cells, features, water, climate, and
+//! derived traversal steps.
+
+use super::World;
+use crate::{
     BaseResource, ClimateSample, Feature, MAX_TRAVERSABLE_ELEVATION_DELTA, Standability,
-    TerrainCell, TraversalKind, TraversalStep, WORLD_GENERATION_BOUNDS, WaterSource, World,
-    WorldPosition, WorldQueryError, WorldRect, chunk_coord, climate_at, surface_traversal_cost,
-    water_source,
+    TerrainCell, TraversalKind, TraversalStep, WORLD_GENERATION_BOUNDS, WaterSource, WorldPosition,
+    WorldQueryError, WorldRect, chunk::chunk_coord, terrain::water_source,
+    traversal::surface_traversal_cost, worldgen::climate_at,
 };
 
 impl World {

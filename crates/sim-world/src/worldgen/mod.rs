@@ -9,106 +9,31 @@
 //! 3. Local detail: small roughness-budgeted noise applied per cell, which may
 //!    erode coastlines and vary forests but never decides where geography is.
 
+mod classification;
 mod climate;
 mod drainage;
 mod hydrology;
 mod noise;
 mod plates;
+mod regions;
 
-use std::{
-    collections::BTreeSet as RegionSet,
-    sync::{Arc, Mutex, MutexGuard, OnceLock},
+use crate::{
+    BiomeType, CHUNK_SIZE, ClimateSample, FeatureKind, SurfaceType, TerrainCell, TerrainClass,
 };
-
-use rayon::prelude::*;
-
-use crate::world::{
-    BiomeType, CHUNK_SIZE, ChunkLoadRequest, ClimateSample, FeatureKind, SurfaceType, TerrainCell,
-    TerrainClass,
-};
+use classification::{FeatureEnvironment, classify, feature, local_detail};
 use drainage::FLOODPLAIN_RADIUS;
-use hydrology::{
-    GRID, LAKE_MIN_DEPTH, NODE_STEP, RegionMap, RiverSegment, point_segment_distance_ratio,
-};
-use noise::{NOISE_HALF, centered_noise, hash};
+use hydrology::{GRID, LAKE_MIN_DEPTH, NODE_STEP, RiverSegment, point_segment_distance_ratio};
+use noise::NOISE_HALF;
 use plates::{SEA_LEVEL, macro_sample};
+use regions::region;
 
 pub(crate) use hydrology::REGION_SIZE;
+pub(crate) use regions::prepare_chunk_regions;
 
-const DEEP_WATER_MAX: i32 = 25_000;
-const BEACH_MAX: i32 = 33_000;
-const HILL_MIN: i32 = 50_000;
-const ROCK_MIN: i32 = 56_000;
 const LAKE_DEEP_DEPTH: i32 = 1_600;
-const DESERT_MOISTURE_MAX: i32 = 12_000;
-const DESERT_TEMPERATURE_MIN: i32 = 30_000;
-const FOREST_MOISTURE_MIN: i32 = 30_000;
-const FOREST_TEMPERATURE_MIN: i32 = 13_000;
-const WETLAND_MOISTURE_MIN: i32 = 48_000;
-const WETLAND_ELEVATION_MAX: i32 = 39_000;
 const WETLAND_SLOPE_MAX: i64 = 90;
-const RIPARIAN_MOISTURE_MIN: i32 = 10_000;
-const RIPARIAN_ELEVATION_MAX: i32 = 42_000;
 const RIPARIAN_SLOPE_MAX: i64 = 180;
 const RIVERBANK_RADIUS: i64 = 4;
-const SAVANNA_MOISTURE_MAX: i32 = 24_000;
-const TUNDRA_TEMPERATURE_MAX: i32 = 13_000;
-const SNOW_TEMPERATURE_MAX: i32 = 6_500;
-const MOUNTAIN_SNOW_TEMPERATURE_MAX: i32 = 9_000;
-
-const DETAIL_SEED_A: u64 = 0x4445_5441_494c_4131;
-const DETAIL_SEED_B: u64 = 0x4445_5441_494c_4232;
-const FEATURE_SEED: u64 = 0x4654_5253;
-
-const REGION_CACHE_CAPACITY: usize = 64;
-
-type RegionKey = (u64, i64, i64);
-type RegionSlot = Arc<OnceLock<Arc<RegionMap>>>;
-
-static REGION_CACHE: OnceLock<Mutex<Vec<(RegionKey, RegionSlot)>>> = OnceLock::new();
-
-fn region_cache() -> &'static Mutex<Vec<(RegionKey, RegionSlot)>> {
-    REGION_CACHE.get_or_init(|| Mutex::new(Vec::new()))
-}
-
-fn lock_region_cache() -> MutexGuard<'static, Vec<(RegionKey, RegionSlot)>> {
-    region_cache()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-fn trim_region_cache(cache: &mut Vec<(RegionKey, RegionSlot)>) {
-    while cache.len() > REGION_CACHE_CAPACITY {
-        let Some(position) = cache.iter().rposition(|(_, slot)| slot.get().is_some()) else {
-            // More than 64 distinct regions may briefly be building at once on
-            // a large machine. Never evict an in-flight build: doing so could
-            // let another worker duplicate the same expensive regional solve.
-            break;
-        };
-        cache.remove(position);
-    }
-}
-
-fn region(seed: u64, region_x: i64, region_y: i64) -> Arc<RegionMap> {
-    let key = (seed, region_x, region_y);
-    let slot = {
-        let mut cache = lock_region_cache();
-        if let Some(position) = cache.iter().position(|(entry, _)| *entry == key) {
-            let entry = cache.remove(position);
-            let slot = Arc::clone(&entry.1);
-            cache.insert(0, entry);
-            slot
-        } else {
-            let slot = Arc::new(OnceLock::new());
-            cache.insert(0, (key, Arc::clone(&slot)));
-            trim_region_cache(&mut cache);
-            slot
-        }
-    };
-    let map = Arc::clone(slot.get_or_init(|| Arc::new(RegionMap::build(seed, region_x, region_y))));
-    trim_region_cache(&mut lock_region_cache());
-    map
-}
 
 pub(crate) fn climate_at(seed: u64, x: i64, y: i64, moisture: u8) -> ClimateSample {
     let base_x = x.div_euclid(NODE_STEP) * NODE_STEP;
@@ -135,32 +60,6 @@ pub(crate) fn climate_at(seed: u64, x: i64, y: i64, moisture: u8) -> ClimateSamp
         moisture,
         wind: climate::prevailing_wind(seed, x, y),
     }
-}
-
-/// Materializes the regional prerequisites for an ordered, bounded chunk
-/// request window before dependent chunk workers enter the build-once cache.
-pub(crate) fn prepare_chunk_regions(seed: u64, requests: &[ChunkLoadRequest]) {
-    if requests.is_empty() {
-        return;
-    }
-    drainage::world_drainage(seed);
-    let chunks_per_region = REGION_SIZE / CHUNK_SIZE;
-    let mut prepared = RegionSet::new();
-    for request in requests {
-        let coord = request.coord();
-        let key = (
-            coord.x.div_euclid(chunks_per_region),
-            coord.y.div_euclid(chunks_per_region),
-        );
-        prepared.insert(key);
-    }
-    prepared
-        .into_iter()
-        .collect::<Vec<_>>()
-        .into_par_iter()
-        .for_each(|(region_x, region_y)| {
-            region(seed, region_x, region_y);
-        });
 }
 
 // Whole-world channel links are subdivided at the 32-cell refinement step.
@@ -412,148 +311,6 @@ fn river_surface_at(x: i64, y: i64, segment: RiverSegment) -> i32 {
         + i128::from(segment.surface_b) * projection)
         / length_squared;
     surface as i32
-}
-
-fn classify(
-    elevation: i32,
-    moisture: i32,
-    temperature: i32,
-    hydrologic_wetland: bool,
-    riparian_bank: bool,
-    transition: i32,
-) -> TerrainClass {
-    let transition = transition.clamp(-(NOISE_HALF as i32), NOISE_HALF as i32);
-    let beach_max = BEACH_MAX + transition / 40;
-    let desert_moisture_max = DESERT_MOISTURE_MAX + transition / 24;
-    let forest_moisture_min = FOREST_MOISTURE_MIN + transition / 16;
-    let wetland_moisture_min = WETLAND_MOISTURE_MIN + transition / 32;
-    let forest_temperature_min = FOREST_TEMPERATURE_MIN + transition / 32;
-    let tundra_temperature_max = TUNDRA_TEMPERATURE_MAX + transition / 32;
-    let snow_temperature_max = SNOW_TEMPERATURE_MAX + transition / 40;
-    let mountain_snow_temperature_max = MOUNTAIN_SNOW_TEMPERATURE_MAX + transition / 40;
-    if elevation <= DEEP_WATER_MAX {
-        TerrainClass::new(SurfaceType::DeepWater, BiomeType::Ocean)
-    } else if elevation <= SEA_LEVEL {
-        TerrainClass::new(SurfaceType::ShallowWater, BiomeType::Ocean)
-    } else if elevation <= beach_max {
-        TerrainClass::new(SurfaceType::Sand, BiomeType::Beach)
-    } else if temperature < snow_temperature_max {
-        TerrainClass::new(SurfaceType::SnowIce, BiomeType::Tundra)
-    } else if elevation > ROCK_MIN {
-        let surface = if temperature < mountain_snow_temperature_max {
-            SurfaceType::SnowIce
-        } else {
-            SurfaceType::Rock
-        };
-        TerrainClass::new(surface, BiomeType::Alpine)
-    } else if elevation > HILL_MIN {
-        let surface = if temperature < mountain_snow_temperature_max {
-            SurfaceType::SnowIce
-        } else {
-            SurfaceType::Hill
-        };
-        TerrainClass::new(surface, BiomeType::Alpine)
-    } else if temperature < tundra_temperature_max {
-        TerrainClass::new(SurfaceType::Soil, BiomeType::Tundra)
-    } else if hydrologic_wetland
-        && moisture > wetland_moisture_min
-        && elevation <= WETLAND_ELEVATION_MAX
-    {
-        TerrainClass::new(SurfaceType::Soil, BiomeType::Wetland)
-    } else if riparian_bank
-        && moisture >= RIPARIAN_MOISTURE_MIN
-        && elevation <= RIPARIAN_ELEVATION_MAX
-    {
-        TerrainClass::new(SurfaceType::Soil, BiomeType::Grassland)
-    } else if moisture < desert_moisture_max && temperature > DESERT_TEMPERATURE_MIN {
-        TerrainClass::new(SurfaceType::Sand, BiomeType::Desert)
-    } else if moisture > forest_moisture_min && temperature > forest_temperature_min {
-        TerrainClass::new(SurfaceType::Soil, BiomeType::Forest)
-    } else if moisture < SAVANNA_MOISTURE_MAX && temperature > DESERT_TEMPERATURE_MIN {
-        TerrainClass::new(SurfaceType::Soil, BiomeType::Savanna)
-    } else {
-        TerrainClass::new(SurfaceType::Soil, BiomeType::Grassland)
-    }
-}
-
-fn local_detail(seed: u64, x: i64, y: i64) -> i64 {
-    (centered_noise(seed ^ DETAIL_SEED_A, x, y, 160) * 5
-        + centered_noise(seed ^ DETAIL_SEED_B, x, y, 40) * 2)
-        / 7
-}
-
-#[derive(Clone, Copy)]
-struct FeatureEnvironment {
-    class: TerrainClass,
-    moisture: i32,
-    temperature: i32,
-    slope: i64,
-    near_water: bool,
-    ecology: i64,
-}
-
-fn feature(seed: u64, x: i64, y: i64, environment: FeatureEnvironment) -> Option<FeatureKind> {
-    let FeatureEnvironment {
-        class,
-        moisture,
-        temperature,
-        slope,
-        near_water,
-        ecology,
-    } = environment;
-    if matches!(
-        class.surface(),
-        SurfaceType::DeepWater
-            | SurfaceType::ShallowWater
-            | SurfaceType::Sand
-            | SurfaceType::SnowIce
-    ) {
-        return None;
-    }
-    let rolls = hash(seed ^ FEATURE_SEED, x, y);
-    let tree_roll = (rolls % 10_000) as i64;
-    let berry_roll = ((rolls >> 21) % 10_000) as i64;
-    let rock_roll = ((rolls >> 42) % 10_000) as i64;
-    match (class.surface(), class.biome()) {
-        (SurfaceType::Soil, BiomeType::Forest) => {
-            if ecology < -18_000 && rock_roll < 180 {
-                Some(FeatureKind::Rock)
-            } else if ecology > -7_000 && tree_roll < 820 {
-                Some(FeatureKind::Tree)
-            } else {
-                (ecology > -20_000 && berry_roll < 120).then_some(FeatureKind::BerryBush)
-            }
-        }
-        (SurfaceType::Soil, biome) => {
-            let tree_threshold = match biome {
-                BiomeType::Grassland if moisture > 28_000 => 9_000,
-                BiomeType::Savanna if moisture > 17_000 => 15_000,
-                _ => i64::MAX,
-            };
-            if ecology > tree_threshold && temperature > FOREST_TEMPERATURE_MIN && tree_roll < 360 {
-                return Some(FeatureKind::Tree);
-            }
-
-            let berry_patch_min = if near_water { -11_000 } else { -3_000 };
-            if matches!(
-                biome,
-                BiomeType::Grassland | BiomeType::Savanna | BiomeType::Wetland
-            ) && moisture > 17_000
-                && temperature > 9_000
-                && ecology > berry_patch_min
-                && ecology <= tree_threshold
-                && berry_roll < 160
-            {
-                return Some(FeatureKind::BerryBush);
-            }
-
-            ((slope >= 70 || ecology < -14_000) && rock_roll < 150).then_some(FeatureKind::Rock)
-        }
-        (SurfaceType::Hill | SurfaceType::Rock, _) => {
-            (ecology > -14_000 && rock_roll < 430).then_some(FeatureKind::Rock)
-        }
-        _ => None,
-    }
 }
 
 #[cfg(test)]

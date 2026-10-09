@@ -12,8 +12,6 @@ mod scheduler;
 mod sleep;
 mod spatial;
 mod structures;
-mod world;
-mod worldgen;
 
 pub use agent::{
     AgentActivity, AgentId, AgentSpawnError, AgentView, EventId, MAX_PERCEPTION_CELLS,
@@ -43,16 +41,7 @@ pub use resources::{
     INVENTORY_CAPACITY_PER_KIND, InitialInventoryError, InventoryView, ResourceDeltaView,
 };
 pub use routing::{MAX_ROUTE_EXPANSIONS, RouteRequest, RouteRequestError};
-pub use sleep::{
-    SleepDiagnostic, SleepDiagnosticKind, SleepInterruptionReason, SleepQuality, SleepRequestError,
-    SleepView,
-};
-pub use structures::{
-    BuildShelterError, SHELTER_BUILD_TICKS, SHELTER_STONE_COST, SHELTER_WOOD_COST,
-    StructureDiagnostic, StructureDiagnosticKind, StructureId, StructureKind, StructureState,
-    StructureView,
-};
-pub use world::{
+pub use sim_world::{
     ArchiveBakeProgress, ArchiveBakeStats, BaseResource, BiomeType, CHUNK_SIZE, ChunkCoord,
     ChunkGenerator, ChunkInspection, ChunkLoadRequest, ChunkLocalPosition, ChunkOverview,
     ChunkPresence, ClimateSample, DEFAULT_INITIAL_WORLD_SIZE, Feature, FeatureKind,
@@ -63,6 +52,15 @@ pub use world::{
     WORLD_GENERATOR_VERSION, WORLD_HALF_EXTENT, WORLD_SIDE_CELLS, WaterSource, World, WorldArchive,
     WorldArchiveError, WorldChunk, WorldChunkLoad, WorldConfig, WorldConfigError, WorldOverview,
     WorldPosition, WorldQueryError, WorldRect,
+};
+pub use sleep::{
+    SleepDiagnostic, SleepDiagnosticKind, SleepInterruptionReason, SleepQuality, SleepRequestError,
+    SleepView,
+};
+pub use structures::{
+    BuildShelterError, SHELTER_BUILD_TICKS, SHELTER_STONE_COST, SHELTER_WOOD_COST,
+    StructureDiagnostic, StructureDiagnosticKind, StructureId, StructureKind, StructureState,
+    StructureView,
 };
 
 use std::time::Duration;

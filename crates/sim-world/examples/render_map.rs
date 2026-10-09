@@ -15,7 +15,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use sim_core::{
+use sim_world::{
     BaseResource, BiomeType, CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkLocalPosition,
     ClimateSample, Feature, FeatureKind, GeneratedCell, PrevailingWind, ResourceKind, SurfaceType,
     TerrainCell, TerrainClass, WORLD_GENERATION_BOUNDS, WorldPosition, WorldRect,

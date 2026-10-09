@@ -1559,7 +1559,7 @@ dependencies = [
 name = "sim-core"
 version = "0.1.0"
 dependencies = [
- "rayon",
+ "sim-world",
 ]
 
 [[package]]
@@ -1581,6 +1581,13 @@ dependencies = [
  "sim-core",
  "wgpu",
  "winit",
+]
+
+[[package]]
+name = "sim-world"
+version = "0.1.0"
+dependencies = [
+ "rayon",
 ]
 
 [[package]]

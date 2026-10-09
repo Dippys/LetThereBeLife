@@ -10,8 +10,8 @@ use crate::{
     agent::CompactPosition,
     placements::SpawnedObjects,
     structures::{StructureId, StructureStore},
-    world::MIN_TRAVERSAL_COST,
 };
+use sim_world::MIN_TRAVERSAL_COST;
 
 pub const MAX_ROUTE_EXPANSIONS: u16 = 4_096;
 

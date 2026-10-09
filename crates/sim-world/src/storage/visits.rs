@@ -1,5 +1,10 @@
-use super::{
-    ChunkCoord, Feature, TerrainCell, World, WorldPosition, WorldRect, visit_loaded_chunk_region,
+//! Deterministic iteration and visitor APIs over resident cells, features,
+//! and loaded chunk coverage.
+
+use super::World;
+use crate::{
+    ChunkCoord, Feature, TerrainCell, WorldPosition, WorldRect, chunk::chunk_origin,
+    geometry::intersection, loads::LoadedChunk,
 };
 
 impl World {
@@ -127,4 +132,44 @@ impl World {
         }
         Some(coverage)
     }
+}
+
+fn visit_loaded_chunk_region(
+    chunk: &LoadedChunk,
+    coord: ChunkCoord,
+    bounds: WorldRect,
+    step: i64,
+    visitor: &mut impl FnMut(WorldPosition, TerrainCell),
+) {
+    let region = chunk.bounds(coord);
+    let Some(clipped) = intersection(region, bounds) else {
+        return;
+    };
+    let origin = chunk_origin(coord);
+    let start_x = align_to_step_from(clipped.min.x, origin.x, step);
+    let start_y = align_to_step_from(clipped.min.y, origin.y, step);
+    for y in (start_y..clipped.max.y).step_by(step as usize) {
+        for x in (start_x..clipped.max.x).step_by(step as usize) {
+            let position = WorldPosition { x, y };
+            visitor(
+                position,
+                chunk
+                    .cell(coord, position)
+                    .expect("loaded chunk coverage must contain visited cells"),
+            );
+        }
+    }
+}
+
+fn align_to_step(value: i64, step: i64) -> i64 {
+    let remainder = value.rem_euclid(step);
+    if remainder == 0 {
+        value
+    } else {
+        value.saturating_add(step - remainder)
+    }
+}
+
+fn align_to_step_from(value: i64, origin: i64, step: i64) -> i64 {
+    origin + align_to_step(value - origin, step)
 }

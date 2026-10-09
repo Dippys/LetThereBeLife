@@ -1,5 +1,11 @@
 [workspace]
-members = ["crates/sim-config", "crates/sim-core", "crates/sim-headless", "crates/sim-viewer"]
+members = [
+    "crates/sim-config",
+    "crates/sim-core",
+    "crates/sim-headless",
+    "crates/sim-viewer",
+    "crates/sim-world",
+]
 resolver = "2"
 
 [workspace.package]
@@ -11,6 +17,7 @@ rust-version = "1.85"
 [workspace.dependencies]
 sim-core = { path = "crates/sim-core" }
 sim-config = { path = "crates/sim-config" }
+sim-world = { path = "crates/sim-world" }
 rayon = "1.10.0"
 serde = { version = "1.0.228", features = ["derive"] }
 toml = "1.1.2"

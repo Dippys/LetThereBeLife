@@ -6,7 +6,7 @@
 
 use rayon::prelude::*;
 
-use crate::world::WORLD_HALF_EXTENT;
+use crate::WORLD_HALF_EXTENT;
 
 use super::climate::{moisture, temperature};
 pub(crate) use super::drainage::DrainageSegment as RiverSegment;

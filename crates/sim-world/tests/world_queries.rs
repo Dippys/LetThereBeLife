@@ -1,4 +1,4 @@
-use sim_core::{
+use sim_world::{
     ResourceKind, TraversalKind, WaterSource, World, WorldConfig, WorldPosition, WorldRect,
 };
 use std::collections::VecDeque;

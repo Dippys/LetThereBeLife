@@ -3,6 +3,8 @@ use std::time::Instant;
 
 use rayon::ThreadPoolBuilder;
 
+use super::channels::{channel_point, derive_stream_orders, segments_intersect, shared_endpoint};
+use super::lattice::is_border;
 use super::*;
 
 #[test]
@@ -193,14 +195,14 @@ fn channels_continue_to_canonical_outlets_across_signed_region_seams() {
         let mut segments_per_chunk = BTreeMap::<(i64, i64), usize>::new();
         for segment in &drainage.rivers {
             let width = i64::from(segment.half_width) + FLOODPLAIN_RADIUS;
-            let min_x = (i64::from(segment.ax.min(segment.bx)) - width)
-                .div_euclid(crate::world::CHUNK_SIZE);
-            let max_x = (i64::from(segment.ax.max(segment.bx)) + width)
-                .div_euclid(crate::world::CHUNK_SIZE);
-            let min_y = (i64::from(segment.ay.min(segment.by)) - width)
-                .div_euclid(crate::world::CHUNK_SIZE);
-            let max_y = (i64::from(segment.ay.max(segment.by)) + width)
-                .div_euclid(crate::world::CHUNK_SIZE);
+            let min_x =
+                (i64::from(segment.ax.min(segment.bx)) - width).div_euclid(crate::CHUNK_SIZE);
+            let max_x =
+                (i64::from(segment.ax.max(segment.bx)) + width).div_euclid(crate::CHUNK_SIZE);
+            let min_y =
+                (i64::from(segment.ay.min(segment.by)) - width).div_euclid(crate::CHUNK_SIZE);
+            let max_y =
+                (i64::from(segment.ay.max(segment.by)) + width).div_euclid(crate::CHUNK_SIZE);
             for chunk_y in min_y..=max_y {
                 for chunk_x in min_x..=max_x {
                     if (-512..512).contains(&chunk_x) && (-512..512).contains(&chunk_y) {
