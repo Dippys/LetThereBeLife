@@ -7,6 +7,7 @@ mod summary;
 use sim_core::{SimulationSnapshot, WorldPosition};
 
 use crate::camera::Camera;
+use crate::gestures::GestureSummary;
 use crate::render::{GenerationStatus, PopulationStatus, RenderState};
 
 pub(super) fn test_render_state(cursor_world: Option<WorldPosition>) -> RenderState {
@@ -37,5 +38,6 @@ pub(super) fn test_render_state(cursor_world: Option<WorldPosition>) -> RenderSt
         hovered_agent: None,
         spawn_message: None,
         spawn_menu: None,
+        gestures: GestureSummary::default(),
     }
 }

@@ -5,9 +5,9 @@
 use std::{collections::BTreeSet, fmt};
 
 use sim_core::{
-    AgentActivity, AgentId, DeathCause, Engine, EngineConfig, PhysicalGoal, PolicyDiagnosticKind,
-    PolicyOptions, PopulationInit, Standability, TickOutcome, WaterSource, WorldConfig,
-    WorldPosition,
+    AgentActivity, AgentId, DeathCause, Engine, EngineCommand, EngineConfig, PhysicalGoal,
+    PolicyDiagnosticKind, PolicyOptions, PopulationInit, Standability, TickOutcome, WaterSource,
+    WorldConfig, WorldPosition, WorldRect,
 };
 
 use crate::scenario::ScenarioError;
@@ -40,7 +40,14 @@ pub enum StudySpawn {
     /// Groups of `GROUP_SIZE` agents dropped together on random land, like a
     /// user pressing `T` several times in one spot.
     Groups,
+    /// The spec's vertical slice: one band together beside water in a small
+    /// livable valley (see `sim_core::find_valley`); only the valley is simulated.
+    Valley,
 }
+
+/// The spec's first vertical slice has 16 adults.
+pub const VALLEY_POPULATION: u32 = sim_core::VALLEY_BAND as u32;
+pub use sim_core::VALLEY_SIDE;
 
 pub const GROUP_SIZE: usize = 5;
 
@@ -76,6 +83,8 @@ struct AgentTrack {
     informed: u64,
     explored_gestures: u64,
     company_samples: u64,
+    /// Decisions to head for a place someone pointed out.
+    hint_decisions: u64,
     /// Highest thirst seen in any sample while alive.
     peak_thirst: u16,
     /// Hunger, thirst, rest, exposure at the last sample while alive.
@@ -105,6 +114,8 @@ pub struct StudyReport {
     pub agents_informed: u64,
     /// Gestures that said "I've been over there" rather than pointing at a place.
     pub explored_gestures: u64,
+    /// Decisions (waypoints included) heading for a place someone pointed out.
+    pub hint_decisions: u64,
     /// Percentage of sampled living time with another living agent within 8 cells.
     pub company_percent: u64,
     /// Mean acquaintances and mean trust in them at the end (social mind only).
@@ -117,6 +128,10 @@ pub struct StudyReport {
     pub per_agent: Vec<StudyAgentLine>,
     /// The traced agent's last decisions, oldest first.
     pub trace: Vec<String>,
+    /// Every gesture and what came of it.
+    pub comms: crate::comms::CommunicationLog,
+    /// Each agent's beliefs at the end of the run.
+    pub minds: Vec<Option<sim_core::MentalMapView>>,
 }
 
 const TRACE_LINES: usize = 60;
@@ -160,21 +175,11 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     if config.population == 0 {
         return Err(ScenarioError("study population must be positive".into()));
     }
-    let mut engine = Engine::new(EngineConfig {
-        seed: config.seed,
-        ticks_per_second: 60,
-        world: WorldConfig::new(config.world_side, config.world_side)
-            .map_err(|error| ScenarioError(format!("invalid study world: {error}")))?,
-    });
-    engine
-        .materialize_initial_area()
-        .map_err(|error| ScenarioError(format!("world materialization failed: {error}")))?;
-    let fresh_water = fresh_water_cells(&engine);
-    let spawns = random_land_spawns(&engine, config, &fresh_water)?;
+    let (mut engine, active_area, fresh_water, spawns) = prepare_world(config)?;
     engine
         .initialize_population(
             PopulationInit {
-                active_area: engine.world().initial_bounds(),
+                active_area,
                 population: config.population,
             },
             &spawns,
@@ -191,10 +196,12 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
         track.spawn = Some(*spawn);
     }
     let mut trace = std::collections::VecDeque::new();
+    let mut comms = crate::comms::CommunicationLog::default();
     for tick in 1..=config.ticks {
         match engine.tick() {
             TickOutcome::Advanced { .. } => {
                 collect_tick(&engine, &mut tracks);
+                comms.record_tick(&engine);
                 if let Some(traced) = config.trace {
                     record_trace(&engine, AgentId::new(traced), &mut trace);
                 }
@@ -210,7 +217,53 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     }
     let mut report = build_report(&engine, config, &spawns, &fresh_water, &tracks, &tiles);
     report.trace = trace.into_iter().collect();
+    report.comms = comms;
     Ok(report)
+}
+
+/// Builds the engine and chooses where everyone starts.
+fn prepare_world(
+    config: StudyConfig,
+) -> Result<(Engine, WorldRect, Vec<WorldPosition>, Vec<WorldPosition>), ScenarioError> {
+    let side = if config.spawn == StudySpawn::Valley {
+        64
+    } else {
+        config.world_side
+    };
+    let mut engine = Engine::new(EngineConfig {
+        seed: config.seed,
+        ticks_per_second: 60,
+        world: WorldConfig::new(side, side)
+            .map_err(|error| ScenarioError(format!("invalid study world: {error}")))?,
+    });
+    engine
+        .materialize_initial_area()
+        .map_err(|error| ScenarioError(format!("world materialization failed: {error}")))?;
+    if config.spawn != StudySpawn::Valley {
+        let fresh_water = fresh_water_cells(&engine);
+        let spawns = random_land_spawns(&engine, config, &fresh_water)?;
+        let area = engine.world().initial_bounds();
+        return Ok((engine, area, fresh_water, spawns));
+    }
+    let valley = sim_core::find_valley(config.seed, VALLEY_SIDE).ok_or_else(|| {
+        ScenarioError(format!(
+            "no livable valley found near the origin for seed {}",
+            config.seed
+        ))
+    })?;
+    engine.command(EngineCommand::GenerateWorldArea(valley.bounds));
+    let fresh_water: Vec<_> = fresh_water_cells(&engine)
+        .into_iter()
+        .filter(|cell| valley.bounds.contains(*cell))
+        .collect();
+    let spawns = sim_core::camp_sites(
+        engine.world(),
+        valley.bounds,
+        config.population as usize,
+        config.seed,
+    )
+    .ok_or_else(|| ScenarioError("valley has no room for the band beside water".into()))?;
+    Ok((engine, valley.bounds, fresh_water, spawns))
 }
 
 fn collect_tick(engine: &Engine, tracks: &mut [AgentTrack]) {
@@ -230,11 +283,16 @@ fn collect_tick(engine: &Engine, tracks: &mut [AgentTrack]) {
     for diagnostic in engine.policy_diagnostics() {
         let track = &mut tracks[diagnostic.agent.get() as usize];
         match diagnostic.kind {
-            PolicyDiagnosticKind::Selected => match diagnostic.goal {
-                PhysicalGoal::Explore => track.explores += 1,
-                PhysicalGoal::Wait => track.waits += 1,
-                _ => {}
-            },
+            PolicyDiagnosticKind::Selected => {
+                match diagnostic.goal {
+                    PhysicalGoal::Explore => track.explores += 1,
+                    PhysicalGoal::Wait => track.waits += 1,
+                    _ => {}
+                }
+                if diagnostic.reason == sim_core::PolicyReason::ToldPlace {
+                    track.hint_decisions += 1;
+                }
+            }
             PolicyDiagnosticKind::ActionCompleted if diagnostic.failure.is_none() => {
                 match diagnostic.goal {
                     PhysicalGoal::Drink => track.drinks += 1,
@@ -408,6 +466,7 @@ fn build_report(
         wait_decisions: tracks.iter().map(|track| track.waits).sum(),
         signals: tracks.iter().map(|track| track.signals).sum(),
         explored_gestures: tracks.iter().map(|track| track.explored_gestures).sum(),
+        hint_decisions: tracks.iter().map(|track| track.hint_decisions).sum(),
         company_percent: percent(
             tracks.iter().map(|track| track.company_samples).sum(),
             alive_samples,
@@ -432,7 +491,76 @@ fn build_report(
             / count,
         per_agent,
         trace: Vec::new(),
+        comms: crate::comms::CommunicationLog::default(),
+        minds: (0..tracks.len())
+            .map(|index| engine.mental_map(AgentId::new(index as u32)))
+            .collect(),
     }
+}
+
+/// A readable account of one agent: who it is, what it believes, who it knows,
+/// and the exchanges it took part in. Pair with the decision trace for the "why".
+pub fn explain(report: &StudyReport, agent: u32) -> String {
+    use std::fmt::Write;
+    let mut out = String::new();
+    let Some(line) = report.per_agent.get(agent as usize) else {
+        return format!("no agent {agent}\n");
+    };
+    let p = line.personality;
+    let fate = match line.death {
+        Some((cause, tick)) => format!("died of {cause:?} at t={tick}"),
+        None => "alive at the end".to_owned(),
+    };
+    let _ = writeln!(
+        out,
+        "explain agent {agent}: curiosity {} caution {} sociability {} diligence {}; {fate}",
+        p.curiosity, p.caution, p.sociability, p.diligence
+    );
+    if let Some(Some(mind)) = report.minds.get(agent as usize) {
+        let _ = writeln!(out, "  believes ({} explored tiles):", mind.explored_tiles);
+        for place in &mind.landmarks {
+            let source = match place.source {
+                sim_core::LandmarkSource::Seen => "seen".to_owned(),
+                sim_core::LandmarkSource::Told => {
+                    format!("told, search +/-{}", place.search_radius)
+                }
+            };
+            let _ = writeln!(
+                out,
+                "    {:?} at ({},{}) [{source}, confidence {}, at {}s]",
+                place.kind, place.position.x, place.position.y, place.confidence, place.seen_second
+            );
+        }
+        let _ = writeln!(out, "  knows:");
+        for known in &mind.acquaintances {
+            let whereabouts = known
+                .last_seen_position
+                .map_or("whereabouts unknown".to_owned(), |at| {
+                    format!("last seen ({},{})", at.x, at.y)
+                });
+            let _ = writeln!(
+                out,
+                "    agent {} familiarity {} trust {} {whereabouts}",
+                known.agent.get(),
+                known.familiarity,
+                known.trust
+            );
+        }
+    }
+    let involved: Vec<_> = report.comms.involving(AgentId::new(agent)).collect();
+    let sent = involved
+        .iter()
+        .filter(|exchange| exchange.signal.sender.get() == agent)
+        .count();
+    let _ = writeln!(
+        out,
+        "  exchanges: {sent} as sender, {} as receiver; latest:",
+        involved.len() - sent
+    );
+    for exchange in involved.iter().rev().take(6).rev() {
+        let _ = writeln!(out, "    {exchange}");
+    }
+    out
 }
 
 fn social_mean(
@@ -538,7 +666,7 @@ fn random_land_spawns(
             y: anchor.y + ((key >> 32) % 13) as i64 - 6,
         });
         let near_enough = match config.spawn {
-            StudySpawn::AnyLand | StudySpawn::Groups => true,
+            StudySpawn::AnyLand | StudySpawn::Groups | StudySpawn::Valley => true,
             StudySpawn::NearWater => nearest_distance(position, fresh_water)
                 .is_some_and(|distance| distance <= NEAR_WATER_DISTANCE),
         };
@@ -689,9 +817,14 @@ impl fmt::Display for StudyReport {
         )?;
         write!(
             formatter,
-            "\n  social: company={}% acquaintances={} trust={} explored-gestures={}",
-            self.company_percent, self.mean_acquaintances, self.mean_trust, self.explored_gestures
+            "\n  social: company={}% acquaintances={} trust={} explored-gestures={} hint-decisions={}",
+            self.company_percent,
+            self.mean_acquaintances,
+            self.mean_trust,
+            self.explored_gestures,
+            self.hint_decisions
         )?;
+        write!(formatter, "\n{}", self.comms.summary())?;
         for (name, metric, low, high) in &self.trait_effects {
             write!(
                 formatter,

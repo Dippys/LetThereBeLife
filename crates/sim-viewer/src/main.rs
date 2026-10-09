@@ -3,10 +3,13 @@
 mod app;
 mod camera;
 mod generation;
+mod gestures;
 mod launch;
 mod render;
 mod spawn_menu;
 mod startup;
+
+use std::time::Instant;
 
 use sim_config::AppConfig;
 use sim_core::{Engine, WorldArchive};
@@ -46,10 +49,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     let archive = load_world_archive(engine_config.seed, &config);
-    let engine = Engine::new(engine_config);
+    let mut engine = Engine::new(engine_config);
+    let valley = options.valley.then(|| {
+        let started = Instant::now();
+        match startup::start_valley(&mut engine) {
+            Ok(start) => {
+                println!(
+                    "valley preset: {} agents in {},{}..{},{} (camp {},{}) ready in {:.2?}",
+                    engine.snapshot().agent_count,
+                    start.bounds.min.x,
+                    start.bounds.min.y,
+                    start.bounds.max.x,
+                    start.bounds.max.y,
+                    start.camp.x,
+                    start.camp.y,
+                    started.elapsed()
+                );
+                Some(start)
+            }
+            Err(error) => {
+                eprintln!("valley preset unavailable ({error}); continuing with normal startup");
+                None
+            }
+        }
+    });
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Wait);
     let mut app = ViewerApp::new(engine, archive, options.smoke_frames);
+    if let Some(start) = valley.flatten() {
+        app = app.with_valley(start);
+    }
     event_loop.run_app(&mut app)?;
     Ok(())
 }

@@ -23,10 +23,10 @@ use crate::routing::RoutePlanner;
 use crate::scheduler::Scheduler;
 use crate::structures::StructureStore;
 use crate::{
-    AgentId, DeathRecord, HealthDiagnostic, MoveRequestError, MovementEventOutcome,
-    MovementScheduled, NeedThresholdEventOutcome, PolicyDiagnostic, PolicyOptions,
-    RouteEventOutcome, SignalEvent, SimTime, SleepDiagnostic, StructureDiagnostic, World,
-    WorldConfig, WorldPosition, WorldRect,
+    AgentId, DeathRecord, HealthDiagnostic, HintOutcomeEvent, InterpretationEvent,
+    MoveRequestError, MovementEventOutcome, MovementScheduled, NeedThresholdEventOutcome,
+    PolicyDiagnostic, PolicyOptions, RouteEventOutcome, SignalEvent, SimTime, SleepDiagnostic,
+    StructureDiagnostic, World, WorldConfig, WorldPosition, WorldRect,
 };
 
 /// Immutable settings used to construct or reset a simulation.
@@ -125,6 +125,9 @@ pub struct Engine {
     policy_options: PolicyOptions,
     minds: Minds,
     signal_events: Vec<SignalEvent>,
+    interpretation_events: Vec<InterpretationEvent>,
+    hint_outcomes: Vec<HintOutcomeEvent>,
+    next_signal_id: u64,
     resource_deltas: ResourceDeltas,
     spawned_objects: SpawnedObjects,
     structures: StructureStore,
@@ -159,6 +162,9 @@ impl Engine {
             policy_options: PolicyOptions::default(),
             minds: Minds::default(),
             signal_events: Vec::new(),
+            interpretation_events: Vec::new(),
+            hint_outcomes: Vec::new(),
+            next_signal_id: 0,
             resource_deltas: ResourceDeltas::default(),
             spawned_objects: SpawnedObjects::default(),
             structures: StructureStore::default(),
@@ -200,6 +206,9 @@ impl Engine {
                 self.policy_options = PolicyOptions::default();
                 self.minds = Minds::default();
                 self.signal_events.clear();
+                self.interpretation_events.clear();
+                self.hint_outcomes.clear();
+                self.next_signal_id = 0;
                 self.resource_deltas = ResourceDeltas::default();
                 self.spawned_objects = SpawnedObjects::default();
                 self.structures = StructureStore::default();

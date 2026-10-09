@@ -20,13 +20,17 @@ use sim_core::{
 };
 use winit::window::Window;
 
-use crate::camera::Camera;
+use crate::{
+    camera::Camera,
+    gestures::{GestureLog, GestureSummary, RECENT_GESTURE_CAPACITY},
+};
 use colors::{rgba, selection_color};
 use gpu::{CameraBinding, CameraUniform, Instance, InstanceBuffer, StaticInstanceBuffers};
 use hud::{write_agent_text, write_hud_text};
 use instances::{
-    build_agent_instances, build_memory_marker_instances, build_relationship_marker_instances,
-    build_spawned_object_instances, build_structure_instances, chunk_outline, world_border,
+    build_agent_instances, build_gesture_instances, build_memory_marker_instances,
+    build_relationship_marker_instances, build_spawned_object_instances, build_structure_instances,
+    chunk_outline, world_border,
 };
 use overlay::build_screen_overlay;
 use summary::{
@@ -48,6 +52,7 @@ pub struct RenderState {
     pub hovered_agent: Option<AgentInspection>,
     pub spawn_message: Option<String>,
     pub spawn_menu: Option<SpawnMenuView>,
+    pub gestures: GestureSummary,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -158,6 +163,8 @@ pub struct Renderer {
     memory_marker_instances: Vec<Instance>,
     relationship_markers: InstanceBuffer,
     relationship_marker_instances: Vec<Instance>,
+    gesture_markers: InstanceBuffer,
+    gesture_marker_instances: Vec<Instance>,
     world_overlay: InstanceBuffer,
     world_overlay_instances: Vec<Instance>,
     screen_overlay: InstanceBuffer,
@@ -307,6 +314,12 @@ impl Renderer {
                 MAX_RELATIONSHIP_MARKER_INSTANCES,
             ),
             relationship_marker_instances: Vec::with_capacity(MAX_RELATIONSHIP_MARKER_INSTANCES),
+            gesture_markers: InstanceBuffer::dynamic(
+                &device,
+                "gesture marker instances",
+                MAX_GESTURE_MARKER_INSTANCES,
+            ),
+            gesture_marker_instances: Vec::with_capacity(MAX_GESTURE_MARKER_INSTANCES),
             world_overlay: InstanceBuffer::dynamic(
                 &device,
                 "world overlay",
@@ -411,6 +424,7 @@ impl Renderer {
         &mut self,
         engine: &Engine,
         state: RenderState,
+        gestures: &GestureLog,
         allow_world_sync: bool,
         changed_bounds: Option<WorldRect>,
     ) -> Result<(), wgpu::SurfaceError> {
@@ -500,6 +514,15 @@ impl Renderer {
         self.relationship_markers
             .write(&self.queue, &self.relationship_marker_instances);
 
+        build_gesture_instances(
+            gestures.recent(),
+            view.scale() as f32,
+            &mut self.gesture_marker_instances,
+        );
+        debug_assert!(self.gesture_marker_instances.len() <= MAX_GESTURE_MARKER_INSTANCES);
+        self.gesture_markers
+            .write(&self.queue, &self.gesture_marker_instances);
+
         let world_overlay = &mut self.world_overlay_instances;
         world_overlay.clear();
         if let Some(position) = state.hovered {
@@ -579,6 +602,7 @@ impl Renderer {
             self.structures.draw(&mut pass);
             self.memory_markers.draw(&mut pass);
             self.relationship_markers.draw(&mut pass);
+            self.gesture_markers.draw(&mut pass);
             self.agents.draw(&mut pass);
             self.world_overlay.draw(&mut pass);
             pass.set_bind_group(0, &self.screen_camera.bind_group, &[]);
@@ -608,6 +632,10 @@ const MAX_MEMORY_MARKER_INSTANCES: usize = LANDMARK_SLOTS * 4;
 const MAX_RELATIONSHIP_DOTS: usize = 16;
 /// Each acquaintance draws one end marker plus its dotted line.
 const MAX_RELATIONSHIP_MARKER_INSTANCES: usize = ACQUAINTANCE_SLOTS * (MAX_RELATIONSHIP_DOTS + 1);
+/// Dots drawn along one gesture's pointing line, at most.
+const MAX_GESTURE_DOTS: usize = 16;
+/// Each recent gesture draws its dotted line, a 4-sided search square, and a topic dot.
+const MAX_GESTURE_MARKER_INSTANCES: usize = RECENT_GESTURE_CAPACITY * (MAX_GESTURE_DOTS + 5);
 const MIN_DYNAMIC_INSTANCE_PIXELS: f32 = 1.25;
 const MIN_CHUNK_OUTLINE_PIXELS: f32 = 4.0;
 const MAX_CHUNK_OUTLINE_WORLD_WIDTH: f32 = 8.0;

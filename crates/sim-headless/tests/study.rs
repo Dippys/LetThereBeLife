@@ -63,3 +63,34 @@ fn social_minds_keep_company_and_sociability_matters() {
         "sociable {sociable}% vs loners {loners}%"
     );
 }
+
+#[test]
+fn valley_communication_log_is_consistent() {
+    let mut config = StudyConfig::new(1, sim_headless::VALLEY_POPULATION, 80_000);
+    config.spawn = StudySpawn::Valley;
+    let report = run_study(config).expect("seed 1 has a valley");
+    let summary = report.comms.summary();
+    assert!(summary.exchanges > 0, "the band talks");
+    assert!(summary.informed <= summary.receptions);
+    assert!(summary.acted <= summary.informed);
+    // Until M2 removes the hidden channel, receivers always read the sender's topic.
+    assert_eq!(summary.misread, 0);
+    for exchange in report.comms.exchanges() {
+        let signal = exchange.signal;
+        let error = signal
+            .inferred_position
+            .x
+            .abs_diff(signal.intended_place.x)
+            .max(signal.inferred_position.y.abs_diff(signal.intended_place.y));
+        assert!(
+            error <= u64::from(signal.search_radius),
+            "the real place lies inside the search area watchers infer"
+        );
+        for reception in &exchange.receptions {
+            assert_eq!(reception.interpretation.signal, signal.id);
+            assert_ne!(reception.interpretation.receiver, signal.sender);
+        }
+    }
+    let story = sim_headless::explain(&report, 0);
+    assert!(story.starts_with("explain agent 0:"));
+}

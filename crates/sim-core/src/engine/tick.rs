@@ -28,6 +28,8 @@ impl Engine {
         self.structure_diagnostics.clear();
         self.health_diagnostics.clear();
         self.signal_events.clear();
+        self.interpretation_events.clear();
+        self.hint_outcomes.clear();
         let mut processed = 0_usize;
         while processed < MAX_DUE_EVENTS_PER_TICK {
             let Some(event) = self.scheduler.pop_due(self.time) else {

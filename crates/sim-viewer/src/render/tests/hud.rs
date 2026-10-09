@@ -10,6 +10,7 @@ use sim_core::{
 };
 
 use super::test_render_state;
+use crate::gestures::{GestureSummary, LastGesture};
 use crate::render::colors::{rgba, selection_color};
 use crate::render::gpu::{Instance, static_instance_chunks};
 use crate::render::hud::{
@@ -219,6 +220,7 @@ fn hud_contains_simulation_and_loaded_cell_inspection_data() {
     assert!(text.contains("SIM 0000:01:02.0  TICK 3721"));
     assert!(text.contains("SEED 7  LOADED "));
     assert!(text.contains("AGENTS ACTIVE  TOTAL 0  LIVING 0  ACTIVE 0  DEAD 0"));
+    assert!(text.contains("\nGESTURES 0\n"));
     assert!(text.contains("  REV "));
     assert!(text.contains("CURSOR X 0  Y 0"));
     assert!(text.contains("CHUNK X 0 Y 0  LOCAL 0,0"));
@@ -230,6 +232,21 @@ fn hud_contains_simulation_and_loaded_cell_inspection_data() {
     assert!(text.contains("MOIST "));
     assert!(text.contains("WIND "));
     assert!(text.contains("FEATURE "));
+}
+
+#[test]
+fn hud_counts_gestures_and_names_the_latest() {
+    let world = World::generate(7, WorldConfig::new(64, 64).unwrap());
+    let mut state = test_render_state(None);
+    state.gestures = GestureSummary {
+        total: 123,
+        last: Some(LastGesture { id: 7, watchers: 4 }),
+    };
+    let mut text = String::new();
+
+    write_hud_text(&mut text, &world, &state);
+
+    assert!(text.contains("\nGESTURES 123  LAST #7 -> 4 WATCHERS\n"));
 }
 
 #[test]
@@ -260,6 +277,13 @@ fn every_hud_layout_fits_the_fixed_gpu_instance_budget() {
         selected: SpawnKind::BerryBush,
         placing: true,
     });
+    state.gestures = GestureSummary {
+        total: u64::MAX,
+        last: Some(LastGesture {
+            id: u64::MAX,
+            watchers: u16::MAX,
+        }),
+    };
     let mut text = String::new();
     let mut instances = Vec::new();
 
@@ -494,6 +518,13 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
     state.selection_valid = false;
     state.generation_status = GenerationStatus::WorkerUnavailable;
     state.spawn_message = Some("SPAWN FAILED - CELL IS OCCUPIED BY AGENT 4294967295".to_owned());
+    state.gestures = GestureSummary {
+        total: u64::MAX,
+        last: Some(LastGesture {
+            id: u64::MAX,
+            watchers: u16::MAX,
+        }),
+    };
     let mut hud_text = String::with_capacity(HUD_TEXT_CAPACITY);
     write_hud_text(&mut hud_text, &world, &state);
     let mut instances = Vec::with_capacity(SCREEN_OVERLAY_CAPACITY);

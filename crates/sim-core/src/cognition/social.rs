@@ -142,6 +142,11 @@ impl SocialMemory {
             .map(|slot| slot as u8)
     }
 
+    pub(crate) fn agent_in(&self, slot: u8) -> Option<AgentId> {
+        let known = self.slots[usize::from(slot)];
+        (known.agent != EMPTY).then(|| AgentId::new(known.agent))
+    }
+
     pub(crate) fn trust(&self, slot: u8) -> u8 {
         self.slots[usize::from(slot)].trust
     }

@@ -21,9 +21,10 @@ use winit::window::Window;
 use crate::{
     camera::{Camera, Viewport},
     generation::{ChunkPager, GenerationId, GenerationKind, WorldGenerator},
+    gestures::GestureLog,
     render,
     spawn_menu::SpawnMenu,
-    startup::residency_ready,
+    startup::{ValleyStart, residency_ready},
 };
 
 #[derive(Clone, Copy)]
@@ -70,6 +71,8 @@ pub(crate) struct ViewerApp {
     population_status: PopulationStatus,
     spawn_message: Option<String>,
     spawn_menu: SpawnMenu,
+    gestures: GestureLog,
+    initial_focus: Option<WorldPosition>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,7 +133,21 @@ impl ViewerApp {
             },
             spawn_message: ready.then(|| "READY - PRESS T ON LOADED TERRAIN".to_owned()),
             spawn_menu: SpawnMenu::default(),
+            gestures: GestureLog::new(),
+            initial_focus: None,
         }
+    }
+
+    /// Opens on a band already started by `startup::start_valley`: running, with
+    /// the camera on the camp once the window exists.
+    pub(crate) fn with_valley(mut self, start: ValleyStart) -> Self {
+        self.population_status = PopulationStatus::Active;
+        self.spawn_message = Some(format!(
+            "VALLEY {},{} TO {},{}",
+            start.bounds.min.x, start.bounds.min.y, start.bounds.max.x, start.bounds.max.y
+        ));
+        self.initial_focus = Some(start.camp);
+        self
     }
 
     fn viewport(&self, width: u32, height: u32) -> Viewport {
@@ -150,3 +167,5 @@ const FRAME_TIME: Duration = Duration::from_nanos(16_666_667);
 const SMOKE_TIMEOUT: Duration = Duration::from_secs(30);
 const WORLD_SYNC_INTERVAL: Duration = Duration::from_millis(125);
 const ARCHIVE_DETAIL_MIN_SCALE: f64 = 0.25;
+/// Cells visible across the shorter screen axis when opening on the valley camp.
+const VALLEY_VIEW_SPAN_CELLS: f64 = 128.0;

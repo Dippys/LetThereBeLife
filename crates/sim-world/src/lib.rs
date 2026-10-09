@@ -12,6 +12,7 @@ mod storage;
 mod terrain;
 mod traversal;
 mod validation;
+mod valley;
 mod worldgen;
 
 pub use archive::{
@@ -33,6 +34,10 @@ pub use traversal::{
     TraversalStep, WorldQueryError,
 };
 pub use validation::GenerateAreaError;
+pub use valley::{
+    CAMP_RADIUS, VALLEY_BAND, VALLEY_SIDE, Valley, ValleyScore, camp_sites, find_valley,
+    score_square,
+};
 
 use worldgen::REGION_SIZE;
 

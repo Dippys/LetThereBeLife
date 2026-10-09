@@ -188,7 +188,7 @@ fn perceived_nearest(
 impl MentalMap {
     /// Updates beliefs from one perception: forgets places that turned out empty,
     /// remembers the nearest visible place of each kind, and marks the tile explored.
-    /// `on_hint(teller_slot, confirmed)` reports hints that were confirmed by
+    /// `on_hint(teller_slot, confirmed, kind)` reports hints that were confirmed by
     /// seeing the place or abandoned after failed searches.
     pub(crate) fn observe(
         &mut self,
@@ -196,7 +196,7 @@ impl MentalMap {
         origin: WorldPosition,
         perception: &PhysicalPerception,
         now: u32,
-        on_hint: &mut impl FnMut(u8, bool),
+        on_hint: &mut impl FnMut(u8, bool, LandmarkKind),
     ) {
         let _ = self.record_visit(origin);
         let nearest = perceived_nearest(origin, perception);
@@ -222,7 +222,7 @@ impl MentalMap {
                 slot_ref.confidence = slot_ref.confidence.saturating_sub(FAILED_PROBE_PENALTY);
                 if slot_ref.confidence < FORGET_CONFIDENCE || slot_ref.probes >= MAX_PROBES {
                     if slot_ref.teller != 0 {
-                        on_hint(slot_ref.teller - 1, false);
+                        on_hint(slot_ref.teller - 1, false, kind_of_slot(slot));
                     }
                     *slot_ref = Landmark::default();
                 }
@@ -240,7 +240,7 @@ impl MentalMap {
         kind: LandmarkKind,
         position: WorldPosition,
         now: u32,
-        on_hint: &mut impl FnMut(u8, bool),
+        on_hint: &mut impl FnMut(u8, bool, LandmarkKind),
     ) {
         let Some((x, y)) = compact(position) else {
             return;
@@ -262,7 +262,7 @@ impl MentalMap {
                 && chebyshev(landmark.position(), position) <= landmark.radius() + MERGE_RADIUS
             {
                 if landmark.teller != 0 {
-                    on_hint(landmark.teller - 1, true);
+                    on_hint(landmark.teller - 1, true, kind);
                 }
                 *landmark = Landmark::default();
             }

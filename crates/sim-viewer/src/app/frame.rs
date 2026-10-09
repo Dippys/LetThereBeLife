@@ -9,7 +9,7 @@ use std::{
 use sim_core::WorldArchive;
 use winit::{dpi::LogicalSize, event_loop::ActiveEventLoop, window::WindowAttributes};
 
-use super::{PopulationStatus, ViewerApp, WORLD_SYNC_INTERVAL};
+use super::{PopulationStatus, VALLEY_VIEW_SPAN_CELLS, ViewerApp, WORLD_SYNC_INTERVAL};
 use crate::{render, spawn_menu::SpawnMenuMode, startup};
 
 impl ViewerApp {
@@ -29,10 +29,13 @@ impl ViewerApp {
             .expect("initialize GPU renderer"),
         );
         self.window = Some(window);
-        if self.archive.is_some() {
-            let size = self.window.as_ref().expect("window exists").inner_size();
+        let size = self.window.as_ref().expect("window exists").inner_size();
+        let viewport = self.viewport(size.width, size.height);
+        if let Some(center) = self.initial_focus {
             self.camera
-                .show_full_world(self.viewport(size.width, size.height));
+                .focus_on(center, VALLEY_VIEW_SPAN_CELLS, viewport);
+        } else if self.archive.is_some() {
+            self.camera.show_full_world(viewport);
         }
         self.last_frame = Some(Instant::now());
     }
@@ -111,7 +114,9 @@ impl ViewerApp {
                         placing: self.spawn_menu.is_placing(),
                     },
                 ),
+                gestures: self.gestures.summary(),
             },
+            &self.gestures,
             allow_world_sync,
             self.pending_world_changes,
         );

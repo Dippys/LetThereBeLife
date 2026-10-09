@@ -5,10 +5,10 @@ use super::errors::{move_failure, perception_failure};
 use crate::cognition::{Personality, belief_seconds, interpret, point, told_confidence};
 use crate::policy::{MindInput, PolicyAction, PolicySelection, deliberate};
 use crate::{
-    AgentActivity, AgentId, Engine, ExplorationHeading, GestureTopic, InventoryView, LandmarkKind,
-    MentalMapView, PHYSICAL_POLICY_RADIUS, PhysicalGoal, PhysicalNeedsView, PhysicalPerception,
-    PolicyDiagnostic, PolicyDiagnosticKind, PolicyFailureReason, PolicyOptions, PolicyReason,
-    SIGNAL_TICKS, SignalEvent, WorldPosition,
+    AgentActivity, AgentId, Engine, ExplorationHeading, GestureTopic, HintOutcomeEvent,
+    InterpretationEvent, InventoryView, LandmarkKind, MentalMapView, PHYSICAL_POLICY_RADIUS,
+    PhysicalGoal, PhysicalNeedsView, PhysicalPerception, PolicyDiagnostic, PolicyDiagnosticKind,
+    PolicyFailureReason, PolicyOptions, PolicyReason, SIGNAL_TICKS, SignalEvent, WorldPosition,
 };
 
 const fn can_watch(activity: AgentActivity) -> bool {
@@ -35,6 +35,8 @@ impl Engine {
             .unwrap_or(ExplorationHeading::North);
         let social = self.policy_options.social;
         let personality = self.personality_in_use(agent);
+        let at = self.time;
+        let hint_outcomes = &mut self.hint_outcomes;
         let mind = self.minds.get_mut(agent);
         if social {
             for other in &perception.agents {
@@ -55,7 +57,14 @@ impl Engine {
             origin,
             perception,
             now,
-            &mut |teller, confirmed| {
+            &mut |teller, confirmed, kind| {
+                hint_outcomes.push(HintOutcomeEvent {
+                    agent,
+                    teller: people.agent_in(teller),
+                    kind,
+                    confirmed,
+                    at,
+                });
                 if social {
                     people.hint_checked(teller, confirmed);
                 }
@@ -177,6 +186,8 @@ impl Engine {
             .perceive_physical(sender, PHYSICAL_POLICY_RADIUS)
             .map_err(perception_failure)?;
         let now = belief_seconds(self.time);
+        let signal = self.next_signal_id;
+        self.next_signal_id += 1;
         let (mut watchers, mut informed) = (0_u16, 0_u16);
         let social = self.policy_options.social;
         for watcher in &perception.agents {
@@ -185,6 +196,7 @@ impl Engine {
             }
             watchers = watchers.saturating_add(1);
             let mind = self.minds.get_mut(watcher.id);
+            let mut confidence = 0;
             let changed = match topic {
                 GestureTopic::Explored => mind.map.record_visit(estimate),
                 GestureTopic::Place(kind) => {
@@ -194,25 +206,36 @@ impl Engine {
                         None
                     };
                     let trust = teller.map_or(crate::DEFAULT_TRUST, |slot| mind.social.trust(slot));
-                    mind.map.remember_told(
-                        kind,
-                        estimate,
-                        uncertainty,
-                        now,
-                        teller,
-                        told_confidence(trust),
-                    )
+                    confidence = told_confidence(trust);
+                    mind.map
+                        .remember_told(kind, estimate, uncertainty, now, teller, confidence)
                 }
             };
             if changed {
                 informed = informed.saturating_add(1);
             }
+            // Today the receiver reads the topic correctly; M2 replaces this with inference.
+            self.interpretation_events.push(InterpretationEvent {
+                signal,
+                receiver: watcher.id,
+                at: self.time,
+                understood: topic,
+                estimate,
+                search_radius: u16::from(uncertainty) * 4,
+                confidence,
+                changed,
+            });
         }
         self.signal_events.push(SignalEvent {
+            id: signal,
             sender,
             at: self.time,
+            origin: from,
             topic,
+            intended_place: place,
+            gesture,
             inferred_position: estimate,
+            search_radius: u16::from(uncertainty) * 4,
             informed,
             watchers,
         });
@@ -252,8 +275,18 @@ impl Engine {
         }
     }
 
-    /// Pointing gestures completed during the latest tick.
+    /// Gestures completed during the latest tick (private intent included: tools only).
     pub fn signal_events(&self) -> &[SignalEvent] {
         &self.signal_events
+    }
+
+    /// How each watcher read the latest tick's gestures.
+    pub fn interpretation_events(&self) -> &[InterpretationEvent] {
+        &self.interpretation_events
+    }
+
+    /// Hints confirmed or abandoned during the latest tick.
+    pub fn hint_outcomes(&self) -> &[HintOutcomeEvent] {
+        &self.hint_outcomes
     }
 }

@@ -1,7 +1,8 @@
-//! Color palette for terrain, features, spawned objects, agents, structures, remembered places, relationships, and selection previews.
+//! Color palette for terrain, features, spawned objects, agents, structures, remembered places, relationships, gestures, and selection previews.
 
 use sim_core::{
-    AgentActivity, BiomeType, FeatureKind, LandmarkKind, SpawnKind, StructureState, SurfaceType,
+    AgentActivity, BiomeType, FeatureKind, GestureTopic, LandmarkKind, SpawnKind, StructureState,
+    SurfaceType,
 };
 
 pub(super) const fn structure_color(state: StructureState) -> u32 {
@@ -31,6 +32,17 @@ pub(super) const fn landmark_color(kind: LandmarkKind) -> u32 {
         LandmarkKind::Wood => rgba(164, 104, 52, 235),
         LandmarkKind::Stone => rgba(176, 176, 170, 235),
         LandmarkKind::Shelter => rgba(255, 150, 40, 235),
+    }
+}
+
+/// The public part of a gesture (pointing line and search square): one neutral color.
+pub(super) const GESTURE_COLOR: u32 = rgba(255, 252, 236, 220);
+
+/// Debug-only marker of a sender's private gesture topic.
+pub(super) const fn gesture_topic_color(topic: GestureTopic) -> u32 {
+    match topic {
+        GestureTopic::Place(kind) => landmark_color(kind),
+        GestureTopic::Explored => rgba(150, 150, 160, 235),
     }
 }
 

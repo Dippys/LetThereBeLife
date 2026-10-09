@@ -14,11 +14,23 @@ const DIRECTION_SCALE: i64 = 8;
 
 /// What watchers can observe of a pointing gesture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Gesture {
+pub struct Gesture {
     /// Pointing direction, larger axis normalized to `±DIRECTION_SCALE`.
     direction: (i8, i8),
     /// Emphasis: `floor(log2(distance))`, the distance's order of magnitude.
     emphasis: u8,
+}
+
+impl Gesture {
+    /// Pointing direction, larger axis normalized to ±8.
+    pub const fn direction(self) -> (i8, i8) {
+        self.direction
+    }
+
+    /// Order of magnitude of the pointed distance (`floor(log2(cells))`).
+    pub const fn emphasis(self) -> u8 {
+        self.emphasis
+    }
 }
 
 /// Rounds `numerator / denominator` to the nearest integer, halves away from zero.

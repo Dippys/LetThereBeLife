@@ -6,17 +6,20 @@ use sim_core::{
     SpawnedObjectView, StructureState, WorldPosition, WorldRect,
 };
 
+use crate::gestures::{GestureMark, RECENT_GESTURE_CAPACITY};
 use crate::render::colors::{
-    agent_color, landmark_color, relationship_color, spawn_kind_color, structure_color,
+    GESTURE_COLOR, agent_color, gesture_topic_color, landmark_color, relationship_color,
+    spawn_kind_color, structure_color,
 };
 use crate::render::instances::{
-    build_agent_instances, build_memory_marker_instances, build_relationship_marker_instances,
-    build_spawned_object_instances,
+    build_agent_instances, build_gesture_instances, build_memory_marker_instances,
+    build_relationship_marker_instances, build_spawned_object_instances,
 };
 use crate::render::summary::{CacheSyncAction, cache_sync_action};
 use crate::render::{
-    MAX_AGENT_INSTANCES, MAX_MEMORY_MARKER_INSTANCES, MAX_RELATIONSHIP_DOTS,
-    MAX_RELATIONSHIP_MARKER_INSTANCES, MAX_SPAWNED_OBJECT_INSTANCES,
+    MAX_AGENT_INSTANCES, MAX_GESTURE_DOTS, MAX_GESTURE_MARKER_INSTANCES,
+    MAX_MEMORY_MARKER_INSTANCES, MAX_RELATIONSHIP_DOTS, MAX_RELATIONSHIP_MARKER_INSTANCES,
+    MAX_SPAWNED_OBJECT_INSTANCES,
 };
 
 #[test]
@@ -270,4 +273,66 @@ fn relationship_markers_dot_a_line_to_each_last_seen_position() {
     );
     build_relationship_marker_instances(origin, &[far], 0.5, &mut instances);
     assert!(instances.is_empty());
+}
+
+#[test]
+fn gestures_draw_a_neutral_dotted_line_search_square_and_topic_dot() {
+    let gesture = GestureMark {
+        id: 3,
+        origin: WorldPosition { x: 0, y: 0 },
+        inferred_position: WorldPosition { x: 10, y: 0 },
+        search_radius: 2,
+        watchers: 2,
+        topic: sim_core::GestureTopic::Place(LandmarkKind::Food),
+    };
+    let mut instances = Vec::new();
+
+    // At 4 px per cell the line is 40 px: 4 dots at 8 px spacing, then the
+    // 4-sided search square around the inferred cell, then the topic dot.
+    build_gesture_instances([&gesture], 4.0, &mut instances);
+    assert_eq!(instances.len(), 4 + 4 + 1);
+    let dot_centers: Vec<_> = instances[..4]
+        .iter()
+        .map(|dot| dot.position[0] + dot.size[0] / 2.0)
+        .collect();
+    assert_eq!(dot_centers, [2.5, 4.5, 6.5, 8.5]);
+    assert!(
+        instances[..8]
+            .iter()
+            .all(|instance| instance.color == GESTURE_COLOR)
+    );
+    assert_eq!(instances[4].position, [8.0, -2.0]);
+    assert_eq!(instances[4].size, [5.0, 0.5]);
+    assert_eq!(instances[7].position, [12.5, -2.0]);
+    assert_eq!(instances[7].size, [0.5, 5.0]);
+    assert_eq!(instances[8].position, [-0.125, -0.125]);
+    assert_eq!(instances[8].size, [1.25, 1.25]);
+    assert_eq!(instances[8].color, landmark_color(LandmarkKind::Food));
+    assert_eq!(
+        gesture_topic_color(sim_core::GestureTopic::Place(LandmarkKind::Food)),
+        landmark_color(LandmarkKind::Food)
+    );
+    assert_ne!(
+        gesture_topic_color(sim_core::GestureTopic::Explored),
+        GESTURE_COLOR
+    );
+
+    // Long lines cap their dots, and more gestures than the ring holds are ignored.
+    let far = GestureMark {
+        inferred_position: WorldPosition {
+            x: 9_000,
+            y: -4_000,
+        },
+        ..gesture
+    };
+    let many = [far; RECENT_GESTURE_CAPACITY + 3];
+    build_gesture_instances(&many, 4.0, &mut instances);
+    assert_eq!(instances.len(), MAX_GESTURE_MARKER_INSTANCES);
+    assert_eq!(
+        MAX_GESTURE_MARKER_INSTANCES,
+        RECENT_GESTURE_CAPACITY * (MAX_GESTURE_DOTS + 5)
+    );
+
+    build_gesture_instances([&gesture], 0.5, &mut instances);
+    assert!(instances.is_empty(), "far zoom hides gesture markers");
 }

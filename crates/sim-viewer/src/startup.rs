@@ -1,8 +1,10 @@
 use std::{error::Error, fmt};
 
+use rayon::prelude::*;
 use sim_core::{
-    AgentId, AgentSpawnError, Engine, EngineCommand, PolicyActivationError, PolicyOptions,
-    PopulationInit, PopulationInitError, World, WorldPosition, WorldRect,
+    AgentId, AgentSpawnError, Engine, EngineCommand, GenerateAreaError, PolicyActivationError,
+    PolicyOptions, PopulationInit, PopulationInitError, VALLEY_BAND, VALLEY_SIDE, World,
+    WorldPosition, WorldRect, camp_sites, find_valley,
 };
 
 pub const VIEWER_AGENT_LIMIT: usize = 4_096;
@@ -48,13 +50,27 @@ pub fn spawn_at(engine: &mut Engine, position: WorldPosition) -> Result<AgentId,
     }
 
     let active_area = initial_active_area(engine.world(), position)?;
+    spawn_band(engine, active_area, &[position])
+}
+
+/// Starts the population in one step: agents at `sites` (in order) inside an
+/// `active_area` they may roam, then full minds. A policy failure resets the
+/// engine so no half-initialized population remains.
+pub fn spawn_band(
+    engine: &mut Engine,
+    active_area: WorldRect,
+    sites: &[WorldPosition],
+) -> Result<AgentId, ViewerSpawnError> {
+    if sites.len() > VIEWER_AGENT_LIMIT {
+        return Err(ViewerSpawnError::PresentationLimit);
+    }
     let outcome = engine
         .initialize_population(
             PopulationInit {
                 active_area,
-                population: 1,
+                population: sites.len() as u32,
             },
-            &[position],
+            sites,
         )
         .map_err(ViewerSpawnError::Population)?;
     if let Err(error) = engine.activate_physical_policy_with_options(PolicyOptions::full()) {
@@ -62,6 +78,65 @@ pub fn spawn_at(engine: &mut Engine, position: WorldPosition) -> Result<AgentId,
         return Err(ViewerSpawnError::Policy(error));
     }
     Ok(outcome.first_id)
+}
+
+/// The `--valley` preset as started: the valley and where the band camps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ValleyStart {
+    pub bounds: WorldRect,
+    pub camp: WorldPosition,
+}
+
+#[derive(Debug)]
+pub enum ValleyStartError {
+    NotFound(u64),
+    Generation(GenerateAreaError),
+    NoCamp,
+    Spawn(ViewerSpawnError),
+}
+
+impl fmt::Display for ValleyStartError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotFound(seed) => {
+                write!(
+                    formatter,
+                    "no livable valley near the origin for seed {seed}"
+                )
+            }
+            Self::Generation(error) => write!(formatter, "valley terrain failed: {error}"),
+            Self::NoCamp => formatter.write_str("the valley has no room for the band beside water"),
+            Self::Spawn(error) => write!(formatter, "band spawn failed: {error}"),
+        }
+    }
+}
+
+impl Error for ValleyStartError {}
+
+/// Finds the seed's valley, generates it synchronously (chunks in parallel,
+/// inserted in request order, so the result is deterministic), and spawns the
+/// `VALLEY_BAND` at its camp with the whole valley as the active area. Requires
+/// an engine with no population yet.
+pub fn start_valley(engine: &mut Engine) -> Result<ValleyStart, ValleyStartError> {
+    let seed = engine.config().seed;
+    let valley = find_valley(seed, VALLEY_SIDE).ok_or(ValleyStartError::NotFound(seed))?;
+    let loads = engine
+        .world()
+        .missing_chunk_load_requests(valley.bounds)
+        .map_err(ValleyStartError::Generation)?
+        .into_par_iter()
+        .map(|request| World::generate_chunk_load(seed, request))
+        .collect();
+    engine
+        .apply_world_chunk_loads(loads)
+        .map_err(ValleyStartError::Generation)?;
+    let sites = camp_sites(engine.world(), valley.bounds, VALLEY_BAND, seed)
+        .ok_or(ValleyStartError::NoCamp)?;
+    spawn_band(engine, valley.bounds, &sites).map_err(ValleyStartError::Spawn)?;
+    Ok(ValleyStart {
+        bounds: valley.bounds,
+        camp: sites[0],
+    })
 }
 
 fn initial_active_area(
@@ -241,6 +316,68 @@ mod tests {
 
         assert_eq!(agent, AgentId::new(0));
         assert!(loaded.contains_rect(perception.area));
+    }
+
+    #[test]
+    fn valley_preset_starts_the_band_inside_the_valley_with_full_minds() {
+        let mut engine = Engine::new(EngineConfig {
+            seed: 1,
+            ticks_per_second: 60,
+            world: WorldConfig::new(64, 64).unwrap(),
+        });
+        let start = start_valley(&mut engine).unwrap();
+        let valley = find_valley(1, VALLEY_SIDE).unwrap();
+
+        assert_eq!(start.bounds, valley.bounds);
+        assert!(engine.world().area_is_generated(valley.bounds));
+        assert_eq!(engine.snapshot().agent_count as usize, VALLEY_BAND);
+        assert_eq!(engine.policy_options(), PolicyOptions::full());
+        let agents: Vec<_> = engine.agent_views(usize::MAX).collect();
+        assert_eq!(agents[0].position, start.camp);
+        assert!(
+            agents
+                .iter()
+                .all(|agent| valley.bounds.contains(agent.position))
+        );
+        // A second start finds the population already there.
+        assert!(matches!(
+            start_valley(&mut engine),
+            Err(ValleyStartError::Spawn(ViewerSpawnError::Population(
+                PopulationInitError::AlreadyInitialized
+            )))
+        ));
+    }
+
+    #[test]
+    fn band_spawns_explicit_sites_in_order_and_resets_cleanly() {
+        let mut engine = resident_engine(false);
+        let bounds = simulation_bounds(engine.world());
+        let sites: Vec<_> = (bounds.min.y..bounds.max.y)
+            .flat_map(|y| (bounds.min.x..bounds.max.x).map(move |x| WorldPosition { x, y }))
+            .filter(|position| {
+                engine.world().standability_at(*position) == Ok(sim_core::Standability::Standable)
+            })
+            .step_by(97)
+            .take(5)
+            .collect();
+        assert_eq!(
+            spawn_band(&mut engine, bounds, &sites).unwrap(),
+            AgentId::new(0)
+        );
+        assert_eq!(
+            engine
+                .agent_views(usize::MAX)
+                .map(|agent| agent.position)
+                .collect::<Vec<_>>(),
+            sites
+        );
+        assert_eq!(engine.policy_options(), PolicyOptions::full());
+        reset(&mut engine);
+        assert_eq!(engine.snapshot().agent_count, 0);
+        assert!(matches!(
+            spawn_band(&mut engine, bounds, &vec![sites[0]; VIEWER_AGENT_LIMIT + 1]),
+            Err(ViewerSpawnError::PresentationLimit)
+        ));
     }
 
     #[test]

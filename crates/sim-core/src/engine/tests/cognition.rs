@@ -48,7 +48,7 @@ fn remember_water(engine: &mut Engine, agent: AgentId, place: WorldPosition) {
         .minds
         .get_mut(agent)
         .map
-        .observe(agent.get(), place, &perception, 0, &mut |_, _| {});
+        .observe(agent.get(), place, &perception, 0, &mut |_, _, _| {});
 }
 
 #[test]
@@ -64,6 +64,15 @@ fn a_gesture_gives_watchers_a_rough_hint_not_the_exact_place() {
     let events = engine.signal_events();
     assert_eq!(events.len(), 1);
     assert_eq!((events[0].watchers, events[0].informed), (1, 1));
+    assert_eq!(
+        events[0].intended_place, lake,
+        "the log keeps the private intent"
+    );
+    let readings = engine.interpretation_events();
+    assert_eq!(readings.len(), 1, "one reading per watcher");
+    assert_eq!(readings[0].signal, events[0].id);
+    assert_eq!(readings[0].receiver, AgentId::new(1));
+    assert!(readings[0].changed);
     assert_eq!(events[0].topic, GestureTopic::Place(LandmarkKind::Water));
 
     let watcher = engine.mental_map(AgentId::new(1)).unwrap();
@@ -189,7 +198,7 @@ fn explored_gestures_mark_ground_for_watchers() {
         .minds
         .get_mut(AgentId::new(0))
         .map
-        .observe(0, far, &far_view, 0, &mut |_, _| {});
+        .observe(0, far, &far_view, 0, &mut |_, _, _| {});
     let (marker, _) = engine
         .minds
         .get(AgentId::new(0))

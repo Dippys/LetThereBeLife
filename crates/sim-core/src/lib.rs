@@ -23,10 +23,10 @@ pub use agent::{
     RouteEventOutcome, RouteOutcomeKind, RouteScheduled, SimTime, SpawnInvalidReason,
 };
 pub use cognition::{
-    ACQUAINTANCE_SLOTS, AcquaintanceView, DEFAULT_TRUST, FRIEND_FAMILIARITY, GestureTopic,
-    LANDMARK_SLOTS, LandmarkKind, LandmarkSource, LandmarkView, MERGE_RADIUS, MentalMapView,
-    Personality, PolicyOptions, SEARCH_SPACING, SHARE_COOLDOWN_SECONDS, SIGNAL_TICKS, SignalEvent,
-    VISIT_TILE_SIZE, VISITED_TILE_SLOTS,
+    ACQUAINTANCE_SLOTS, AcquaintanceView, DEFAULT_TRUST, FRIEND_FAMILIARITY, Gesture, GestureTopic,
+    HintOutcomeEvent, InterpretationEvent, LANDMARK_SLOTS, LandmarkKind, LandmarkSource,
+    LandmarkView, MERGE_RADIUS, MentalMapView, Personality, PolicyOptions, SEARCH_SPACING,
+    SHARE_COOLDOWN_SECONDS, SIGNAL_TICKS, SignalEvent, VISIT_TILE_SIZE, VISITED_TILE_SLOTS,
 };
 pub use diagnostics::{EngineCapacityMetrics, EngineDiagnostics, EngineWorkMetrics};
 pub use engine::{
@@ -54,16 +54,17 @@ pub use resources::{
 };
 pub use routing::{MAX_ROUTE_EXPANSIONS, RouteRequest, RouteRequestError};
 pub use sim_world::{
-    ArchiveBakeProgress, ArchiveBakeStats, BaseResource, BiomeType, CHUNK_SIZE, ChunkCoord,
-    ChunkGenerator, ChunkInspection, ChunkLoadRequest, ChunkLocalPosition, ChunkOverview,
-    ChunkPresence, ClimateSample, DEFAULT_INITIAL_WORLD_SIZE, Feature, FeatureKind,
+    ArchiveBakeProgress, ArchiveBakeStats, BaseResource, BiomeType, CAMP_RADIUS, CHUNK_SIZE,
+    ChunkCoord, ChunkGenerator, ChunkInspection, ChunkLoadRequest, ChunkLocalPosition,
+    ChunkOverview, ChunkPresence, ClimateSample, DEFAULT_INITIAL_WORLD_SIZE, Feature, FeatureKind,
     GenerateAreaError, GeneratedCell, MAX_CHUNKS_PER_GENERATION, MAX_GENERATED_CELLS,
     MAX_GENERATED_CHUNKS, MAX_GENERATED_TERRAIN_BYTES, MAX_INITIAL_CHUNKS,
     MAX_TRAVERSABLE_ELEVATION_DELTA, PrevailingWind, ResourceKind, Standability, SurfaceType,
-    TerrainCell, TerrainClass, TraversalKind, TraversalStep, WORLD_GENERATION_BOUNDS,
-    WORLD_GENERATOR_VERSION, WORLD_HALF_EXTENT, WORLD_SIDE_CELLS, WaterSource, World, WorldArchive,
-    WorldArchiveError, WorldChunk, WorldChunkLoad, WorldConfig, WorldConfigError, WorldOverview,
-    WorldPosition, WorldQueryError, WorldRect,
+    TerrainCell, TerrainClass, TraversalKind, TraversalStep, VALLEY_BAND, VALLEY_SIDE, Valley,
+    ValleyScore, WORLD_GENERATION_BOUNDS, WORLD_GENERATOR_VERSION, WORLD_HALF_EXTENT,
+    WORLD_SIDE_CELLS, WaterSource, World, WorldArchive, WorldArchiveError, WorldChunk,
+    WorldChunkLoad, WorldConfig, WorldConfigError, WorldOverview, WorldPosition, WorldQueryError,
+    WorldRect, camp_sites, find_valley, score_square,
 };
 pub use sleep::{
     SleepDiagnostic, SleepDiagnosticKind, SleepInterruptionReason, SleepQuality, SleepRequestError,

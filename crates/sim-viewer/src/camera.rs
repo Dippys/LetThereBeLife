@@ -43,6 +43,26 @@ impl Camera {
         self.constrain_to_viewport(viewport);
     }
 
+    /// Centers on `center` with about `span_cells` cells visible across the
+    /// shorter screen axis (zoom limits still apply).
+    pub fn focus_on(&mut self, center: WorldPosition, span_cells: f64, viewport: Viewport) {
+        if viewport.screen_width == 0 || viewport.screen_height == 0 {
+            return;
+        }
+        let fit = initial_fit_scale(
+            viewport.screen_width,
+            viewport.screen_height,
+            viewport.world_width,
+            viewport.world_height,
+        );
+        let wanted =
+            f64::from(viewport.screen_width.min(viewport.screen_height)) / span_cells.max(1.0);
+        self.center_x = center.x as f64 + 0.5;
+        self.center_y = center.y as f64 + 0.5;
+        self.zoom = wanted / fit;
+        self.constrain_to_viewport(viewport);
+    }
+
     pub fn scale(
         self,
         screen_width: u32,
@@ -306,6 +326,19 @@ mod tests {
                 .world_bounds()
                 .contains_rect(WORLD_GENERATION_BOUNDS)
         );
+    }
+
+    #[test]
+    fn focus_centers_on_a_cell_with_the_requested_span() {
+        let viewport = test_viewport();
+        let mut camera = Camera::at_origin();
+        let center = WorldPosition { x: 1_500, y: -700 };
+        camera.focus_on(center, 108.0, viewport);
+        assert_eq!(
+            camera.screen_to_world_position(480.0, 270.0, viewport),
+            center
+        );
+        assert!((camera.scale(960, 540, 1_024, 1_024) - 5.0).abs() < 1e-9);
     }
 
     #[test]

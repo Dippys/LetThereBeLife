@@ -165,6 +165,7 @@ impl ApplicationHandler for ViewerApp {
         }
         let snapshot = self.engine.snapshot();
         let now = Instant::now();
+        self.dirty |= self.gestures.expire(now);
         if self.smoke_deadline.is_some_and(|deadline| now >= deadline) {
             panic!("viewer smoke timed out before rendering streamed terrain");
         }
@@ -187,6 +188,7 @@ impl ApplicationHandler for ViewerApp {
             || self.active_generation.is_some()
             || self.generation_is_pending()
             || self.pending_world_changes.is_some()
+            || !self.gestures.is_empty()
             || self.dirty
         {
             if self.next_frame <= now {

@@ -1,4 +1,4 @@
-//! Instance builders for agents, structures, spawned objects, remembered-place and relationship markers, exact world cells, chunk outlines, and the world border.
+//! Instance builders for agents, structures, spawned objects, remembered-place, relationship, and gesture markers, exact world cells, chunk outlines, and the world border.
 
 use sim_core::{
     ACQUAINTANCE_SLOTS, AcquaintanceView, AgentActivity, AgentView, CHUNK_SIZE, ChunkInspection,
@@ -7,15 +7,16 @@ use sim_core::{
 };
 
 use super::{
-    MAX_AGENT_INSTANCES, MAX_CHUNK_OUTLINE_WORLD_WIDTH, MAX_RELATIONSHIP_DOTS,
+    MAX_AGENT_INSTANCES, MAX_CHUNK_OUTLINE_WORLD_WIDTH, MAX_GESTURE_DOTS, MAX_RELATIONSHIP_DOTS,
     MAX_SPAWNED_OBJECT_INSTANCES, MAX_STRUCTURE_INSTANCES, MAX_WORLD_BORDER_WIDTH,
     MIN_CHUNK_OUTLINE_PIXELS, MIN_DYNAMIC_INSTANCE_PIXELS,
     colors::{
-        agent_color, feature_color, landmark_color, relationship_color, rgba, spawn_kind_color,
-        structure_color, terrain_color,
+        GESTURE_COLOR, agent_color, feature_color, gesture_topic_color, landmark_color,
+        relationship_color, rgba, spawn_kind_color, structure_color, terrain_color,
     },
     gpu::Instance,
 };
+use crate::gestures::{GestureMark, RECENT_GESTURE_CAPACITY};
 
 pub(super) fn build_spawned_object_instances(
     views: impl IntoIterator<Item = SpawnedObjectView>,
@@ -188,6 +189,65 @@ const MIN_RELATIONSHIP_DOT_CELLS: f32 = 0.2;
 const RELATIONSHIP_DOT_SPACING_PIXELS: f32 = 10.0;
 const ACQUAINTANCE_MARKER_PIXELS: f32 = 4.0;
 const FRIEND_MARKER_PIXELS: f32 = 7.0;
+
+/// Draws recently completed gestures: a dotted line in one neutral color from the
+/// sender to where watchers concluded the place is (the public pointing), a
+/// hollow square spanning their search radius there, and a small dot at the
+/// sender colored by its private topic (debug-only: agents never see topics).
+pub(super) fn build_gesture_instances<'a>(
+    gestures: impl IntoIterator<Item = &'a GestureMark>,
+    scale: f32,
+    output: &mut Vec<Instance>,
+) {
+    output.clear();
+    if scale < MIN_DYNAMIC_INSTANCE_PIXELS {
+        return;
+    }
+    let scale = scale.max(f32::EPSILON);
+    let dot = (GESTURE_DOT_PIXELS / scale).max(MIN_RELATIONSHIP_DOT_CELLS);
+    let topic_dot = (GESTURE_TOPIC_DOT_PIXELS / scale).max(MIN_MEMORY_MARKER_CELLS);
+    for gesture in gestures.into_iter().take(RECENT_GESTURE_CAPACITY) {
+        let from_x = gesture.origin.x as f32 + 0.5;
+        let from_y = gesture.origin.y as f32 + 0.5;
+        let to_x = gesture.inferred_position.x as f32 + 0.5;
+        let to_y = gesture.inferred_position.y as f32 + 0.5;
+        let (dx, dy) = (to_x - from_x, to_y - from_y);
+        let dots = ((dx.hypot(dy) * scale / GESTURE_DOT_SPACING_PIXELS) as usize)
+            .saturating_sub(1)
+            .min(MAX_GESTURE_DOTS);
+        for step in 1..=dots {
+            let t = step as f32 / (dots + 1) as f32;
+            output.push(Instance::new(
+                from_x + dx * t - dot / 2.0,
+                from_y + dy * t - dot / 2.0,
+                dot,
+                dot,
+                GESTURE_COLOR,
+            ));
+        }
+        let half = f32::from(gesture.search_radius) + 0.5;
+        let side = half * 2.0;
+        let line = (MEMORY_OUTLINE_PIXELS / scale).clamp(0.1, half);
+        let (x, y) = (to_x - half, to_y - half);
+        output.extend_from_slice(&[
+            Instance::new(x, y, side, line, GESTURE_COLOR),
+            Instance::new(x, y + side - line, side, line, GESTURE_COLOR),
+            Instance::new(x, y, line, side, GESTURE_COLOR),
+            Instance::new(x + side - line, y, line, side, GESTURE_COLOR),
+            Instance::new(
+                from_x - topic_dot / 2.0,
+                from_y - topic_dot / 2.0,
+                topic_dot,
+                topic_dot,
+                gesture_topic_color(gesture.topic),
+            ),
+        ]);
+    }
+}
+
+const GESTURE_DOT_PIXELS: f32 = 3.0;
+const GESTURE_DOT_SPACING_PIXELS: f32 = 8.0;
+const GESTURE_TOPIC_DOT_PIXELS: f32 = 5.0;
 
 pub(super) fn build_structure_instances(
     views: impl IntoIterator<Item = StructureView>,

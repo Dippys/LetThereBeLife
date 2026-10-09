@@ -8,6 +8,7 @@ mod map;
 mod personality;
 mod social;
 
+pub use gesture::Gesture;
 pub(crate) use gesture::{interpret, point};
 pub(crate) use map::MentalMap;
 pub use map::{LANDMARK_SLOTS, MERGE_RADIUS, SEARCH_SPACING, VISIT_TILE_SIZE, VISITED_TILE_SLOTS};
@@ -96,18 +97,57 @@ pub enum GestureTopic {
     Explored,
 }
 
-/// One pointing gesture observed during the latest tick.
+/// One gesture completed during the latest tick, for logs and tools only.
+/// Agents never see this record: receivers get just the public `gesture`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SignalEvent {
+    /// Unique, increasing per engine run (reset clears it).
+    pub id: u64,
     pub sender: AgentId,
     pub at: SimTime,
+    pub origin: WorldPosition,
+    /// **Private** to the sender: what it meant.
     pub topic: GestureTopic,
+    /// **Private** to the sender: the exact place it had in mind.
+    pub intended_place: WorldPosition,
+    /// **Public:** what anyone watching could see.
+    pub gesture: Gesture,
     /// Where watchers concluded the place is (what they can know, not the truth).
     pub inferred_position: WorldPosition,
+    /// Search radius watchers attach to that conclusion.
+    pub search_radius: u16,
     /// Watchers whose mental map changed.
     pub informed: u16,
     /// Awake agents that saw the gesture.
     pub watchers: u16,
+}
+
+/// How one watcher read one gesture (latest tick, for logs and tools only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InterpretationEvent {
+    pub signal: u64,
+    pub receiver: AgentId,
+    pub at: SimTime,
+    /// What the receiver took the gesture to be about.
+    pub understood: GestureTopic,
+    pub estimate: WorldPosition,
+    pub search_radius: u16,
+    /// Confidence given to the hint (0 for "explored" gestures).
+    pub confidence: u8,
+    /// Whether the receiver's beliefs changed.
+    pub changed: bool,
+}
+
+/// A hint that was checked by looking (latest tick, for logs and tools only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HintOutcomeEvent {
+    pub agent: AgentId,
+    /// Who pointed it out, if still remembered.
+    pub teller: Option<AgentId>,
+    pub kind: LandmarkKind,
+    /// `true`: found what the hint promised; `false`: searched and gave up.
+    pub confirmed: bool,
+    pub at: SimTime,
 }
 
 /// Which cognitive features the autonomous policy uses.

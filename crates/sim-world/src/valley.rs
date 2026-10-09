@@ -1,0 +1,269 @@
+//! Site selection for small social scenarios: find a livable "valley" (mostly
+//! walkable land with some fresh water and food) near the origin by sampling the
+//! generator, without materializing any terrain.
+
+use crate::{
+    BiomeType, CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkLocalPosition, FeatureKind,
+    Standability, SurfaceType, WORLD_GENERATION_BOUNDS, World, WorldPosition, WorldRect,
+};
+
+/// Distance between candidate valley centers.
+const CANDIDATE_SPACING: i64 = 1_024;
+/// Candidates per axis (centered on the origin): 7 × 7 = 49 sites.
+const CANDIDATES_PER_AXIS: i64 = 7;
+/// Sampling stride inside a candidate square.
+const SAMPLE_STEP: i64 = 8;
+/// Fresh-water samples needed: a few ponds or one river reach.
+const MIN_FRESH_SAMPLES: u32 = 8;
+
+/// How livable a sampled square is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ValleyScore {
+    /// Percent of samples that are walkable dry land (not water, rock, snow, or hill).
+    pub land_percent: u32,
+    /// Percent of samples that are fresh water (lake or river).
+    pub fresh_water_percent: u32,
+    /// Samples that are fresh water.
+    pub fresh_water_samples: u32,
+    /// Percent of samples that are ocean.
+    pub ocean_percent: u32,
+    /// Samples holding a berry bush.
+    pub food_samples: u32,
+    /// Samples holding a tree.
+    pub wood_samples: u32,
+}
+
+impl ValleyScore {
+    /// Livable: mostly land, some fresh water without being a lake, no sea, some food.
+    pub const fn is_livable(self) -> bool {
+        self.land_percent >= 70
+            && self.fresh_water_samples >= MIN_FRESH_SAMPLES
+            && self.fresh_water_percent <= 20
+            && self.ocean_percent == 0
+            && self.food_samples >= 12
+    }
+
+    /// Higher is better among livable sites: food first, then wood, then water.
+    pub fn rank(self) -> u32 {
+        self.food_samples * 4 + self.wood_samples + self.fresh_water_samples.min(400)
+    }
+}
+
+/// A chosen valley: its bounds and why it was chosen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Valley {
+    pub bounds: WorldRect,
+    pub score: ValleyScore,
+}
+
+/// The best livable `side × side` square among candidates around the origin,
+/// or `None` if no candidate qualifies. `side` is rounded up to whole chunks.
+/// Deterministic for a seed: equal inputs always pick the same valley.
+pub fn find_valley(seed: u64, side: i64) -> Option<Valley> {
+    let side = (side.max(CHUNK_SIZE) + CHUNK_SIZE - 1) / CHUNK_SIZE * CHUNK_SIZE;
+    let half = CANDIDATES_PER_AXIS / 2;
+    let mut best: Option<(u32, i64, Valley)> = None;
+    for gy in -half..=half {
+        for gx in -half..=half {
+            let center = WorldPosition {
+                x: gx * CANDIDATE_SPACING,
+                y: gy * CANDIDATE_SPACING,
+            };
+            let min = WorldPosition {
+                x: (center.x - side / 2).div_euclid(CHUNK_SIZE) * CHUNK_SIZE,
+                y: (center.y - side / 2).div_euclid(CHUNK_SIZE) * CHUNK_SIZE,
+            };
+            let bounds = WorldRect {
+                min,
+                max: WorldPosition {
+                    x: min.x + side,
+                    y: min.y + side,
+                },
+            };
+            if !WORLD_GENERATION_BOUNDS.contains_rect(bounds) {
+                continue;
+            }
+            let score = score_square(seed, bounds);
+            if !score.is_livable() {
+                continue;
+            }
+            // Prefer better sites, then sites closer to the origin.
+            let distance = gx.abs() + gy.abs();
+            let candidate = (score.rank(), -distance, Valley { bounds, score });
+            if best
+                .as_ref()
+                .is_none_or(|current| (candidate.0, candidate.1) > (current.0, current.1))
+            {
+                best = Some(candidate);
+            }
+        }
+    }
+    best.map(|(_, _, valley)| valley)
+}
+
+/// Samples a square every `SAMPLE_STEP` cells.
+pub fn score_square(seed: u64, bounds: WorldRect) -> ValleyScore {
+    let (mut total, mut land, mut fresh, mut ocean, mut food, mut wood) = (0, 0, 0, 0, 0, 0);
+    let mut chunk_y = bounds.min.y.div_euclid(CHUNK_SIZE);
+    while chunk_y * CHUNK_SIZE < bounds.max.y {
+        let mut chunk_x = bounds.min.x.div_euclid(CHUNK_SIZE);
+        while chunk_x * CHUNK_SIZE < bounds.max.x {
+            let coord = ChunkCoord {
+                x: chunk_x,
+                y: chunk_y,
+            };
+            if let Ok(generator) = ChunkGenerator::new(seed, coord) {
+                for local_y in (SAMPLE_STEP / 2..CHUNK_SIZE).step_by(SAMPLE_STEP as usize) {
+                    for local_x in (SAMPLE_STEP / 2..CHUNK_SIZE).step_by(SAMPLE_STEP as usize) {
+                        let Some(cell) = generator.sample(ChunkLocalPosition {
+                            x: local_x as u8,
+                            y: local_y as u8,
+                        }) else {
+                            continue;
+                        };
+                        total += 1;
+                        match (cell.terrain.biome(), cell.terrain.surface()) {
+                            (BiomeType::Ocean, _) => ocean += 1,
+                            (BiomeType::Lake | BiomeType::River, _) => fresh += 1,
+                            (_, SurfaceType::Sand | SurfaceType::Soil) => land += 1,
+                            _ => {}
+                        }
+                        match cell.feature {
+                            Some(FeatureKind::BerryBush) => food += 1,
+                            Some(FeatureKind::Tree) => wood += 1,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            chunk_x += 1;
+        }
+        chunk_y += 1;
+    }
+    let percent = |part: u32| part * 100 / total.max(1);
+    ValleyScore {
+        land_percent: percent(land),
+        fresh_water_percent: percent(fresh),
+        fresh_water_samples: fresh,
+        ocean_percent: percent(ocean),
+        food_samples: food,
+        wood_samples: wood,
+    }
+}
+
+/// Side of the default valley square in cells.
+pub const VALLEY_SIDE: i64 = 768;
+/// The spec's first vertical slice: a band of 16 adults.
+pub const VALLEY_BAND: usize = 16;
+
+/// Band members start within this many cells of the camp's water access.
+pub const CAMP_RADIUS: i64 = 8;
+
+/// Where a band of `count` starts in a resident valley: the water access closest
+/// to its center, then distinct standable cells around it. Deterministic per seed.
+/// `None` if the valley has no reachable fresh water or too little room.
+pub fn camp_sites(
+    world: &World,
+    bounds: WorldRect,
+    count: usize,
+    seed: u64,
+) -> Option<Vec<WorldPosition>> {
+    let center = WorldPosition {
+        x: (bounds.min.x + bounds.max.x) / 2,
+        y: (bounds.min.y + bounds.max.y) / 2,
+    };
+    let standable = |position: WorldPosition| {
+        bounds.contains(position) && world.standability_at(position) == Ok(Standability::Standable)
+    };
+    let camp = world
+        .cells()
+        .map(|(position, _)| position)
+        .filter(|position| {
+            bounds.contains(*position)
+                && world
+                    .water_at(*position)
+                    .is_ok_and(|source| source.is_some_and(crate::WaterSource::is_drinkable))
+        })
+        .flat_map(|water| {
+            [(0, -1), (-1, 0), (1, 0), (0, 1)].map(|(dx, dy)| WorldPosition {
+                x: water.x + dx,
+                y: water.y + dy,
+            })
+        })
+        .filter(|cell| standable(*cell))
+        .min_by_key(|cell| {
+            (
+                cell.x.abs_diff(center.x) + cell.y.abs_diff(center.y),
+                cell.y,
+                cell.x,
+            )
+        })?;
+    let mut chosen = vec![camp];
+    let span = (CAMP_RADIUS * 2 + 1) as u64;
+    for attempt in 0..100_000_u64 {
+        if chosen.len() >= count {
+            break;
+        }
+        let mut key = seed ^ 0xca4d_u64.wrapping_mul(attempt + 1);
+        key = (key ^ (key >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        key = (key ^ (key >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        key ^= key >> 31;
+        let cell = WorldPosition {
+            x: camp.x + (key % span) as i64 - CAMP_RADIUS,
+            y: camp.y + ((key >> 32) % span) as i64 - CAMP_RADIUS,
+        };
+        if standable(cell) && !chosen.contains(&cell) {
+            chosen.push(cell);
+        }
+    }
+    (chosen.len() >= count).then(|| {
+        chosen.truncate(count);
+        chosen
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valleys_are_deterministic_livable_and_chunk_aligned() {
+        let valley = find_valley(1, 768).expect("seed 1 has a livable valley");
+        assert_eq!(find_valley(1, 768), Some(valley));
+        assert!(valley.score.is_livable());
+        assert_eq!(valley.bounds.min.x.rem_euclid(CHUNK_SIZE), 0);
+        assert_eq!(valley.bounds.max.x - valley.bounds.min.x, 768);
+        assert_eq!(score_square(1, valley.bounds), valley.score);
+    }
+
+    #[test]
+    fn the_band_camps_together_beside_water_inside_the_valley() {
+        let valley = find_valley(1, VALLEY_SIDE).expect("seed 1 has a valley");
+        let mut world = World::new(1, crate::WorldConfig::new(64, 64).unwrap());
+        world.generate_area(valley.bounds).unwrap();
+        let sites = camp_sites(&world, valley.bounds, VALLEY_BAND, 1).expect("room to camp");
+        assert_eq!(sites.len(), VALLEY_BAND);
+        assert_eq!(
+            camp_sites(&world, valley.bounds, VALLEY_BAND, 1),
+            Some(sites.clone())
+        );
+        let camp = sites[0];
+        assert!(
+            [(0, -1), (-1, 0), (1, 0), (0, 1)]
+                .iter()
+                .any(|(dx, dy)| world
+                    .water_at(WorldPosition {
+                        x: camp.x + dx,
+                        y: camp.y + dy
+                    })
+                    .is_ok_and(|source| source.is_some_and(crate::WaterSource::is_drinkable))),
+            "the first site is a water access"
+        );
+        for (index, site) in sites.iter().enumerate() {
+            assert!(valley.bounds.contains(*site));
+            assert_eq!(world.standability_at(*site), Ok(Standability::Standable));
+            assert!(site.x.abs_diff(camp.x) as i64 <= CAMP_RADIUS);
+            assert!(!sites[..index].contains(site), "sites are distinct");
+        }
+    }
+}

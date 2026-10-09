@@ -9,12 +9,14 @@ pub(super) struct LaunchOptions {
     pub(super) config_path: String,
     pub(super) smoke_frames: Option<u32>,
     pub(super) pregenerate_world: bool,
+    pub(super) valley: bool,
 }
 
 pub(super) fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Error>> {
     let mut config_path = DEFAULT_CONFIG_PATH.to_owned();
     let mut smoke_frames = None;
     let mut pregenerate_world = false;
+    let mut valley = false;
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
         match argument.as_str() {
@@ -30,9 +32,10 @@ pub(super) fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Erro
                 smoke_frames = Some(frames);
             }
             "--pregenerate-world" => pregenerate_world = true,
+            "--valley" => valley = true,
             "--help" | "-h" => {
                 println!(
-                    "Usage: sim-viewer [--config PATH] [--smoke-frames NUMBER] [--pregenerate-world]"
+                    "Usage: sim-viewer [--config PATH] [--smoke-frames NUMBER] [--pregenerate-world] [--valley]"
                 );
                 std::process::exit(0);
             }
@@ -43,6 +46,7 @@ pub(super) fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Erro
         config_path,
         smoke_frames,
         pregenerate_world,
+        valley,
     })
 }
 

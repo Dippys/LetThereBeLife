@@ -3,7 +3,10 @@
 use std::time::Instant;
 
 use super::{PopulationStatus, ViewerApp};
-use crate::startup::{reset, residency_ready, spawn_at};
+use crate::{
+    gestures::GestureMark,
+    startup::{reset, residency_ready, spawn_at},
+};
 
 impl ViewerApp {
     pub(super) fn update(&mut self) {
@@ -15,6 +18,11 @@ impl ViewerApp {
             let tick_seconds = self.engine.config().tick_duration().as_secs_f64();
             while self.accumulator >= tick_seconds {
                 self.engine.tick();
+                // Signal events cover only the latest tick, so collect them per tick.
+                self.gestures.record(
+                    self.engine.signal_events().iter().map(GestureMark::from),
+                    now,
+                );
                 self.accumulator -= tick_seconds;
             }
         }
@@ -33,6 +41,7 @@ impl ViewerApp {
 
     pub(super) fn reset_population(&mut self) {
         reset(&mut self.engine);
+        self.gestures.clear();
         self.population_status = PopulationStatus::WaitingForResidency;
         self.spawn_message = Some("POPULATION RESET".to_owned());
         self.update_residency_status();

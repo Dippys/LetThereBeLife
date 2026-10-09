@@ -63,6 +63,15 @@ pub(super) fn write_hud_text(output: &mut String, world: &World, state: &RenderS
         state.snapshot.death_count,
     )
     .expect("writing to String cannot fail");
+    match state.gestures.last {
+        Some(last) => writeln!(
+            output,
+            "GESTURES {}  LAST #{} -> {} WATCHERS",
+            state.gestures.total, last.id, last.watchers
+        ),
+        None => writeln!(output, "GESTURES {}", state.gestures.total),
+    }
+    .expect("writing to String cannot fail");
     if let Some(selection) = state.selection {
         writeln!(
             output,

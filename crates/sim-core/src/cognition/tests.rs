@@ -58,7 +58,7 @@ fn observe(
     perception: &PhysicalPerception,
     now: u32,
 ) {
-    map.observe(agent, origin, perception, now, &mut |_, _| {});
+    map.observe(agent, origin, perception, now, &mut |_, _, _| {});
 }
 
 fn landmarks(map: &MentalMap) -> Vec<LandmarkView> {
@@ -251,7 +251,7 @@ fn hint_outcomes_are_reported_to_the_teller() {
         spot,
         &with_water(view_around(spot), &[spot]),
         2,
-        &mut |teller, confirmed| {
+        &mut |teller, confirmed, _| {
             outcomes.push((teller, confirmed));
         },
     );
@@ -273,7 +273,7 @@ fn hint_outcomes_are_reported_to_the_teller() {
             probe,
             &view_around(probe),
             2 + step,
-            &mut |teller, confirmed| {
+            &mut |teller, confirmed, _| {
                 outcomes.push((teller, confirmed));
             },
         );
@@ -297,7 +297,7 @@ fn forgetting_a_teller_detaches_their_hints() {
         spot,
         &with_food(view_around(spot), &[spot]),
         2,
-        &mut |teller, confirmed| {
+        &mut |teller, confirmed, _| {
             outcomes.push((teller, confirmed));
         },
     );
