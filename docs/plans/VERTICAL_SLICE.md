@@ -113,7 +113,31 @@ what was said.
 
 **Done when:** lexicons are compact (size asserted), deterministic, and inspectable in the viewer.
 
-### M4 — Inference with competing interpretations
+### M4 — Inference with competing interpretations ✅ (2026-10-10)
+
+**Result:** `cognition/reading.rs` scores a bounded set of candidate concepts using only the
+listener's own evidence: the mime (scooping and eating look alike, as do chopping and striking), its
+own reading of the word, its thirst and hunger, what it already remembers near the indicated spot,
+and the sender's urgency. Each reading keeps the top 3 candidates with probabilities and reason
+flags (ambiguous mime, unknown word, word disagrees, need bias, memory bias). Hint confidence is
+trust × the probability of the reading, and a likely runner-up is also kept if the listener urgently
+needs it. To give hints real work:
+- Places compete by expected cost (distance plus search effort, over belief), and food sightings go
+  stale.
+- A fresh hint may displace a stale first-hand memory.
+- Agents stock up from remembered food.
+- Curious agents check out the most promising unverified hint before wandering.
+- The founding band is now **two families of 8** whose dialects differ on about a third of the
+  concepts.
+
+**Measured (seed 1 valley, 600k ticks):** 348 of 5,348 receptions misread (6.5%), every one with a
+recorded reason (mostly ambiguous mime plus a word the listener's family uses differently), and **36
+misreadings acted on**. Tip-based decisions went from 0 to 801. Survival is unchanged (249/300 across
+the 15 study scenarios). Example from the log: agent 6 mimes eating and says "kani" (food, in its
+dialect); agent 10, from the other family, reads WATER 58% / FOOD 40%, goes looking, and gives up.
+Misreadings reinforce the wrong word (listeners learn from their own reading), so vocabulary
+stays split (81% → 83%) until M5 corrects from consequences.
+
 
 - Receivers generate a **bounded** set of candidate meanings: from their lexicon entries for the
   heard form, what's visible near where the sender points or looks, their own needs, recent

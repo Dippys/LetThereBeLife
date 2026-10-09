@@ -7,17 +7,20 @@ mod gesture;
 mod lexicon;
 mod map;
 mod personality;
+mod reading;
 mod signal;
 mod social;
 
 pub use gesture::Gesture;
 pub(crate) use lexicon::Lexicon;
-pub use lexicon::{Concept, LEXICON_SLOTS, LexiconEntryView, VOCAL_FORMS, VocalForm};
+pub use lexicon::{Concept, FAMILY_SIZE, LEXICON_SLOTS, LexiconEntryView, VOCAL_FORMS, VocalForm};
 pub(crate) use map::MentalMap;
 pub use map::{LANDMARK_SLOTS, MERGE_RADIUS, SEARCH_SPACING, VISIT_TILE_SIZE, VISITED_TILE_SLOTS};
 pub use personality::Personality;
+pub(crate) use reading::ListenerContext;
+pub use reading::{READING_CANDIDATES, Reading, ReadingReasons, concept_topic};
 pub use signal::{DesiredEffect, Mime, PublicSignal, Tone, Understanding, UtteranceIntent};
-pub(crate) use signal::{express, understand};
+pub(crate) use signal::{express, locate, understand};
 pub(crate) use social::SocialMemory;
 pub use social::{ACQUAINTANCE_SLOTS, AcquaintanceView, DEFAULT_TRUST, FRIEND_FAMILIARITY};
 
@@ -143,6 +146,8 @@ pub struct InterpretationEvent {
     pub heard: Option<VocalForm>,
     /// What the receiver thought that word meant *before* learning from this signal.
     pub word_reading: Option<Concept>,
+    /// The competing meanings the receiver weighed, and why it chose as it did.
+    pub reading: Reading,
 }
 
 /// A hint that was checked by looking (latest tick, for logs and tools only).

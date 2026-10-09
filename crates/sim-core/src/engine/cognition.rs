@@ -3,8 +3,8 @@
 
 use super::errors::{move_failure, perception_failure};
 use crate::cognition::{
-    DesiredEffect, Personality, PublicSignal, Understanding, UtteranceIntent, belief_seconds,
-    express, told_confidence, understand,
+    DesiredEffect, ListenerContext, Personality, PublicSignal, UtteranceIntent, belief_seconds,
+    express, locate, told_confidence, understand,
 };
 use crate::policy::{MindInput, PolicyAction, PolicySelection, deliberate};
 use crate::{
@@ -16,9 +16,21 @@ use crate::{
 
 /// What delivering one public signal did.
 pub(super) struct Delivery {
-    pub(super) reading: Understanding,
+    pub(super) estimate: WorldPosition,
+    pub(super) uncertainty: u8,
     pub(super) informed: u16,
     pub(super) watchers: u16,
+}
+
+/// A runner-up reading at least this likely (out of 255) is kept when the
+/// listener urgently needs what it would mean.
+const RUNNER_UP_MIN_PROBABILITY: u8 = 64;
+/// Relative need (128 = at threshold) that counts as urgent for that rule.
+const URGENT_NEED: u16 = 112;
+
+/// Hint confidence: trust in the teller, scaled by how sure the reading is.
+fn scaled_confidence(trust: u8, probability: u8) -> u8 {
+    (u16::from(told_confidence(trust)) * u16::from(probability) / 255) as u8
 }
 
 const fn can_watch(activity: AgentActivity) -> bool {
@@ -211,8 +223,8 @@ impl Engine {
             at: self.time,
             intent,
             signal: public,
-            inferred_position: delivery.reading.estimate,
-            search_radius: u16::from(delivery.reading.uncertainty) * 4,
+            inferred_position: delivery.estimate,
+            search_radius: u16::from(delivery.uncertainty) * 4,
             informed: delivery.informed,
             watchers: delivery.watchers,
         });
@@ -226,7 +238,7 @@ impl Engine {
         id: u64,
         public: &PublicSignal,
     ) -> Result<Delivery, PolicyFailureReason> {
-        let reading = understand(public);
+        let (estimate, uncertainty) = locate(public);
         let perception = self
             .perceive_physical(public.sender, PHYSICAL_POLICY_RADIUS)
             .map_err(perception_failure)?;
@@ -238,34 +250,58 @@ impl Engine {
                 continue;
             }
             watchers = watchers.saturating_add(1);
+            let (thirst, hunger) = self.relative_need(watcher.id);
             let mind = self.minds.get_mut(watcher.id);
-            // Words are learned from what accompanies them (here the understood mime).
-            let word_reading = public.vocal.and_then(|form| mind.lexicon.recognize(form));
+            let word = public
+                .vocal
+                .and_then(|form| mind.lexicon.recognize_with_strength(form));
+            let radius = u64::from(uncertainty) * 4;
+            let listener = ListenerContext {
+                word,
+                heard_word: public.vocal.is_some(),
+                thirst,
+                hunger,
+                remembered_near: LandmarkKind::ALL
+                    .map(|kind| mind.map.remembers_near(kind, estimate, radius)),
+            };
+            let understanding = understand(public, listener);
+            // Words are learned from the listener's own reading, right or wrong.
             if let Some(form) = public.vocal {
                 mind.lexicon
-                    .hear_with_evidence(form, reading.topic.concept());
+                    .hear_with_evidence(form, understanding.topic.concept());
             }
+            let teller = match (social, understanding.topic) {
+                (true, GestureTopic::Place(_)) => mind.notice(public.sender, public.origin, now),
+                _ => None,
+            };
+            let trust = teller.map_or(crate::DEFAULT_TRUST, |slot| mind.social.trust(slot));
+            let (best, best_probability) = understanding.reading.best();
             let mut confidence = 0;
-            let changed = match reading.topic {
-                GestureTopic::Explored => mind.map.record_visit(reading.estimate),
+            let mut changed = match understanding.topic {
+                GestureTopic::Explored => mind.map.record_visit(estimate),
                 GestureTopic::Place(kind) => {
-                    let teller = if social {
-                        mind.notice(public.sender, public.origin, now)
-                    } else {
-                        None
-                    };
-                    let trust = teller.map_or(crate::DEFAULT_TRUST, |slot| mind.social.trust(slot));
-                    confidence = told_confidence(trust);
-                    mind.map.remember_told(
-                        kind,
-                        reading.estimate,
-                        reading.uncertainty,
-                        now,
-                        teller,
-                        confidence,
-                    )
+                    confidence = scaled_confidence(trust, best_probability);
+                    mind.map
+                        .remember_told(kind, estimate, uncertainty, now, teller, confidence)
                 }
             };
+            // Stakes: a likely-enough reading of something urgently needed is kept too.
+            if let Some((runner_up, probability)) = understanding.reading.runner_up()
+                && runner_up != best
+                && probability >= RUNNER_UP_MIN_PROBABILITY
+                && let Some(GestureTopic::Place(kind)) = crate::cognition::concept_topic(runner_up)
+                && ((kind == LandmarkKind::Water && thirst >= URGENT_NEED)
+                    || (kind == LandmarkKind::Food && hunger >= URGENT_NEED))
+            {
+                changed |= mind.map.remember_told(
+                    kind,
+                    estimate,
+                    uncertainty,
+                    now,
+                    teller,
+                    scaled_confidence(trust, probability),
+                );
+            }
             if changed {
                 informed = informed.saturating_add(1);
             }
@@ -273,20 +309,35 @@ impl Engine {
                 signal: id,
                 receiver: watcher.id,
                 at: self.time,
-                understood: reading.topic,
-                estimate: reading.estimate,
-                search_radius: u16::from(reading.uncertainty) * 4,
+                understood: understanding.topic,
+                estimate,
+                search_radius: u16::from(uncertainty) * 4,
                 confidence,
                 changed,
                 heard: public.vocal,
-                word_reading,
+                word_reading: word.map(|(concept, _)| concept),
+                reading: understanding.reading,
             });
         }
         Ok(Delivery {
-            reading,
+            estimate,
+            uncertainty,
             informed,
             watchers,
         })
+    }
+
+    /// Thirst and hunger relative to their thresholds (128 = at threshold).
+    fn relative_need(&self, agent: AgentId) -> (u16, u16) {
+        self.population
+            .needs_view(agent, self.time)
+            .map_or((0, 0), |needs| {
+                let relative = |level: crate::NeedLevelView| {
+                    (u32::from(level.value) * 128 / u32::from(level.threshold.max(1))).min(255)
+                        as u16
+                };
+                (relative(needs.thirst), relative(needs.hunger))
+            })
     }
 
     /// How urgent the agent looks: its most pressing need relative to that

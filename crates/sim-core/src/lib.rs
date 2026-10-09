@@ -23,12 +23,13 @@ pub use agent::{
     RouteEventOutcome, RouteOutcomeKind, RouteScheduled, SimTime, SpawnInvalidReason,
 };
 pub use cognition::{
-    ACQUAINTANCE_SLOTS, AcquaintanceView, Concept, DEFAULT_TRUST, DesiredEffect,
+    ACQUAINTANCE_SLOTS, AcquaintanceView, Concept, DEFAULT_TRUST, DesiredEffect, FAMILY_SIZE,
     FRIEND_FAMILIARITY, Gesture, GestureTopic, HintOutcomeEvent, InterpretationEvent,
     LANDMARK_SLOTS, LEXICON_SLOTS, LandmarkKind, LandmarkSource, LandmarkView, LexiconEntryView,
-    MERGE_RADIUS, MentalMapView, Mime, Personality, PolicyOptions, PublicSignal, SEARCH_SPACING,
-    SHARE_COOLDOWN_SECONDS, SIGNAL_TICKS, SignalEvent, Tone, Understanding, UtteranceIntent,
-    VISIT_TILE_SIZE, VISITED_TILE_SLOTS, VOCAL_FORMS, VocalForm,
+    MERGE_RADIUS, MentalMapView, Mime, Personality, PolicyOptions, PublicSignal,
+    READING_CANDIDATES, Reading, ReadingReasons, SEARCH_SPACING, SHARE_COOLDOWN_SECONDS,
+    SIGNAL_TICKS, SignalEvent, Tone, Understanding, UtteranceIntent, VISIT_TILE_SIZE,
+    VISITED_TILE_SLOTS, VOCAL_FORMS, VocalForm, concept_topic,
 };
 pub use diagnostics::{EngineCapacityMetrics, EngineDiagnostics, EngineWorkMetrics};
 pub use engine::{

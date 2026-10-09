@@ -151,9 +151,14 @@ fn watchers_remember_who_pointed_and_weigh_hints_by_trust() {
     assert_eq!(watcher.acquaintances.len(), 1);
     assert_eq!(watcher.acquaintances[0].agent, AgentId::new(0));
     let stranger_hint = watcher.landmarks[0].confidence;
+    let reading = engine.interpretation_events()[0];
+    assert_eq!(stranger_hint, reading.confidence);
+    // Confidence = trust in a stranger, scaled by how sure the reading was.
+    let (_, probability) = reading.reading.best();
     assert_eq!(
-        stranger_hint,
-        crate::cognition::told_confidence(crate::DEFAULT_TRUST)
+        u16::from(stranger_hint),
+        u16::from(crate::cognition::told_confidence(crate::DEFAULT_TRUST)) * u16::from(probability)
+            / 255
     );
 
     // A distrusted teller's hint about another place carries less weight.
@@ -361,5 +366,40 @@ fn founders_inherit_the_same_lexicons_on_replay() {
     assert!(
         !words(&first).is_empty(),
         "founders start with a proto-language"
+    );
+}
+
+#[test]
+fn a_word_the_listener_holds_differently_causes_a_believable_misreading() {
+    let (mut world, sender, _) = two_neighbours();
+    let lake = WorldPosition {
+        x: sender.x + 70,
+        y: sender.y,
+    };
+    remember_water(&mut world, AgentId::new(0), lake);
+    world.apply_signal(AgentId::new(0), lake).unwrap();
+    let mut public = world.signal_events()[0].signal;
+    assert_eq!(public.mime, crate::Mime::Scoop);
+    // The sender says the word that, to this listener, firmly means FOOD.
+    let (mut listener_world, _, _) = two_neighbours();
+    listener_world.minds.get_mut(AgentId::new(1));
+    let food_word = listener_world
+        .mental_map(AgentId::new(1))
+        .unwrap()
+        .lexicon
+        .into_iter()
+        .filter(|entry| entry.concept == crate::Concept::Food)
+        .max_by_key(|entry| i32::from(entry.positive) - i32::from(entry.contradictory))
+        .expect("founders have a word for food")
+        .form;
+    public.vocal = Some(food_word);
+    listener_world.deliver(0, &public).unwrap();
+    let reading = listener_world.interpretation_events()[0];
+    assert_eq!(reading.understood, GestureTopic::Place(LandmarkKind::Food));
+    assert!(reading.reading.reasons.ambiguous_mime);
+    assert!(reading.reading.reasons.word_disagrees);
+    assert_eq!(
+        reading.reading.runner_up().map(|(c, _)| c),
+        Some(crate::Concept::Water)
     );
 }

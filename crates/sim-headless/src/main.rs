@@ -14,6 +14,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut valley = false;
     let mut trace = None;
     let mut comms_lines = 0_usize;
+    let mut misread_lines = 0_usize;
     let mut explain = None;
     let mut mind = sim_core::PolicyOptions::full();
     let mut config_path = DEFAULT_CONFIG_PATH.to_owned();
@@ -29,6 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--valley" => valley = true,
             "--trace" => trace = Some(parse_next(&mut args, "--trace")),
             "--comms" => comms_lines = parse_next(&mut args, "--comms"),
+            "--misreads" => misread_lines = parse_next(&mut args, "--misreads"),
             "--explain" => explain = Some(parse_next::<u32>(&mut args, "--explain")),
             "--mind" => {
                 mind = match args.next().as_deref() {
@@ -59,7 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--config" => config_path = parse_next(&mut args, "--config"),
             "--help" | "-h" => {
                 println!(
-                    "Usage: sim-headless [--canonical | --study [--near-water | --groups | --valley] [--mind legacy|memory|sharing|full] [--verbose] [--trace AGENT] [--comms N] [--explain AGENT]] [--config PATH] [--ticks NUMBER] [--seed NUMBER] [--agents NUMBER] [--batch-size NUMBER]"
+                    "Usage: sim-headless [--canonical | --study [--near-water | --groups | --valley] [--mind legacy|memory|sharing|full] [--verbose] [--trace AGENT] [--comms N] [--misreads N] [--explain AGENT]] [--config PATH] [--ticks NUMBER] [--seed NUMBER] [--agents NUMBER] [--batch-size NUMBER]"
                 );
                 return Ok(());
             }
@@ -103,6 +105,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .iter()
                 .filter(|exchange| exchange.receptions.iter().any(|r| r.outcome.is_some()))
                 .take(comms_lines)
+            {
+                println!("  {exchange}");
+            }
+        }
+        if misread_lines > 0 {
+            println!("misunderstandings that were acted on (first {misread_lines}):");
+            for exchange in report
+                .comms
+                .exchanges()
+                .iter()
+                .filter(|exchange| {
+                    exchange.receptions.iter().any(|reception| {
+                        reception.acted_at.is_some()
+                            && reception.interpretation.understood != exchange.signal.intent.topic
+                    })
+                })
+                .take(misread_lines)
             {
                 println!("  {exchange}");
             }

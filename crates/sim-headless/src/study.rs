@@ -85,6 +85,8 @@ struct AgentTrack {
     company_samples: u64,
     /// Decisions to head for a place someone pointed out.
     hint_decisions: u64,
+    /// Decisions to head for a place the agent saw itself.
+    memory_decisions: u64,
     /// Highest thirst seen in any sample while alive.
     peak_thirst: u16,
     /// Hunger, thirst, rest, exposure at the last sample while alive.
@@ -116,6 +118,8 @@ pub struct StudyReport {
     pub explored_gestures: u64,
     /// Decisions (waypoints included) heading for a place someone pointed out.
     pub hint_decisions: u64,
+    /// Decisions (waypoints included) heading for a place the agent saw itself.
+    pub memory_decisions: u64,
     /// Percentage of sampled living time with another living agent within 8 cells.
     pub company_percent: u64,
     /// Mean acquaintances and mean trust in them at the end (social mind only).
@@ -297,8 +301,10 @@ fn collect_tick(engine: &Engine, tracks: &mut [AgentTrack]) {
                     PhysicalGoal::Wait => track.waits += 1,
                     _ => {}
                 }
-                if diagnostic.reason == sim_core::PolicyReason::ToldPlace {
-                    track.hint_decisions += 1;
+                match diagnostic.reason {
+                    sim_core::PolicyReason::ToldPlace => track.hint_decisions += 1,
+                    sim_core::PolicyReason::RememberedPlace => track.memory_decisions += 1,
+                    _ => {}
                 }
             }
             PolicyDiagnosticKind::ActionCompleted if diagnostic.failure.is_none() => {
@@ -475,6 +481,7 @@ fn build_report(
         signals: tracks.iter().map(|track| track.signals).sum(),
         explored_gestures: tracks.iter().map(|track| track.explored_gestures).sum(),
         hint_decisions: tracks.iter().map(|track| track.hint_decisions).sum(),
+        memory_decisions: tracks.iter().map(|track| track.memory_decisions).sum(),
         company_percent: percent(
             tracks.iter().map(|track| track.company_samples).sum(),
             alive_samples,
@@ -872,11 +879,12 @@ impl fmt::Display for StudyReport {
         )?;
         write!(
             formatter,
-            "\n  social: company={}% acquaintances={} trust={} explored-gestures={} hint-decisions={}",
+            "\n  social: company={}% acquaintances={} trust={} explored-gestures={} memory-decisions={} hint-decisions={}",
             self.company_percent,
             self.mean_acquaintances,
             self.mean_trust,
             self.explored_gestures,
+            self.memory_decisions,
             self.hint_decisions
         )?;
         write!(formatter, "\n{}", self.comms.summary())?;

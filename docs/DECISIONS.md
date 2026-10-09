@@ -186,3 +186,19 @@ misunderstandings.
 10M agents). Interpretation still follows the mime, so behavior is unchanged. In the seed 1 valley
 the band's vocabulary converged from 88% to 97% agreement. Production successes and failures are
 recorded but not updated until M5.
+
+## D-074: M4, competing interpretations, dialects, and hints that matter (2026-10-10)
+
+**Decision:** Listeners score candidate concepts (at most 3) from public evidence and their own
+state, keeping probabilities and reason flags. Mimes are physically ambiguous in pairs. Hint
+confidence = trust × reading probability, and a likely runner-up is kept when it meets an urgent
+need. Places are ranked by expected cost with food staleness, fresh hints may displace stale
+memories, agents stock up from remembered food, and curious agents check out unverified hints. The
+founding band is two families of 8 with different dialects (a third of concepts).
+**Why:** The plan's M4. The M1 log showed hints never drove decisions. Uniform lexical noise plus
+fast convergence made misreadings vanishingly rare (3 of 7,954). Family dialects are a believable
+source of misunderstanding and seed the spec's multiple languages.
+**Consequences:** In the seed 1 valley, 6.5% of receptions are misread and 36 misreadings were acted
+on, while survival stays at 249/300. Because learning still follows the listener's own reading,
+confusions self-reinforce until M5. The "acted" link in the log matches hint checks to the
+receiver's latest place hint, which is approximate.

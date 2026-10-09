@@ -73,8 +73,6 @@ fn valley_communication_log_is_consistent() {
     assert!(summary.exchanges > 0, "the band talks");
     assert!(summary.informed <= summary.receptions);
     assert!(summary.acted <= summary.informed);
-    // Until M2 removes the hidden channel, receivers always read the sender's topic.
-    assert_eq!(summary.misread, 0);
     for exchange in report.comms.exchanges() {
         let signal = exchange.signal;
         let error = signal
@@ -103,4 +101,28 @@ fn valley_communication_log_is_consistent() {
     );
     let story = sim_headless::explain(&report, 0);
     assert!(story.starts_with("explain agent 0:"));
+}
+
+#[test]
+fn valley_misunderstandings_happen_for_recorded_reasons_and_are_acted_on() {
+    let mut config = StudyConfig::new(1, sim_headless::VALLEY_POPULATION, 200_000);
+    config.spawn = StudySpawn::Valley;
+    let report = run_study(config).expect("seed 1 has a valley");
+    let summary = report.comms.summary();
+    assert!(report.hint_decisions > 0, "agents act on what they're told");
+    assert!(
+        summary.misread > 0,
+        "two family dialects produce misreadings"
+    );
+    assert!(
+        summary.misread * 4 < summary.receptions,
+        "but not chaos: {} of {}",
+        summary.misread,
+        summary.receptions
+    );
+    let explained = summary.misread_reasons.iter().sum::<u64>();
+    assert!(
+        explained >= summary.misread,
+        "every misreading has a recorded reason"
+    );
 }

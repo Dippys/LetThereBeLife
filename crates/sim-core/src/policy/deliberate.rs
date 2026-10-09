@@ -308,10 +308,18 @@ impl Planner<'_> {
         if self.needs.hunger.value >= temperament.top_up_hunger && inventory.food > 0 {
             return Deliberation::act(PhysicalGoal::Eat, origin, PolicyReason::PrepareTrip);
         }
-        if inventory.food < temperament.food_reserve
-            && let Some(target) = food_here
-        {
-            return Deliberation::act(PhysicalGoal::SeekFood, target, PolicyReason::PrepareTrip);
+        if inventory.food < temperament.food_reserve {
+            if let Some(target) = food_here {
+                return Deliberation::act(
+                    PhysicalGoal::SeekFood,
+                    target,
+                    PolicyReason::PrepareTrip,
+                );
+            }
+            // Stock up from a remembered food place, seen or pointed out.
+            if let Some(trip) = self.travel_to_known(LandmarkKind::Food, PhysicalGoal::SeekFood) {
+                return trip.with_reason(PolicyReason::PrepareTrip);
+            }
         }
         if let Some(place) = self.mind.share_target {
             return Deliberation::act(PhysicalGoal::Signal, place, PolicyReason::Sharing);
@@ -371,10 +379,24 @@ impl Planner<'_> {
         let excursion = works
             && self.roll(3) < temperament.excursion_chance
             && !(self.mind.company && temperament.stays_with_company);
-        if (curious || excursion)
-            && let Some(explore) = self.explore(PolicyReason::NoUrgentNeed, true)
-        {
-            return explore;
+        if curious || excursion {
+            // Curiosity first checks what others have pointed out.
+            if let Some(hint) = map.hint_to_check(self.needs.agent.get(), origin)
+                && self.within_leash(hint)
+                && let Some((waypoint, heading)) = self.waypoint_toward(hint)
+            {
+                return Deliberation {
+                    selection: PolicySelection {
+                        goal: PhysicalGoal::Explore,
+                        target: Some(waypoint),
+                        reason: PolicyReason::ToldPlace,
+                    },
+                    heading: Some(heading),
+                };
+            }
+            if let Some(explore) = self.explore(PolicyReason::NoUrgentNeed, true) {
+                return explore;
+            }
         }
         Deliberation::wait(origin, PolicyReason::NoUrgentNeed)
     }
@@ -391,10 +413,12 @@ impl Planner<'_> {
 
     /// Head for the best remembered place of `kind`, one visible waypoint at a time.
     fn travel_to_known(&self, kind: LandmarkKind, goal: PhysicalGoal) -> Option<Deliberation> {
-        let (destination, source) =
-            self.mind
-                .map
-                .recall(kind, self.needs.agent.get(), self.origin)?;
+        let (destination, source) = self.mind.map.recall(
+            kind,
+            self.needs.agent.get(),
+            self.origin,
+            (self.needs.at.ticks() / 60) as u32,
+        )?;
         let reason = match source {
             crate::LandmarkSource::Seen => PolicyReason::RememberedPlace,
             crate::LandmarkSource::Told => PolicyReason::ToldPlace,
@@ -439,6 +463,17 @@ impl Planner<'_> {
             Some((_, cell)) => Some((cell, heading)),
             None => exploration_target(origin, self.perception, heading.rotated(2)),
         }
+    }
+
+    /// Whether going to `place` keeps the agent within walking range of known water.
+    fn within_leash(&self, place: WorldPosition) -> bool {
+        let thirst = self.needs.thirst;
+        let headroom = u64::from(thirst.threshold.saturating_sub(thirst.value));
+        let leash = (headroom * self.temperament.leash_percent / 100).max(MIN_LEASH);
+        self.mind
+            .map
+            .nearest_seen_distance(LandmarkKind::Water, place)
+            .is_none_or(|distance| distance <= leash)
     }
 
     /// Wander toward unexplored ground. With `leashed`, stay within the range the
@@ -490,8 +525,12 @@ impl Planner<'_> {
 }
 
 impl Deliberation {
+    /// Labels the decision with its purpose, except that a trip based on someone's
+    /// tip keeps `ToldPlace`, so logs can see hints being acted on.
     fn with_reason(mut self, reason: PolicyReason) -> Self {
-        self.selection.reason = reason;
+        if self.selection.reason != PolicyReason::ToldPlace {
+            self.selection.reason = reason;
+        }
         self
     }
 }

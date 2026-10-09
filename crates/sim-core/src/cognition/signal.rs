@@ -12,6 +12,7 @@ use crate::{AgentId, WorldPosition};
 use super::{
     GestureTopic, LandmarkKind, VocalForm,
     gesture::{Gesture, interpret, point},
+    reading::{ListenerContext, Reading, concept_topic, read},
 };
 
 /// What a sender wants its signal to achieve. Requests come with M7.
@@ -103,30 +104,32 @@ pub(crate) fn express(
 /// A watcher's reading of a public signal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Understanding {
+    /// Competing meanings and why.
+    pub reading: Reading,
+    /// The topic of the best reading.
     pub topic: GestureTopic,
     pub estimate: WorldPosition,
     /// Search radius in 4-cell units (as stored by the mental map).
     pub uncertainty: u8,
 }
 
-/// The only path from a signal to a belief: reads the public signal and nothing
-/// else. Today every watcher reads mimes the same way; personal, ambiguous
-/// readings arrive with lexicons (M3) and competing interpretations (M4).
-pub(crate) fn understand(signal: &PublicSignal) -> Understanding {
-    let topic = match signal.mime {
-        Mime::Scoop => GestureTopic::Place(LandmarkKind::Water),
-        Mime::PickAndChew => GestureTopic::Place(LandmarkKind::Food),
-        Mime::Chop => GestureTopic::Place(LandmarkKind::Wood),
-        Mime::Strike => GestureTopic::Place(LandmarkKind::Stone),
-        Mime::RestHead => GestureTopic::Place(LandmarkKind::Shelter),
-        Mime::Sweep => GestureTopic::Explored,
-    };
+/// The only path from a signal to a belief: the public signal plus the
+/// listener's own context (its lexicon, needs, and memories), nothing else.
+pub(crate) fn understand(signal: &PublicSignal, listener: ListenerContext) -> Understanding {
+    let reading = read(signal, listener);
+    let topic = concept_topic(reading.best().0).unwrap_or(GestureTopic::Explored);
     let (estimate, uncertainty) = interpret(signal.origin, signal.pointing);
     Understanding {
+        reading,
         topic,
         estimate,
         uncertainty,
     }
+}
+
+/// Where the pointing leads, for anyone watching.
+pub(crate) fn locate(signal: &PublicSignal) -> (WorldPosition, u8) {
+    interpret(signal.origin, signal.pointing)
 }
 
 #[cfg(test)]
@@ -135,6 +138,17 @@ mod tests {
 
     fn at(x: i64, y: i64) -> WorldPosition {
         WorldPosition { x, y }
+    }
+
+    /// A listener who knows the word for `topic` well and needs nothing.
+    fn clear_listener(topic: GestureTopic) -> ListenerContext {
+        ListenerContext {
+            word: Some((topic.concept(), 20)),
+            heard_word: true,
+            thirst: 0,
+            hunger: 0,
+            remembered_near: [false; 5],
+        }
     }
 
     #[test]
@@ -154,7 +168,7 @@ mod tests {
                 place: at(80, -30),
             };
             let signal = express(AgentId::new(1), at(0, 0), intent, None, 40).unwrap();
-            assert_eq!(understand(&signal).topic, topic);
+            assert_eq!(understand(&signal, clear_listener(topic)).topic, topic);
         }
     }
 
@@ -167,7 +181,7 @@ mod tests {
         };
         let signal = express(AgentId::new(3), at(5, 5), intent, None, 200).unwrap();
         assert_eq!(signal.tone.urgency, 200);
-        let reading = understand(&signal);
+        let reading = understand(&signal, clear_listener(intent.topic));
         assert_ne!(
             reading.estimate, intent.place,
             "watchers only get an estimate"

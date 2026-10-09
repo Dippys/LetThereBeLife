@@ -26,6 +26,8 @@ const FAILED_PROBE_PENALTY: u8 = 40;
 /// Hints below this confidence, or searched this many times, are forgotten.
 const FORGET_CONFIDENCE: u8 = 24;
 const MAX_PROBES: u8 = 6;
+/// A food sighting loses one point of belief per this many seconds of age.
+const FOOD_STALENESS_SECONDS: u64 = 20;
 /// Spacing between spiral-search loops: slightly less than the view width so
 /// consecutive loops overlap and nothing is missed.
 pub const SEARCH_SPACING: i64 = 14;
@@ -313,7 +315,16 @@ impl MentalMap {
             landmark.seen = now;
             return true;
         }
-        let Some(slot) = self.replacement_slot(range, false) else {
+        let slot = self.replacement_slot(range.clone(), false).or_else(|| {
+            // A fresh hint can displace a first-hand memory the agent now trusts
+            // less, such as an old food sighting that has probably been eaten.
+            range
+                .map(|slot| (believed_confidence(self.landmarks[slot], kind, now), slot))
+                .filter(|&(belief, _)| belief < u64::from(confidence))
+                .min()
+                .map(|(_, slot)| slot)
+        });
+        let Some(slot) = slot else {
             return false;
         };
         self.landmarks[slot] = Landmark {
@@ -354,12 +365,15 @@ impl MentalMap {
     }
 
     /// The remembered place of `kind` most worth travelling to from `origin`, as a
-    /// concrete destination (hints are searched around their estimate).
+    /// concrete destination (hints are searched around their estimate). Places
+    /// compete by expected cost: distance plus search effort, divided by how much
+    /// the agent still believes in them. Food sightings go stale (it gets eaten).
     pub(crate) fn recall(
         &self,
         kind: LandmarkKind,
         agent: u32,
         origin: WorldPosition,
+        now: u32,
     ) -> Option<(WorldPosition, LandmarkSource)> {
         slot_range(kind)
             .filter(|&slot| !self.landmarks[slot].is_empty())
@@ -370,13 +384,46 @@ impl MentalMap {
                 } else {
                     (probe_point(landmark, agent, slot), LandmarkSource::Told)
                 };
-                let score = manhattan(origin, destination)
-                    + landmark.radius() * 2
-                    + u64::from(u8::MAX - landmark.confidence);
+                let belief = believed_confidence(landmark, kind, now);
+                let score = (manhattan(origin, destination) + landmark.radius()) * 256 / belief;
                 (score, slot, destination, source)
             })
             .min_by_key(|&(score, slot, _, _)| (score, slot))
             .map(|(_, _, destination, source)| (destination, source))
+    }
+
+    /// The most believable hint the agent hasn't checked yet, as a destination:
+    /// what a curious agent goes to see for itself.
+    pub(crate) fn hint_to_check(&self, agent: u32, origin: WorldPosition) -> Option<WorldPosition> {
+        (0..LANDMARK_SLOTS)
+            .filter(|&slot| {
+                let landmark = self.landmarks[slot];
+                !landmark.is_empty() && !landmark.is_first_hand() && landmark.probes == 0
+            })
+            .map(|slot| {
+                let landmark = self.landmarks[slot];
+                let destination = probe_point(landmark, agent, slot);
+                let cost = (manhattan(origin, destination) + landmark.radius()) * 256
+                    / u64::from(landmark.confidence.max(16));
+                (cost, slot, destination)
+            })
+            .min()
+            .map(|(_, _, destination)| destination)
+    }
+
+    /// Whether the agent remembers any place of `kind` near `position`.
+    pub(crate) fn remembers_near(
+        &self,
+        kind: LandmarkKind,
+        position: WorldPosition,
+        radius: u64,
+    ) -> bool {
+        slot_range(kind).any(|slot| {
+            let landmark = self.landmarks[slot];
+            !landmark.is_empty()
+                && chebyshev(landmark.position(), position)
+                    <= radius + landmark.radius() + MERGE_RADIUS
+        })
     }
 
     /// Distance to the nearest first-hand memory of `kind`.
@@ -581,6 +628,18 @@ fn spiral_corner(anchor: (i16, i16), step: u16) -> WorldPosition {
         }
     }
     WorldPosition { x, y }
+}
+
+/// How much the agent still believes a place holds what it remembers. Food
+/// sightings lose belief as they age; other places stay as remembered.
+fn believed_confidence(landmark: Landmark, kind: LandmarkKind, now: u32) -> u64 {
+    let age = u64::from(now.saturating_sub(landmark.seen));
+    let decay = if kind == LandmarkKind::Food && landmark.is_first_hand() {
+        (age / FOOD_STALENESS_SECONDS).min(180)
+    } else {
+        0
+    };
+    u64::from(landmark.confidence).saturating_sub(decay).max(16)
 }
 
 fn tile_center(tile: (i16, i16)) -> WorldPosition {

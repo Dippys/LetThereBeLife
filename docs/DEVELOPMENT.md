@@ -48,7 +48,7 @@ Measures how viewer-like agents actually fare. They spawn without supplies and r
 ```sh
 cargo run --release -p sim-headless -- --study [--near-water | --groups | --valley] [--seed N]
     [--agents N] [--ticks N] [--mind legacy|memory|sharing|full] [--verbose] [--trace AGENT]
-    [--comms N] [--explain AGENT]
+    [--comms N] [--misreads N] [--explain AGENT]
 ```
 
 - `--near-water` spawns within 6 cells of fresh water. `--groups` drops agents in groups of 5.
@@ -59,6 +59,10 @@ cargo run --release -p sim-headless -- --study [--near-water | --groups | --vall
   somewhere, as stories: who pointed where, what they privately meant, how each watcher read it,
   and what each did and found. `--explain AGENT` prints that agent's personality, beliefs,
   acquaintances, and latest exchanges, followed by its decision trace.
+- The `misreadings:` line counts receptions read differently from the sender's private intent,
+  how many were acted on, and their recorded reasons. `--misreads N` prints the first N acted-on
+  misunderstandings as stories, with each listener's competing readings (for example
+  `FOOD 50% / WATER 49%`) and why.
 - The `words:` line counts heard words in the first and second half of the run, and how often the
   listener already read the word the way the sender meant it. The `vocabulary:` line is the
   band's agreement on each place word at the start and at the end.

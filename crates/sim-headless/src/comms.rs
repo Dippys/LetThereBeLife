@@ -13,8 +13,9 @@ use sim_core::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Reception {
     pub interpretation: InterpretationEvent,
-    /// First tick the receiver headed for a place it was told about, matching
-    /// this exchange's kind (the log can't tell which of several hints it chose).
+    /// First tick the receiver headed for a place it was told about: matched by
+    /// kind for need-driven trips, or to its latest place hint when it went to
+    /// check one out (the log can't tell which of several hints it chose).
     pub acted_at: Option<u64>,
     /// `(confirmed, tick)`: found what the hint promised, or searched and gave up.
     pub outcome: Option<(bool, u64)>,
@@ -47,6 +48,11 @@ pub struct CommunicationSummary {
     pub worded: [u64; 2],
     /// ...of which the listener already read the word as the sender meant it.
     pub word_agreed: [u64; 2],
+    /// Misreadings by reason (a misreading can have several):
+    /// ambiguous mime, unknown word, word disagrees, need bias, memory bias.
+    pub misread_reasons: [u64; 5],
+    /// Misreadings the receiver acted on.
+    pub misread_acted: u64,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -92,9 +98,8 @@ impl CommunicationLog {
             {
                 continue;
             }
-            let Some(kind) = kind_for_goal(decision.goal) else {
-                continue;
-            };
+            // Checking out a hint (goal Explore) names no kind: any place hint counts.
+            let kind = kind_for_goal(decision.goal);
             if let Some(reception) =
                 self.latest_reception(decision.agent, None, kind, |reception| {
                     reception.interpretation.changed && reception.acted_at.is_none()
@@ -104,11 +109,12 @@ impl CommunicationLog {
             }
         }
         for outcome in engine.hint_outcomes() {
-            if let Some(reception) =
-                self.latest_reception(outcome.agent, outcome.teller, outcome.kind, |reception| {
-                    reception.outcome.is_none()
-                })
-            {
+            if let Some(reception) = self.latest_reception(
+                outcome.agent,
+                outcome.teller,
+                Some(outcome.kind),
+                |reception| reception.outcome.is_none(),
+            ) {
                 reception.outcome = Some((outcome.confirmed, outcome.at.ticks()));
             }
         }
@@ -119,7 +125,7 @@ impl CommunicationLog {
         &mut self,
         receiver: AgentId,
         sender: Option<AgentId>,
-        kind: LandmarkKind,
+        kind: Option<LandmarkKind>,
         accept: impl Fn(&Reception) -> bool,
     ) -> Option<&mut Reception> {
         self.exchanges
@@ -129,7 +135,11 @@ impl CommunicationLog {
             .flat_map(|exchange| exchange.receptions.iter_mut())
             .find(|reception| {
                 reception.interpretation.receiver == receiver
-                    && reception.interpretation.understood == GestureTopic::Place(kind)
+                    && match (kind, reception.interpretation.understood) {
+                        (Some(kind), understood) => understood == GestureTopic::Place(kind),
+                        (None, GestureTopic::Place(_)) => true,
+                        (None, GestureTopic::Explored) => false,
+                    }
                     && accept(reception)
             })
     }
@@ -172,8 +182,23 @@ impl CommunicationLog {
                 summary.receptions += 1;
                 summary.informed += u64::from(reception.interpretation.changed);
                 summary.acted += u64::from(reception.acted_at.is_some());
-                summary.misread +=
-                    u64::from(reception.interpretation.understood != exchange.signal.intent.topic);
+                if reception.interpretation.understood != exchange.signal.intent.topic {
+                    summary.misread += 1;
+                    summary.misread_acted += u64::from(reception.acted_at.is_some());
+                    let reasons = reception.interpretation.reading.reasons;
+                    for (slot, applies) in [
+                        reasons.ambiguous_mime,
+                        reasons.unknown_word,
+                        reasons.word_disagrees,
+                        reasons.need_bias,
+                        reasons.memory_bias,
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        summary.misread_reasons[slot] += u64::from(applies);
+                    }
+                }
                 match reception.outcome {
                     Some((true, _)) => summary.confirmed += 1,
                     Some((false, _)) => summary.refuted += 1,
@@ -208,6 +233,12 @@ impl fmt::Display for CommunicationSummary {
             self.worded[1],
             percent(self.word_agreed[0], self.worded[0]),
             percent(self.word_agreed[1], self.worded[1])
+        )?;
+        let [ambiguous, unknown, disagrees, need, memory] = self.misread_reasons;
+        write!(
+            formatter,
+            "\n  misreadings: {} of {} receptions ({} acted on); reasons: ambiguous mime {ambiguous}, unknown word {unknown}, word disagrees {disagrees}, need bias {need}, memory bias {memory}",
+            self.misread, self.receptions, self.misread_acted
         )
     }
 }
@@ -247,12 +278,38 @@ impl fmt::Display for Exchange {
         )?;
         for reception in &self.receptions {
             let read = reception.interpretation;
+            let reading = read.reading;
+            let candidates: Vec<String> = reading.candidates
+                [..usize::from(reading.candidate_count)]
+                .iter()
+                .map(|(concept, probability)| {
+                    format!("{concept:?} {}%", u32::from(*probability) * 100 / 255).to_uppercase()
+                })
+                .collect();
+            let reasons: Vec<&str> = [
+                (reading.reasons.ambiguous_mime, "ambiguous mime"),
+                (reading.reasons.unknown_word, "unknown word"),
+                (reading.reasons.word_disagrees, "word disagrees"),
+                (reading.reasons.need_bias, "own need"),
+                (reading.reasons.memory_bias, "own memory"),
+            ]
+            .into_iter()
+            .filter_map(|(applies, name)| applies.then_some(name))
+            .collect();
+            let misread = read.understood != event.intent.topic;
             write!(
                 formatter,
-                "\n      agent {} read {}{} conf {}",
+                "\n      agent {} read {}{}{} [{}] {} conf {}",
                 read.receiver.get(),
                 topic_name(read.understood),
+                if misread { " (MISREAD)" } else { "" },
                 if read.changed { "" } else { " (already knew)" },
+                candidates.join(" / "),
+                if reasons.is_empty() {
+                    String::new()
+                } else {
+                    format!("because {}", reasons.join(", "))
+                },
                 read.confidence
             )?;
             if let Some(form) = read.heard {

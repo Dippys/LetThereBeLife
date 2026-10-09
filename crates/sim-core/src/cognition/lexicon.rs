@@ -75,8 +75,12 @@ impl VocalForm {
 pub const LEXICON_SLOTS: usize = 16;
 /// Evidence a founder's inherited association starts with.
 const INHERITED_EVIDENCE: u16 = 6;
-/// Percent of founder concepts linked to a non-conventional form.
-const VARIANT_PERCENT: u64 = 10;
+/// Founders come from families of this many (agent ids `0..8`, `8..16`, ...).
+pub const FAMILY_SIZE: u32 = 8;
+/// Percent of concepts for which a family other than the first has its own word.
+const FAMILY_DIALECT_PERCENT: u64 = 33;
+/// Percent of founder concepts linked to an idiosyncratic form.
+const VARIANT_PERCENT: u64 = 5;
 /// Percent of founder concepts with an extra synonym.
 const SYNONYM_PERCENT: u64 = 6;
 
@@ -148,14 +152,33 @@ pub(crate) fn founding_form(seed: u64, concept: Concept) -> VocalForm {
     VocalForm(forms[concept as usize])
 }
 
+/// The word a founding family uses for a concept: the community's word, except
+/// that each family after the first has its own word for about a third of the
+/// concepts (a dialect).
+pub(crate) fn family_form(seed: u64, family: u32, concept: Concept) -> VocalForm {
+    if family == 0 {
+        return founding_form(seed, concept);
+    }
+    let roll = mix(seed ^ 0x4641_4d49_4c59 ^ (u64::from(family) << 32) ^ concept as u64);
+    if roll % 100 < FAMILY_DIALECT_PERCENT {
+        founding_form(
+            seed ^ u64::from(family).wrapping_mul(0x9e37_79b9_7f4a_7c15),
+            concept,
+        )
+    } else {
+        founding_form(seed, concept)
+    }
+}
+
 impl Lexicon {
-    /// A founder's inherited lexicon: mostly the community convention, with
-    /// some concepts linked to another form and occasional synonyms.
+    /// A founder's inherited lexicon: its family's dialect of the community
+    /// convention, with a few idiosyncratic forms and occasional synonyms.
     pub(crate) fn founding(seed: u64, agent: AgentId) -> Self {
         let mut lexicon = Self::default();
+        let family = agent.get() / FAMILY_SIZE;
         for concept in Concept::ALL {
             let roll = mix(seed ^ (u64::from(agent.get()) << 20) ^ (concept as u64) << 4);
-            let conventional = founding_form(seed, concept);
+            let conventional = family_form(seed, family, concept);
             let form = if roll % 100 < VARIANT_PERCENT {
                 VocalForm(((roll >> 8) % u64::from(VOCAL_FORMS)) as u8)
             } else {
@@ -213,14 +236,21 @@ impl Lexicon {
     }
 
     /// What this agent thinks `form` means, if anything (its strongest reading).
+    #[cfg(test)]
     pub(crate) fn recognize(&self, form: VocalForm) -> Option<Concept> {
+        self.recognize_with_strength(form)
+            .map(|(concept, _)| concept)
+    }
+
+    /// The strongest reading of `form` and how firmly it is held.
+    pub(crate) fn recognize_with_strength(&self, form: VocalForm) -> Option<(Concept, i32)> {
         self.entries
             .iter()
             .enumerate()
             .filter(|(_, entry)| !entry.is_empty() && entry.form == form.0)
             .filter(|(_, entry)| entry.strength() > 0)
             .max_by_key(|&(slot, entry)| (entry.strength(), usize::MAX - slot))
-            .map(|(_, entry)| Concept::from_index(entry.concept))
+            .map(|(_, entry)| (Concept::from_index(entry.concept), entry.strength()))
     }
 
     /// Learns from hearing `form` while other evidence pointed to `concept`
@@ -292,10 +322,23 @@ mod tests {
     }
 
     #[test]
+    fn the_second_family_speaks_a_dialect() {
+        let seed = 1;
+        let differing = Concept::ALL
+            .iter()
+            .filter(|&&concept| family_form(seed, 1, concept) != family_form(seed, 0, concept))
+            .count();
+        assert!(
+            differing > 0 && differing < Concept::COUNT,
+            "{differing} concepts differ"
+        );
+    }
+
+    #[test]
     fn founders_mostly_share_the_convention_but_not_entirely() {
         let seed = 1;
         let (mut agree, mut disagree) = (0, 0);
-        for id in 0..100 {
+        for id in 0..FAMILY_SIZE {
             let lexicon = Lexicon::founding(seed, AgentId::new(id));
             for concept in Concept::ALL {
                 if lexicon.produce(concept) == Some(founding_form(seed, concept)) {
