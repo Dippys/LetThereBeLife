@@ -2,11 +2,11 @@
 //!
 //! A single view remains available for ad-hoc work:
 //!
-//! `cargo run --release -p sim-core --example render_map -- [view options]`
+//! `cargo run --release -p sim-world --example render_map -- [view options]`
 //!
 //! The complete repeatable review set is produced with:
 //!
-//! `cargo run --release -p sim-core --example render_map -- --review-set`
+//! `cargo run --release -p sim-world --example render_map -- --review-set`
 
 use std::{
     fmt::Write as _,
@@ -21,13 +21,29 @@ use sim_world::{
     TerrainCell, TerrainClass, WORLD_GENERATION_BOUNDS, WorldPosition, WorldRect,
 };
 
+mod image;
+mod reports;
+
+use image::{biome_index, feature_index, sample_color, surface_index, write_bmp};
+use reports::{
+    detect_source_revision, distribution_report, representation_report, review_manifest,
+    sanitize_field, seed_roles_report,
+};
+
 const DEFAULT_WIDTH: i64 = 4_096;
+
 const DEFAULT_HEIGHT: i64 = 4_096;
+
 const DEFAULT_STEP: i64 = 8;
+
 const DEFAULT_REVIEW_DIRECTORY: &str = "target/world-quality";
+
 const MAX_PIXELS: usize = 16_777_216;
+
 const REVIEW_FORMAT_VERSION: u32 = 3;
+
 const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
 const REPRESENTATIVE_SEEDS: [SeedCase; 4] = [
@@ -510,150 +526,6 @@ fn validate_view(bounds: WorldRect, step: i64) -> Result<(usize, usize), String>
     Ok((columns, rows))
 }
 
-fn review_manifest(source_revision: &str, rendered: &[RenderedView]) -> String {
-    let mut report = "review_format\tsource_revision\tview\tseed\tmin_x\tmin_y\tmax_x\tmax_y\tstep\tcolumns\trows\tfeatures\tsample_hash\tpath\n".to_owned();
-    for output in rendered {
-        let view = output.view;
-        let (columns, rows) = view.dimensions();
-        writeln!(
-            report,
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:016x}\t{}",
-            REVIEW_FORMAT_VERSION,
-            source_revision,
-            view.name,
-            view.seed,
-            view.bounds.min.x,
-            view.bounds.min.y,
-            view.bounds.max.x,
-            view.bounds.max.y,
-            view.step,
-            columns,
-            rows,
-            view.show_features,
-            output.stats.sample_hash,
-            output.relative_path.display(),
-        )
-        .expect("writing to a String cannot fail");
-    }
-    report
-}
-
-fn distribution_report(rendered: &[RenderedView]) -> String {
-    let mut report = String::from(
-        "view\tseed\tsamples\tdeep_water\tshallow_water\tsand\tsoil\thill\trock\tsnow_ice\tocean\tlake\triver\tbeach\tdesert\tgrassland\tsavanna\tforest\twetland\ttundra\talpine\ttrees\trocks\tberry_bushes\tfeatures\tfeature_ppm\tsample_hash\n",
-    );
-    for output in rendered {
-        let surfaces = &output.stats.surfaces;
-        let biomes = &output.stats.biomes;
-        let features = &output.stats.features;
-        writeln!(
-            report,
-            concat!(
-                "{}\t{}\t{}",
-                "\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-                "\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-                "\t{}\t{}\t{}",
-                "\t{}\t{}",
-                "\t{:016x}"
-            ),
-            output.view.name,
-            output.view.seed,
-            output.stats.samples,
-            surfaces[0],
-            surfaces[1],
-            surfaces[2],
-            surfaces[3],
-            surfaces[4],
-            surfaces[5],
-            surfaces[6],
-            biomes[0],
-            biomes[1],
-            biomes[2],
-            biomes[3],
-            biomes[4],
-            biomes[5],
-            biomes[6],
-            biomes[7],
-            biomes[8],
-            biomes[9],
-            biomes[10],
-            features[0],
-            features[1],
-            features[2],
-            output.stats.feature_count(),
-            output.stats.feature_parts_per_million(),
-            output.stats.sample_hash,
-        )
-        .expect("writing to a String cannot fail");
-    }
-    report
-}
-
-fn representation_report() -> String {
-    let mut report = String::from("type\tsize_bytes\talign_bytes\n");
-    for (name, size, align) in [
-        type_layout::<SurfaceType>("SurfaceType"),
-        type_layout::<BiomeType>("BiomeType"),
-        type_layout::<TerrainClass>("TerrainClass"),
-        type_layout::<TerrainCell>("TerrainCell"),
-        type_layout::<PrevailingWind>("PrevailingWind"),
-        type_layout::<ClimateSample>("ClimateSample"),
-        type_layout::<FeatureKind>("FeatureKind"),
-        type_layout::<Feature>("Feature"),
-        type_layout::<ResourceKind>("ResourceKind"),
-        type_layout::<BaseResource>("BaseResource"),
-        type_layout::<GeneratedCell>("GeneratedCell"),
-        type_layout::<ChunkCoord>("ChunkCoord"),
-    ] {
-        writeln!(report, "{name}\t{size}\t{align}").expect("writing to a String cannot fail");
-    }
-    report
-}
-
-fn type_layout<T>(name: &'static str) -> (&'static str, usize, usize) {
-    (name, std::mem::size_of::<T>(), std::mem::align_of::<T>())
-}
-
-fn seed_roles_report() -> String {
-    let mut report = String::from("seed\trole\n");
-    for case in REPRESENTATIVE_SEEDS {
-        writeln!(report, "{}\t{}", case.seed, case.role).expect("writing to a String cannot fail");
-    }
-    report
-}
-
-fn detect_source_revision() -> String {
-    let revision = std::process::Command::new("git")
-        .args(["rev-parse", "--verify", "HEAD"])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| String::from_utf8(output.stdout).ok())
-        .map(|revision| revision.trim().to_owned())
-        .filter(|revision| !revision.is_empty())
-        .unwrap_or_else(|| "unavailable".to_owned());
-    let dirty = std::process::Command::new("git")
-        .args(["status", "--porcelain", "--untracked-files=no"])
-        .output()
-        .ok()
-        .is_some_and(|output| output.status.success() && !output.stdout.is_empty());
-    if dirty {
-        format!("{revision}+dirty")
-    } else {
-        revision
-    }
-}
-
-fn sanitize_field(value: &str) -> String {
-    value
-        .chars()
-        .map(|character| match character {
-            '\t' | '\r' | '\n' => ' ',
-            other => other,
-        })
-        .collect()
-}
-
 fn parse_value<T: std::str::FromStr>(value: String, argument: &str) -> Result<T, String> {
     value
         .parse()
@@ -682,265 +554,5 @@ fn align_up(value: i64, origin: i64, step: i64) -> Result<i64, String> {
         .ok_or("sample alignment exceeds i64 coordinates".to_owned())
 }
 
-fn surface_index(surface: SurfaceType) -> usize {
-    match surface {
-        SurfaceType::DeepWater => 0,
-        SurfaceType::ShallowWater => 1,
-        SurfaceType::Sand => 2,
-        SurfaceType::Soil => 3,
-        SurfaceType::Hill => 4,
-        SurfaceType::Rock => 5,
-        SurfaceType::SnowIce => 6,
-    }
-}
-
-fn biome_index(biome: BiomeType) -> usize {
-    match biome {
-        BiomeType::Ocean => 0,
-        BiomeType::Lake => 1,
-        BiomeType::River => 2,
-        BiomeType::Beach => 3,
-        BiomeType::Desert => 4,
-        BiomeType::Grassland => 5,
-        BiomeType::Savanna => 6,
-        BiomeType::Forest => 7,
-        BiomeType::Wetland => 8,
-        BiomeType::Tundra => 9,
-        BiomeType::Alpine => 10,
-    }
-}
-
-fn feature_index(feature: FeatureKind) -> usize {
-    match feature {
-        FeatureKind::Tree => 0,
-        FeatureKind::Rock => 1,
-        FeatureKind::BerryBush => 2,
-    }
-}
-
-fn sample_color(cell: GeneratedCell, show_features: bool) -> [u8; 3] {
-    if show_features && let Some(feature) = cell.feature {
-        return match feature {
-            FeatureKind::Tree => [17, 48, 24],
-            FeatureKind::Rock => [84, 82, 78],
-            FeatureKind::BerryBush => [164, 35, 77],
-        };
-    }
-    terrain_color(cell.terrain)
-}
-
-/// Mirrors the viewer palette in crates/sim-viewer/src/renderer.rs.
-fn terrain_color(cell: TerrainCell) -> [u8; 3] {
-    let shade = (cell.elevation >> 12) as u8;
-    let rgb = |r: u8, g: u8, b: u8| [r, g, b];
-    match (cell.surface(), cell.biome()) {
-        (SurfaceType::DeepWater, BiomeType::Ocean) => rgb(16, 48 + shade, 94 + shade),
-        (SurfaceType::ShallowWater, BiomeType::Ocean) => rgb(28, 84 + shade, 126 + shade),
-        (SurfaceType::DeepWater, BiomeType::Lake) => rgb(24, 66 + shade, 112 + shade),
-        (SurfaceType::ShallowWater, BiomeType::Lake) => rgb(40, 102 + shade, 142 + shade),
-        (SurfaceType::DeepWater, BiomeType::River) => rgb(20, 74 + shade, 128 + shade),
-        (SurfaceType::ShallowWater, BiomeType::River) => rgb(38, 116 + shade, 154 + shade),
-        (SurfaceType::Sand, BiomeType::Beach) => rgb(210 + shade, 190 + shade, 126),
-        (SurfaceType::Sand, BiomeType::Desert) => rgb(184 + shade, 150 + shade, 75),
-        (SurfaceType::Soil, BiomeType::Grassland) => rgb(50 + shade, 112 + shade, 51),
-        (SurfaceType::Soil, BiomeType::Savanna) => rgb(118 + shade, 126 + shade, 55),
-        (SurfaceType::Soil, BiomeType::Forest) => rgb(37, 86 + shade, 39),
-        (SurfaceType::Soil, BiomeType::Wetland) => rgb(48, 94 + shade, 74 + shade),
-        (SurfaceType::Soil, BiomeType::Tundra) => rgb(105 + shade, 119 + shade, 105 + shade),
-        (SurfaceType::Hill, _) => rgb(100 + shade, 108 + shade, 72),
-        (SurfaceType::Rock, _) => rgb(125 + shade, 124 + shade, 119 + shade),
-        (SurfaceType::SnowIce, _) => rgb(220 + shade, 229 + shade, 234 + shade),
-        _ => rgb(255, 0, 255),
-    }
-}
-
-fn write_bmp(
-    path: &Path,
-    width: usize,
-    height: usize,
-    pixels: &[[u8; 3]],
-) -> Result<(), std::io::Error> {
-    let invalid = |message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message);
-    let row_bytes = width
-        .checked_mul(3)
-        .ok_or_else(|| invalid("BMP row too wide"))?;
-    let padding = (4 - row_bytes % 4) % 4;
-    let data_size = row_bytes
-        .checked_add(padding)
-        .and_then(|row_size| row_size.checked_mul(height))
-        .ok_or_else(|| invalid("BMP data is too large"))?;
-    let file_size = 54_usize
-        .checked_add(data_size)
-        .ok_or_else(|| invalid("BMP file is too large"))?;
-    let width = i32::try_from(width).map_err(|_| invalid("BMP width exceeds i32"))?;
-    let height = i32::try_from(height).map_err(|_| invalid("BMP height exceeds i32"))?;
-    let file_size = u32::try_from(file_size).map_err(|_| invalid("BMP file exceeds u32"))?;
-    let mut file = std::io::BufWriter::new(std::fs::File::create(path)?);
-    file.write_all(b"BM")?;
-    file.write_all(&file_size.to_le_bytes())?;
-    file.write_all(&[0; 4])?;
-    file.write_all(&54_u32.to_le_bytes())?;
-    file.write_all(&40_u32.to_le_bytes())?;
-    file.write_all(&width.to_le_bytes())?;
-    file.write_all(&height.to_le_bytes())?;
-    file.write_all(&1_u16.to_le_bytes())?;
-    file.write_all(&24_u16.to_le_bytes())?;
-    file.write_all(&[0; 24])?;
-    for row in (0..height as usize).rev() {
-        for pixel in &pixels[row * width as usize..(row + 1) * width as usize] {
-            file.write_all(&[pixel[2], pixel[1], pixel[0]])?;
-        }
-        file.write_all(&[0, 0, 0, 0][..padding])?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn view_validation_enforces_world_bounds_and_pixel_budget() {
-        assert!(validate_view(WORLD_GENERATION_BOUNDS, 128).is_ok());
-        assert!(
-            validate_view(
-                WorldRect {
-                    min: WorldPosition {
-                        x: WORLD_GENERATION_BOUNDS.min.x - 1,
-                        y: 0,
-                    },
-                    max: WorldPosition { x: 64, y: 64 },
-                },
-                1,
-            )
-            .unwrap_err()
-            .contains("must remain inside")
-        );
-        assert!(
-            validate_view(
-                WorldRect {
-                    min: WorldPosition { x: 0, y: 0 },
-                    max: WorldPosition { x: 4_097, y: 4_097 },
-                },
-                1,
-            )
-            .unwrap_err()
-            .contains("maximum")
-        );
-    }
-
-    #[test]
-    fn ad_hoc_view_rejects_coordinate_overflow() {
-        let error = parse_single_options(
-            [
-                "--min-x".to_owned(),
-                i64::MAX.to_string(),
-                "--width".to_owned(),
-                "1".to_owned(),
-            ]
-            .into_iter(),
-        )
-        .unwrap_err();
-        assert_eq!(error, "--min-x plus --width exceeds i64 coordinates");
-    }
-
-    #[test]
-    fn sampling_alignment_is_relative_to_the_view_origin_across_signed_chunks() {
-        let origin = -1_003;
-        let step = 7;
-        for value in [-1_100, -1_024, -1_003, -1_000, -960, -1] {
-            let aligned = align_up(value, origin, step).unwrap();
-            assert!(aligned >= value);
-            assert_eq!((aligned - origin).rem_euclid(step), 0);
-            assert!(aligned - value < step);
-        }
-        assert_eq!(align_up(-1_024, origin, step), Ok(-1_024));
-    }
-
-    #[test]
-    fn canonical_views_cover_both_drainage_seam_axes() {
-        let seam_x = FOCUSED_VIEWS
-            .iter()
-            .find(|view| view.name == "drainage-seam-x")
-            .unwrap();
-        let seam_y = FOCUSED_VIEWS
-            .iter()
-            .find(|view| view.name == "drainage-seam-y")
-            .unwrap();
-        assert!(seam_x.bounds.min.x < 0 && seam_x.bounds.max.x > 0);
-        assert!(seam_y.bounds.min.y < 0 && seam_y.bounds.max.y > 0);
-        assert!(
-            FOCUSED_VIEWS
-                .into_iter()
-                .all(|view| view.validate().is_ok())
-        );
-    }
-
-    #[test]
-    fn feature_ecology_views_are_full_resolution_and_visible() {
-        let views: Vec<_> = FOCUSED_VIEWS
-            .into_iter()
-            .filter(|view| {
-                matches!(
-                    view.name,
-                    "forest-features" | "outcrop-features" | "close-up"
-                )
-            })
-            .collect();
-        assert_eq!(views.len(), 3);
-        assert!(
-            views
-                .iter()
-                .all(|view| view.step == 1 && view.show_features)
-        );
-    }
-
-    #[test]
-    fn representative_seed_contract_is_multi_seed_and_keeps_repository_seed() {
-        assert_eq!(REPRESENTATIVE_SEEDS[0].seed, 1);
-        assert!(REPRESENTATIVE_SEEDS.len() >= 4);
-        let unique: std::collections::BTreeSet<_> = REPRESENTATIVE_SEEDS
-            .into_iter()
-            .map(|case| case.seed)
-            .collect();
-        assert_eq!(unique.len(), REPRESENTATIVE_SEEDS.len());
-    }
-
-    #[test]
-    fn output_metadata_is_byte_stable_for_equal_inputs() {
-        let output = RenderedView {
-            view: ReviewView::new("fixture", 7, (-64, -32, 128, 64), 4, true),
-            relative_path: PathBuf::from("seed-7/fixture.bmp"),
-            stats: SampleStats {
-                surfaces: [1, 2, 3, 4, 5, 6, 7],
-                biomes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
-                features: [8, 9, 10],
-                samples: 28,
-                sample_hash: 0x1234_5678_9abc_def0,
-            },
-            elapsed: Duration::from_secs(99),
-        };
-        let left = review_manifest("abc123+dirty", std::slice::from_ref(&output));
-        let right = review_manifest("abc123+dirty", &[output]);
-        assert_eq!(left, right);
-        assert_eq!(
-            left,
-            "review_format\tsource_revision\tview\tseed\tmin_x\tmin_y\tmax_x\tmax_y\tstep\tcolumns\trows\tfeatures\tsample_hash\tpath\n3\tabc123+dirty\tfixture\t7\t-64\t-32\t64\t32\t4\t32\t16\ttrue\t123456789abcdef0\tseed-7/fixture.bmp\n"
-        );
-    }
-
-    #[test]
-    fn semantic_sample_hash_is_deterministic_and_coordinate_sensitive() {
-        let cell = ChunkGenerator::new(1, ChunkCoord { x: 0, y: 0 })
-            .unwrap()
-            .sample(ChunkLocalPosition { x: 0, y: 0 })
-            .unwrap();
-        let mut left = SampleStats::default();
-        let mut right = SampleStats::default();
-        left.record(-1, 2, cell);
-        right.record(-1, 2, cell);
-        assert_eq!(left, right);
-        right.record(0, 2, cell);
-        assert_ne!(left.sample_hash, right.sample_hash);
-    }
-}
+mod tests;

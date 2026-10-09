@@ -13,5 +13,5 @@ rayon.workspace = true
 
 [[example]]
 name = "render_map"
-path = "examples/render_map.rs"
+path = "examples/render_map/main.rs"
 test = true
