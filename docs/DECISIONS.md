@@ -146,3 +146,16 @@ hidden meaning channel (receivers are told the kind of place).
 **Consequences:** World-scale and terrain work is paused unless a milestone needs it.
 `GestureTopic` will be removed from the receiver path in M2. DANGER waits until the world has
 hazards. `MINDS.md` becomes a record.
+
+## D-071: M1, the valley scenario and communication log (2026-10-10)
+
+**Decision:** Add `find_valley`/`camp_sites` (sim-world), a `--valley` study and viewer preset
+(16 adults in a 768² valley), engine diagnostics that separate private intent from the public
+gesture (`SignalEvent`, `InterpretationEvent`, `HintOutcomeEvent`), and a headless
+`CommunicationLog` with `--comms` and `--explain`.
+**Why:** The plan's first milestone, and the spec's "instrumentation first". Every later
+milestone is judged by what this log shows.
+**Consequences:** The log immediately showed that hints never drive decisions (agents prefer
+first-hand memories) and that many hints are stale. M4 now explicitly requires hints to compete
+fairly in decisions. The "acted" link in the log is approximate (it matches by receiver and kind,
+not by the specific hint chosen) and is labelled as such.

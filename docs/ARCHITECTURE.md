@@ -146,7 +146,17 @@ only the bootstrap load area, not the world size.
 | `spawn_menu.rs` | Numpad object-placement menu |
 
 `sim-headless` is split into `scenario.rs` (runner), `spawns.rs`, `report.rs`, `invariants.rs`, `hash.rs`,
-and `study.rs` (behavior study: viewer-like agents, survival and roaming metrics, decision traces).
+`study.rs` (behavior study: viewer-like agents, survival and roaming metrics, decision traces,
+`explain`), and `comms.rs` (`CommunicationLog`: exchange chains built from engine diagnostics).
+
+`sim-world/src/valley.rs` chooses scenario sites without materializing terrain:
+`find_valley(seed, side)` samples 49 candidate squares around the origin, and
+`camp_sites(world, bounds, count, seed)` places a band around the water access nearest the
+valley's center.
+
+Communication diagnostics (latest tick only, for tools; agents never read them):
+`Engine::signal_events` (id, private intent, public gesture, inferred place),
+`interpretation_events` (one per watcher), and `hint_outcomes` (confirmed or abandoned, with teller).
 
 The viewer's hover card shows the hovered agent's memory (counts by kind, hints, explored tiles),
 and the map draws its remembered places: solid squares for seen places, outlines sized to the

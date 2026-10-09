@@ -95,6 +95,9 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Known problems and limitations
 
+- **Hints never drive decisions (found by the M1 log).** Agents always prefer places they saw
+  themselves, so in practice hearsay changes beliefs but never actions. Many hints are also stale
+  (the place pointed at has since been eaten). M4 addresses this.
 - **Sharing improves survival only where knowledge is scarce.** In most scenarios agents already
   survive on their own knowledge. Sharing should matter more with bigger populations, scarcer
   resources, or children who start out knowing nothing.
@@ -113,6 +116,7 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
+- 2026-10-10 (latest): M1, the valley scenario, communication log, and explain output (D-071).
 - 2026-10-10 (later): personalities (D-067), relationships and trust (D-068), visiting friends
   and "I've been there" gestures (D-069).
 - 2026-10-10: behavior study (D-061), waterholes and generator v2 (D-062), mental maps and the
@@ -122,7 +126,7 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## What's next
 
-Follow [`plans/VERTICAL_SLICE.md`](plans/VERTICAL_SLICE.md), starting with **M1: valley scenario and
-communication log**, then private intent vs public signals, personal lexicons, interpretation with
+Follow [`plans/VERTICAL_SLICE.md`](plans/VERTICAL_SLICE.md). **M1 (valley and communication log) is
+done.** Next is **M2: private intent vs public signals**, then personal lexicons, interpretation with
 competing meanings, learning and repair, and finally the automated success test. Run the study
 before and after each milestone.

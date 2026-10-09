@@ -14,6 +14,7 @@
 ```sh
 cargo run -p sim-viewer                                  # interactive (use --release for smooth)
 cargo run -p sim-viewer -- --config path/to/file.toml
+cargo run --release -p sim-viewer -- --valley           # the vertical slice: 16 agents camped in a valley
 cargo run -p sim-headless -- --ticks 600 --seed 42 [--agents 20] [--batch-size N]
 cargo run --release -p sim-headless -- --canonical --agents 20 --batch-size 10000
 ```
@@ -45,12 +46,19 @@ procedurally instead. Re-run the command after changing the seed or the generato
 Measures how viewer-like agents actually fare. They spawn without supplies and run headless:
 
 ```sh
-cargo run --release -p sim-headless -- --study [--near-water | --groups] [--seed N] [--agents N]
-    [--ticks N] [--mind legacy|memory|sharing|full] [--verbose] [--trace AGENT]
+cargo run --release -p sim-headless -- --study [--near-water | --groups | --valley] [--seed N]
+    [--agents N] [--ticks N] [--mind legacy|memory|sharing|full] [--verbose] [--trace AGENT]
+    [--comms N] [--explain AGENT]
 ```
 
 - `--near-water` spawns within 6 cells of fresh water. `--groups` drops agents in groups of 5.
-  The default spawns on random land.
+  `--valley` is the spec's vertical slice: a 768² livable valley (found per seed) with a band of
+  16 camped beside water, and only the valley is simulated. The default spawns on random land.
+- The `communication:` line counts gestures by topic and receptions: informed, acted on,
+  confirmed, abandoned, and misread. `--comms N` prints the first N exchanges that led
+  somewhere, as stories: who pointed where, what they privately meant, how each watcher read it,
+  and what each did and found. `--explain AGENT` prints that agent's personality, beliefs,
+  acquaintances, and latest exchanges, followed by its decision trace.
 - `--mind legacy` is the old reactive policy (what the viewer used before). `memory` adds the
   mental map. `sharing` adds gestures. `full` (the default) adds personalities and relationships.
 - The `social:` line shows the % of time agents spend near another agent, their acquaintances,
@@ -80,6 +88,11 @@ Compare minds before and after any behavior change. Current numbers are in [STAT
 | `C` | Cancel pending generation |
 | Hover | Cell/chunk info in HUD. Hovering an agent shows its needs, goal, inventory, health, sleep, memory, personality (with a one-word summary such as EXPLORER or LONER), and friends with trust. The map shows its remembered places (solid = seen, outline = hint with search area) and dotted lines to where its acquaintances were last seen (violet = friend) |
 | `Esc` | Quit |
+
+Gestures appear for 2.5 s as an off-white dotted line from the sender to where watchers think
+the place is, with the inferred search area outlined. A small colored dot at the sender shows the
+**private** topic: that's debug-only, since agents can't see it. The HUD counts gestures and shows
+the latest one.
 
 ## Tests
 

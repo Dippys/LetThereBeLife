@@ -34,7 +34,24 @@ Kept and reused: mental maps and hints (`cognition/map.rs`), trust and relations
 Each milestone ends with a study measurement and tests, like the work so far. Only one is active
 at a time; update this file when one lands.
 
-### M1 — Valley scenario and communication log
+### M1 — Valley scenario and communication log ✅ (2026-10-10)
+
+**Result:** `sim_core::find_valley` and `camp_sites` choose a livable 768² valley and a camp
+beside water (seeds 1, 4, 7, 9, and 42 have one; seed 2's surroundings are ocean). In
+`sim-headless --study --valley` and `sim-viewer --valley`, the band of 16 lives there.
+Each gesture now has an id, a private intent, a public gesture, and one interpretation per
+watcher, and hint outcomes are reported with their teller. `CommunicationLog` links them into
+exchange chains (`--comms N`), and `--explain AGENT` tells one agent's story.
+
+**What the log showed right away (seed 1 valley, 600k ticks):** 2,538 gestures, 2,020 receptions
+that changed beliefs, **zero decisions based on a hint**, and 3 confirmed vs 24 abandoned hints.
+Agents always prefer places they saw themselves (hints are penalized for uncertainty), and in a
+valley everyone has seen water and food within minutes, so hearsay never drives behavior. Most
+abandoned hints were **stale**: a sender pointing at a bush it saw earlier that has since been
+eaten. Trust in such senders fell (one agent's trust in a teller dropped from 128 to 32). The
+small survival gain earlier credited to sharing can't have come from hints. **M4 must make hints
+matter in decisions.**
+
 
 - A `--valley` preset for the study and the viewer: a small watered area (about 512–1,024 cells
   across, chosen deterministically per seed) and the spec's population of 16 adults. Children
@@ -88,8 +105,12 @@ that the receiver links to both WATER and FOOD and points toward a pond ringed w
 The receiver is hungry, so it reads FOOD, goes to eat, and the sender (who meant "water's there,
 you look thirsty") sees it walk to the bushes.
 
+Hints must also **compete fairly with first-hand memories** in decisions: a fresh, trusted hint
+about a closer place should beat an old sighting far away (M1 found hints were never acted on).
+
 **Done when:** the study shows misinterpretations happening at a plausible rate (neither zero nor
-chaos), each with a recorded reason (ambiguous form, ambiguous context, need bias, low trust).
+chaos), each with a recorded reason (ambiguous form, ambiguous context, need bias, low trust), and
+`hint-decisions` is well above zero in the valley.
 
 ### M5 — Consequences, learning, and repair
 
