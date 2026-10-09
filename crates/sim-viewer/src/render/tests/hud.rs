@@ -3,9 +3,10 @@
 use bytemuck::Zeroable;
 use sim_core::{
     AgentActivity, AgentView, DeathCause, DeathRecord, ExplorationHeading, HealthStatus,
-    HealthView, InventoryView, NeedKind, PhysicalGoal, PhysicalNeedsView, PhysicalPolicyView,
-    PolicyReason, SleepQuality, SleepView, SpawnKind, WORLD_GENERATION_BOUNDS, World, WorldConfig,
-    WorldPosition,
+    HealthView, InventoryView, LANDMARK_SLOTS, LandmarkKind, LandmarkSource, LandmarkView,
+    MentalMapView, NeedKind, PhysicalGoal, PhysicalNeedsView, PhysicalPolicyView, PolicyReason,
+    SleepQuality, SleepView, SpawnKind, VISITED_TILE_SLOTS, WORLD_GENERATION_BOUNDS, World,
+    WorldConfig, WorldPosition,
 };
 
 use super::test_render_state;
@@ -16,8 +17,19 @@ use crate::render::instances::{chunk_outline, world_border};
 use crate::render::overlay::build_screen_overlay;
 use crate::render::{
     AGENT_TEXT_CAPACITY, AgentInspection, GenerationStatus, HUD_TEXT_CAPACITY,
-    MAX_INSTANCES_PER_BUFFER, SCREEN_OVERLAY_CAPACITY, SpawnMenuView,
+    MAX_INSTANCES_PER_BUFFER, MemoryInspection, SCREEN_OVERLAY_CAPACITY, SpawnMenuView,
 };
+
+fn landmark(kind: LandmarkKind, source: LandmarkSource, x: i64) -> LandmarkView {
+    LandmarkView {
+        kind,
+        position: WorldPosition { x, y: 0 },
+        source,
+        confidence: 200,
+        search_radius: 0,
+        seen_second: 10,
+    }
+}
 
 #[test]
 fn static_buffers_partition_at_the_device_safe_limit() {
@@ -203,6 +215,16 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
         }),
         sleep: None,
         death: None,
+        memory: Some(MemoryInspection::from_view(&MentalMapView {
+            agent: view.id,
+            landmarks: vec![
+                landmark(LandmarkKind::Water, LandmarkSource::Seen, 0),
+                landmark(LandmarkKind::Water, LandmarkSource::Told, 1),
+                landmark(LandmarkKind::Food, LandmarkSource::Seen, 2),
+                landmark(LandmarkKind::Shelter, LandmarkSource::Told, 3),
+            ],
+            explored_tiles: 37,
+        })),
     };
     let mut text = String::with_capacity(AGENT_TEXT_CAPACITY);
     write_agent_text(&mut text, Some(inspection));
@@ -215,7 +237,14 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
     assert!(text.contains("INVENTORY F 2  W 3  S 4"));
     assert!(text.contains("HEALTH 9000  HEALTHY"));
     assert!(text.contains("SLEEP NONE"));
+    assert!(text.contains("MEMORY WATER 2  FOOD 1  WOOD 0  STONE 0\n"));
+    assert!(text.contains("SHELTER 1  HINTS 2  EXPLORED 37 TILES\n"));
     assert!(text.len() <= AGENT_TEXT_CAPACITY);
+
+    let mut mindless = inspection;
+    mindless.memory = None;
+    write_agent_text(&mut text, Some(mindless));
+    assert!(text.contains("MEMORY NONE"));
 
     let mut backoff = inspection;
     backoff.policy = Some(PhysicalPolicyView {
@@ -295,12 +324,21 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
             at: sim_core::SimTime::from_ticks(u64::MAX),
             position: budget_view.position,
         }),
+        memory: Some(MemoryInspection::from_view(&MentalMapView {
+            agent: budget_view.id,
+            landmarks: (0..LANDMARK_SLOTS)
+                .map(|index| landmark(LandmarkKind::Shelter, LandmarkSource::Told, index as i64))
+                .collect(),
+            // The mental map caps explored tiles at its fixed visit-tile slots.
+            explored_tiles: VISITED_TILE_SLOTS,
+        })),
     };
     let mut budget_text = String::with_capacity(AGENT_TEXT_CAPACITY);
     write_agent_text(&mut budget_text, Some(budget_inspection));
     assert!(budget_text.contains("WHY EXPOSURE THRESHOLD"));
     assert!(budget_text.contains("DEATH CAUSE EXHAUSTION"));
     assert!(budget_text.contains("DIED AT TICK 18446744073709551615"));
+    assert!(budget_text.contains("SHELTER 12  HINTS 12  EXPLORED 24 TILES"));
     assert!(budget_text.len() <= AGENT_TEXT_CAPACITY);
 
     let world = World::generate(u64::MAX, WorldConfig::new(64, 64).unwrap());

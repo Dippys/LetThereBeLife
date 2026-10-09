@@ -1,14 +1,18 @@
 //! Agent, spawned-object, and structure instance tests.
 
 use sim_core::{
-    AgentActivity, AgentView, SpawnKind, SpawnedObjectView, StructureState, WorldPosition,
-    WorldRect,
+    AgentActivity, AgentView, LANDMARK_SLOTS, LandmarkKind, LandmarkSource, LandmarkView,
+    SpawnKind, SpawnedObjectView, StructureState, WorldPosition, WorldRect,
 };
 
-use crate::render::colors::{agent_color, spawn_kind_color, structure_color};
-use crate::render::instances::{build_agent_instances, build_spawned_object_instances};
+use crate::render::colors::{agent_color, landmark_color, spawn_kind_color, structure_color};
+use crate::render::instances::{
+    build_agent_instances, build_memory_marker_instances, build_spawned_object_instances,
+};
 use crate::render::summary::{CacheSyncAction, cache_sync_action};
-use crate::render::{MAX_AGENT_INSTANCES, MAX_SPAWNED_OBJECT_INSTANCES};
+use crate::render::{
+    MAX_AGENT_INSTANCES, MAX_MEMORY_MARKER_INSTANCES, MAX_SPAWNED_OBJECT_INSTANCES,
+};
 
 #[test]
 fn agent_instances_reflect_position_activity_and_bounded_far_zoom_culling() {
@@ -128,4 +132,61 @@ fn shelter_lifecycle_states_have_distinct_footprint_colors() {
         structure_color(StructureState::UnderConstruction),
         structure_color(StructureState::Complete)
     );
+}
+
+#[test]
+fn memory_markers_show_seen_places_solid_and_hints_as_search_outlines() {
+    let seen = LandmarkView {
+        kind: LandmarkKind::Water,
+        position: WorldPosition { x: 10, y: -4 },
+        source: LandmarkSource::Seen,
+        confidence: 255,
+        search_radius: 0,
+        seen_second: 5,
+    };
+    let told = LandmarkView {
+        kind: LandmarkKind::Food,
+        position: WorldPosition { x: -20, y: 6 },
+        source: LandmarkSource::Told,
+        confidence: 120,
+        search_radius: 8,
+        seen_second: 9,
+    };
+    let narrow_hint = LandmarkView {
+        kind: LandmarkKind::Stone,
+        search_radius: 0,
+        ..told
+    };
+    let mut instances = Vec::new();
+
+    build_memory_marker_instances(&[seen, told, narrow_hint], 4.0, &mut instances);
+    assert_eq!(instances.len(), 1 + 4 + 4);
+    let marker = instances[0];
+    assert_eq!(marker.color, landmark_color(LandmarkKind::Water));
+    assert_eq!(marker.size, [1.5, 1.5]);
+    assert_eq!(marker.position, [9.75, -4.25]);
+
+    let outline = &instances[1..5];
+    assert!(
+        outline
+            .iter()
+            .all(|edge| edge.color == landmark_color(LandmarkKind::Food))
+    );
+    assert_eq!(outline[0].position, [-28.0, -2.0]);
+    assert_eq!(outline[0].size, [17.0, 0.5]);
+    assert_eq!(outline[2].size, [0.5, 17.0]);
+    assert_eq!(outline[3].position, [-11.5, -2.0]);
+    assert_eq!(
+        instances[5].size[0], 7.0,
+        "hints without a search radius still show a few cells of uncertainty"
+    );
+
+    let sightings = [seen; LANDMARK_SLOTS * 2];
+    build_memory_marker_instances(&sightings, 4.0, &mut instances);
+    assert_eq!(instances.len(), LANDMARK_SLOTS);
+    let hints = [told; LANDMARK_SLOTS];
+    build_memory_marker_instances(&hints, 4.0, &mut instances);
+    assert_eq!(instances.len(), MAX_MEMORY_MARKER_INSTANCES);
+    build_memory_marker_instances(&hints, 0.5, &mut instances);
+    assert!(instances.is_empty());
 }

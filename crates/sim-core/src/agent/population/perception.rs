@@ -125,6 +125,7 @@ impl Population {
         claimed_targets.dedup();
         let mut drinkable_water = Vec::new();
         let mut resources = Vec::new();
+        let mut reserved_cells = Vec::new();
         let mut perceived_structures = Vec::new();
         perceived_structures
             .try_reserve(structures.len().min(cell_count))
@@ -157,6 +158,9 @@ impl Population {
                     Standability::Standable => {}
                     Standability::BlockedByWater | Standability::BlockedByFeature => {}
                 }
+                if spawned_objects.reserves_exclusive_use_at(world, position) {
+                    try_push(&mut reserved_cells, position)?;
+                }
                 if let Some(source) = spawned_objects
                     .water_at(world, position)
                     .map_err(map_perception_query_error)?
@@ -187,6 +191,7 @@ impl Population {
             structures: perceived_structures,
             traversable_cells,
             reachable_cells,
+            reserved_cells,
         })
     }
 }

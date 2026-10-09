@@ -1,15 +1,19 @@
-//! Instance builders for agents, structures, spawned objects, exact world cells, chunk outlines, and the world border.
+//! Instance builders for agents, structures, spawned objects, remembered-place markers, exact world cells, chunk outlines, and the world border.
 
 use sim_core::{
-    AgentActivity, AgentView, CHUNK_SIZE, ChunkInspection, ChunkPresence, SpawnKind,
-    SpawnedObjectView, StructureView, WORLD_GENERATION_BOUNDS, World, WorldRect,
+    AgentActivity, AgentView, CHUNK_SIZE, ChunkInspection, ChunkPresence, LANDMARK_SLOTS,
+    LandmarkSource, LandmarkView, SpawnKind, SpawnedObjectView, StructureView,
+    WORLD_GENERATION_BOUNDS, World, WorldRect,
 };
 
 use super::{
     MAX_AGENT_INSTANCES, MAX_CHUNK_OUTLINE_WORLD_WIDTH, MAX_SPAWNED_OBJECT_INSTANCES,
     MAX_STRUCTURE_INSTANCES, MAX_WORLD_BORDER_WIDTH, MIN_CHUNK_OUTLINE_PIXELS,
     MIN_DYNAMIC_INSTANCE_PIXELS,
-    colors::{agent_color, feature_color, rgba, spawn_kind_color, structure_color, terrain_color},
+    colors::{
+        agent_color, feature_color, landmark_color, rgba, spawn_kind_color, structure_color,
+        terrain_color,
+    },
     gpu::Instance,
 };
 
@@ -71,6 +75,55 @@ pub(super) fn build_agent_instances(
         ));
     }
 }
+
+/// Marks a hovered agent's remembered places: first-hand sightings as small solid
+/// squares, hints from gestures as hollow squares spanning the expected search area.
+pub(super) fn build_memory_marker_instances(
+    places: &[LandmarkView],
+    scale: f32,
+    output: &mut Vec<Instance>,
+) {
+    output.clear();
+    if scale < MIN_DYNAMIC_INSTANCE_PIXELS {
+        return;
+    }
+    let scale = scale.max(f32::EPSILON);
+    for place in places.iter().take(LANDMARK_SLOTS) {
+        let color = landmark_color(place.kind);
+        let center_x = place.position.x as f32 + 0.5;
+        let center_y = place.position.y as f32 + 0.5;
+        match place.source {
+            LandmarkSource::Seen => {
+                let size = (MEMORY_MARKER_PIXELS / scale).max(MIN_MEMORY_MARKER_CELLS);
+                output.push(Instance::new(
+                    center_x - size / 2.0,
+                    center_y - size / 2.0,
+                    size,
+                    size,
+                    color,
+                ));
+            }
+            LandmarkSource::Told => {
+                let half = f32::from(place.search_radius.max(MIN_HINT_RADIUS_CELLS)) + 0.5;
+                let side = half * 2.0;
+                let line = (MEMORY_OUTLINE_PIXELS / scale).clamp(0.1, half);
+                let x = center_x - half;
+                let y = center_y - half;
+                output.extend_from_slice(&[
+                    Instance::new(x, y, side, line, color),
+                    Instance::new(x, y + side - line, side, line, color),
+                    Instance::new(x, y, line, side, color),
+                    Instance::new(x + side - line, y, line, side, color),
+                ]);
+            }
+        }
+    }
+}
+
+const MEMORY_MARKER_PIXELS: f32 = 6.0;
+const MIN_MEMORY_MARKER_CELLS: f32 = 0.4;
+const MEMORY_OUTLINE_PIXELS: f32 = 2.0;
+const MIN_HINT_RADIUS_CELLS: u16 = 3;
 
 pub(super) fn build_structure_instances(
     views: impl IntoIterator<Item = StructureView>,

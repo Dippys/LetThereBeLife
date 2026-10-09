@@ -1,8 +1,8 @@
 use std::{error::Error, fmt};
 
 use sim_core::{
-    AgentId, AgentSpawnError, Engine, EngineCommand, PolicyActivationError, PopulationInit,
-    PopulationInitError, World, WorldPosition, WorldRect,
+    AgentId, AgentSpawnError, Engine, EngineCommand, PolicyActivationError, PolicyOptions,
+    PopulationInit, PopulationInitError, World, WorldPosition, WorldRect,
 };
 
 pub const VIEWER_AGENT_LIMIT: usize = 4_096;
@@ -57,7 +57,7 @@ pub fn spawn_at(engine: &mut Engine, position: WorldPosition) -> Result<AgentId,
             &[position],
         )
         .map_err(ViewerSpawnError::Population)?;
-    if let Err(error) = engine.activate_physical_policy_with_exploration() {
+    if let Err(error) = engine.activate_physical_policy_with_options(PolicyOptions::full()) {
         engine.command(EngineCommand::Reset);
         return Err(ViewerSpawnError::Policy(error));
     }
@@ -183,6 +183,7 @@ mod tests {
         let position = first_standable(&forward);
         spawn_at(&mut forward, position).unwrap();
         spawn_at(&mut reverse, position).unwrap();
+        assert_eq!(forward.policy_options(), PolicyOptions::full());
         for _ in 0..600 {
             forward.tick();
             reverse.tick();
@@ -195,7 +196,7 @@ mod tests {
         assert_ne!(
             forward.agent_views(1).next().unwrap().position,
             position,
-            "viewer exploration mode must produce authoritative movement"
+            "viewer full-mind mode must produce authoritative movement"
         );
     }
 

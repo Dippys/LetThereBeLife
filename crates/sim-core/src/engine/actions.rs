@@ -104,6 +104,7 @@ impl Engine {
                 }
             }
             PhysicalGoal::BuildShelter => self.apply_build_completion(event.agent),
+            PhysicalGoal::Signal => self.apply_signal(event.agent, target),
             PhysicalGoal::SeekShelter | PhysicalGoal::Incapacitated => {
                 Err(PolicyFailureReason::DeferredToLaterSlice)
             }

@@ -13,7 +13,8 @@ mod tests;
 use std::{borrow::Cow, sync::Arc, time::Instant};
 
 use sim_core::{
-    AgentView, ChunkInspection, DeathRecord, Engine, HealthView, InventoryView, PhysicalNeedsView,
+    AgentView, ChunkInspection, DeathRecord, Engine, HealthView, InventoryView, LANDMARK_SLOTS,
+    LandmarkKind, LandmarkSource, LandmarkView, MentalMapView, PhysicalNeedsView,
     PhysicalPolicyView, SimulationSnapshot, SleepView, SpawnKind, SpawnedObjectView, World,
     WorldOverview, WorldPosition, WorldRect,
 };
@@ -24,8 +25,8 @@ use colors::{rgba, selection_color};
 use gpu::{CameraBinding, CameraUniform, Instance, InstanceBuffer, StaticInstanceBuffers};
 use hud::{write_agent_text, write_hud_text};
 use instances::{
-    build_agent_instances, build_spawned_object_instances, build_structure_instances,
-    chunk_outline, world_border,
+    build_agent_instances, build_memory_marker_instances, build_spawned_object_instances,
+    build_structure_instances, chunk_outline, world_border,
 };
 use overlay::build_screen_overlay;
 use summary::{
@@ -64,6 +65,40 @@ pub struct AgentInspection {
     pub policy: Option<PhysicalPolicyView>,
     pub sleep: Option<SleepView>,
     pub death: Option<DeathRecord>,
+    pub memory: Option<MemoryInspection>,
+}
+
+/// A bounded, copyable snapshot of one agent's mental map for the hover card and map markers.
+#[derive(Debug, Clone, Copy)]
+pub struct MemoryInspection {
+    places: [LandmarkView; LANDMARK_SLOTS],
+    len: u8,
+    pub explored_tiles: usize,
+}
+
+impl MemoryInspection {
+    pub fn from_view(view: &MentalMapView) -> Self {
+        const EMPTY: LandmarkView = LandmarkView {
+            kind: LandmarkKind::Water,
+            position: WorldPosition { x: 0, y: 0 },
+            source: LandmarkSource::Seen,
+            confidence: 0,
+            search_radius: 0,
+            seen_second: 0,
+        };
+        let mut places = [EMPTY; LANDMARK_SLOTS];
+        let len = view.landmarks.len().min(LANDMARK_SLOTS);
+        places[..len].copy_from_slice(&view.landmarks[..len]);
+        Self {
+            places,
+            len: len as u8,
+            explored_tiles: view.explored_tiles,
+        }
+    }
+
+    pub fn places(&self) -> &[LandmarkView] {
+        &self.places[..usize::from(self.len)]
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,6 +133,8 @@ pub struct Renderer {
     structure_instances: Vec<Instance>,
     agents: InstanceBuffer,
     agent_instances: Vec<Instance>,
+    memory_markers: InstanceBuffer,
+    memory_marker_instances: Vec<Instance>,
     world_overlay: InstanceBuffer,
     world_overlay_instances: Vec<Instance>,
     screen_overlay: InstanceBuffer,
@@ -235,6 +272,12 @@ impl Renderer {
             structure_instances: Vec::with_capacity(MAX_STRUCTURE_INSTANCES),
             agents: InstanceBuffer::dynamic(&device, "agent instances", MAX_AGENT_INSTANCES),
             agent_instances: Vec::with_capacity(MAX_AGENT_INSTANCES),
+            memory_markers: InstanceBuffer::dynamic(
+                &device,
+                "memory marker instances",
+                MAX_MEMORY_MARKER_INSTANCES,
+            ),
+            memory_marker_instances: Vec::with_capacity(MAX_MEMORY_MARKER_INSTANCES),
             world_overlay: InstanceBuffer::dynamic(
                 &device,
                 "world overlay",
@@ -401,6 +444,18 @@ impl Renderer {
         );
         self.spawned_objects
             .write(&self.queue, &self.spawned_object_instances);
+        build_memory_marker_instances(
+            state
+                .hovered_agent
+                .as_ref()
+                .and_then(|agent| agent.memory.as_ref())
+                .map_or(&[], MemoryInspection::places),
+            view.scale() as f32,
+            &mut self.memory_marker_instances,
+        );
+        debug_assert!(self.memory_marker_instances.len() <= MAX_MEMORY_MARKER_INSTANCES);
+        self.memory_markers
+            .write(&self.queue, &self.memory_marker_instances);
 
         let world_overlay = &mut self.world_overlay_instances;
         world_overlay.clear();
@@ -479,6 +534,7 @@ impl Renderer {
             self.features.draw(&mut pass);
             self.spawned_objects.draw(&mut pass);
             self.structures.draw(&mut pass);
+            self.memory_markers.draw(&mut pass);
             self.agents.draw(&mut pass);
             self.world_overlay.draw(&mut pass);
             pass.set_bind_group(0, &self.screen_camera.bind_group, &[]);
@@ -494,12 +550,13 @@ const MAX_INSTANCES_PER_BUFFER: usize = 1_000_000;
 const MIN_TERRAIN_SAMPLE_PIXELS: f32 = 2.0;
 const CACHE_MARGIN_PIXELS: f32 = 128.0;
 const WORLD_OVERLAY_CAPACITY: usize = 10;
-const SCREEN_OVERLAY_CAPACITY: usize = 8_192;
+const SCREEN_OVERLAY_CAPACITY: usize = 9_216;
 const HUD_TEXT_CAPACITY: usize = 640;
-const AGENT_TEXT_CAPACITY: usize = 640;
+const AGENT_TEXT_CAPACITY: usize = 768;
 const MAX_AGENT_INSTANCES: usize = 4_096;
 const MAX_STRUCTURE_INSTANCES: usize = 4_096;
 const MAX_SPAWNED_OBJECT_INSTANCES: usize = 16_384;
+const MAX_MEMORY_MARKER_INSTANCES: usize = LANDMARK_SLOTS * 4;
 const MIN_DYNAMIC_INSTANCE_PIXELS: f32 = 1.25;
 const MIN_CHUNK_OUTLINE_PIXELS: f32 = 4.0;
 const MAX_CHUNK_OUTLINE_WORLD_WIDTH: f32 = 8.0;

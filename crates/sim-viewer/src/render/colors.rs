@@ -1,6 +1,8 @@
-//! Color palette for terrain, features, spawned objects, agents, structures, and selection previews.
+//! Color palette for terrain, features, spawned objects, agents, structures, remembered places, and selection previews.
 
-use sim_core::{AgentActivity, BiomeType, FeatureKind, SpawnKind, StructureState, SurfaceType};
+use sim_core::{
+    AgentActivity, BiomeType, FeatureKind, LandmarkKind, SpawnKind, StructureState, SurfaceType,
+};
 
 pub(super) const fn structure_color(state: StructureState) -> u32 {
     match state {
@@ -18,6 +20,17 @@ pub(super) const fn agent_color(activity: AgentActivity) -> u32 {
         AgentActivity::Sleeping => rgba(92, 164, 246, 255),
         AgentActivity::Incapacitated => rgba(180, 72, 214, 255),
         AgentActivity::Dead => rgba(118, 28, 32, 255),
+    }
+}
+
+/// Bright marker colors for a hovered agent's remembered places; they must read over terrain.
+pub(super) const fn landmark_color(kind: LandmarkKind) -> u32 {
+    match kind {
+        LandmarkKind::Water => rgba(70, 176, 255, 235),
+        LandmarkKind::Food => rgba(240, 84, 136, 235),
+        LandmarkKind::Wood => rgba(164, 104, 52, 235),
+        LandmarkKind::Stone => rgba(176, 176, 170, 235),
+        LandmarkKind::Shelter => rgba(255, 150, 40, 235),
     }
 }
 

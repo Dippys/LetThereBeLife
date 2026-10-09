@@ -40,24 +40,7 @@ pub(crate) fn select_with_exploration(
     perception: &PhysicalPerception,
     exploration_heading: Option<ExplorationHeading>,
 ) -> (PolicySelection, Option<ExplorationHeading>) {
-    let urgent = NeedKind::ALL
-        .into_iter()
-        .filter_map(|kind| {
-            let level = match kind {
-                NeedKind::Hunger => needs.hunger,
-                NeedKind::Thirst => needs.thirst,
-                NeedKind::Rest => needs.rest,
-                NeedKind::Exposure => needs.exposure,
-            };
-            level.threshold_reached.then_some((
-                urgency_score(level.value, level.threshold),
-                urgency_tie_rank(kind),
-                kind,
-            ))
-        })
-        .max_by_key(|&(score, tie, _)| (score, tie));
-
-    let selection = match urgent.map(|(_, _, kind)| kind) {
+    let selection = match most_urgent(needs) {
         Some(NeedKind::Thirst) => PolicySelection {
             goal: PhysicalGoal::SeekWater,
             target: nearest_water_access(origin, perception),
@@ -112,6 +95,27 @@ pub(crate) fn select_with_exploration(
     )
 }
 
+/// The need past its threshold with the highest relative urgency, if any.
+pub(super) fn most_urgent(needs: PhysicalNeedsView) -> Option<NeedKind> {
+    NeedKind::ALL
+        .into_iter()
+        .filter_map(|kind| {
+            let level = match kind {
+                NeedKind::Hunger => needs.hunger,
+                NeedKind::Thirst => needs.thirst,
+                NeedKind::Rest => needs.rest,
+                NeedKind::Exposure => needs.exposure,
+            };
+            level.threshold_reached.then_some((
+                urgency_score(level.value, level.threshold),
+                urgency_tie_rank(kind),
+                kind,
+            ))
+        })
+        .max_by_key(|&(score, tie, _)| (score, tie))
+        .map(|(_, _, kind)| kind)
+}
+
 fn is_safe_anchor(origin: WorldPosition, perception: &PhysicalPerception) -> bool {
     perception
         .drinkable_water
@@ -120,7 +124,7 @@ fn is_safe_anchor(origin: WorldPosition, perception: &PhysicalPerception) -> boo
         || nearest_shelter_access(origin, perception) == Some(origin)
 }
 
-fn shelter_selection(
+pub(super) fn shelter_selection(
     origin: WorldPosition,
     inventory: InventoryView,
     perception: &PhysicalPerception,
@@ -187,7 +191,7 @@ fn shelter_selection(
     )
 }
 
-fn nearest_shelter_access(
+pub(super) fn nearest_shelter_access(
     origin: WorldPosition,
     perception: &PhysicalPerception,
 ) -> Option<WorldPosition> {
@@ -205,7 +209,13 @@ fn nearest_build_site(
     perception: &PhysicalPerception,
 ) -> Option<WorldPosition> {
     cardinal_neighbors(origin)
-        .filter(|candidate| candidate_available(origin, perception, *candidate))
+        .filter(|candidate| {
+            candidate_available(origin, perception, *candidate)
+                && perception
+                    .reserved_cells
+                    .binary_search_by_key(&(candidate.y, candidate.x), |cell| (cell.y, cell.x))
+                    .is_err()
+        })
         .min_by_key(|candidate| (candidate.y, candidate.x))
 }
 
@@ -222,7 +232,7 @@ const fn urgency_tie_rank(kind: NeedKind) -> u8 {
     }
 }
 
-fn nearest_water_access(
+pub(super) fn nearest_water_access(
     origin: WorldPosition,
     perception: &PhysicalPerception,
 ) -> Option<WorldPosition> {
@@ -234,7 +244,7 @@ fn nearest_water_access(
         .min_by_key(|candidate| target_key(origin, *candidate))
 }
 
-fn nearest_resource_access(
+pub(super) fn nearest_resource_access(
     origin: WorldPosition,
     perception: &PhysicalPerception,
     accepts: impl Fn(ResourceKind) -> bool,

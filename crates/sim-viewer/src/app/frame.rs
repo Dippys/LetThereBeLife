@@ -66,6 +66,11 @@ impl ViewerApp {
                         .iter()
                         .find(|record| record.agent == view.id)
                         .copied(),
+                    memory: self
+                        .engine
+                        .mental_map(view.id)
+                        .as_ref()
+                        .map(render::MemoryInspection::from_view),
                 })
         });
         let (Some(window), Some(renderer)) = (&self.window, &mut self.renderer) else {

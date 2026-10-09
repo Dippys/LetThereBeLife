@@ -11,14 +11,14 @@ use crate::{
     AgentId, Engine, ExplorationHeading, PHYSICAL_POLICY_ACTION_TICKS,
     PHYSICAL_POLICY_IDLE_RECHECK_TICKS, PHYSICAL_POLICY_RADIUS, PHYSICAL_POLICY_ROUTE_BUDGET,
     PhysicalGoal, PolicyActivationError, PolicyDiagnostic, PolicyDiagnosticKind,
-    PolicyFailureReason, PolicyReason, RouteRequest, SleepDiagnostic, SleepDiagnosticKind,
-    WorldPosition,
+    PolicyFailureReason, PolicyOptions, PolicyReason, RouteRequest, SleepDiagnostic,
+    SleepDiagnosticKind, WorldPosition,
 };
 
 impl Engine {
     /// Activates autonomous physical decisions after population initialization.
     pub fn activate_physical_policy(&mut self) -> Result<(), PolicyActivationError> {
-        self.activate_physical_policy_mode(false)
+        self.activate_physical_policy_with_options(PolicyOptions::default())
     }
 
     /// Activates autonomous physical decisions with bounded deterministic wandering
@@ -26,12 +26,17 @@ impl Engine {
     pub fn activate_physical_policy_with_exploration(
         &mut self,
     ) -> Result<(), PolicyActivationError> {
-        self.activate_physical_policy_mode(true)
+        self.activate_physical_policy_with_options(PolicyOptions {
+            exploration: true,
+            ..PolicyOptions::default()
+        })
     }
 
-    fn activate_physical_policy_mode(
+    /// Activates autonomous physical decisions with explicit cognitive features.
+    /// `memory` implies exploration; `sharing` requires `memory` and is ignored without it.
+    pub fn activate_physical_policy_with_options(
         &mut self,
-        explore_when_unresolved: bool,
+        options: PolicyOptions,
     ) -> Result<(), PolicyActivationError> {
         if !self.population.is_initialized() {
             return Err(PolicyActivationError::PopulationNotInitialized);
@@ -53,7 +58,11 @@ impl Engine {
             .activate_policy(&mut self.scheduler, due)
             .map_err(|_| PolicyActivationError::EventSequenceExhausted)?;
         self.policy_active = true;
-        self.policy_exploration = explore_when_unresolved;
+        self.policy_options = PolicyOptions {
+            exploration: options.exploration || options.memory,
+            memory: options.memory,
+            sharing: options.memory && options.sharing,
+        };
         Ok(())
     }
 
@@ -92,17 +101,22 @@ impl Engine {
         let width = (perception.area.max.x - perception.area.min.x) as u64;
         let height = (perception.area.max.y - perception.area.min.y) as u64;
         self.runtime_counters.policy_perceived_cells += width * height;
-        let exploration_heading = self
-            .policy_exploration
-            .then(|| self.population.exploration_heading(event.agent))
-            .flatten();
-        let (selection, selected_heading) = select_with_exploration(
-            view.position,
-            needs,
-            inventory,
-            &perception,
-            exploration_heading,
-        );
+        let (selection, selected_heading) = if self.policy_options.memory {
+            self.deliberate_with_memory(event.agent, view.position, needs, inventory, &perception)
+        } else {
+            let exploration_heading = self
+                .policy_options
+                .exploration
+                .then(|| self.population.exploration_heading(event.agent))
+                .flatten();
+            select_with_exploration(
+                view.position,
+                needs,
+                inventory,
+                &perception,
+                exploration_heading,
+            )
+        };
         self.policy_diagnostics.push(PolicyDiagnostic {
             agent: event.agent,
             at: self.time,
@@ -136,6 +150,10 @@ impl Engine {
             );
             return;
         };
+        if selection.goal == PhysicalGoal::Signal {
+            self.start_signal(agent, target, selection.reason);
+            return;
+        }
         if selection.goal == PhysicalGoal::BuildShelter {
             match self.start_shelter_build(agent, target, selection.reason) {
                 Ok(structure) => self.policy_diagnostics.push(PolicyDiagnostic {

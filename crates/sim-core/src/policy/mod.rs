@@ -2,10 +2,16 @@
 //! plus the compact per-agent state (`state`), goal selection (`selection`),
 //! and bounded exploration (`exploration`).
 
+mod deliberate;
 mod exploration;
 mod selection;
 mod state;
 
+pub use deliberate::{
+    CURIOSITY_TARGET, EXCURSION_EVERY, FOOD_RESERVE, HOME_RANGE, PREPARE_EXPOSURE, TOP_UP_HUNGER,
+    TOP_UP_THIRST,
+};
+pub(crate) use deliberate::{MindInput, deliberate};
 #[cfg(test)]
 pub(crate) use selection::select;
 pub(crate) use selection::{PolicyAction, PolicySelection, select_with_exploration};
@@ -56,6 +62,8 @@ pub enum PhysicalGoal {
     Wait = 8,
     Incapacitated = 9,
     Explore = 10,
+    /// Point out a remembered place to agents nearby.
+    Signal = 11,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,6 +79,16 @@ pub enum PolicyReason {
     ActionCompleted,
     ShelterMaterials,
     Retry,
+    /// Heading for a place the agent saw earlier.
+    RememberedPlace,
+    /// Heading for a place someone pointed out.
+    ToldPlace,
+    /// Drinking, eating, or stocking up before needs become urgent.
+    PrepareTrip,
+    /// Pointing out a place to someone nearby.
+    Sharing,
+    /// Turning back toward known water before straying out of range.
+    Returning,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,11 +181,11 @@ impl ExplorationHeading {
         }
     }
 
-    const fn rotated(self, offset: i8) -> Self {
+    pub(crate) const fn rotated(self, offset: i8) -> Self {
         Self::from_rank((self as i8).wrapping_add(offset) as u8)
     }
 
-    const fn delta(self) -> (i64, i64) {
+    pub(crate) const fn delta(self) -> (i64, i64) {
         match self {
             Self::North => (0, -1),
             Self::NorthEast => (1, -1),

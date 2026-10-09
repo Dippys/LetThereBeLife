@@ -2,14 +2,15 @@
 //! explicit starting supplies.
 
 use crate::agent::{MovementEnvironment, Population};
+use crate::cognition::Minds;
 use crate::diagnostics::RuntimeCounters;
 use crate::routing::RoutePlanner;
 use crate::scheduler::{MAX_DUE_EVENTS_PER_TICK, Scheduler};
 use crate::{
     AgentId, AgentSpawnError, Engine, EngineConfig, GenerateAreaError, InitialInventoryError,
-    InventoryView, PopulationInit, PopulationInitError, PopulationInitOutcome, SimTime, SpawnKind,
-    SpawnObjectError, Standability, World, WorldChunk, WorldChunkLoad, WorldPosition,
-    WorldQueryError,
+    InventoryView, PolicyOptions, PopulationInit, PopulationInitError, PopulationInitOutcome,
+    SimTime, SpawnKind, SpawnObjectError, Standability, World, WorldChunk, WorldChunkLoad,
+    WorldPosition, WorldQueryError,
 };
 
 impl Engine {
@@ -98,7 +99,8 @@ impl Engine {
         self.health_diagnostics.clear();
         self.death_records.clear();
         self.policy_active = false;
-        self.policy_exploration = false;
+        self.policy_options = PolicyOptions::default();
+        self.minds = Minds::default();
         self.route_outcomes.clear();
         self.route_planner = RoutePlanner::default();
         self.runtime_counters = RuntimeCounters::default();

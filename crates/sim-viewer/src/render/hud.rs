@@ -4,13 +4,14 @@ use std::fmt::Write;
 
 use sim_core::{
     AgentActivity, BiomeType, ChunkPresence, DeathCause, ExplorationHeading, FeatureKind,
-    GenerateAreaError, HealthStatus, NeedKind, PhysicalGoal, PhysicalPolicyView, PolicyReason,
-    PrevailingWind, ResourceKind, SleepQuality, SurfaceType, World,
+    GenerateAreaError, HealthStatus, LandmarkKind, LandmarkSource, NeedKind, PhysicalGoal,
+    PhysicalPolicyView, PolicyReason, PrevailingWind, ResourceKind, SleepQuality, SurfaceType,
+    World,
 };
 
 use super::{
-    AGENT_TEXT_CAPACITY, AgentInspection, GenerationStatus, PopulationStatus, RenderState,
-    overlay::spawn_kind_label,
+    AGENT_TEXT_CAPACITY, AgentInspection, GenerationStatus, MemoryInspection, PopulationStatus,
+    RenderState, overlay::spawn_kind_label,
 };
 
 pub(super) fn write_hud_text(output: &mut String, world: &World, state: &RenderState) {
@@ -250,7 +251,39 @@ pub(super) fn write_agent_text(output: &mut String, inspection: Option<AgentInsp
     } else {
         writeln!(output, "SLEEP NONE").unwrap();
     }
+    if let Some(memory) = agent.memory {
+        write_memory(output, &memory);
+    } else {
+        writeln!(output, "MEMORY NONE").unwrap();
+    }
     debug_assert!(output.len() <= AGENT_TEXT_CAPACITY);
+}
+
+fn write_memory(output: &mut String, memory: &MemoryInspection) {
+    let mut counts = [0_u8; LandmarkKind::ALL.len()];
+    let mut hints = 0_u8;
+    for place in memory.places() {
+        counts[place.kind as usize] += 1;
+        hints += u8::from(place.source == LandmarkSource::Told);
+    }
+    let count = |kind: LandmarkKind| counts[kind as usize];
+    writeln!(
+        output,
+        "MEMORY WATER {}  FOOD {}  WOOD {}  STONE {}",
+        count(LandmarkKind::Water),
+        count(LandmarkKind::Food),
+        count(LandmarkKind::Wood),
+        count(LandmarkKind::Stone),
+    )
+    .unwrap();
+    writeln!(
+        output,
+        "SHELTER {}  HINTS {}  EXPLORED {} TILES",
+        count(LandmarkKind::Shelter),
+        hints,
+        memory.explored_tiles
+    )
+    .unwrap();
 }
 
 fn write_need(output: &mut String, label: &str, need: sim_core::NeedLevelView) {
@@ -305,6 +338,7 @@ const fn goal_label(goal: PhysicalGoal) -> &'static str {
         PhysicalGoal::Wait => "WAIT",
         PhysicalGoal::Incapacitated => "INCAPACITATED",
         PhysicalGoal::Explore => "EXPLORE",
+        PhysicalGoal::Signal => "POINT OUT PLACE",
     }
 }
 
@@ -320,6 +354,11 @@ const fn policy_reason_label(reason: PolicyReason) -> &'static str {
         PolicyReason::ActionCompleted => "ACTION COMPLETED",
         PolicyReason::ShelterMaterials => "SHELTER MATERIALS",
         PolicyReason::Retry => "RETRY",
+        PolicyReason::RememberedPlace => "REMEMBERED PLACE",
+        PolicyReason::ToldPlace => "PLACE SOMEONE POINTED OUT",
+        PolicyReason::PrepareTrip => "PREPARING FOR TRIP",
+        PolicyReason::Sharing => "SHARING A PLACE",
+        PolicyReason::Returning => "RETURNING TO WATER",
     }
 }
 

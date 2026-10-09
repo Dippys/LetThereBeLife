@@ -1,6 +1,7 @@
 //! Engine-independent deterministic simulation foundation.
 
 mod agent;
+mod cognition;
 mod diagnostics;
 mod engine;
 mod health;
@@ -21,6 +22,11 @@ pub use agent::{
     PhysicalPerception, PopulationInit, PopulationInitError, PopulationInitOutcome,
     RouteEventOutcome, RouteOutcomeKind, RouteScheduled, SimTime, SpawnInvalidReason,
 };
+pub use cognition::{
+    LANDMARK_SLOTS, LandmarkKind, LandmarkSource, LandmarkView, MERGE_RADIUS, MentalMapView,
+    PolicyOptions, SEARCH_SPACING, SHARE_COOLDOWN_SECONDS, SIGNAL_TICKS, SignalEvent,
+    VISIT_TILE_SIZE, VISITED_TILE_SLOTS,
+};
 pub use diagnostics::{EngineCapacityMetrics, EngineDiagnostics, EngineWorkMetrics};
 pub use engine::{
     Engine, EngineCommand, EngineCommandOutcome, EngineConfig, MAX_SIMULATION_SPEED,
@@ -36,10 +42,11 @@ pub use needs::{
 };
 pub use placements::{SpawnKind, SpawnObjectError, SpawnedObjectView};
 pub use policy::{
-    ExplorationHeading, PHYSICAL_POLICY_ACTION_TICKS, PHYSICAL_POLICY_IDLE_RECHECK_TICKS,
+    CURIOSITY_TARGET, EXCURSION_EVERY, ExplorationHeading, FOOD_RESERVE, HOME_RANGE,
+    PHYSICAL_POLICY_ACTION_TICKS, PHYSICAL_POLICY_IDLE_RECHECK_TICKS,
     PHYSICAL_POLICY_MAX_BACKOFF_TICKS, PHYSICAL_POLICY_RADIUS, PHYSICAL_POLICY_ROUTE_BUDGET,
-    PhysicalGoal, PhysicalPolicyView, PolicyActivationError, PolicyDiagnostic,
-    PolicyDiagnosticKind, PolicyFailureReason, PolicyReason,
+    PREPARE_EXPOSURE, PhysicalGoal, PhysicalPolicyView, PolicyActivationError, PolicyDiagnostic,
+    PolicyDiagnosticKind, PolicyFailureReason, PolicyReason, TOP_UP_HUNGER, TOP_UP_THIRST,
 };
 pub use resources::{
     DRINK_THIRST_RELIEF, EAT_HUNGER_RELIEF, FOOD_CONSUMPTION, GATHER_YIELD,

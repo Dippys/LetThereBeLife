@@ -3,6 +3,7 @@
 //! responsibility; each adds an `impl Engine` block.
 
 mod actions;
+mod cognition;
 mod errors;
 mod policy;
 mod routes;
@@ -14,6 +15,7 @@ mod views;
 use std::time::Duration;
 
 use crate::agent::Population;
+use crate::cognition::Minds;
 use crate::diagnostics::RuntimeCounters;
 use crate::placements::SpawnedObjects;
 use crate::resources::ResourceDeltas;
@@ -22,8 +24,9 @@ use crate::scheduler::Scheduler;
 use crate::structures::StructureStore;
 use crate::{
     AgentId, DeathRecord, HealthDiagnostic, MoveRequestError, MovementEventOutcome,
-    MovementScheduled, NeedThresholdEventOutcome, PolicyDiagnostic, RouteEventOutcome, SimTime,
-    SleepDiagnostic, StructureDiagnostic, World, WorldConfig, WorldPosition, WorldRect,
+    MovementScheduled, NeedThresholdEventOutcome, PolicyDiagnostic, PolicyOptions,
+    RouteEventOutcome, SignalEvent, SimTime, SleepDiagnostic, StructureDiagnostic, World,
+    WorldConfig, WorldPosition, WorldRect,
 };
 
 /// Immutable settings used to construct or reset a simulation.
@@ -119,7 +122,9 @@ pub struct Engine {
     health_diagnostics: Vec<HealthDiagnostic>,
     death_records: Vec<DeathRecord>,
     policy_active: bool,
-    policy_exploration: bool,
+    policy_options: PolicyOptions,
+    minds: Minds,
+    signal_events: Vec<SignalEvent>,
     resource_deltas: ResourceDeltas,
     spawned_objects: SpawnedObjects,
     structures: StructureStore,
@@ -151,7 +156,9 @@ impl Engine {
             health_diagnostics: Vec::new(),
             death_records: Vec::new(),
             policy_active: false,
-            policy_exploration: false,
+            policy_options: PolicyOptions::default(),
+            minds: Minds::default(),
+            signal_events: Vec::new(),
             resource_deltas: ResourceDeltas::default(),
             spawned_objects: SpawnedObjects::default(),
             structures: StructureStore::default(),
@@ -190,7 +197,9 @@ impl Engine {
                 self.health_diagnostics.clear();
                 self.death_records.clear();
                 self.policy_active = false;
-                self.policy_exploration = false;
+                self.policy_options = PolicyOptions::default();
+                self.minds = Minds::default();
+                self.signal_events.clear();
                 self.resource_deltas = ResourceDeltas::default();
                 self.spawned_objects = SpawnedObjects::default();
                 self.structures = StructureStore::default();
@@ -208,12 +217,15 @@ impl Engine {
         }
     }
 
+    /// Drops lazily cancelled events once they outnumber what live agents can
+    /// hold. Each agent has at most about 7 live events (4 needs, health, and one
+    /// decision, action, movement, or wake), so the queue stays near `8 × population`.
     pub(super) fn compact_scheduler_if_needed(&mut self) {
         let retention_limit = self
             .population
             .len()
-            .saturating_mul(5)
-            .saturating_add(4_096)
+            .saturating_mul(8)
+            .saturating_add(256)
             .max(64);
         if self.scheduler.len() >= retention_limit {
             let population = &self.population;

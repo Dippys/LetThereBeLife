@@ -38,6 +38,9 @@ pub struct PhysicalPerception {
     /// Terrain-connected standable cells reachable from this agent inside the
     /// perception area. Kept row-major for deterministic policy selection.
     pub reachable_cells: Vec<WorldPosition>,
+    /// Cells a tree or rock stands on, depleted or not: walkable, but nobody
+    /// can sleep or build there. Row-major.
+    pub reserved_cells: Vec<WorldPosition>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -27,6 +27,7 @@ impl Engine {
         self.sleep_diagnostics.clear();
         self.structure_diagnostics.clear();
         self.health_diagnostics.clear();
+        self.signal_events.clear();
         let mut processed = 0_usize;
         while processed < MAX_DUE_EVENTS_PER_TICK {
             let Some(event) = self.scheduler.pop_due(self.time) else {
@@ -183,6 +184,9 @@ impl Engine {
             .max(processed);
         let due_backlog = self.scheduler.has_due(self.time);
         self.runtime_counters.due_backlog_ticks += u64::from(due_backlog);
+        // Autonomous agents re-schedule constantly; without this, stale events
+        // were only pruned on manual commands and piled up during long runs.
+        self.compact_scheduler_if_needed();
         TickOutcome::Advanced {
             time: self.time,
             processed_events: processed,
