@@ -18,3 +18,16 @@ which made the project hard to pick back up.
 `InitialDocumentation/` checksum gate is kept (`scripts/initial-documentation.sha256`).
 The validate scripts no longer check skill manifests or that the config copied into `target/`
 matches, and the GPU viewer smoke is now opt-in (`--gpu` / `-Gpu`).
+
+## D-060: `sim-world` crate and folder modules (2026-10-09)
+
+**Decision:** Move world storage, generation, and the archive into a new `sim-world` crate, which
+`sim-core` depends on and re-exports, so `sim_core::…` paths are unchanged. Split every large
+file into folder modules of at most about 600 lines (`engine/`, `agent/population/`, `policy/`,
+`render/`, `app/`, `generation/`, …) and rename integration tests by topic.
+**Why:** World code had no dependency on agents, so the crate boundary is real. Files of
+1,000–4,000 lines were hard to work in.
+**Consequences:** Agents and `Engine` stay in one crate, because they are tightly coupled.
+`MIN_TRAVERSAL_COST` and `TraversalStep::blocked` became `pub` in `sim-world` to cross the boundary.
+Some `pub(super)`/`pub(crate)` widening happened inside crates. Changing agent code no longer
+recompiles or retests world generation (`cargo test -p sim-core`).

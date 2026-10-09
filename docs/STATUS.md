@@ -36,28 +36,35 @@ lays out phases 0–10, from world → physical agents → cognition → communi
   **not present** on this machine right now (`target/world-cache/` is empty); the viewer falls back
   to procedural generation automatically.
 
-## Work that was uncommitted when the project paused
+## Recent changes (2026-10-09)
 
-When cleanup started, about 500 lines of finished but uncommitted work sat in the tree. It was
-the full-world archive (`sim-core/src/world/archive.rs` plus viewer integration) and cursor-local
-first spawns (`T` works as soon as the terrain under the cursor is loaded). The old docs record it as
-validated on 2026-07-17, and `cargo test --workspace` still passes. Commit it on its own before
-doing new work.
+- Pending July work committed: the full-world archive and cursor-local first spawns (`ce883fe`).
+- Agent workflow and docs simplified (`4abbcd9`, D-059).
+- Code split into small modules and a new `sim-world` crate (D-060). No behavior changed: all
+  245 tests and the three determinism hashes in [DEVELOPMENT.md](DEVELOPMENT.md#tests) are identical.
 
 ## Known problems and limitations
 
-- **Agents die in dry areas.** Perception is radius 8 with no memory, so an agent spawned far from
-  fresh water wanders until it dies of thirst. That's expected for Phase 2. Phase 3 landmark
-  memory is meant to fix it.
+- **Agents look timid: they stock up, camp by lakes, then die.** This was the main frustration
+  before the pause. The causes below come from reading `sim-core/src/policy/` and haven't been
+  confirmed by an experiment yet:
+  - **Waiting at water blocks exploring.** In `select_with_exploration`, an idle agent standing
+    next to water or a shelter counts as being at a "safe anchor", so it returns `Wait` instead of
+    exploring.
+  - **Food never grows back.** Gathering permanently depletes berries and trees, so the food
+    around a lake runs out.
+  - **They see 8 cells and remember nothing.** A hungry agent that leaves the lake can't find its
+    way back to water, and one spawned far from water just wanders until it dies of thirst.
+  - **Full inventory means nothing to do.** At the inventory caps, the agent has nothing left to
+    collect, so it waits, and the anchor rule keeps it waiting by the water.
+
+  Likely fixes: landmark memory (Phase 3 slice 2), resource regrowth, and dropping the anchor rule
+  or limiting it to agents that are actually thirsty.
 - **Intermittent viewer smoke crash.** `sim-viewer --smoke-frames 2` exited with
   `0xc0000409` (STATUS_STACK_BUFFER_OVERRUN, no panic message) in 1 of 19 runs on 2026-10-09,
   the first run right after `cargo test`. The other 18 passed (debug and release). Cause unknown;
   it could be GPU/driver teardown. Worth a look if it recurs.
 - **No save/load.** Only the immutable world archive exists; simulation state can't be persisted.
-- **Large files:** `sim-core/src/lib.rs` (~4,100 lines; the `Engine` impl is ~1,900 of them) and
-  `sim-viewer/src/renderer.rs` (~2,900 lines) are due for a split before Phase 3 adds more to `Engine`.
-- **Test files are named by slice** (`physical_agent_slice0.rs` … `slice8.rs`), not by feature.
-  That's fine, but renaming them by topic would make them easier to find.
 - **World size far exceeds the agent count.** Viewer max is 4,096 agents; canonical scenarios
   use a 2,048-cell square. The big-world machinery is ahead of what the agents need.
 
@@ -69,6 +76,5 @@ doing new work.
 2. **Prototype the core idea earlier.** Build a deliberately rough signals → inference → belief
    loop in a tiny world, to test the project's central bet before investing in full Phase 3
    infrastructure.
-3. **Housekeeping first (small):** commit the pending work, then split `Engine` out of `lib.rs`.
 
 Whichever path is chosen, update this file when it starts and when it lands.

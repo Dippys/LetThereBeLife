@@ -7,31 +7,36 @@ How the code fits together today. For exhaustive per-feature detail, see
 ## Crates
 
 ```text
-sim-config ──► sim-core ◄── sim-headless
-     ▲            ▲
-     └──── sim-viewer
+sim-world ◄── sim-core ◄── sim-headless
+                 ▲   ▲
+     sim-config ─┘   └── sim-viewer   (sim-config is also used by both binaries)
 ```
 
 | Crate | Owns | Dependencies |
 |---|---|---|
-| `sim-core` | All simulation truth: `Engine`, time, agents, scheduler, world storage, world generation, archive format | std, `rayon` (pure parallel world derivation only) |
+| `sim-world` | Terrain types, chunk storage (`World`), world generation, full-world archive format, `render_map` example | std, `rayon` (pure parallel derivation only) |
+| `sim-core` | All dynamic simulation truth: `Engine`, time, agents, scheduler, policy. Re-exports the `sim-world` public API, so clients only use `sim_core::…` | `sim-world` |
 | `sim-config` | Loading/validating `config/simulation.toml`; `build.rs` copies it next to built binaries | `sim-core`, `serde`, `toml` |
 | `sim-headless` | CLI runner, `ScenarioRunner`, canonical survival scenarios, versioned reports + hashes | `sim-core`, `sim-config` |
 | `sim-viewer` | Window, input, fixed-step driver, camera, HUD, spawning UI, background chunk loading, `wgpu` rendering | `sim-core`, `sim-config`, `winit`, `wgpu`, `pollster`, `bytemuck`, `rayon` |
 
-**The one hard boundary:** `sim-core` never depends on presentation. Clients read state through
-views/snapshots and change it only through `Engine` methods / `EngineCommand`.
+**Hard boundaries:** `sim-world` knows nothing about agents. `sim-core` never depends on presentation.
+Clients read state through views/snapshots and change it only through `Engine` methods / `EngineCommand`.
+
+Each folder module has a `mod.rs` with the main type, sibling files for groups of `impl` blocks,
+and a `tests.rs` or `tests/` folder next to it. Every file starts with a `//!` line describing it.
 
 ## `sim-core` module map
 
 | Module | Responsibility |
 |---|---|
-| `lib.rs` | `Engine` (the facade), `EngineConfig`, `EngineCommand`, `SimulationSnapshot`, public re-exports. Also the event handlers for policy decisions and action effects (drink, eat, gather, build). |
-| `agent` | Dense population: `AgentId(u32)`, 6-byte `AgentRecord`, positions, activity, movement, `AgentView`, `ScheduledEvent` (32 B) |
+| `lib.rs` | `mod` declarations and public re-exports only |
+| `engine/` | `Engine` facade. `mod.rs` (struct, config, commands, snapshot), `tick.rs` (event dispatch), `setup.rs` (world loads, population, spawn), `views.rs` (read-only accessors), `routes.rs`, `policy.rs` (decision handling and drink/eat/gather effects), `actions.rs` (sleep requests, action and wake completion), `shelter.rs`, `errors.rs` (error mapping) |
+| `agent/` | `AgentId(u32)`, `SimTime`, 6-byte `AgentRecord`, `AgentView`, errors, perception types, `ScheduledEvent` (32 B). `population/` splits the dense `Population` store: `init`, `movement`, `vitals` (needs + health), `policy`, `sleep`, `inventory`, `perception` |
+| `policy/` | Physical decision-making: `selection.rs` (goal by urgency, target from perception), `exploration.rs`, `state.rs` (`PolicyState`, 12 B) |
 | `scheduler` | Binary-heap event queue with a total order (see below), ≤4,096 due events per tick |
 | `needs` | Analytical fixed-point hunger/thirst/rest/exposure (`NeedState`, 32 B). Values are computed from rates, not ticked. |
 | `health` | Severe-need damage, incapacitation, death (`HealthState`, 16 B) |
-| `policy` | Physical decision-making: pick goal by urgency, pick target from perception, exploration (`PolicyState`, 12 B) |
 | `routing` | Bounded A* with reusable scratch |
 | `spatial` | Sparse chunk-bucketed agent positions; multiple agents may share a cell |
 | `resources` | 3-byte inventories; sparse `BTreeMap` of depleted generated features |
@@ -39,8 +44,18 @@ views/snapshots and change it only through `Engine` methods / `EngineCommand`.
 | `structures` | Sparse one-cell lean-to shelters, construction lifecycle |
 | `placements` | Sparse user-spawned trees/berries/rocks/water overlay |
 | `diagnostics` | Copied work/capacity counters for reports |
-| `world` | Chunk-keyed resident storage (`BTreeMap` of 64×64 tiles), loading, queries (`queries.rs`), read-only iteration (`visits.rs`), full-world archive (`archive.rs`) |
-| `worldgen` | Private, integer-only generator (see below) |
+
+## `sim-world` module map
+
+| Module | Responsibility |
+|---|---|
+| `lib.rs` | World constants (envelope, chunk size, limits) and re-exports |
+| `config.rs`, `geometry.rs`, `terrain.rs`, `features.rs`, `traversal.rs` | Value types: `WorldConfig`, `WorldPosition`/`WorldRect`, `TerrainCell`/surface/biome/climate, `Feature`/resources, walking rules and query errors |
+| `chunk.rs`, `loads.rs`, `validation.rs` | `ChunkCoord`, chunk inspection and payloads; worker load requests and resident chunk forms; request validation and region-major spans |
+| `storage/` | `World`: chunk-keyed resident storage (`BTreeMap` of 64×64 tiles), `loading.rs`, `queries.rs` (resident physical lookups), `visits.rs` (deterministic read-only iteration) |
+| `generator.rs` | `ChunkGenerator` (read-only sampler for tooling) and full-chunk synthesis |
+| `archive/` | Full-world archive: `format`, `writer`, `reader`, `overview` |
+| `worldgen/` | Private integer-only generator (see below): `plates`, `climate`, `noise`, `drainage/` (`lattice`, `channels`), `hydrology`, `regions`, `classification`, chunk synthesis in `mod.rs` |
 
 ## Engine lifecycle
 
@@ -70,8 +85,8 @@ Engine::new(config)                         // empty world + empty population, O
    It fills basins, places lakes and outlets, and routes rivers to the ocean or world edge. Cached (LRU of 4 seeds).
 3. **Regional refinement** (`hydrology`, `RegionMap`): 4,096-cell regions on a 129×129 lattice,
    with exact seams. Cached (LRU of 64).
-4. **Chunk synthesis** (`worldgen/mod.rs`): interpolates the region, adds detail, rasterizes
-   rivers and lakes, classifies biomes, and places sparse features.
+4. **Chunk synthesis** (`worldgen/mod.rs`, `classification.rs`): interpolates the region, adds
+   detail, rasterizes rivers and lakes, classifies biomes, and places sparse features.
 
 Output: 4-byte `TerrainCell` (elevation, moisture, packed surface/biome) and sparse 24-byte `Feature`s.
 Worker count and completion order never change the output; tests enforce this.
@@ -83,12 +98,15 @@ only the bootstrap load area, not the world size.
 
 | Module | Responsibility |
 |---|---|
-| `main.rs` | Event loop, input handling, fixed-step accumulator, CLI flags (`--config`, `--smoke-frames`, `--pregenerate-world`) |
+| `main.rs`, `launch.rs` | Entry point, CLI flags (`--config`, `--smoke-frames`, `--pregenerate-world`), archive loading |
+| `app/` | `ViewerApp`: `events.rs` (winit `ApplicationHandler`), `input.rs`, `simulation.rs` (fixed-step ticks, spawn, reset), `world_loading.rs` (generation and archive polling, dirty regions), `selection.rs`, `frame.rs` (window creation and redraw) |
+| `render/` | `wgpu` `Renderer`: `gpu.rs` (uniforms, instance buffers), `instances.rs` (agents, shelters, objects, outlines), `summary.rs` (multi-level chunk summaries for zoomed-out views), `colors.rs`, `hud.rs` (HUD and agent text), `overlay.rs` (screen overlay, spawn menu, bitmap font), `shader.wgsl` |
+| `generation/` | Background Rayon pool: `mod.rs` (`WorldGenerator`, jobs), `worker.rs`, `pager.rs` (center-out 32×32-chunk bootstrap pages) |
 | `startup.rs` | Cursor-spawn validation (`T`), residency readiness check, 4,096-agent viewer limit, reset |
-| `generation.rs` | Background Rayon pool: bootstrap pager (center-out 32×32-chunk pages), right-drag requests, archive reads, cancellation |
 | `camera.rs` | Presentation-only camera, zoom/pan clamping |
-| `renderer.rs` | `wgpu` pipeline, terrain/feature instance caches, multi-level chunk summaries for zoomed-out views, agents/shelters, HUD text |
 | `spawn_menu.rs` | Numpad object-placement menu |
+
+`sim-headless` is split into `scenario.rs` (runner), `spawns.rs`, `report.rs`, `invariants.rs`, and `hash.rs`.
 
 Wall-clock time is converted into whole fixed ticks. Render frames never drive simulation.
 Worker-built chunks are merged on the main thread after that frame's ticks.

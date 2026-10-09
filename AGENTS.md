@@ -11,7 +11,8 @@ plus physical survival agents (needs, gathering, sleep, shelter, health, death).
 
 | Path | What it is |
 |---|---|
-| `crates/sim-core` | The simulation. Engine, agents, scheduler, world + world generation. No window/GPU/OS deps. |
+| `crates/sim-core` | The simulation: `Engine`, agents, scheduler, policy. Re-exports `sim-world`. No window/GPU/OS deps. |
+| `crates/sim-world` | Terrain types, chunk storage, world generation, world archive. Knows nothing about agents. |
 | `crates/sim-config` | Loads `config/simulation.toml` for the binaries. |
 | `crates/sim-headless` | CLI runner + canonical survival scenarios and reports. |
 | `crates/sim-viewer` | `winit` + `wgpu` window: camera, HUD, spawning, background chunk loading. Read-only view of the sim. |

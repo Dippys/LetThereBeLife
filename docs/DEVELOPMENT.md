@@ -67,26 +67,33 @@ scripts/validate.sh [--quick] [--gpu]       # all of the above + checksum + head
 
 Where tests live:
 
-- Unit tests sit next to their module. Large suites have their own files: `sim-core/src/world/tests.rs`
-  and `sim-core/src/worldgen/tests.rs`.
-- Public-API scenario tests: `crates/sim-core/tests/physical_agent_slice{0..8}.rs` (one per
-  Phase 2 slice), `spawned_objects.rs`, `world_foundation_exit.rs`.
-- `crates/sim-headless/tests/physical_agent_slice8.rs`: canonical scenario determinism.
+- Unit tests live in a `tests.rs` or `tests/` folder next to the module they cover
+  (e.g. `sim-core/src/engine/tests/`, `sim-world/src/worldgen/tests/`, `sim-viewer/src/render/tests/`).
+- Public-API tests, one file per topic: `crates/sim-core/tests/` (`movement`, `routing_and_perception`,
+  `needs`, `policy`, `resources`, `sleep`, `shelter`, `health`, `initial_supplies`, `spawned_objects`)
+  and `crates/sim-world/tests/world_queries.rs`.
+- `crates/sim-headless/tests/canonical_scenarios.rs`: canonical scenario determinism and soaks.
+- `cargo test -p sim-world` runs only the world tests, which is handy when you're not touching the world.
 
 Release harnesses and soaks are `#[ignore]`d. Run them explicitly:
 
 ```sh
-cargo test --release -p sim-headless --test physical_agent_slice8 -- --ignored --nocapture --test-threads=1
+cargo test --release -p sim-headless --test canonical_scenarios -- --ignored --nocapture --test-threads=1
 ```
 
-Expected headless smoke output (seed 42, 20 agents, 600 ticks) last recorded
-2026-07-17: `hash=a7b3823045d32660`. If this changes, simulation behavior changed.
+Determinism fingerprints (last verified 2026-10-09). If one changes, simulation behavior changed:
+
+| Run | Hash |
+|---|---|
+| `sim-headless --ticks 600 --seed 42` (20 agents) | `a7b3823045d32660` |
+| Canonical 20 agents, 600,000 ticks (release soak) | `be55f18f67d71983` |
+| Canonical 100 agents, 600,000 ticks (release soak) | `26a5c65e5427bd6d` |
 
 ## Tooling
 
 - **Map render** (BMP, no window):
-  `cargo run --release -p sim-core --example render_map -- --width 4096 --height 4096 --step 8 --out map.bmp`
-- **World-quality review set**: `cargo run --release -p sim-core --example render_map -- --review-set`
+  `cargo run --release -p sim-world --example render_map -- --width 4096 --height 4096 --step 8 --out map.bmp`
+- **World-quality review set**: `cargo run --release -p sim-world --example render_map -- --review-set`
   writes 14 views × 4 seeds plus distribution/hash reports to `target/world-quality/`.
   Compare before and after any generator change.
 - **Viewer metrics**: `SIM_VIEWER_SUMMARY_METRICS=1` logs summary-cache rebuild cost.

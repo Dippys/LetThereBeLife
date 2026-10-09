@@ -49,7 +49,7 @@ pub(super) fn sample_color(cell: GeneratedCell, show_features: bool) -> [u8; 3] 
     terrain_color(cell.terrain)
 }
 
-/// Mirrors the viewer palette in crates/sim-viewer/src/renderer.rs.
+/// Mirrors the viewer palette in crates/sim-viewer/src/render/colors.rs.
 fn terrain_color(cell: TerrainCell) -> [u8; 3] {
     let shade = (cell.elevation >> 12) as u8;
     let rgb = |r: u8, g: u8, b: u8| [r, g, b];

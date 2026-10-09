@@ -23,6 +23,7 @@ Viewer basics: scroll to zoom, left-drag to pan, `T` to spawn an agent, `Space` 
 | Path | |
 |---|---|
 | `crates/sim-core` | The simulation (headless, deterministic) |
+| `crates/sim-world` | World storage and procedural generation |
 | `crates/sim-viewer` | `winit` + `wgpu` viewer |
 | `crates/sim-headless` | CLI runner and canonical scenarios |
 | `crates/sim-config` | Shared TOML config loading |
