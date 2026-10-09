@@ -1,3 +1,5 @@
+//! Public-API initial supply limits, pre-policy setup, and reset scenario.
+
 use sim_core::{
     AgentId, Engine, EngineCommand, EngineConfig, InitialInventoryError, InventoryView,
     PopulationInit, Standability, WorldConfig,

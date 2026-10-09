@@ -1,3 +1,5 @@
+//! Public-API prolonged-thirst death record and reset boundary scenario.
+
 use sim_core::{
     AgentActivity, AgentId, DeathCause, Engine, EngineCommand, EngineConfig, HealthStatus,
     MoveRequestError, PerceptionError, PopulationInit, WorldConfig, WorldPosition,

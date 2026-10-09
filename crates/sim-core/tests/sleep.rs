@@ -1,3 +1,5 @@
+//! Public-API sleep scenarios: planned wake, urgent interruption, and location validation.
+
 use sim_core::{
     AgentActivity, AgentId, Engine, EngineCommand, EngineConfig, FeatureKind, PopulationInit,
     SleepDiagnosticKind, SleepInterruptionReason, SleepQuality, SleepRequestError, Standability,

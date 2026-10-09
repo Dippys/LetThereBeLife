@@ -1,3 +1,5 @@
+//! Public-API gathering depletion and inventory capacity scenarios.
+
 use sim_core::{
     AgentId, Engine, EngineCommand, EngineConfig, InventoryView, PhysicalGoal,
     PolicyDiagnosticKind, PopulationInit, ResourceKind, Standability, WorldConfig, WorldPosition,

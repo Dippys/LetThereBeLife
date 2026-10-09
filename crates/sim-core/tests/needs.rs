@@ -1,3 +1,5 @@
+//! Public-API analytical need thresholds: pause safety, chunking independence, and movement rebasing.
+
 use sim_core::{
     AgentId, Engine, EngineCommand, EngineConfig, NeedKind, NeedThresholdOutcomeKind,
     PopulationInit, RouteRequest, Standability, TraversalStep, WorldConfig, WorldPosition,

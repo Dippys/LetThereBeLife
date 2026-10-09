@@ -1,3 +1,5 @@
+//! Public-API world queries used to select a deterministic, plausible settlement candidate.
+
 use sim_world::{
     ResourceKind, TraversalKind, WaterSource, World, WorldConfig, WorldPosition, WorldRect,
 };

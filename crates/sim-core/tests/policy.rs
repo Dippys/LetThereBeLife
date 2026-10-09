@@ -1,3 +1,5 @@
+//! Public-API autonomous policy activation, drink selection, backoff, and target reconsideration.
+
 use sim_core::{
     AgentId, Engine, EngineCommand, EngineConfig, MoveRequestError, PhysicalGoal,
     PolicyActivationError, PolicyDiagnosticKind, PolicyFailureReason, PopulationInit, RouteRequest,

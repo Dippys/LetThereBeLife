@@ -1,3 +1,5 @@
+//! Public-API movement scenario: replay is independent of event insertion order.
+
 use sim_core::{
     AgentView, Engine, EngineConfig, MovementOutcomeKind, PopulationInit, TraversalStep,
     WorldConfig, WorldPosition,

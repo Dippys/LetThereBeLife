@@ -1,3 +1,5 @@
+//! Public-API route planning (shared destinations, budgets, no-path) and bounded perception scenarios.
+
 use sim_core::{
     AgentId, Engine, EngineConfig, PopulationInit, RouteOutcomeKind, RouteRequest,
     RouteRequestError, SpawnKind, Standability, TraversalStep, WorldConfig, WorldPosition,

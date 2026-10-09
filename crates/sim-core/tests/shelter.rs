@@ -1,3 +1,5 @@
+//! Public-API autonomous gathering, shelter construction, and reset scenario.
+
 use sim_core::{
     AgentId, Engine, EngineCommand, EngineConfig, PopulationInit, ResourceKind, Standability,
     StructureState, WorldConfig, WorldPosition,
