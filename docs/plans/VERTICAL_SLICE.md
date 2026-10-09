@@ -64,7 +64,19 @@ matter in decisions.**
 
 **Done when:** the valley runs headless and in the viewer, and the log captures today's gestures.
 
-### M2 — Private intent and public signals
+### M2 — Private intent and public signals ✅ (2026-10-10)
+
+**Result:** `cognition/signal.rs` separates the sender's private `UtteranceIntent` (inform; topic;
+exact place) from the `PublicSignal` (sender, origin, pointing gesture, a **mime**, and an
+emotional **tone** derived from the sender's most pressing need). The engine completes a gesture
+in two steps: `apply_signal` expresses the intent, then `deliver` hands watchers only the public
+signal, and `understand(&PublicSignal)` is the sole path from signal to belief. A test delivers the
+same public signal from a sender who knows a lake and from one who knows nothing, and requires
+identical beliefs. Mimes stand in for words until M3 (scoop = water, pick-and-chew = food, chop,
+strike, head-on-hands = shelter, arm sweep = "been there"). Behavior is unchanged: the valley and
+group studies reproduce M1's numbers exactly, as expected while every mime has exactly one
+reading. Tone is public but not yet used by receivers (M4).
+
 
 - The sender keeps a private `UtteranceIntent { desired_effect, concept, place or target }`
   (desired effects to start: **inform** and **request**).

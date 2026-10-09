@@ -6,13 +6,15 @@
 mod gesture;
 mod map;
 mod personality;
+mod signal;
 mod social;
 
 pub use gesture::Gesture;
-pub(crate) use gesture::{interpret, point};
 pub(crate) use map::MentalMap;
 pub use map::{LANDMARK_SLOTS, MERGE_RADIUS, SEARCH_SPACING, VISIT_TILE_SIZE, VISITED_TILE_SLOTS};
 pub use personality::Personality;
+pub use signal::{DesiredEffect, Mime, PublicSignal, Tone, Understanding, UtteranceIntent};
+pub(crate) use signal::{express, understand};
 pub(crate) use social::SocialMemory;
 pub use social::{ACQUAINTANCE_SLOTS, AcquaintanceView, DEFAULT_TRUST, FRIEND_FAMILIARITY};
 
@@ -103,15 +105,11 @@ pub enum GestureTopic {
 pub struct SignalEvent {
     /// Unique, increasing per engine run (reset clears it).
     pub id: u64,
-    pub sender: AgentId,
     pub at: SimTime,
-    pub origin: WorldPosition,
-    /// **Private** to the sender: what it meant.
-    pub topic: GestureTopic,
-    /// **Private** to the sender: the exact place it had in mind.
-    pub intended_place: WorldPosition,
-    /// **Public:** what anyone watching could see.
-    pub gesture: Gesture,
+    /// **Private** to the sender: what it meant and the exact place it had in mind.
+    pub intent: UtteranceIntent,
+    /// **Public:** everything anyone watching could see.
+    pub signal: PublicSignal,
     /// Where watchers concluded the place is (what they can know, not the truth).
     pub inferred_position: WorldPosition,
     /// Search radius watchers attach to that conclusion.

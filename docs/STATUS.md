@@ -116,7 +116,8 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
-- 2026-10-10 (latest): M1, the valley scenario, communication log, and explain output (D-071).
+- 2026-10-10 (latest): M2, private intent separated from the public signal (D-072).
+- 2026-10-10: M1, the valley scenario, communication log, and explain output (D-071).
 - 2026-10-10 (later): personalities (D-067), relationships and trust (D-068), visiting friends
   and "I've been there" gestures (D-069).
 - 2026-10-10: behavior study (D-061), waterholes and generator v2 (D-062), mental maps and the
@@ -126,7 +127,7 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## What's next
 
-Follow [`plans/VERTICAL_SLICE.md`](plans/VERTICAL_SLICE.md). **M1 (valley and communication log) is
-done.** Next is **M2: private intent vs public signals**, then personal lexicons, interpretation with
+Follow [`plans/VERTICAL_SLICE.md`](plans/VERTICAL_SLICE.md). **M1 (valley and communication log) and
+M2 (private intent vs public signals) are done.** Next is **M3: concepts and personal lexicons**, then personal lexicons, interpretation with
 competing meanings, learning and repair, and finally the automated success test. Run the study
 before and after each milestone.

@@ -2,7 +2,10 @@
 //! deliberation, pointing gestures and who sees them, and read-only belief views.
 
 use super::errors::{move_failure, perception_failure};
-use crate::cognition::{Personality, belief_seconds, interpret, point, told_confidence};
+use crate::cognition::{
+    DesiredEffect, Personality, PublicSignal, Understanding, UtteranceIntent, belief_seconds,
+    express, told_confidence, understand,
+};
 use crate::policy::{MindInput, PolicyAction, PolicySelection, deliberate};
 use crate::{
     AgentActivity, AgentId, Engine, ExplorationHeading, GestureTopic, HintOutcomeEvent,
@@ -10,6 +13,13 @@ use crate::{
     PhysicalGoal, PhysicalNeedsView, PhysicalPerception, PolicyDiagnostic, PolicyDiagnosticKind,
     PolicyFailureReason, PolicyOptions, PolicyReason, SIGNAL_TICKS, SignalEvent, WorldPosition,
 };
+
+/// What delivering one public signal did.
+pub(super) struct Delivery {
+    pub(super) reading: Understanding,
+    pub(super) informed: u16,
+    pub(super) watchers: u16,
+}
 
 const fn can_watch(activity: AgentActivity) -> bool {
     !matches!(
@@ -154,8 +164,8 @@ impl Engine {
         }
     }
 
-    /// Completes a gesture: every awake agent in view of the sender sees it and
-    /// infers a rough place. Watchers never learn the sender's exact memory.
+    /// Completes a gesture. The sender turns its private intent into a public
+    /// signal; `deliver` then hands watchers that public signal and nothing else.
     pub(super) fn apply_signal(
         &mut self,
         sender: AgentId,
@@ -180,66 +190,105 @@ impl Engine {
                     })
             })
             .ok_or(PolicyFailureReason::TargetUnavailable)?;
-        let gesture = point(from, place).ok_or(PolicyFailureReason::TargetUnavailable)?;
-        let (estimate, uncertainty) = interpret(from, gesture);
+        let intent = UtteranceIntent {
+            effect: DesiredEffect::Inform,
+            topic,
+            place,
+        };
+        let urgency = self.visible_urgency(sender);
+        let public =
+            express(sender, from, intent, urgency).ok_or(PolicyFailureReason::TargetUnavailable)?;
+        let id = self.next_signal_id;
+        self.next_signal_id += 1;
+        let delivery = self.deliver(id, &public)?;
+        self.signal_events.push(SignalEvent {
+            id,
+            at: self.time,
+            intent,
+            signal: public,
+            inferred_position: delivery.reading.estimate,
+            search_radius: u16::from(delivery.reading.uncertainty) * 4,
+            informed: delivery.informed,
+            watchers: delivery.watchers,
+        });
+        Ok(())
+    }
+
+    /// Shows a public signal to every awake agent in view of its sender. This is
+    /// the receiver side: it has no access to the sender's intent or memory.
+    pub(super) fn deliver(
+        &mut self,
+        id: u64,
+        public: &PublicSignal,
+    ) -> Result<Delivery, PolicyFailureReason> {
+        let reading = understand(public);
         let perception = self
-            .perceive_physical(sender, PHYSICAL_POLICY_RADIUS)
+            .perceive_physical(public.sender, PHYSICAL_POLICY_RADIUS)
             .map_err(perception_failure)?;
         let now = belief_seconds(self.time);
-        let signal = self.next_signal_id;
-        self.next_signal_id += 1;
         let (mut watchers, mut informed) = (0_u16, 0_u16);
         let social = self.policy_options.social;
         for watcher in &perception.agents {
-            if watcher.id == sender || !can_watch(watcher.activity) {
+            if watcher.id == public.sender || !can_watch(watcher.activity) {
                 continue;
             }
             watchers = watchers.saturating_add(1);
             let mind = self.minds.get_mut(watcher.id);
             let mut confidence = 0;
-            let changed = match topic {
-                GestureTopic::Explored => mind.map.record_visit(estimate),
+            let changed = match reading.topic {
+                GestureTopic::Explored => mind.map.record_visit(reading.estimate),
                 GestureTopic::Place(kind) => {
                     let teller = if social {
-                        mind.notice(sender, from, now)
+                        mind.notice(public.sender, public.origin, now)
                     } else {
                         None
                     };
                     let trust = teller.map_or(crate::DEFAULT_TRUST, |slot| mind.social.trust(slot));
                     confidence = told_confidence(trust);
-                    mind.map
-                        .remember_told(kind, estimate, uncertainty, now, teller, confidence)
+                    mind.map.remember_told(
+                        kind,
+                        reading.estimate,
+                        reading.uncertainty,
+                        now,
+                        teller,
+                        confidence,
+                    )
                 }
             };
             if changed {
                 informed = informed.saturating_add(1);
             }
-            // Today the receiver reads the topic correctly; M2 replaces this with inference.
             self.interpretation_events.push(InterpretationEvent {
-                signal,
+                signal: id,
                 receiver: watcher.id,
                 at: self.time,
-                understood: topic,
-                estimate,
-                search_radius: u16::from(uncertainty) * 4,
+                understood: reading.topic,
+                estimate: reading.estimate,
+                search_radius: u16::from(reading.uncertainty) * 4,
                 confidence,
                 changed,
             });
         }
-        self.signal_events.push(SignalEvent {
-            id: signal,
-            sender,
-            at: self.time,
-            origin: from,
-            topic,
-            intended_place: place,
-            gesture,
-            inferred_position: estimate,
-            search_radius: u16::from(uncertainty) * 4,
+        Ok(Delivery {
+            reading,
             informed,
             watchers,
-        });
-        Ok(())
+        })
+    }
+
+    /// How urgent the agent looks: its most pressing need relative to that
+    /// need's threshold (128 = at threshold, 255 = twice past it or more).
+    fn visible_urgency(&self, agent: AgentId) -> u8 {
+        self.population
+            .needs_view(agent, self.time)
+            .map_or(0, |needs| {
+                [needs.hunger, needs.thirst, needs.rest, needs.exposure]
+                    .iter()
+                    .map(|level| u32::from(level.value) * 128 / u32::from(level.threshold.max(1)))
+                    .max()
+                    .unwrap_or(0)
+                    .min(255) as u8
+            })
     }
 
     /// The cognitive features the active policy uses.

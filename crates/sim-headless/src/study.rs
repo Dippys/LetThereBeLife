@@ -268,10 +268,10 @@ fn prepare_world(
 
 fn collect_tick(engine: &Engine, tracks: &mut [AgentTrack]) {
     for signal in engine.signal_events() {
-        let track = &mut tracks[signal.sender.get() as usize];
+        let track = &mut tracks[signal.signal.sender.get() as usize];
         track.signals += 1;
         track.informed += u64::from(signal.informed);
-        if signal.topic == sim_core::GestureTopic::Explored {
+        if signal.intent.topic == sim_core::GestureTopic::Explored {
             track.explored_gestures += 1;
         }
     }
@@ -550,7 +550,7 @@ pub fn explain(report: &StudyReport, agent: u32) -> String {
     let involved: Vec<_> = report.comms.involving(AgentId::new(agent)).collect();
     let sent = involved
         .iter()
-        .filter(|exchange| exchange.signal.sender.get() == agent)
+        .filter(|exchange| exchange.signal.signal.sender.get() == agent)
         .count();
     let _ = writeln!(
         out,

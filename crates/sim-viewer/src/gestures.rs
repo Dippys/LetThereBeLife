@@ -42,11 +42,11 @@ impl From<&SignalEvent> for GestureMark {
     fn from(event: &SignalEvent) -> Self {
         Self {
             id: event.id,
-            origin: event.origin,
+            origin: event.signal.origin,
             inferred_position: event.inferred_position,
             search_radius: event.search_radius,
             watchers: event.watchers,
-            topic: event.topic,
+            topic: event.intent.topic,
         }
     }
 }

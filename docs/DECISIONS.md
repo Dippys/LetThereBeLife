@@ -159,3 +159,16 @@ milestone is judged by what this log shows.
 first-hand memories) and that many hints are stale. M4 now explicitly requires hints to compete
 fairly in decisions. The "acted" link in the log is approximate (it matches by receiver and kind,
 not by the specific hint chosen) and is labelled as such.
+
+## D-072: M2, private intent and public signals (2026-10-10)
+
+**Decision:** Gestures carry a private `UtteranceIntent` (effect, topic, place) and a
+`PublicSignal` (sender, origin, pointing, mime, tone). Receivers are reached only through
+`Engine::deliver(&PublicSignal)` and `understand(&PublicSignal)`. Before lexicons exist, the
+"what" is carried by one of six mimes.
+**Why:** Spec 05 forbids any receiver-visible object holding both the signal and its meaning, and
+the plan's M2 requires a test that no receiver path can read the sender's intent.
+**Consequences:** `SignalEvent` now holds `intent` (private, for tools) and `signal` (public)
+instead of `topic`, `intended_place`, and `gesture`. Readings are still unambiguous (one meaning
+per mime), so behavior is unchanged. Ambiguity arrives with lexicons (M3) and competing
+interpretations (M4); the scoop and pick-and-chew mimes are an obvious first source of confusion.

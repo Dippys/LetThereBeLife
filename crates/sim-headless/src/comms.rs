@@ -120,7 +120,7 @@ impl CommunicationLog {
         self.exchanges
             .iter_mut()
             .rev()
-            .filter(|exchange| sender.is_none_or(|sender| exchange.signal.sender == sender))
+            .filter(|exchange| sender.is_none_or(|sender| exchange.signal.signal.sender == sender))
             .flat_map(|exchange| exchange.receptions.iter_mut())
             .find(|reception| {
                 reception.interpretation.receiver == receiver
@@ -136,7 +136,7 @@ impl CommunicationLog {
     /// Exchanges where `agent` was the sender or a receiver.
     pub fn involving(&self, agent: AgentId) -> impl Iterator<Item = &Exchange> + '_ {
         self.exchanges.iter().filter(move |exchange| {
-            exchange.signal.sender == agent
+            exchange.signal.signal.sender == agent
                 || exchange
                     .receptions
                     .iter()
@@ -148,7 +148,7 @@ impl CommunicationLog {
         let mut summary = CommunicationSummary::default();
         for exchange in &self.exchanges {
             summary.exchanges += 1;
-            match exchange.signal.topic {
+            match exchange.signal.intent.topic {
                 GestureTopic::Place(kind) => summary.place_exchanges[kind as usize] += 1,
                 GestureTopic::Explored => summary.explored_exchanges += 1,
             }
@@ -157,7 +157,7 @@ impl CommunicationLog {
                 summary.informed += u64::from(reception.interpretation.changed);
                 summary.acted += u64::from(reception.acted_at.is_some());
                 summary.misread +=
-                    u64::from(reception.interpretation.understood != exchange.signal.topic);
+                    u64::from(reception.interpretation.understood != exchange.signal.intent.topic);
                 match reception.outcome {
                     Some((true, _)) => summary.confirmed += 1,
                     Some((false, _)) => summary.refuted += 1,
@@ -197,22 +197,25 @@ fn topic_name(topic: GestureTopic) -> String {
 impl fmt::Display for Exchange {
     /// A short narrative of one exchange, private intent marked as such.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let signal = self.signal;
-        let (dx, dy) = signal.gesture.direction();
+        let event = self.signal;
+        let public = event.signal;
+        let (dx, dy) = public.pointing.direction();
         write!(
             formatter,
-            "t={} agent {} at ({},{}) pointed dir ({dx},{dy}) emphasis {} [meant {} at ({},{})] -> watchers infer ({},{}) +/-{}",
-            signal.at.ticks(),
-            signal.sender.get(),
-            signal.origin.x,
-            signal.origin.y,
-            signal.gesture.emphasis(),
-            topic_name(signal.topic),
-            signal.intended_place.x,
-            signal.intended_place.y,
-            signal.inferred_position.x,
-            signal.inferred_position.y,
-            signal.search_radius
+            "t={} agent {} at ({},{}) points dir ({dx},{dy}) emphasis {}, mimes {:?}, urgency {} [privately meant {} at ({},{})] -> watchers infer ({},{}) +/-{}",
+            event.at.ticks(),
+            public.sender.get(),
+            public.origin.x,
+            public.origin.y,
+            public.pointing.emphasis(),
+            public.mime,
+            public.tone.urgency,
+            topic_name(event.intent.topic),
+            event.intent.place.x,
+            event.intent.place.y,
+            event.inferred_position.x,
+            event.inferred_position.y,
+            event.search_radius
         )?;
         for reception in &self.receptions {
             let read = reception.interpretation;

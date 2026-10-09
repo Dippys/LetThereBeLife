@@ -65,7 +65,7 @@ fn a_gesture_gives_watchers_a_rough_hint_not_the_exact_place() {
     assert_eq!(events.len(), 1);
     assert_eq!((events[0].watchers, events[0].informed), (1, 1));
     assert_eq!(
-        events[0].intended_place, lake,
+        events[0].intent.place, lake,
         "the log keeps the private intent"
     );
     let readings = engine.interpretation_events();
@@ -73,7 +73,11 @@ fn a_gesture_gives_watchers_a_rough_hint_not_the_exact_place() {
     assert_eq!(readings[0].signal, events[0].id);
     assert_eq!(readings[0].receiver, AgentId::new(1));
     assert!(readings[0].changed);
-    assert_eq!(events[0].topic, GestureTopic::Place(LandmarkKind::Water));
+    assert_eq!(
+        events[0].intent.topic,
+        GestureTopic::Place(LandmarkKind::Water)
+    );
+    assert_eq!(events[0].signal.mime, crate::Mime::Scoop);
 
     let watcher = engine.mental_map(AgentId::new(1)).unwrap();
     assert_eq!(watcher.landmarks.len(), 1);
@@ -210,7 +214,10 @@ fn explored_gestures_mark_ground_for_watchers() {
         .mental_map(AgentId::new(1))
         .map_or(0, |map| map.explored_tiles);
     engine.apply_signal(AgentId::new(0), marker).unwrap();
-    assert_eq!(engine.signal_events()[0].topic, GestureTopic::Explored);
+    assert_eq!(
+        engine.signal_events()[0].intent.topic,
+        GestureTopic::Explored
+    );
     assert_eq!(
         engine.mental_map(AgentId::new(1)).unwrap().explored_tiles,
         before + 1
@@ -237,5 +244,58 @@ fn personalities_are_stable_per_agent_and_average_without_social() {
     assert_eq!(
         engine.mental_map(AgentId::new(0)).unwrap().personality,
         crate::Personality::AVERAGE
+    );
+}
+
+#[test]
+fn receivers_depend_only_on_the_public_signal() {
+    // World A: the sender really remembers a lake and points at it.
+    let (mut informed_world, sender, _) = two_neighbours();
+    let lake = WorldPosition {
+        x: sender.x + 90,
+        y: sender.y + 20,
+    };
+    remember_water(&mut informed_world, AgentId::new(0), lake);
+    informed_world.apply_signal(AgentId::new(0), lake).unwrap();
+    let public = informed_world.signal_events()[0].signal;
+
+    // World B: the sender knows nothing; the same public signal is delivered.
+    let (mut blank_world, _, _) = two_neighbours();
+    let delivery = blank_world.deliver(0, &public).unwrap();
+    assert_eq!(delivery.watchers, 1);
+
+    assert_eq!(
+        informed_world.mental_map(AgentId::new(1)),
+        blank_world.mental_map(AgentId::new(1)),
+        "identical public signals must produce identical beliefs, whatever the sender meant"
+    );
+    assert_eq!(
+        informed_world.interpretation_events(),
+        blank_world.interpretation_events()
+    );
+}
+
+#[test]
+fn the_sender_looks_as_urgent_as_its_needs() {
+    let (mut engine, sender, _) = two_neighbours();
+    let lake = WorldPosition {
+        x: sender.x + 40,
+        y: sender.y,
+    };
+    remember_water(&mut engine, AgentId::new(0), lake);
+    engine.apply_signal(AgentId::new(0), lake).unwrap();
+    let calm = engine.signal_events()[0].signal.tone.urgency;
+    engine.population.set_need_value_for_test(
+        AgentId::new(0),
+        crate::NeedKind::Thirst,
+        6_000,
+        engine.time,
+    );
+    engine.apply_signal(AgentId::new(0), lake).unwrap();
+    let thirsty = engine.signal_events()[1].signal.tone.urgency;
+    assert!(calm < 32, "a fresh agent looks calm ({calm})");
+    assert!(
+        thirsty >= 128,
+        "an agent at its thirst threshold looks urgent ({thirsty})"
     );
 }

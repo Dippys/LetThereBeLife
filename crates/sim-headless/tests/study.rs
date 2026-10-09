@@ -80,15 +80,15 @@ fn valley_communication_log_is_consistent() {
         let error = signal
             .inferred_position
             .x
-            .abs_diff(signal.intended_place.x)
-            .max(signal.inferred_position.y.abs_diff(signal.intended_place.y));
+            .abs_diff(signal.intent.place.x)
+            .max(signal.inferred_position.y.abs_diff(signal.intent.place.y));
         assert!(
             error <= u64::from(signal.search_radius),
             "the real place lies inside the search area watchers infer"
         );
         for reception in &exchange.receptions {
             assert_eq!(reception.interpretation.signal, signal.id);
-            assert_ne!(reception.interpretation.receiver, signal.sender);
+            assert_ne!(reception.interpretation.receiver, signal.signal.sender);
         }
     }
     let story = sim_headless::explain(&report, 0);
