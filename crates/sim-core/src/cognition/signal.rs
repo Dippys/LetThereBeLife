@@ -10,7 +10,7 @@
 use crate::{AgentId, WorldPosition};
 
 use super::{
-    GestureTopic, LandmarkKind,
+    GestureTopic, LandmarkKind, VocalForm,
     gesture::{Gesture, interpret, point},
 };
 
@@ -64,6 +64,8 @@ pub struct PublicSignal {
     pub origin: WorldPosition,
     pub pointing: Gesture,
     pub mime: Mime,
+    /// The word the sender says, if it has one for the concept.
+    pub vocal: Option<VocalForm>,
     pub tone: Tone,
 }
 
@@ -85,6 +87,7 @@ pub(crate) fn express(
     sender: AgentId,
     origin: WorldPosition,
     intent: UtteranceIntent,
+    vocal: Option<VocalForm>,
     urgency: u8,
 ) -> Option<PublicSignal> {
     Some(PublicSignal {
@@ -92,6 +95,7 @@ pub(crate) fn express(
         origin,
         pointing: point(origin, intent.place)?,
         mime: mime_for(intent.topic),
+        vocal,
         tone: Tone { urgency },
     })
 }
@@ -149,7 +153,7 @@ mod tests {
                 topic,
                 place: at(80, -30),
             };
-            let signal = express(AgentId::new(1), at(0, 0), intent, 40).unwrap();
+            let signal = express(AgentId::new(1), at(0, 0), intent, None, 40).unwrap();
             assert_eq!(understand(&signal).topic, topic);
         }
     }
@@ -161,7 +165,7 @@ mod tests {
             topic: GestureTopic::Place(LandmarkKind::Water),
             place: at(137, 41),
         };
-        let signal = express(AgentId::new(3), at(5, 5), intent, 200).unwrap();
+        let signal = express(AgentId::new(3), at(5, 5), intent, None, 200).unwrap();
         assert_eq!(signal.tone.urgency, 200);
         let reading = understand(&signal);
         assert_ne!(
@@ -183,6 +187,6 @@ mod tests {
             topic: GestureTopic::Place(LandmarkKind::Food),
             place: at(3, 3),
         };
-        assert_eq!(express(AgentId::new(0), at(0, 0), intent, 0), None);
+        assert_eq!(express(AgentId::new(0), at(0, 0), intent, None, 0), None);
     }
 }

@@ -91,6 +91,16 @@ fn valley_communication_log_is_consistent() {
             assert_ne!(reception.interpretation.receiver, signal.signal.sender);
         }
     }
+    assert!(summary.worded[0] + summary.worded[1] > 0, "the band speaks");
+    let [start, end] = report.vocabulary_agreement;
+    assert!(
+        start >= 50,
+        "founders mostly share a proto-language ({start}%)"
+    );
+    assert!(
+        end >= start,
+        "talking doesn't make words diverge ({start}% -> {end}%)"
+    );
     let story = sim_headless::explain(&report, 0);
     assert!(story.starts_with("explain agent 0:"));
 }

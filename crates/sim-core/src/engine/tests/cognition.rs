@@ -299,3 +299,67 @@ fn the_sender_looks_as_urgent_as_its_needs() {
         "an agent at its thirst threshold looks urgent ({thirsty})"
     );
 }
+
+#[test]
+fn watchers_learn_words_from_the_mime_they_come_with() {
+    let (mut informed_world, sender, _) = two_neighbours();
+    let lake = WorldPosition {
+        x: sender.x + 90,
+        y: sender.y,
+    };
+    remember_water(&mut informed_world, AgentId::new(0), lake);
+    informed_world.apply_signal(AgentId::new(0), lake).unwrap();
+    let mut public = informed_world.signal_events()[0].signal;
+    // Pick a word the watcher has no reading for at all.
+    let watcher_words: Vec<_> = informed_world
+        .mental_map(AgentId::new(1))
+        .unwrap()
+        .lexicon
+        .iter()
+        .map(|entry| entry.form)
+        .collect();
+    let fresh = (0..crate::VOCAL_FORMS)
+        .map(crate::VocalForm)
+        .find(|form| !watcher_words.contains(form))
+        .expect("16 slots can't hold all 32 forms");
+    public.vocal = Some(fresh);
+
+    let (mut world, _, _) = two_neighbours();
+    world.deliver(0, &public).unwrap();
+    let reading = world.interpretation_events()[0];
+    assert_eq!(reading.heard, Some(fresh));
+    assert_eq!(
+        reading.word_reading, None,
+        "the word meant nothing to them before"
+    );
+    let learned = world
+        .mental_map(AgentId::new(1))
+        .unwrap()
+        .lexicon
+        .into_iter()
+        .find(|entry| entry.form == fresh)
+        .expect("the word is now in the lexicon");
+    assert_eq!(
+        learned.concept,
+        crate::Concept::Water,
+        "learned from the scooping mime"
+    );
+}
+
+#[test]
+fn founders_inherit_the_same_lexicons_on_replay() {
+    let (mut first, sender, _) = two_neighbours();
+    let (mut second, _, _) = two_neighbours();
+    let lake = WorldPosition {
+        x: sender.x + 60,
+        y: sender.y,
+    };
+    remember_water(&mut first, AgentId::new(0), lake);
+    remember_water(&mut second, AgentId::new(0), lake);
+    let words = |engine: &Engine| engine.mental_map(AgentId::new(0)).unwrap().lexicon;
+    assert_eq!(words(&first), words(&second));
+    assert!(
+        !words(&first).is_empty(),
+        "founders start with a proto-language"
+    );
+}

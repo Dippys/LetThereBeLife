@@ -2,11 +2,12 @@
 
 use bytemuck::Zeroable;
 use sim_core::{
-    ACQUAINTANCE_SLOTS, AcquaintanceView, AgentActivity, AgentView, DEFAULT_TRUST, DeathCause,
-    DeathRecord, ExplorationHeading, HealthStatus, HealthView, InventoryView, LANDMARK_SLOTS,
-    LandmarkKind, LandmarkSource, LandmarkView, MentalMapView, NeedKind, Personality, PhysicalGoal,
-    PhysicalNeedsView, PhysicalPolicyView, PolicyReason, SleepQuality, SleepView, SpawnKind,
-    VISITED_TILE_SLOTS, WORLD_GENERATION_BOUNDS, World, WorldConfig, WorldPosition,
+    ACQUAINTANCE_SLOTS, AcquaintanceView, AgentActivity, AgentView, Concept, DEFAULT_TRUST,
+    DeathCause, DeathRecord, ExplorationHeading, HealthStatus, HealthView, InventoryView,
+    LANDMARK_SLOTS, LEXICON_SLOTS, LandmarkKind, LandmarkSource, LandmarkView, LexiconEntryView,
+    MentalMapView, Mime, NeedKind, Personality, PhysicalGoal, PhysicalNeedsView,
+    PhysicalPolicyView, PolicyReason, SleepQuality, SleepView, SpawnKind, VISITED_TILE_SLOTS,
+    VOCAL_FORMS, VocalForm, WORLD_GENERATION_BOUNDS, World, WorldConfig, WorldPosition,
 };
 
 use super::test_render_state;
@@ -44,13 +45,56 @@ fn acquaintance(id: u32, familiarity: u8, trust: u8) -> AcquaintanceView {
     }
 }
 
+fn word(form: u8, concept: Concept, positive: u16, contradictory: u16) -> LexiconEntryView {
+    LexiconEntryView {
+        form: VocalForm(form),
+        concept,
+        positive,
+        contradictory,
+        heard: positive + contradictory,
+    }
+}
+
+/// Every mime, for worst-case layouts.
+const MIMES: [Mime; 6] = [
+    Mime::Scoop,
+    Mime::PickAndChew,
+    Mime::Chop,
+    Mime::Strike,
+    Mime::RestHead,
+    Mime::Sweep,
+];
+
+/// The five place concepts the card names, all linked to `form`.
+fn place_words(form: u8) -> Vec<LexiconEntryView> {
+    [
+        Concept::Water,
+        Concept::Food,
+        Concept::Wood,
+        Concept::Stone,
+        Concept::Home,
+    ]
+    .into_iter()
+    .map(|concept| word(form, concept, u16::MAX, 0))
+    .collect()
+}
+
 fn mind(personality: Personality, acquaintances: Vec<AcquaintanceView>) -> MemoryInspection {
+    mind_with_words(personality, acquaintances, Vec::new())
+}
+
+fn mind_with_words(
+    personality: Personality,
+    acquaintances: Vec<AcquaintanceView>,
+    lexicon: Vec<LexiconEntryView>,
+) -> MemoryInspection {
     MemoryInspection::from_view(&MentalMapView {
         agent: sim_core::AgentId::new(1),
         personality,
         landmarks: Vec::new(),
         explored_tiles: 0,
         acquaintances,
+        lexicon,
     })
 }
 
@@ -155,6 +199,72 @@ fn agent_card_lists_personality_and_most_familiar_friends() {
 const FRIEND: u8 = sim_core::FRIEND_FAMILIARITY;
 
 #[test]
+fn agent_card_lists_each_place_word_with_the_most_net_evidence() {
+    // VocalForm 0..3 render as KANI, TAKA, MASO, NAMU (VocalForm::name).
+    let names: Vec<_> = (0..4).map(|id| VocalForm(id).name()).collect();
+    assert_eq!(names, ["kani", "taka", "maso", "namu"]);
+    let lexicon = vec![
+        word(1, Concept::Water, 9, 1),
+        // Same net evidence as form 1 but less positive evidence: loses.
+        word(2, Concept::Water, 8, 0),
+        word(0, Concept::Food, 6, 0),
+        // Equal evidence ties go to the lowest form id.
+        word(3, Concept::Wood, 5, 0),
+        word(2, Concept::Wood, 5, 0),
+        // Contested links are not words.
+        word(3, Concept::Stone, 4, 4),
+        word(1, Concept::Home, 0, 0),
+        // Non-place concepts are not listed.
+        word(0, Concept::Come, 9, 0),
+    ];
+    let lines = card_lines(mind_with_words(
+        Personality::AVERAGE,
+        Vec::new(),
+        lexicon.clone(),
+    ));
+    assert_eq!(
+        lines[1..],
+        [
+            "FRIENDS 0 OF 0 KNOWN",
+            "WORDS WATER TAKA  FOOD KANI  WOOD MASO"
+        ]
+    );
+
+    // All five place words wrap onto an indented second line.
+    let lines = card_lines(mind_with_words(
+        Personality::AVERAGE,
+        Vec::new(),
+        place_words(3),
+    ));
+    assert_eq!(
+        lines[2..],
+        [
+            "WORDS WATER NAMU  FOOD NAMU  WOOD NAMU",
+            "      STONE NAMU  HOME NAMU",
+        ]
+    );
+
+    // A word that does not fit after STONE also wraps, and the lexicon copy is bounded.
+    let mut crowded = vec![word(0, Concept::Stone, 1, 0); LEXICON_SLOTS + 4];
+    crowded[0] = word(0, Concept::Water, 1, 0);
+    crowded[LEXICON_SLOTS] = word(0, Concept::Food, 9, 0);
+    let memory = mind_with_words(Personality::AVERAGE, Vec::new(), crowded);
+    assert_eq!(memory.lexicon().len(), LEXICON_SLOTS);
+    assert_eq!(memory.word_for(Concept::Food), None);
+    let lines = card_lines(memory);
+    assert_eq!(lines[2..], ["WORDS WATER KANI  STONE KANI"]);
+
+    for form in 0..VOCAL_FORMS {
+        let lines = card_lines(mind_with_words(
+            Personality::AVERAGE,
+            Vec::new(),
+            place_words(form),
+        ));
+        assert!(lines.iter().all(|line| line.len() <= AGENT_CARD_LINE_WIDTH));
+    }
+}
+
+#[test]
 fn static_buffers_partition_at_the_device_safe_limit() {
     let instances = vec![Instance::zeroed(); MAX_INSTANCES_PER_BUFFER + 1];
     let lengths: Vec<_> = static_instance_chunks(&instances).map(<[_]>::len).collect();
@@ -240,13 +350,27 @@ fn hud_counts_gestures_and_names_the_latest() {
     let mut state = test_render_state(None);
     state.gestures = GestureSummary {
         total: 123,
-        last: Some(LastGesture { id: 7, watchers: 4 }),
+        last: Some(LastGesture {
+            id: 7,
+            watchers: 4,
+            word: Some(VocalForm(0)),
+            mime: Mime::PickAndChew,
+        }),
     };
     let mut text = String::new();
 
     write_hud_text(&mut text, &world, &state);
 
-    assert!(text.contains("\nGESTURES 123  LAST #7 -> 4 WATCHERS\n"));
+    assert!(text.contains("\nGESTURES 123  LAST #7 \"KANI\" PICK-AND-CHEW -> 4 WATCHERS\n"));
+
+    state.gestures.last = Some(LastGesture {
+        id: 8,
+        watchers: 0,
+        word: None,
+        mime: Mime::Sweep,
+    });
+    write_hud_text(&mut text, &world, &state);
+    assert!(text.contains("\nGESTURES 123  LAST #8 - SWEEP -> 0 WATCHERS\n"));
 }
 
 #[test]
@@ -277,16 +401,39 @@ fn every_hud_layout_fits_the_fixed_gpu_instance_budget() {
         selected: SpawnKind::BerryBush,
         placing: true,
     });
-    state.gestures = GestureSummary {
-        total: u64::MAX,
-        last: Some(LastGesture {
-            id: u64::MAX,
-            watchers: u16::MAX,
-        }),
-    };
     let mut text = String::new();
     let mut instances = Vec::new();
 
+    // The gesture line is longest with a quoted word and PICK-AND-CHEW; which
+    // word and mime light the most glyph runs is checked exhaustively.
+    for (word, mime) in (0..VOCAL_FORMS)
+        .map(|form| Some(VocalForm(form)))
+        .chain([None])
+        .flat_map(|word| MIMES.map(|mime| (word, mime)))
+    {
+        state.gestures = GestureSummary {
+            total: u64::MAX,
+            last: Some(LastGesture {
+                id: u64::MAX,
+                watchers: u16::MAX,
+                word,
+                mime,
+            }),
+        };
+        assert_worst_hud_fits(&world, &mut state, &mut text, &mut instances);
+    }
+    write_hud_text(&mut text, &world, &state);
+    assert!(text.contains(
+        "\nGESTURES 18446744073709551615  LAST #18446744073709551615 - SWEEP -> 65535 WATCHERS\n"
+    ));
+}
+
+fn assert_worst_hud_fits(
+    world: &World,
+    state: &mut crate::render::RenderState,
+    text: &mut String,
+    instances: &mut Vec<Instance>,
+) {
     for cursor in [
         None,
         Some(WorldPosition { x: 0, y: 0 }),
@@ -304,9 +451,9 @@ fn every_hud_layout_fits_the_fixed_gpu_instance_budget() {
             GenerationStatus::WorkerUnavailable,
         ] {
             state.generation_status = status;
-            write_hud_text(&mut text, &world, &state);
+            write_hud_text(text, world, state);
             assert!(text.len() <= HUD_TEXT_CAPACITY);
-            build_screen_overlay(&mut instances, &text, None, &state, 1_920, 1_080);
+            build_screen_overlay(instances, text, None, state, 1_920, 1_080);
             assert!(instances.len() <= SCREEN_OVERLAY_CAPACITY);
         }
     }
@@ -364,6 +511,7 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
         memory: Some(MemoryInspection::from_view(&MentalMapView {
             personality: Personality::AVERAGE,
             acquaintances: Vec::new(),
+            lexicon: Vec::new(),
             agent: view.id,
             landmarks: vec![
                 landmark(LandmarkKind::Water, LandmarkSource::Seen, 0),
@@ -424,6 +572,31 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
         threshold: 10_000,
         threshold_reached: true,
     };
+    let mut budget_mind = MentalMapView {
+        // Glyph instances are per lit pixel run, so the worst case maximizes
+        // runs, not characters: '0' has the most runs of any digit, and four
+        // 3-digit traits are only possible while BALANCED. That makes this the
+        // heaviest personality line (41 characters).
+        personality: Personality {
+            curiosity: 100,
+            caution: 100,
+            sociability: 100,
+            diligence: 100,
+        },
+        // Every slot a friend; ten-digit ids and 3-digit trust heavy in '0's.
+        // The TOP line fits two of them (39 characters), and fewer, longer
+        // entries out-weigh more, shorter ones.
+        acquaintances: vec![acquaintance(4_000_000_000, u8::MAX, 100); ACQUAINTANCE_SLOTS],
+        // A word for every place concept (two WORDS lines); the loop below
+        // tries every form.
+        lexicon: place_words(0),
+        agent: budget_view.id,
+        landmarks: (0..LANDMARK_SLOTS)
+            .map(|index| landmark(LandmarkKind::Shelter, LandmarkSource::Told, index as i64))
+            .collect(),
+        // The mental map caps explored tiles at its fixed visit-tile slots.
+        explored_tiles: VISITED_TILE_SLOTS,
+    };
     let budget_inspection = AgentInspection {
         view: budget_view,
         needs: Some(PhysicalNeedsView {
@@ -474,28 +647,7 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
             at: sim_core::SimTime::from_ticks(u64::MAX),
             position: budget_view.position,
         }),
-        memory: Some(MemoryInspection::from_view(&MentalMapView {
-            // Glyph instances are per lit pixel run, so the worst case maximizes
-            // runs, not characters: '0' has the most runs of any digit, and four
-            // 3-digit traits are only possible while BALANCED. That makes this the
-            // heaviest personality line (41 characters).
-            personality: Personality {
-                curiosity: 100,
-                caution: 100,
-                sociability: 100,
-                diligence: 100,
-            },
-            // Every slot a friend; ten-digit ids and 3-digit trust heavy in '0's.
-            // The TOP line fits two of them (39 characters), and fewer, longer
-            // entries out-weigh more, shorter ones.
-            acquaintances: vec![acquaintance(4_000_000_000, u8::MAX, 100); ACQUAINTANCE_SLOTS],
-            agent: budget_view.id,
-            landmarks: (0..LANDMARK_SLOTS)
-                .map(|index| landmark(LandmarkKind::Shelter, LandmarkSource::Told, index as i64))
-                .collect(),
-            // The mental map caps explored tiles at its fixed visit-tile slots.
-            explored_tiles: VISITED_TILE_SLOTS,
-        })),
+        memory: Some(MemoryInspection::from_view(&budget_mind)),
     };
     let mut budget_text = String::with_capacity(AGENT_TEXT_CAPACITY);
     write_agent_text(&mut budget_text, Some(budget_inspection));
@@ -506,6 +658,8 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
     assert!(budget_text.contains("BALANCED  CUR 100 CAU 100 SOC 100 DIL 100\n"));
     assert!(budget_text.contains("FRIENDS 6 OF 6 KNOWN\n"));
     assert!(budget_text.contains("TOP  #4000000000 T100  #4000000000 T100\n"));
+    assert!(budget_text.contains("WORDS WATER KANI  FOOD KANI  WOOD KANI\n"));
+    assert!(budget_text.contains("\n      STONE KANI  HOME KANI\n"));
     assert!(budget_text.len() <= AGENT_TEXT_CAPACITY);
 
     let world = World::generate(u64::MAX, WorldConfig::new(64, 64).unwrap());
@@ -518,27 +672,43 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
     state.selection_valid = false;
     state.generation_status = GenerationStatus::WorkerUnavailable;
     state.spawn_message = Some("SPAWN FAILED - CELL IS OCCUPIED BY AGENT 4294967295".to_owned());
-    state.gestures = GestureSummary {
-        total: u64::MAX,
-        last: Some(LastGesture {
-            id: u64::MAX,
-            watchers: u16::MAX,
-        }),
-    };
     let mut hud_text = String::with_capacity(HUD_TEXT_CAPACITY);
-    write_hud_text(&mut hud_text, &world, &state);
     let mut instances = Vec::with_capacity(SCREEN_OVERLAY_CAPACITY);
-    build_screen_overlay(
-        &mut instances,
-        &hud_text,
-        Some(&budget_text),
-        &state,
-        1_920,
-        1_080,
-    );
+    let mut heaviest = 0;
+    // Which word lights the most glyph runs is checked exhaustively, on the
+    // card and in the HUD gesture line alike.
+    for form in 0..VOCAL_FORMS {
+        budget_mind.lexicon = place_words(form);
+        let mut inspection = budget_inspection;
+        inspection.memory = Some(MemoryInspection::from_view(&budget_mind));
+        write_agent_text(&mut budget_text, Some(inspection));
+        assert!(budget_text.len() <= AGENT_TEXT_CAPACITY);
+        for mime in MIMES {
+            state.gestures = GestureSummary {
+                total: u64::MAX,
+                last: Some(LastGesture {
+                    id: u64::MAX,
+                    watchers: u16::MAX,
+                    word: Some(VocalForm(form)),
+                    mime,
+                }),
+            };
+            write_hud_text(&mut hud_text, &world, &state);
+            assert!(hud_text.len() <= HUD_TEXT_CAPACITY);
+            build_screen_overlay(
+                &mut instances,
+                &hud_text,
+                Some(&budget_text),
+                &state,
+                1_920,
+                1_080,
+            );
+            assert!(instances.len() <= SCREEN_OVERLAY_CAPACITY);
+            heaviest = heaviest.max(instances.len());
+        }
+    }
     assert!(
-        instances.len() > 4_096,
+        heaviest > 10_240,
         "the regression layout must exercise the former undersized budget"
     );
-    assert!(instances.len() <= SCREEN_OVERLAY_CAPACITY);
 }

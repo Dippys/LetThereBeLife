@@ -100,7 +100,7 @@ impl Engine {
         self.death_records.clear();
         self.policy_active = false;
         self.policy_options = PolicyOptions::default();
-        self.minds = Minds::default();
+        self.minds = Minds::new(self.config.seed);
         self.route_outcomes.clear();
         self.route_planner = RoutePlanner::default();
         self.runtime_counters = RuntimeCounters::default();

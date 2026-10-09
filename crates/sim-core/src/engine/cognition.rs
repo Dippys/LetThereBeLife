@@ -61,6 +61,7 @@ impl Engine {
         let crate::cognition::Mind {
             map,
             social: people,
+            ..
         } = mind;
         map.observe(
             agent.get(),
@@ -196,8 +197,12 @@ impl Engine {
             place,
         };
         let urgency = self.visible_urgency(sender);
-        let public =
-            express(sender, from, intent, urgency).ok_or(PolicyFailureReason::TargetUnavailable)?;
+        let vocal = self
+            .minds
+            .get(sender)
+            .and_then(|mind| mind.lexicon.produce(topic.concept()));
+        let public = express(sender, from, intent, vocal, urgency)
+            .ok_or(PolicyFailureReason::TargetUnavailable)?;
         let id = self.next_signal_id;
         self.next_signal_id += 1;
         let delivery = self.deliver(id, &public)?;
@@ -234,6 +239,12 @@ impl Engine {
             }
             watchers = watchers.saturating_add(1);
             let mind = self.minds.get_mut(watcher.id);
+            // Words are learned from what accompanies them (here the understood mime).
+            let word_reading = public.vocal.and_then(|form| mind.lexicon.recognize(form));
+            if let Some(form) = public.vocal {
+                mind.lexicon
+                    .hear_with_evidence(form, reading.topic.concept());
+            }
             let mut confidence = 0;
             let changed = match reading.topic {
                 GestureTopic::Explored => mind.map.record_visit(reading.estimate),
@@ -267,6 +278,8 @@ impl Engine {
                 search_radius: u16::from(reading.uncertainty) * 4,
                 confidence,
                 changed,
+                heard: public.vocal,
+                word_reading,
             });
         }
         Ok(Delivery {
@@ -305,6 +318,7 @@ impl Engine {
             landmarks: mind.map.views().collect(),
             explored_tiles: mind.map.explored_tile_count(),
             acquaintances: mind.social.views().collect(),
+            lexicon: mind.lexicon.views().collect(),
         })
     }
 

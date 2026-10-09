@@ -13,10 +13,11 @@ mod tests;
 use std::{borrow::Cow, sync::Arc, time::Instant};
 
 use sim_core::{
-    ACQUAINTANCE_SLOTS, AcquaintanceView, AgentId, AgentView, ChunkInspection, DeathRecord, Engine,
-    HealthView, InventoryView, LANDMARK_SLOTS, LandmarkKind, LandmarkSource, LandmarkView,
-    MentalMapView, Personality, PhysicalNeedsView, PhysicalPolicyView, SimulationSnapshot,
-    SleepView, SpawnKind, SpawnedObjectView, World, WorldOverview, WorldPosition, WorldRect,
+    ACQUAINTANCE_SLOTS, AcquaintanceView, AgentId, AgentView, ChunkInspection, Concept,
+    DeathRecord, Engine, HealthView, InventoryView, LANDMARK_SLOTS, LEXICON_SLOTS, LandmarkKind,
+    LandmarkSource, LandmarkView, LexiconEntryView, MentalMapView, Personality, PhysicalNeedsView,
+    PhysicalPolicyView, SimulationSnapshot, SleepView, SpawnKind, SpawnedObjectView, VocalForm,
+    World, WorldOverview, WorldPosition, WorldRect,
 };
 use winit::window::Window;
 
@@ -73,8 +74,8 @@ pub struct AgentInspection {
     pub memory: Option<MemoryInspection>,
 }
 
-/// A bounded, copyable snapshot of one agent's mind (places, personality, and
-/// acquaintances) for the hover card and map markers.
+/// A bounded, copyable snapshot of one agent's mind (places, personality,
+/// acquaintances, and lexicon) for the hover card and map markers.
 #[derive(Debug, Clone, Copy)]
 pub struct MemoryInspection {
     places: [LandmarkView; LANDMARK_SLOTS],
@@ -83,6 +84,8 @@ pub struct MemoryInspection {
     pub personality: Personality,
     acquaintances: [AcquaintanceView; ACQUAINTANCE_SLOTS],
     acquaintance_len: u8,
+    lexicon: [LexiconEntryView; LEXICON_SLOTS],
+    lexicon_len: u8,
 }
 
 impl MemoryInspection {
@@ -102,12 +105,22 @@ impl MemoryInspection {
             last_seen_position: None,
             last_seen_second: 0,
         };
+        const UNHEARD: LexiconEntryView = LexiconEntryView {
+            form: VocalForm(0),
+            concept: Concept::Water,
+            positive: 0,
+            contradictory: 0,
+            heard: 0,
+        };
         let mut places = [EMPTY; LANDMARK_SLOTS];
         let len = view.landmarks.len().min(LANDMARK_SLOTS);
         places[..len].copy_from_slice(&view.landmarks[..len]);
         let mut acquaintances = [STRANGER; ACQUAINTANCE_SLOTS];
         let acquaintance_len = view.acquaintances.len().min(ACQUAINTANCE_SLOTS);
         acquaintances[..acquaintance_len].copy_from_slice(&view.acquaintances[..acquaintance_len]);
+        let mut lexicon = [UNHEARD; LEXICON_SLOTS];
+        let lexicon_len = view.lexicon.len().min(LEXICON_SLOTS);
+        lexicon[..lexicon_len].copy_from_slice(&view.lexicon[..lexicon_len]);
         Self {
             places,
             len: len as u8,
@@ -115,6 +128,8 @@ impl MemoryInspection {
             personality: view.personality,
             acquaintances,
             acquaintance_len: acquaintance_len as u8,
+            lexicon,
+            lexicon_len: lexicon_len as u8,
         }
     }
 
@@ -124,6 +139,27 @@ impl MemoryInspection {
 
     pub fn acquaintances(&self) -> &[AcquaintanceView] {
         &self.acquaintances[..usize::from(self.acquaintance_len)]
+    }
+
+    pub fn lexicon(&self) -> &[LexiconEntryView] {
+        &self.lexicon[..usize::from(self.lexicon_len)]
+    }
+
+    /// The agent's word for `concept`: the entry with the most net evidence
+    /// (`positive - contradictory`), ties going to more positive evidence and
+    /// then the lowest form id. `None` unless some entry has net evidence above zero.
+    pub fn word_for(&self, concept: Concept) -> Option<VocalForm> {
+        self.lexicon()
+            .iter()
+            .filter(|entry| entry.concept == concept && entry.positive > entry.contradictory)
+            .max_by_key(|entry| {
+                (
+                    i32::from(entry.positive) - i32::from(entry.contradictory),
+                    entry.positive,
+                    std::cmp::Reverse(entry.form.0),
+                )
+            })
+            .map(|entry| entry.form)
     }
 }
 
@@ -618,12 +654,15 @@ const MAX_INSTANCES_PER_BUFFER: usize = 1_000_000;
 const MIN_TERRAIN_SAMPLE_PIXELS: f32 = 2.0;
 const CACHE_MARGIN_PIXELS: f32 = 128.0;
 const WORLD_OVERLAY_CAPACITY: usize = 10;
-/// The worst-case composed card measures 9_195 instances; the personality and
-/// friend lines add 885 of them, so the former 9_216 kept only 21 spare. 10_240
-/// restores roughly the ~900 instances of slack the budget had before them.
-const SCREEN_OVERLAY_CAPACITY: usize = 10_240;
+/// The worst-case composed card measures 10_553 instances: the personality and
+/// friend lines took it to 9_195 (budget 10_240), then the two `WORDS` card
+/// lines and the spoken word and mime on the HUD gesture line overflowed 10_240.
+/// 11_520 keeps the ~900 instances of slack the budget has carried.
+const SCREEN_OVERLAY_CAPACITY: usize = 11_520;
 const HUD_TEXT_CAPACITY: usize = 640;
-const AGENT_TEXT_CAPACITY: usize = 768;
+/// The worst-case card is 800 bytes: 733 before the two `WORDS` lines (67 bytes)
+/// were added, which overflowed the former 768.
+const AGENT_TEXT_CAPACITY: usize = 832;
 const MAX_AGENT_INSTANCES: usize = 4_096;
 const MAX_STRUCTURE_INSTANCES: usize = 4_096;
 const MAX_SPAWNED_OBJECT_INSTANCES: usize = 16_384;

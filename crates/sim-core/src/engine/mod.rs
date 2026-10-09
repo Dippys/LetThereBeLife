@@ -160,7 +160,7 @@ impl Engine {
             death_records: Vec::new(),
             policy_active: false,
             policy_options: PolicyOptions::default(),
-            minds: Minds::default(),
+            minds: Minds::new(config.seed),
             signal_events: Vec::new(),
             interpretation_events: Vec::new(),
             hint_outcomes: Vec::new(),
@@ -204,7 +204,7 @@ impl Engine {
                 self.death_records.clear();
                 self.policy_active = false;
                 self.policy_options = PolicyOptions::default();
-                self.minds = Minds::default();
+                self.minds = Minds::new(self.config.seed);
                 self.signal_events.clear();
                 self.interpretation_events.clear();
                 self.hint_outcomes.clear();

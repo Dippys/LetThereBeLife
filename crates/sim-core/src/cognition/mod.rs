@@ -4,12 +4,15 @@
 //! physical truth stays in the world, population, and resource stores.
 
 mod gesture;
+mod lexicon;
 mod map;
 mod personality;
 mod signal;
 mod social;
 
 pub use gesture::Gesture;
+pub(crate) use lexicon::Lexicon;
+pub use lexicon::{Concept, LEXICON_SLOTS, LexiconEntryView, VOCAL_FORMS, VocalForm};
 pub(crate) use map::MentalMap;
 pub use map::{LANDMARK_SLOTS, MERGE_RADIUS, SEARCH_SPACING, VISIT_TILE_SIZE, VISITED_TILE_SLOTS};
 pub use personality::Personality;
@@ -88,6 +91,8 @@ pub struct MentalMapView {
     pub landmarks: Vec<LandmarkView>,
     pub explored_tiles: usize,
     pub acquaintances: Vec<AcquaintanceView>,
+    /// What the agent believes words mean.
+    pub lexicon: Vec<LexiconEntryView>,
 }
 
 /// What a gesture was about.
@@ -134,6 +139,10 @@ pub struct InterpretationEvent {
     pub confidence: u8,
     /// Whether the receiver's beliefs changed.
     pub changed: bool,
+    /// The word the receiver heard, if the sender said one.
+    pub heard: Option<VocalForm>,
+    /// What the receiver thought that word meant *before* learning from this signal.
+    pub word_reading: Option<Concept>,
 }
 
 /// A hint that was checked by looking (latest tick, for logs and tools only).
@@ -175,11 +184,26 @@ impl PolicyOptions {
     }
 }
 
-/// Everything one agent privately knows: places and people.
+impl GestureTopic {
+    /// The concept a topic is about.
+    pub const fn concept(self) -> Concept {
+        match self {
+            Self::Place(LandmarkKind::Water) => Concept::Water,
+            Self::Place(LandmarkKind::Food) => Concept::Food,
+            Self::Place(LandmarkKind::Wood) => Concept::Wood,
+            Self::Place(LandmarkKind::Stone) => Concept::Stone,
+            Self::Place(LandmarkKind::Shelter) => Concept::Home,
+            Self::Explored => Concept::Been,
+        }
+    }
+}
+
+/// Everything one agent privately knows: places, people, and words.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Mind {
     pub(crate) map: MentalMap,
     pub(crate) social: SocialMemory,
+    pub(crate) lexicon: Lexicon,
 }
 
 impl Mind {
@@ -198,21 +222,34 @@ impl Mind {
     }
 }
 
-/// Minds for every agent, indexed by `AgentId`, grown on demand.
+/// Minds for every agent, indexed by `AgentId`, grown on demand. New minds
+/// belong to founders and inherit the seed's noisy proto-language.
 #[derive(Debug, Default)]
 pub(crate) struct Minds {
+    seed: u64,
     minds: Vec<Mind>,
 }
 
 impl Minds {
+    pub(crate) fn new(seed: u64) -> Self {
+        Self {
+            seed,
+            minds: Vec::new(),
+        }
+    }
+
     pub(crate) fn get(&self, agent: AgentId) -> Option<&Mind> {
         self.minds.get(agent.get() as usize)
     }
 
     pub(crate) fn get_mut(&mut self, agent: AgentId) -> &mut Mind {
         let index = agent.get() as usize;
-        if index >= self.minds.len() {
-            self.minds.resize(index + 1, Mind::default());
+        while self.minds.len() <= index {
+            let founder = AgentId::new(self.minds.len() as u32);
+            self.minds.push(Mind {
+                lexicon: Lexicon::founding(self.seed, founder),
+                ..Mind::default()
+            });
         }
         &mut self.minds[index]
     }

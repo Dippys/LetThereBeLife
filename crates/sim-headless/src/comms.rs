@@ -42,6 +42,11 @@ pub struct CommunicationSummary {
     pub refuted: u64,
     /// Receptions whose reading differed from the sender's private intent.
     pub misread: u64,
+    /// Receptions where a word was heard, split by the first and second half of
+    /// the log: `[early, late]`.
+    pub worded: [u64; 2],
+    /// ...of which the listener already read the word as the sender meant it.
+    pub word_agreed: [u64; 2],
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -146,7 +151,18 @@ impl CommunicationLog {
 
     pub fn summary(&self) -> CommunicationSummary {
         let mut summary = CommunicationSummary::default();
-        for exchange in &self.exchanges {
+        let half = self.exchanges.len() / 2;
+        for (index, exchange) in self.exchanges.iter().enumerate() {
+            let period = usize::from(index >= half);
+            for reception in &exchange.receptions {
+                if reception.interpretation.heard.is_some() {
+                    summary.worded[period] += 1;
+                    summary.word_agreed[period] += u64::from(
+                        reception.interpretation.word_reading
+                            == Some(exchange.signal.intent.topic.concept()),
+                    );
+                }
+            }
             summary.exchanges += 1;
             match exchange.signal.intent.topic {
                 GestureTopic::Place(kind) => summary.place_exchanges[kind as usize] += 1,
@@ -183,6 +199,15 @@ impl fmt::Display for CommunicationSummary {
             self.confirmed,
             self.refuted,
             self.misread
+        )?;
+        let percent = |part: u64, whole: u64| (part * 100).checked_div(whole).unwrap_or(0);
+        write!(
+            formatter,
+            "\n  words: heard {} / {} (early / late half); listener already read the word as meant {}% -> {}%",
+            self.worded[0],
+            self.worded[1],
+            percent(self.word_agreed[0], self.worded[0]),
+            percent(self.word_agreed[1], self.worded[1])
         )
     }
 }
@@ -202,13 +227,16 @@ impl fmt::Display for Exchange {
         let (dx, dy) = public.pointing.direction();
         write!(
             formatter,
-            "t={} agent {} at ({},{}) points dir ({dx},{dy}) emphasis {}, mimes {:?}, urgency {} [privately meant {} at ({},{})] -> watchers infer ({},{}) +/-{}",
+            "t={} agent {} at ({},{}) points dir ({dx},{dy}) emphasis {}, mimes {:?}, says \"{}\", urgency {} [privately meant {} at ({},{})] -> watchers infer ({},{}) +/-{}",
             event.at.ticks(),
             public.sender.get(),
             public.origin.x,
             public.origin.y,
             public.pointing.emphasis(),
             public.mime,
+            public
+                .vocal
+                .map_or_else(|| "-".to_owned(), |form| form.name()),
             public.tone.urgency,
             topic_name(event.intent.topic),
             event.intent.place.x,
@@ -227,6 +255,13 @@ impl fmt::Display for Exchange {
                 if read.changed { "" } else { " (already knew)" },
                 read.confidence
             )?;
+            if let Some(form) = read.heard {
+                let meaning = read.word_reading.map_or_else(
+                    || "nothing yet".to_owned(),
+                    |concept| format!("{concept:?}"),
+                );
+                write!(formatter, "; took \"{}\" to mean {meaning}", form.name())?;
+            }
             if let Some(at) = reception.acted_at {
                 write!(formatter, "; went looking at t={at}")?;
             }

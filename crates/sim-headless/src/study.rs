@@ -132,6 +132,9 @@ pub struct StudyReport {
     pub comms: crate::comms::CommunicationLog,
     /// Each agent's beliefs at the end of the run.
     pub minds: Vec<Option<sim_core::MentalMapView>>,
+    /// Percent of agents saying each place concept's most common word, averaged
+    /// over concepts: `[first sample, end]`.
+    pub vocabulary_agreement: [u64; 2],
 }
 
 const TRACE_LINES: usize = 60;
@@ -197,6 +200,7 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     }
     let mut trace = std::collections::VecDeque::new();
     let mut comms = crate::comms::CommunicationLog::default();
+    let mut early_vocabulary = 0;
     for tick in 1..=config.ticks {
         match engine.tick() {
             TickOutcome::Advanced { .. } => {
@@ -211,6 +215,9 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                 return Err(ScenarioError("simulation time exhausted".into()));
             }
         }
+        if tick == STUDY_SAMPLE_TICKS {
+            early_vocabulary = vocabulary_agreement(&engine, population);
+        }
         if tick % STUDY_SAMPLE_TICKS == 0 {
             sample(&engine, &mut tracks, &mut tiles);
         }
@@ -218,6 +225,7 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     let mut report = build_report(&engine, config, &spawns, &fresh_water, &tracks, &tiles);
     report.trace = trace.into_iter().collect();
     report.comms = comms;
+    report.vocabulary_agreement = [early_vocabulary, vocabulary_agreement(&engine, population)];
     Ok(report)
 }
 
@@ -492,6 +500,7 @@ fn build_report(
         per_agent,
         trace: Vec::new(),
         comms: crate::comms::CommunicationLog::default(),
+        vocabulary_agreement: [0, 0],
         minds: (0..tracks.len())
             .map(|index| engine.mental_map(AgentId::new(index as u32)))
             .collect(),
@@ -622,6 +631,52 @@ fn trait_effects(
             percent(tracks[i].idle_samples, tracks[i].alive_samples)
         }),
     ]
+}
+
+/// For each place concept, the share of living agents whose strongest word for
+/// it is the band's most common one; averaged over concepts.
+fn vocabulary_agreement(engine: &Engine, population: usize) -> u64 {
+    use sim_core::Concept;
+    let concepts = [
+        Concept::Water,
+        Concept::Food,
+        Concept::Wood,
+        Concept::Stone,
+        Concept::Home,
+        Concept::Been,
+    ];
+    let lexicons: Vec<_> = (0..population)
+        .filter_map(|index| engine.mental_map(AgentId::new(index as u32)))
+        .map(|map| map.lexicon)
+        .collect();
+    if lexicons.is_empty() {
+        return 0;
+    }
+    let mut total = 0;
+    for concept in concepts {
+        let words: Vec<_> = lexicons
+            .iter()
+            .filter_map(|lexicon| {
+                lexicon
+                    .iter()
+                    .filter(|entry| entry.concept == concept)
+                    .max_by_key(|entry| {
+                        (
+                            i32::from(entry.positive) - i32::from(entry.contradictory),
+                            entry.form,
+                        )
+                    })
+                    .map(|entry| entry.form)
+            })
+            .collect();
+        let mut counts = std::collections::BTreeMap::new();
+        for word in &words {
+            *counts.entry(*word).or_insert(0_u64) += 1;
+        }
+        let modal = counts.values().copied().max().unwrap_or(0);
+        total += percent(modal, lexicons.len() as u64);
+    }
+    total / concepts.len() as u64
 }
 
 fn percent(part: u64, whole: u64) -> u64 {
@@ -825,6 +880,11 @@ impl fmt::Display for StudyReport {
             self.hint_decisions
         )?;
         write!(formatter, "\n{}", self.comms.summary())?;
+        write!(
+            formatter,
+            "\n  vocabulary: band agreement on each place word {}% at start -> {}% at end",
+            self.vocabulary_agreement[0], self.vocabulary_agreement[1]
+        )?;
         for (name, metric, low, high) in &self.trait_effects {
             write!(
                 formatter,

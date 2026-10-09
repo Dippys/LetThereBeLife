@@ -3,10 +3,11 @@
 use std::{cmp::Reverse, fmt::Write};
 
 use sim_core::{
-    ACQUAINTANCE_SLOTS, AcquaintanceView, AgentActivity, BiomeType, ChunkPresence, DeathCause,
-    ExplorationHeading, FRIEND_FAMILIARITY, FeatureKind, GenerateAreaError, HealthStatus,
-    LandmarkKind, LandmarkSource, NeedKind, Personality, PhysicalGoal, PhysicalPolicyView,
-    PolicyReason, PrevailingWind, ResourceKind, SleepQuality, SurfaceType, World,
+    ACQUAINTANCE_SLOTS, AcquaintanceView, AgentActivity, BiomeType, ChunkPresence, Concept,
+    DeathCause, ExplorationHeading, FRIEND_FAMILIARITY, FeatureKind, GenerateAreaError,
+    HealthStatus, LandmarkKind, LandmarkSource, Mime, NeedKind, Personality, PhysicalGoal,
+    PhysicalPolicyView, PolicyReason, PrevailingWind, ResourceKind, SleepQuality, SurfaceType,
+    VocalForm, World,
 };
 
 use super::{
@@ -63,15 +64,26 @@ pub(super) fn write_hud_text(output: &mut String, world: &World, state: &RenderS
         state.snapshot.death_count,
     )
     .expect("writing to String cannot fail");
-    match state.gestures.last {
-        Some(last) => writeln!(
+    write!(output, "GESTURES {}", state.gestures.total).expect("writing to String cannot fail");
+    if let Some(last) = state.gestures.last {
+        write!(output, "  LAST #{} ", last.id).expect("writing to String cannot fail");
+        match last.word {
+            Some(word) => {
+                output.push('"');
+                write_form(output, word);
+                output.push('"');
+            }
+            None => output.push('-'),
+        }
+        write!(
             output,
-            "GESTURES {}  LAST #{} -> {} WATCHERS",
-            state.gestures.total, last.id, last.watchers
-        ),
-        None => writeln!(output, "GESTURES {}", state.gestures.total),
+            " {} -> {} WATCHERS",
+            mime_label(last.mime),
+            last.watchers
+        )
+        .expect("writing to String cannot fail");
     }
-    .expect("writing to String cannot fail");
+    output.push('\n');
     if let Some(selection) = state.selection {
         writeln!(
             output,
@@ -295,9 +307,62 @@ fn write_memory(output: &mut String, memory: &MemoryInspection) {
     .unwrap();
     write_personality(output, memory.personality);
     write_friends(output, memory.acquaintances());
+    write_words(output, memory);
 }
 
-/// Width cap for the personality and friend lines, so they never widen the card
+/// Place concepts whose words the card lists, in display order.
+const PLACE_CONCEPTS: [(Concept, &str); 5] = [
+    (Concept::Water, "WATER"),
+    (Concept::Food, "FOOD"),
+    (Concept::Wood, "WOOD"),
+    (Concept::Stone, "STONE"),
+    (Concept::Home, "HOME"),
+];
+
+/// `WORDS <CONCEPT> <FORM>  ...` for each place concept the agent has a word
+/// for, wrapping onto an indented continuation line rather than exceeding
+/// `AGENT_CARD_LINE_WIDTH`. Writes nothing when the agent has no place words.
+fn write_words(output: &mut String, memory: &MemoryInspection) {
+    const PREFIX: &str = "WORDS";
+    let mut line_start = None;
+    for (concept, label) in PLACE_CONCEPTS {
+        let Some(form) = memory.word_for(concept) else {
+            continue;
+        };
+        let entry_len = 2 + label.len() + 1 + FORM_NAME_LEN;
+        match line_start {
+            None => {
+                line_start = Some(output.len());
+                output.push_str(PREFIX);
+                output.push(' ');
+            }
+            Some(start) if output.len() + entry_len - start > AGENT_CARD_LINE_WIDTH => {
+                output.push('\n');
+                line_start = Some(output.len());
+                output.extend([' '; PREFIX.len() + 1]);
+            }
+            Some(_) => output.push_str("  "),
+        }
+        output.push_str(label);
+        output.push(' ');
+        write_form(output, form);
+    }
+    if line_start.is_some() {
+        output.push('\n');
+    }
+}
+
+/// Characters in every `VocalForm::name`.
+const FORM_NAME_LEN: usize = 4;
+
+/// A vocal form's readable name, uppercased for the bitmap font.
+fn write_form(output: &mut String, form: VocalForm) {
+    let name = form.name();
+    debug_assert_eq!(name.len(), FORM_NAME_LEN);
+    output.extend(name.chars().map(|letter| letter.to_ascii_uppercase()));
+}
+
+/// Width cap for the personality, friend, and word lines, so they never widen the card
 /// past its existing worst-case lines (`NEXT EXPOSURE AT TICK <u64::MAX>` is 42
 /// characters, `SLEEP OPEN GROUND  WAKE <u64::MAX>` is 44).
 pub(super) const AGENT_CARD_LINE_WIDTH: usize = 42;
@@ -385,6 +450,17 @@ fn write_need(output: &mut String, label: &str, need: sim_core::NeedLevelView) {
         need.value, need.threshold, need.rate_per_period
     )
     .unwrap();
+}
+
+const fn mime_label(mime: Mime) -> &'static str {
+    match mime {
+        Mime::Scoop => "SCOOP",
+        Mime::PickAndChew => "PICK-AND-CHEW",
+        Mime::Chop => "CHOP",
+        Mime::Strike => "STRIKE",
+        Mime::RestHead => "REST-HEAD",
+        Mime::Sweep => "SWEEP",
+    }
 }
 
 const fn generation_label(status: GenerationStatus) -> &'static str {

@@ -88,7 +88,19 @@ reading. Tone is public but not yet used by receivers (M4).
 **Done when:** a test proves no receiver code path can read the sender's intent, and agents behave
 no worse than today in the study.
 
-### M3 — Concepts and personal lexicons
+### M3 — Concepts and personal lexicons ✅ (2026-10-10)
+
+**Result:** `cognition/lexicon.rs` adds 12 concepts, 32 abstract vocal forms (rendered as
+syllables like "kani" for humans only), and a 192-byte personal lexicon per agent (16 entries of
+12 bytes: form, concept, evidence for and against, times heard, uses that worked or failed).
+Founders inherit a seed-specific convention with noise: about 1 in 10 concepts gets another form,
+and about 1 in 16 gets an extra synonym. Senders now say their word with the point and the mime.
+Watchers learn from hearing a word alongside a mime they understood (grounded, observable
+evidence only). In the seed 1 valley, band agreement on each place word rose from **88% to 97%**
+over 600k ticks with no global dictionary. Words don't drive interpretation yet (the mime does),
+so behavior is unchanged. In the viewer, the hover card lists an agent's words and the HUD shows
+what was said.
+
 
 - A small concept set that this world can ground: **WATER, FOOD, SHELTER/HOME, COME, GIVE, ME,
   YOU, YES, NO**. DANGER waits until the world has hazards (see "Not yet").

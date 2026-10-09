@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use sim_core::{GestureTopic, SignalEvent, WorldPosition};
+use sim_core::{GestureTopic, Mime, SignalEvent, VocalForm, WorldPosition};
 
 /// Recent gestures kept for drawing; older ones are dropped first.
 pub const RECENT_GESTURE_CAPACITY: usize = 32;
@@ -23,11 +23,14 @@ pub struct GestureSummary {
 pub struct LastGesture {
     pub id: u64,
     pub watchers: u16,
+    /// The spoken word, if the sender had one.
+    pub word: Option<VocalForm>,
+    pub mime: Mime,
 }
 
 /// What the viewer draws for one gesture: the public pointing line from the sender
-/// to where watchers concluded the place is, plus the sender's private topic
-/// (debug-only; agents never see it).
+/// to where watchers concluded the place is, the public word and mime, plus the
+/// sender's private topic (debug-only; agents never see it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GestureMark {
     pub id: u64,
@@ -35,6 +38,8 @@ pub struct GestureMark {
     pub inferred_position: WorldPosition,
     pub search_radius: u16,
     pub watchers: u16,
+    pub word: Option<VocalForm>,
+    pub mime: Mime,
     pub topic: GestureTopic,
 }
 
@@ -46,6 +51,8 @@ impl From<&SignalEvent> for GestureMark {
             inferred_position: event.inferred_position,
             search_radius: event.search_radius,
             watchers: event.watchers,
+            word: event.signal.vocal,
+            mime: event.signal.mime,
             topic: event.intent.topic,
         }
     }
@@ -77,6 +84,8 @@ impl GestureLog {
             self.summary.last = Some(LastGesture {
                 id: event.id,
                 watchers: event.watchers,
+                word: event.word,
+                mime: event.mime,
             });
         }
     }
@@ -126,6 +135,8 @@ mod tests {
             inferred_position: WorldPosition { x: 40, y: 0 },
             search_radius: 6,
             watchers: id as u16,
+            word: Some(VocalForm(id as u8)),
+            mime: Mime::Scoop,
             topic: GestureTopic::Place(LandmarkKind::Water),
         }
     }
@@ -145,7 +156,9 @@ mod tests {
                 total: events.len() as u64,
                 last: Some(LastGesture {
                     id: 40,
-                    watchers: 40
+                    watchers: 40,
+                    word: Some(VocalForm(40)),
+                    mime: Mime::Scoop,
                 }),
             }
         );

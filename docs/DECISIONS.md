@@ -172,3 +172,17 @@ the plan's M2 requires a test that no receiver path can read the sender's intent
 instead of `topic`, `intended_place`, and `gesture`. Readings are still unambiguous (one meaning
 per mime), so behavior is unchanged. Ambiguity arrives with lexicons (M3) and competing
 interpretations (M4); the scoop and pick-and-chew mimes are an obvious first source of confusion.
+
+## D-073: M3, personal lexicons and a noisy founding proto-language (2026-10-10)
+
+**Decision:** 12 engine-level concepts, 32 abstract vocal forms, and a fixed 16-entry lexicon per
+agent with evidence for and against plus production outcomes. Founders inherit a seed-specific
+convention: 10% of concepts get a variant form and 6% get a synonym. Senders say their best form
+for the concept, and watchers learn `form → concept` from the mime that came with it.
+**Why:** Spec 06: language belongs to individuals, there's no global dictionary, and learning is
+grounded in observable evidence. Variation is needed so that M4 can produce believable
+misunderstandings.
+**Consequences:** `Mind` grows to 544 B (fine for the valley, but it needs compaction long before
+10M agents). Interpretation still follows the mime, so behavior is unchanged. In the seed 1 valley
+the band's vocabulary converged from 88% to 97% agreement. Production successes and failures are
+recorded but not updated until M5.

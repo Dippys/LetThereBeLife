@@ -283,6 +283,8 @@ fn gestures_draw_a_neutral_dotted_line_search_square_and_topic_dot() {
         inferred_position: WorldPosition { x: 10, y: 0 },
         search_radius: 2,
         watchers: 2,
+        word: None,
+        mime: sim_core::Mime::PickAndChew,
         topic: sim_core::GestureTopic::Place(LandmarkKind::Food),
     };
     let mut instances = Vec::new();

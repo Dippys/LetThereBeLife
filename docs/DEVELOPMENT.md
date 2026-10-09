@@ -59,6 +59,9 @@ cargo run --release -p sim-headless -- --study [--near-water | --groups | --vall
   somewhere, as stories: who pointed where, what they privately meant, how each watcher read it,
   and what each did and found. `--explain AGENT` prints that agent's personality, beliefs,
   acquaintances, and latest exchanges, followed by its decision trace.
+- The `words:` line counts heard words in the first and second half of the run, and how often the
+  listener already read the word the way the sender meant it. The `vocabulary:` line is the
+  band's agreement on each place word at the start and at the end.
 - `--mind legacy` is the old reactive policy (what the viewer used before). `memory` adds the
   mental map. `sharing` adds gestures. `full` (the default) adds personalities and relationships.
 - The `social:` line shows the % of time agents spend near another agent, their acquaintances,
