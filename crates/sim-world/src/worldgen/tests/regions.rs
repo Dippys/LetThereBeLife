@@ -16,6 +16,7 @@ fn chunk_context_uses_a_safe_overflow_path_beyond_the_measured_fast_bound() {
         rivers: [EMPTY_SEGMENT; MAX_CHUNK_RIVERS],
         river_len: 0,
         overflow_rivers: Vec::new(),
+        pond: None,
     };
     for channel_id in 1..=MAX_CHUNK_RIVERS as u32 + 1 {
         context.push_river(RiverSegment {

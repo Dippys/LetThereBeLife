@@ -15,6 +15,7 @@ mod drainage;
 mod hydrology;
 mod noise;
 mod plates;
+mod ponds;
 mod regions;
 
 use crate::{
@@ -25,6 +26,7 @@ use drainage::FLOODPLAIN_RADIUS;
 use hydrology::{GRID, LAKE_MIN_DEPTH, NODE_STEP, RiverSegment, point_segment_distance_ratio};
 use noise::NOISE_HALF;
 use plates::{SEA_LEVEL, macro_sample};
+use ponds::{POND_DEPTH, Pond, PondCover, pond_for_chunk};
 use regions::region;
 
 pub(crate) use hydrology::REGION_SIZE;
@@ -93,6 +95,7 @@ pub(crate) struct ChunkContext {
     rivers: [RiverSegment; MAX_CHUNK_RIVERS],
     river_len: usize,
     overflow_rivers: Vec<RiverSegment>,
+    pond: Option<Pond>,
 }
 
 impl ChunkContext {
@@ -115,6 +118,7 @@ impl ChunkContext {
             rivers: [EMPTY_SEGMENT; MAX_CHUNK_RIVERS],
             river_len: 0,
             overflow_rivers: Vec::new(),
+            pond: None,
         };
         for offset_y in 0..3 {
             for offset_x in 0..3 {
@@ -133,6 +137,12 @@ impl ChunkContext {
                 context.push_river(*segment);
             }
         }
+        context.pond = pond_for_chunk(seed, origin_x, origin_y, |local_x, local_y| {
+            (
+                context.interpolate(&context.elevation, local_x, local_y),
+                context.interpolate(&context.moisture, local_x, local_y),
+            )
+        });
         context
     }
 
@@ -231,10 +241,27 @@ impl ChunkContext {
         if water_biome == Some(BiomeType::River) {
             elevation = river_grade.expect("river water has a longitudinal grade");
         }
+        let mut pond_shore = false;
+        if water_surface.is_none()
+            && let Some(cover) = self.pond.and_then(|pond| pond.cover(self.seed, x, y))
+        {
+            match cover {
+                PondCover::Deep | PondCover::Shallow => {
+                    water_surface = Some(if cover == PondCover::Deep {
+                        SurfaceType::DeepWater
+                    } else {
+                        SurfaceType::ShallowWater
+                    });
+                    water_biome = Some(BiomeType::Lake);
+                    elevation = (elevation - POND_DEPTH).max(0);
+                }
+                PondCover::Shore => pond_shore = true,
+            }
+        }
 
         let basin_edge = water_depth > 0 && water_depth < LAKE_MIN_DEPTH;
         let hydrologic_wetland = (basin_edge || floodplain) && slope <= WETLAND_SLOPE_MAX;
-        let riparian_bank = (basin_edge || riverbank) && slope <= RIPARIAN_SLOPE_MAX;
+        let riparian_bank = (basin_edge || riverbank || pond_shore) && slope <= RIPARIAN_SLOPE_MAX;
         let class = water_surface.map_or_else(
             || {
                 classify(
@@ -270,7 +297,7 @@ impl ChunkContext {
                     moisture,
                     temperature,
                     slope,
-                    near_water: basin_edge || riverbank,
+                    near_water: basin_edge || riverbank || pond_shore,
                     ecology: detail,
                 },
             ),

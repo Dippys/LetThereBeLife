@@ -127,6 +127,7 @@ fn graded_mountain_river_core_wins_in_any_segment_order() {
             rivers,
             river_len: ordered.len(),
             overflow_rivers: Vec::new(),
+            pond: None,
         };
 
         let (cell, feature) = context.generate(16, 16);
@@ -165,6 +166,7 @@ fn wetlands_require_low_slope_hydrologic_evidence() {
             rivers,
             river_len: 1,
             overflow_rivers: Vec::new(),
+            pond: None,
         }
     };
 

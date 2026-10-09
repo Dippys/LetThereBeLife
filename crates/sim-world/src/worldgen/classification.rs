@@ -27,6 +27,8 @@ const MOUNTAIN_SNOW_TEMPERATURE_MAX: i32 = 9_000;
 const DETAIL_SEED_A: u64 = 0x4445_5441_494c_4131;
 const DETAIL_SEED_B: u64 = 0x4445_5441_494c_4232;
 const FEATURE_SEED: u64 = 0x4654_5253;
+/// Below this temperature shores stay bare (too cold for oasis vegetation).
+const OASIS_TEMPERATURE_MIN: i32 = 9_000;
 
 pub(super) fn classify(
     elevation: i32,
@@ -144,6 +146,22 @@ pub(super) fn feature(
             }
         }
         (SurfaceType::Soil, biome) => {
+            // Shores in dry or open country are green oases: trees and berries
+            // cluster where water is, which is where agents need them.
+            if near_water
+                && matches!(
+                    biome,
+                    BiomeType::Grassland | BiomeType::Savanna | BiomeType::Desert
+                )
+                && temperature > OASIS_TEMPERATURE_MIN
+            {
+                if tree_roll < 300 {
+                    return Some(FeatureKind::Tree);
+                }
+                if berry_roll < 900 {
+                    return Some(FeatureKind::BerryBush);
+                }
+            }
             let tree_threshold = match biome {
                 BiomeType::Grassland if moisture > 28_000 => 9_000,
                 BiomeType::Savanna if moisture > 17_000 => 15_000,

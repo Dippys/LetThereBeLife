@@ -36,7 +36,7 @@ pub use validation::GenerateAreaError;
 
 use worldgen::REGION_SIZE;
 
-pub const WORLD_GENERATOR_VERSION: u32 = 1;
+pub const WORLD_GENERATOR_VERSION: u32 = 2;
 
 /// Default side length of the initially generated area.
 pub const DEFAULT_INITIAL_WORLD_SIZE: u32 = 1_024;

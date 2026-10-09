@@ -32,13 +32,25 @@ fn water_access(engine: &Engine, bounds: WorldRect) -> WorldPosition {
                     x: x + dx,
                     y: y + dy,
                 };
-                if engine.world().standability_at(access) == Ok(Standability::Standable) {
+                if engine.world().standability_at(access) == Ok(Standability::Standable)
+                    && nothing_to_gather_near(engine, access)
+                {
                     return access;
                 }
             }
         }
     }
     panic!("seeded world should expose resident drinkable-water access");
+}
+
+/// Keeps thirst tests independent of shore vegetation: an agent with trees or
+/// berries in view would go gathering before it gets thirsty.
+fn nothing_to_gather_near(engine: &Engine, position: WorldPosition) -> bool {
+    let radius = i64::from(sim_core::PHYSICAL_POLICY_RADIUS);
+    (position.y - radius..=position.y + radius).all(|y| {
+        (position.x - radius..=position.x + radius)
+            .all(|x| engine.world().feature_at(WorldPosition { x, y }).is_none())
+    })
 }
 
 fn river_engine() -> (Engine, WorldRect) {
