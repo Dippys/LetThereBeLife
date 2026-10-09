@@ -1,16 +1,15 @@
 use std::{error::Error, fmt};
 
 use sim_core::{
-    AgentId, AgentSpawnError, ChunkCoord, Engine, EngineCommand, GenerateAreaError,
-    PolicyActivationError, PopulationInit, PopulationInitError, World, WorldPosition, WorldRect,
+    AgentId, AgentSpawnError, Engine, EngineCommand, PolicyActivationError, PopulationInit,
+    PopulationInitError, World, WorldPosition, WorldRect,
 };
 
 pub const VIEWER_AGENT_LIMIT: usize = 4_096;
-pub const VIEWER_SIMULATION_SIDE: i64 = 2_048;
 
 #[derive(Debug)]
 pub enum ViewerSpawnError {
-    NotReady,
+    Unloaded,
     PresentationLimit,
     Population(PopulationInitError),
     Policy(PolicyActivationError),
@@ -20,7 +19,7 @@ pub enum ViewerSpawnError {
 impl fmt::Display for ViewerSpawnError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NotReady => formatter.write_str("agent spawning is waiting for world residency"),
+            Self::Unloaded => formatter.write_str("the cursor is not over loaded terrain"),
             Self::PresentationLimit => write!(
                 formatter,
                 "viewer agent limit of {VIEWER_AGENT_LIMIT} has been reached"
@@ -34,27 +33,11 @@ impl fmt::Display for ViewerSpawnError {
 
 impl Error for ViewerSpawnError {}
 
-pub fn simulation_bounds(world: &World) -> WorldRect {
-    let half = VIEWER_SIMULATION_SIDE / 2;
-    let fixed = WorldRect {
-        min: WorldPosition { x: -half, y: -half },
-        max: WorldPosition { x: half, y: half },
-    };
-    fixed
-        .intersection(world.initial_bounds())
-        .expect("validated initial worlds include the origin")
-}
-
-pub fn residency_ready(world: &World) -> Result<bool, GenerateAreaError> {
-    Ok(world
-        .missing_chunk_load_requests(simulation_bounds(world))?
-        .is_empty())
+pub fn residency_ready(world: &World) -> bool {
+    world.loaded_chunk_count() > 0
 }
 
 pub fn spawn_at(engine: &mut Engine, position: WorldPosition) -> Result<AgentId, ViewerSpawnError> {
-    if !residency_ready(engine.world()).map_err(|_| ViewerSpawnError::NotReady)? {
-        return Err(ViewerSpawnError::NotReady);
-    }
     if engine.snapshot().agent_count as usize >= VIEWER_AGENT_LIMIT {
         return Err(ViewerSpawnError::PresentationLimit);
     }
@@ -85,31 +68,9 @@ fn initial_active_area(
     world: &World,
     position: WorldPosition,
 ) -> Result<WorldRect, ViewerSpawnError> {
-    if world.standability_at(position).is_err() {
-        return Err(ViewerSpawnError::NotReady);
-    }
-    let ready = simulation_bounds(world);
-    let active_area = if ready.contains(position) {
-        ready
-    } else {
-        let chunk = ChunkCoord::from_world_position(position)
-            .bounds()
-            .map_err(|_| ViewerSpawnError::NotReady)?;
-        WorldRect {
-            min: WorldPosition {
-                x: ready.min.x.min(chunk.min.x),
-                y: ready.min.y.min(chunk.min.y),
-            },
-            max: WorldPosition {
-                x: ready.max.x.max(chunk.max.x),
-                y: ready.max.y.max(chunk.max.y),
-            },
-        }
-    };
     world
-        .area_is_generated(active_area)
-        .then_some(active_area)
-        .ok_or(ViewerSpawnError::NotReady)
+        .loaded_bounds_at(position)
+        .ok_or(ViewerSpawnError::Unloaded)
 }
 
 pub fn reset(engine: &mut Engine) {
@@ -120,6 +81,19 @@ pub fn reset(engine: &mut Engine) {
 mod tests {
     use super::*;
     use sim_core::{EngineConfig, WorldConfig};
+
+    const TEST_SIMULATION_SIDE: i64 = 2_048;
+
+    fn simulation_bounds(world: &World) -> WorldRect {
+        let half = TEST_SIMULATION_SIDE / 2;
+        let fixed = WorldRect {
+            min: WorldPosition { x: -half, y: -half },
+            max: WorldPosition { x: half, y: half },
+        };
+        fixed
+            .intersection(world.initial_bounds())
+            .expect("validated initial worlds include the origin")
+    }
 
     fn engine() -> Engine {
         Engine::new(EngineConfig {
@@ -160,9 +134,9 @@ mod tests {
     #[test]
     fn residency_becomes_ready_without_automatic_agents() {
         let mut engine = engine();
-        assert!(!residency_ready(engine.world()).unwrap());
+        assert!(!residency_ready(engine.world()));
         engine = resident_engine(false);
-        assert!(residency_ready(engine.world()).unwrap());
+        assert!(residency_ready(engine.world()));
         assert_eq!(engine.snapshot().agent_count, 0);
         assert_eq!(engine.snapshot().tick, 0);
     }
@@ -226,47 +200,55 @@ mod tests {
     }
 
     #[test]
-    fn first_spawn_uses_ready_area_before_outer_bootstrap_finishes() {
+    fn first_spawn_depends_only_on_cursor_residency() {
         let mut engine = Engine::new(EngineConfig {
             seed: 7,
             ticks_per_second: 60,
-            world: WorldConfig::new(VIEWER_SIMULATION_SIDE as u32 + 64, 64).unwrap(),
+            world: WorldConfig::new(TEST_SIMULATION_SIDE as u32 + 64, 64).unwrap(),
         });
-        let ready = simulation_bounds(engine.world());
-        let loads = engine
+        let cursor_area = WorldRect {
+            min: WorldPosition { x: 0, y: 0 },
+            max: WorldPosition { x: 1, y: 1 },
+        };
+        let requests = engine
             .world()
-            .missing_chunk_load_requests(ready)
-            .unwrap()
-            .into_iter()
-            .map(|request| World::generate_chunk_load(7, request))
-            .collect();
-        engine.apply_world_chunk_loads(loads).unwrap();
+            .missing_chunk_load_requests(cursor_area)
+            .unwrap();
+        assert_eq!(requests.len(), 1);
+        engine
+            .apply_world_chunk_loads(vec![World::generate_chunk_load(7, requests[0])])
+            .unwrap();
 
-        assert!(residency_ready(engine.world()).unwrap());
         assert!(
             !engine
                 .world()
-                .area_is_generated(engine.world().initial_bounds())
+                .area_is_generated(simulation_bounds(engine.world()))
         );
-        let position = (ready.min.y..ready.max.y)
-            .flat_map(|y| (ready.min.x + 8..ready.max.x - 8).map(move |x| WorldPosition { x, y }))
+        let loaded = engine
+            .world()
+            .loaded_bounds_at(WorldPosition { x: 0, y: 0 })
+            .unwrap();
+        let position = (loaded.min.y..loaded.max.y)
+            .flat_map(|y| (loaded.min.x..loaded.max.x).map(move |x| WorldPosition { x, y }))
             .find(|position| {
-                let local_x = position.x.rem_euclid(sim_core::CHUNK_SIZE);
-                (local_x <= 7 || local_x >= sim_core::CHUNK_SIZE - 8)
-                    && engine.world().standability_at(*position)
-                        == Ok(sim_core::Standability::Standable)
+                engine.world().standability_at(*position) == Ok(sim_core::Standability::Standable)
             })
-            .expect("seeded ready area exposes a standable chunk-edge position");
-        let spawn_chunk = ChunkCoord::from_world_position(position).bounds().unwrap();
+            .expect("seeded loaded terrain exposes a standable position");
 
         let agent = spawn_at(&mut engine, position).unwrap();
         let perception = engine.perceive_physical(agent, 8).unwrap();
 
         assert_eq!(agent, AgentId::new(0));
-        assert!(ready.contains_rect(perception.area));
-        assert!(
-            !spawn_chunk.contains_rect(perception.area),
-            "first-spawn perception must cross storage chunks inside the ready simulation area"
-        );
+        assert!(loaded.contains_rect(perception.area));
+    }
+
+    #[test]
+    fn first_spawn_rejects_only_an_unloaded_cursor() {
+        let mut engine = engine();
+
+        assert!(matches!(
+            spawn_at(&mut engine, WorldPosition { x: 0, y: 0 }),
+            Err(ViewerSpawnError::Unloaded)
+        ));
     }
 }

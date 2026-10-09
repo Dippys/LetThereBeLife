@@ -9,8 +9,11 @@ use std::{
 
 use crate::worldgen::{ChunkContext, REGION_SIZE, climate_at};
 
+mod archive;
 mod queries;
 mod visits;
+
+pub const WORLD_GENERATOR_VERSION: u32 = 1;
 
 /// Default side length of the initially generated area.
 pub const DEFAULT_INITIAL_WORLD_SIZE: u32 = 1_024;
@@ -270,6 +273,11 @@ impl TerrainClass {
 
     pub const fn packed(self) -> u8 {
         self.0
+    }
+
+    pub(crate) fn from_packed(packed: u8) -> Option<Self> {
+        let class = Self(packed);
+        (matches!(packed & 0x0f, 0..=6) && matches!(packed >> 4, 0..=10)).then_some(class)
     }
 }
 
@@ -1440,3 +1448,7 @@ impl Error for GenerateAreaError {}
 
 #[cfg(test)]
 mod tests;
+pub use archive::{
+    ArchiveBakeProgress, ArchiveBakeStats, ChunkOverview, WorldArchive, WorldArchiveError,
+    WorldOverview,
+};

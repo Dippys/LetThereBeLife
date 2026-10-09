@@ -8,7 +8,8 @@ use sim_core::{
     HealthStatus, HealthView, InventoryView, NeedKind, PhysicalGoal, PhysicalNeedsView,
     PhysicalPolicyView, PolicyReason, PrevailingWind, ResourceKind, SimulationSnapshot,
     SleepQuality, SleepView, SpawnKind, SpawnedObjectView, StructureState, StructureView,
-    SurfaceType, TerrainCell, WORLD_GENERATION_BOUNDS, World, WorldPosition, WorldRect,
+    SurfaceType, TerrainCell, WORLD_GENERATION_BOUNDS, World, WorldOverview, WorldPosition,
+    WorldRect,
 };
 use wgpu::util::DeviceExt;
 use winit::window::Window;
@@ -63,7 +64,6 @@ pub enum PopulationStatus {
     Waiting,
     Ready,
     Active,
-    Failed,
 }
 
 pub struct Renderer {
@@ -92,14 +92,23 @@ pub struct Renderer {
     cached_bounds: Option<WorldRect>,
     cached_step: u32,
     summaries: WorldSummaryCache,
+    overview: Option<WorldOverview>,
 }
 
 impl Renderer {
-    pub fn new(window: Arc<Window>, world: &World) -> Result<Self, String> {
-        pollster::block_on(Self::new_async(window, world))
+    pub fn new(
+        window: Arc<Window>,
+        world: &World,
+        overview: Option<WorldOverview>,
+    ) -> Result<Self, String> {
+        pollster::block_on(Self::new_async(window, world, overview))
     }
 
-    async fn new_async(window: Arc<Window>, world: &World) -> Result<Self, String> {
+    async fn new_async(
+        window: Arc<Window>,
+        world: &World,
+        overview: Option<WorldOverview>,
+    ) -> Result<Self, String> {
         let size = window.inner_size();
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
         let surface = instance
@@ -228,6 +237,7 @@ impl Renderer {
             cached_bounds: None,
             cached_step: 1,
             summaries: WorldSummaryCache::default(),
+            overview,
             device,
             queue,
             config,
@@ -281,6 +291,7 @@ impl Renderer {
         let build_started = Instant::now();
         let (terrain, features) = self.summaries.sync(
             world,
+            self.overview.as_ref(),
             cached,
             step,
             revision_changed.then_some(changed_bounds).flatten(),
@@ -749,7 +760,7 @@ fn build_world_instances(
     step: u32,
 ) -> (Vec<Instance>, Vec<Instance>) {
     let mut summaries = WorldSummaryCache::default();
-    summaries.sync(world, bounds, step, None)
+    summaries.sync(world, None, bounds, step, None)
 }
 
 fn build_exact_world_instances(world: &World, bounds: WorldRect) -> (Vec<Instance>, Vec<Instance>) {
@@ -786,6 +797,7 @@ impl WorldSummaryCache {
     fn sync(
         &mut self,
         world: &World,
+        overview: Option<&WorldOverview>,
         bounds: WorldRect,
         step: u32,
         changed_bounds: Option<WorldRect>,
@@ -840,6 +852,41 @@ impl WorldSummaryCache {
         for summary in self.chunks.values() {
             terrain.extend_from_slice(&summary.terrain);
             features.extend_from_slice(&summary.features);
+        }
+        if let Some(overview) = overview {
+            let overview_chunks = overview.chunk_count_in(bounds);
+            terrain.reserve(overview_chunks.saturating_mul(2));
+            features.reserve(overview_chunks);
+            overview.visit_chunks_in(bounds, |coord, chunk| {
+                if self.chunks.contains_key(&coord) {
+                    return;
+                }
+                let block = coord
+                    .bounds()
+                    .expect("archive overview coordinates are world-valid");
+                terrain.push(rect_instance(block, terrain_color(chunk.base())));
+                if let (Some(detail), Some(detail_bounds)) =
+                    (chunk.detail(), chunk.detail_bounds(coord))
+                {
+                    terrain.push(rect_instance(
+                        visible_detail_bounds(detail_bounds, block),
+                        terrain_color(detail),
+                    ));
+                }
+                if let Some((kind, count)) = chunk.feature() {
+                    let density = f32::from(count) / (CHUNK_SIZE * CHUNK_SIZE) as f32;
+                    let fraction = (0.2 + density.sqrt() * 1.6).clamp(0.25, 0.8);
+                    let size = CHUNK_SIZE as f32 * fraction;
+                    let inset = (CHUNK_SIZE as f32 - size) * 0.5;
+                    features.push(Instance::new(
+                        block.min.x as f32 + inset,
+                        block.min.y as f32 + inset,
+                        size,
+                        size,
+                        summary_feature_color(kind),
+                    ));
+                }
+            });
         }
         (terrain, features)
     }
@@ -1559,7 +1606,6 @@ const fn population_label(status: PopulationStatus) -> &'static str {
         PopulationStatus::Waiting => "WAITING FOR WORLD",
         PopulationStatus::Ready => "READY - PRESS T",
         PopulationStatus::Active => "ACTIVE",
-        PopulationStatus::Failed => "STARTUP FAILED",
     }
 }
 
@@ -2260,23 +2306,23 @@ mod tests {
         world.generate_area(distant).unwrap();
         let mut cache = WorldSummaryCache::default();
         let initial = world.initial_bounds();
-        let _ = cache.sync(&world, initial, 16, None);
+        let _ = cache.sync(&world, None, initial, 16, None);
         assert_eq!(cache.step, 16);
         assert_eq!(cache.chunks.len(), 4);
         assert!(cache.logical_bytes() > 0);
 
-        let _ = cache.sync(&world, distant, 16, None);
+        let _ = cache.sync(&world, None, distant, 16, None);
         assert_eq!(cache.chunks.len(), 1);
         assert!(cache.chunks.contains_key(&ChunkCoord { x: 8, y: 0 }));
 
-        let _ = cache.sync(&world, distant, 32, None);
+        let _ = cache.sync(&world, None, distant, 32, None);
         assert_eq!(cache.step, 32);
         assert_eq!(cache.chunks.len(), 1);
 
         let mut repeated = WorldSummaryCache::default();
         assert_eq!(
-            cache.sync(&world, distant, 32, Some(distant)),
-            repeated.sync(&world, distant, 32, None),
+            cache.sync(&world, None, distant, 32, Some(distant)),
+            repeated.sync(&world, None, distant, 32, None),
             "parallel summary construction and change-bound invalidation must be deterministic"
         );
     }
@@ -2293,7 +2339,7 @@ mod tests {
         for step in [2, 4, 8, 16, 32, 64] {
             let mut cache = WorldSummaryCache::default();
             let started = Instant::now();
-            let (terrain, features) = cache.sync(&world, bounds, step, None);
+            let (terrain, features) = cache.sync(&world, None, bounds, step, None);
             let elapsed = started.elapsed();
             println!(
                 "summary-bench side={side} step={step} chunks={} cache_bytes={} terrain_instances={} feature_instances={} gpu_instance_bytes={} build_ms={:.3}",

@@ -7,3 +7,11 @@ ticks_per_second = 60
 # headless explicitly materializes it before ticks. It is not the world maximum.
 initial_width = 4096
 initial_height = 4096
+
+[world_cache]
+# Load the complete finite-world archive and immediate whole-world overview.
+# If it is absent, stale, corrupt, or does not match the seed, deterministic
+# generation remains available. Create/refresh the multi-gigabyte archive with:
+# cargo run --release -p sim-viewer -- --pregenerate-world
+enabled = true
+path = "target/world-cache/seed-1-full-world.ltbl-archive"

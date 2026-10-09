@@ -10,8 +10,8 @@ use std::{
 
 use rayon::{Scope, ThreadPool, ThreadPoolBuilder};
 use sim_core::{
-    ChunkCoord, ChunkLoadRequest, GenerateAreaError, World, WorldChunkLoad, WorldPosition,
-    WorldRect,
+    ChunkCoord, ChunkLoadRequest, GenerateAreaError, World, WorldArchive, WorldChunkLoad,
+    WorldPosition, WorldRect,
 };
 
 pub const PAGE_CHUNKS: i64 = 32;
@@ -29,12 +29,14 @@ pub struct GenerationJob {
     pub id: GenerationId,
     pub seed: u64,
     pub requests: Vec<ChunkLoadRequest>,
+    pub archive: Option<WorldArchive>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GenerationOutcome {
     Completed,
     Cancelled,
+    Failed,
     WorkerStopped,
 }
 
@@ -56,7 +58,13 @@ pub struct GenerationPoll {
 
 struct TaskCompletion {
     index: usize,
-    load: Option<WorldChunkLoad>,
+    load: Result<Option<WorldChunkLoad>, String>,
+}
+
+#[derive(Clone)]
+enum ChunkSource {
+    Procedural(u64),
+    Archive(WorldArchive),
 }
 
 const COMPLETED_CHANNEL_CAPACITY: usize = 64;
@@ -199,13 +207,28 @@ fn spawn_generation_task<'scope>(
     completed: SyncSender<TaskCompletion>,
     cancelled_job: Arc<AtomicU64>,
     id: GenerationId,
-    seed: u64,
     index: usize,
     request: ChunkLoadRequest,
+    source: ChunkSource,
 ) {
     scope.spawn(move |_| {
-        let load = (cancelled_job.load(Ordering::Acquire) != id)
-            .then(|| World::generate_chunk_load(seed, request));
+        let load = if cancelled_job.load(Ordering::Acquire) == id {
+            Ok(None)
+        } else {
+            match source {
+                ChunkSource::Procedural(seed) => {
+                    Ok(Some(World::generate_chunk_load(seed, request)))
+                }
+                ChunkSource::Archive(archive) => {
+                    archive.load_chunk(request).map(Some).map_err(|error| {
+                        format!(
+                            "could not read archived chunk {:?}: {error}",
+                            request.coord()
+                        )
+                    })
+                }
+            }
+        };
         let _ = completed.send(TaskCompletion { index, load });
     });
 }
@@ -218,15 +241,20 @@ fn run_generation_job(
 ) -> bool {
     let id = job.id;
     let seed = job.seed;
+    let archive = job.archive.clone();
+    let source = archive
+        .clone()
+        .map_or(ChunkSource::Procedural(seed), ChunkSource::Archive);
     let request_count = job.requests.len();
     let task_window = (pool.current_num_threads() * TASKS_PER_WORKER)
         .min(COMPLETED_CHANNEL_CAPACITY)
         .min(request_count)
         .max(1);
     let (task_tx, task_rx) = mpsc::sync_channel::<TaskCompletion>(task_window);
-    let (output_connected, cancelled, next_output) = pool.in_place_scope(move |scope| {
+    let (output_connected, cancelled, failed, next_output) = pool.in_place_scope(move |scope| {
         let mut output_connected = true;
         let mut cancelled = cancelled_job.load(Ordering::Acquire) == id;
+        let mut failed = false;
         let mut next_request = 0;
         let mut next_output = 0;
         let mut active = 0;
@@ -235,7 +263,7 @@ fn run_generation_job(
         let mut ready: Vec<Option<WorldChunkLoad>> = std::iter::repeat_with(|| None)
             .take(request_count)
             .collect();
-        if !cancelled {
+        if !cancelled && archive.is_none() {
             prepare_request_window(seed, &job.requests, &mut prepared_until, task_window);
             cancelled = cancelled_job.load(Ordering::Acquire) == id;
         }
@@ -245,9 +273,9 @@ fn run_generation_job(
                 task_tx.clone(),
                 Arc::clone(cancelled_job),
                 id,
-                seed,
                 next_request,
                 job.requests[next_request],
+                source.clone(),
             );
             next_request += 1;
             active += 1;
@@ -265,11 +293,19 @@ fn run_generation_job(
                     load.take();
                 });
                 buffered = 0;
-            } else if let Some(load) = task.load {
-                ready[task.index] = Some(load);
-                buffered += 1;
             } else {
-                cancelled = true;
+                match task.load {
+                    Ok(Some(load)) => {
+                        ready[task.index] = Some(load);
+                        buffered += 1;
+                    }
+                    Ok(None) => cancelled = true,
+                    Err(error) => {
+                        eprintln!("{error}");
+                        failed = true;
+                        cancelled = true;
+                    }
+                }
             }
 
             while output_connected && !cancelled && next_output < request_count {
@@ -293,7 +329,7 @@ fn run_generation_job(
 
             if output_connected && !cancelled {
                 while active + buffered < task_window && next_request < request_count {
-                    if next_request == prepared_until {
+                    if archive.is_none() && next_request == prepared_until {
                         prepare_request_window(
                             seed,
                             &job.requests,
@@ -310,22 +346,24 @@ fn run_generation_job(
                         task_tx.clone(),
                         Arc::clone(cancelled_job),
                         id,
-                        seed,
                         next_request,
                         job.requests[next_request],
+                        source.clone(),
                     );
                     next_request += 1;
                     active += 1;
                 }
             }
         }
-        (output_connected, cancelled, next_output)
+        (output_connected, cancelled, failed, next_output)
     });
 
     if !output_connected {
         return false;
     }
-    let outcome = if cancelled || next_output < request_count {
+    let outcome = if failed {
+        GenerationOutcome::Failed
+    } else if cancelled || next_output < request_count {
         GenerationOutcome::Cancelled
     } else {
         GenerationOutcome::Completed
@@ -590,6 +628,7 @@ mod tests {
             id,
             seed: 1,
             requests: vec![request],
+            archive: None,
         }
     }
 
@@ -666,6 +705,7 @@ mod tests {
                     id,
                     seed,
                     requests: requests.clone(),
+                    archive: None,
                 })
                 .unwrap();
 
@@ -689,6 +729,7 @@ mod tests {
                 id: 39,
                 seed,
                 requests,
+                archive: None,
             })
             .unwrap();
 
@@ -712,6 +753,7 @@ mod tests {
                 id: 42,
                 seed,
                 requests,
+                archive: None,
             })
             .unwrap();
 
@@ -755,6 +797,7 @@ mod tests {
                 id: SEED,
                 seed: SEED,
                 requests,
+                archive: None,
             })
             .unwrap();
         let (loads, outcome) = wait_for_job(&generator, SEED, request_count);

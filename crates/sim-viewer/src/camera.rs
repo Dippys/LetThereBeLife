@@ -36,6 +36,13 @@ impl Camera {
         }
     }
 
+    pub fn show_full_world(&mut self, viewport: Viewport) {
+        self.center_x = 0.0;
+        self.center_y = 0.0;
+        self.zoom = minimum_zoom(viewport);
+        self.constrain_to_viewport(viewport);
+    }
+
     pub fn scale(
         self,
         screen_width: u32,
@@ -279,6 +286,26 @@ mod tests {
         assert_eq!(camera.zoom, minimum_zoom(test_viewport()));
         let visible = camera.view(960, 540, 1_024, 1_024).world_bounds();
         assert!(visible.contains_rect(WORLD_GENERATION_BOUNDS));
+    }
+
+    #[test]
+    fn show_full_world_recenters_and_fits_after_navigation() {
+        let viewport = test_viewport();
+        let mut camera = Camera::at_origin();
+        camera.pan_by_screen_delta(400.0, -200.0, viewport);
+        camera.zoom_at(6.0, (120.0, 100.0), viewport);
+
+        camera.show_full_world(viewport);
+
+        assert_eq!(camera.center_x, 0.0);
+        assert_eq!(camera.center_y, 0.0);
+        assert_eq!(camera.zoom, minimum_zoom(viewport));
+        assert!(
+            camera
+                .view(960, 540, 1_024, 1_024)
+                .world_bounds()
+                .contains_rect(WORLD_GENERATION_BOUNDS)
+        );
     }
 
     #[test]

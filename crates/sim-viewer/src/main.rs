@@ -5,6 +5,7 @@ mod spawn_menu;
 mod startup;
 
 use std::{
+    fs,
     sync::{Arc, mpsc},
     thread,
     time::{Duration, Instant},
@@ -17,7 +18,7 @@ use generation::{
 use sim_config::{AppConfig, DEFAULT_CONFIG_PATH};
 use sim_core::{
     ChunkInspection, ChunkLoadRequest, Engine, EngineCommand, GenerateAreaError,
-    WORLD_GENERATION_BOUNDS, World, WorldChunkLoad, WorldPosition, WorldRect,
+    WORLD_GENERATION_BOUNDS, World, WorldArchive, WorldChunkLoad, WorldPosition, WorldRect,
 };
 use spawn_menu::{SpawnMenu, SpawnMenuMode};
 use startup::{reset, residency_ready, spawn_at};
@@ -32,10 +33,39 @@ use winit::{
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let options = launch_options()?;
-    let engine = Engine::new(AppConfig::load(options.config_path)?.engine_config()?);
+    let config = AppConfig::load(&options.config_path)?;
+    let engine_config = config.engine_config()?;
+    if options.pregenerate_world {
+        let mut last_reported = 0;
+        let stats =
+            WorldArchive::bake_full(engine_config.seed, &config.world_cache.path, |progress| {
+                if progress.completed_chunks == progress.total_chunks
+                    || progress.completed_chunks.saturating_sub(last_reported) >= 16_384
+                {
+                    println!(
+                        "baked {}/{} chunks ({:.1} GiB)",
+                        progress.completed_chunks,
+                        progress.total_chunks,
+                        progress.bytes_written as f64 / 1024_f64.powi(3)
+                    );
+                    last_reported = progress.completed_chunks;
+                }
+            })?;
+        println!(
+            "pre-generated complete seed {} world to {}: {} chunks, {:.2} GiB in {:.2?}",
+            engine_config.seed,
+            config.world_cache.path,
+            stats.chunks,
+            stats.bytes as f64 / 1024_f64.powi(3),
+            stats.elapsed
+        );
+        return Ok(());
+    }
+    let archive = load_world_archive(engine_config.seed, &config);
+    let engine = Engine::new(engine_config);
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut app = ViewerApp::new(engine, options.smoke_frames);
+    let mut app = ViewerApp::new(engine, archive, options.smoke_frames);
     event_loop.run_app(&mut app)?;
     Ok(())
 }
@@ -43,6 +73,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 struct LaunchOptions {
     config_path: String,
     smoke_frames: Option<u32>,
+    pregenerate_world: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -61,6 +92,7 @@ struct ActiveGeneration {
 fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Error>> {
     let mut config_path = DEFAULT_CONFIG_PATH.to_owned();
     let mut smoke_frames = None;
+    let mut pregenerate_world = false;
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
         match argument.as_str() {
@@ -75,8 +107,11 @@ fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Error>> {
                 }
                 smoke_frames = Some(frames);
             }
+            "--pregenerate-world" => pregenerate_world = true,
             "--help" | "-h" => {
-                println!("Usage: sim-viewer [--config PATH] [--smoke-frames NUMBER]");
+                println!(
+                    "Usage: sim-viewer [--config PATH] [--smoke-frames NUMBER] [--pregenerate-world]"
+                );
                 std::process::exit(0);
             }
             _ => return Err(format!("unknown argument: {argument}").into()),
@@ -85,13 +120,43 @@ fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Error>> {
     Ok(LaunchOptions {
         config_path,
         smoke_frames,
+        pregenerate_world,
     })
+}
+
+fn load_world_archive(seed: u64, app: &AppConfig) -> Option<WorldArchive> {
+    if !app.world_cache.enabled {
+        return None;
+    }
+    let started = Instant::now();
+    match WorldArchive::open(&app.world_cache.path, seed) {
+        Ok(archive) => {
+            let bytes = fs::metadata(&app.world_cache.path)
+                .map(|metadata| metadata.len())
+                .unwrap_or(0);
+            println!(
+                "loaded full-world archive index {} ({:.2} GiB) in {:.2?}",
+                app.world_cache.path,
+                bytes as f64 / 1024_f64.powi(3),
+                started.elapsed()
+            );
+            Some(archive)
+        }
+        Err(error) => {
+            eprintln!(
+                "full-world archive {} was not loaded ({error}); deterministic generation remains available",
+                app.world_cache.path
+            );
+            None
+        }
+    }
 }
 
 struct ViewerApp {
     window: Option<Arc<Window>>,
     renderer: Option<renderer::Renderer>,
     engine: Engine,
+    archive: Option<WorldArchive>,
     last_frame: Option<Instant>,
     accumulator: f64,
     camera: Camera,
@@ -125,19 +190,25 @@ enum PopulationStatus {
     WaitingForResidency,
     Ready,
     Active,
-    Failed,
 }
 
 impl ViewerApp {
-    fn new(engine: Engine, smoke_frames: Option<u32>) -> Self {
+    fn new(engine: Engine, archive: Option<WorldArchive>, smoke_frames: Option<u32>) -> Self {
         let camera = Camera::at_origin();
         let bootstrap_focus = WorldPosition { x: 0, y: 0 };
-        let bootstrap_pager = ChunkPager::new(engine.world().initial_bounds(), bootstrap_focus)
-            .expect("validated configured bootstrap bounds create pages");
+        let bootstrap_pager = (!engine
+            .world()
+            .area_is_generated(engine.world().initial_bounds()))
+        .then(|| {
+            ChunkPager::new(engine.world().initial_bounds(), bootstrap_focus)
+                .expect("validated configured bootstrap bounds create pages")
+        });
+        let ready = residency_ready(engine.world());
         Self {
             window: None,
             renderer: None,
             engine,
+            archive,
             last_frame: None,
             accumulator: 0.0,
             camera,
@@ -153,7 +224,7 @@ impl ViewerApp {
             active_generation: None,
             pending_manual: None,
             pending_bootstrap: None,
-            bootstrap_pager: Some(bootstrap_pager),
+            bootstrap_pager,
             next_generation_id: 1,
             pending_world_changes: None,
             next_world_sync: Instant::now(),
@@ -161,8 +232,12 @@ impl ViewerApp {
             dirty: true,
             smoke_frames,
             smoke_deadline: smoke_frames.map(|_| Instant::now() + SMOKE_TIMEOUT),
-            population_status: PopulationStatus::WaitingForResidency,
-            spawn_message: None,
+            population_status: if ready {
+                PopulationStatus::Ready
+            } else {
+                PopulationStatus::WaitingForResidency
+            },
+            spawn_message: ready.then(|| "READY - PRESS T ON LOADED TERRAIN".to_owned()),
             spawn_menu: SpawnMenu::default(),
         }
     }
@@ -177,10 +252,19 @@ impl ViewerApp {
             .with_visible(self.smoke_frames.is_none());
         let window = Arc::new(event_loop.create_window(attributes).expect("create window"));
         self.renderer = Some(
-            renderer::Renderer::new(window.clone(), self.engine.world())
-                .expect("initialize GPU renderer"),
+            renderer::Renderer::new(
+                window.clone(),
+                self.engine.world(),
+                self.archive.as_ref().map(WorldArchive::overview),
+            )
+            .expect("initialize GPU renderer"),
         );
         self.window = Some(window);
+        if self.archive.is_some() {
+            let size = self.window.as_ref().expect("window exists").inner_size();
+            self.camera
+                .show_full_world(self.viewport(size.width, size.height));
+        }
         self.last_frame = Some(Instant::now());
     }
 
@@ -258,7 +342,6 @@ impl ViewerApp {
                     PopulationStatus::WaitingForResidency => renderer::PopulationStatus::Waiting,
                     PopulationStatus::Ready => renderer::PopulationStatus::Ready,
                     PopulationStatus::Active => renderer::PopulationStatus::Active,
-                    PopulationStatus::Failed => renderer::PopulationStatus::Failed,
                 },
                 hovered_agent,
                 spawn_message: self.spawn_message.clone(),
@@ -297,10 +380,7 @@ impl ViewerApp {
         let Some(frames) = self.smoke_frames else {
             return false;
         };
-        if matches!(
-            self.population_status,
-            PopulationStatus::WaitingForResidency | PopulationStatus::Failed
-        ) {
+        if self.population_status == PopulationStatus::WaitingForResidency {
             return false;
         }
         assert!(
@@ -419,9 +499,19 @@ impl ViewerApp {
             self.active_generation
                 .take()
                 .expect("worker outcomes always belong to an active job");
-            if matches!(outcome, GenerationOutcome::WorkerStopped) {
-                eprintln!("world generation worker stopped unexpectedly");
-                self.update_hover();
+            match outcome {
+                GenerationOutcome::Failed => {
+                    eprintln!(
+                        "archive detail loading failed; disabling archive reads and falling back to deterministic generation"
+                    );
+                    self.archive = None;
+                    self.update_hover();
+                }
+                GenerationOutcome::WorkerStopped => {
+                    eprintln!("world generation worker stopped unexpectedly");
+                    self.update_hover();
+                }
+                GenerationOutcome::Completed | GenerationOutcome::Cancelled => {}
             }
             if self.pending_world_changes.is_some() {
                 self.next_world_sync = Instant::now();
@@ -450,18 +540,10 @@ impl ViewerApp {
         if self.population_status != PopulationStatus::WaitingForResidency {
             return;
         }
-        match residency_ready(self.engine.world()) {
-            Ok(false) => {}
-            Ok(true) => {
-                self.population_status = PopulationStatus::Ready;
-                self.spawn_message = Some("READY - MOVE CURSOR AND PRESS T".to_owned());
-                self.dirty = true;
-            }
-            Err(error) => {
-                eprintln!("viewer residency gate failed: {error}");
-                self.population_status = PopulationStatus::Failed;
-                self.dirty = true;
-            }
+        if residency_ready(self.engine.world()) {
+            self.population_status = PopulationStatus::Ready;
+            self.spawn_message = Some("READY - PRESS T ON LOADED TERRAIN".to_owned());
+            self.dirty = true;
         }
     }
 
@@ -550,6 +632,13 @@ impl ViewerApp {
         if let Some(requests) = self.pending_manual.take() {
             return self.start_generation(GenerationKind::Manual, requests);
         }
+        match self.take_archive_view_requests() {
+            Ok(Some(requests)) => {
+                return self.start_generation(GenerationKind::Bootstrap, requests);
+            }
+            Ok(None) => {}
+            Err(error) => eprintln!("archive detail loading paused: {error}"),
+        }
         if let Some(requests) = self.pending_bootstrap.take() {
             return self.start_generation(GenerationKind::Bootstrap, requests);
         }
@@ -562,6 +651,29 @@ impl ViewerApp {
                 true
             }
         }
+    }
+
+    fn take_archive_view_requests(
+        &self,
+    ) -> Result<Option<Vec<ChunkLoadRequest>>, GenerateAreaError> {
+        let (Some(_), Some(window)) = (&self.archive, &self.window) else {
+            return Ok(None);
+        };
+        let size = window.inner_size();
+        let view = self.camera.view(
+            size.width,
+            size.height,
+            self.engine.world().width(),
+            self.engine.world().height(),
+        );
+        if view.scale() < ARCHIVE_DETAIL_MIN_SCALE {
+            return Ok(None);
+        }
+        let Some(bounds) = view.world_bounds().intersection(WORLD_GENERATION_BOUNDS) else {
+            return Ok(None);
+        };
+        let requests = self.engine.world().missing_chunk_load_requests(bounds)?;
+        Ok((!requests.is_empty()).then_some(requests))
     }
 
     fn take_next_bootstrap_requests(
@@ -586,6 +698,7 @@ impl ViewerApp {
             id,
             seed: self.engine.config().seed,
             requests,
+            archive: self.archive.clone(),
         };
         match self.generator.request(job) {
             Ok(()) => {
@@ -953,6 +1066,7 @@ const WORLD_APPLY_TIME_BUDGET: Duration = Duration::from_millis(2);
 const FRAME_TIME: Duration = Duration::from_nanos(16_666_667);
 const SMOKE_TIMEOUT: Duration = Duration::from_secs(30);
 const WORLD_SYNC_INTERVAL: Duration = Duration::from_millis(125);
+const ARCHIVE_DETAIL_MIN_SCALE: f64 = 0.25;
 
 fn union_load_bounds(loads: &[WorldChunkLoad]) -> Option<WorldRect> {
     loads
@@ -991,7 +1105,7 @@ mod tests {
 
     #[test]
     fn streamed_changes_coalesce_into_one_dirty_region() {
-        let mut app = ViewerApp::new(engine_with_world(64, 64), None);
+        let mut app = ViewerApp::new(engine_with_world(64, 64), None, None);
         app.dirty = false;
         app.mark_world_changed(WorldRect {
             min: WorldPosition { x: -32, y: 8 },
@@ -1014,7 +1128,7 @@ mod tests {
 
     #[test]
     fn bootstrap_pager_materializes_once_then_releases_its_queue() {
-        let mut app = ViewerApp::new(engine_with_world(64, 64), None);
+        let mut app = ViewerApp::new(engine_with_world(64, 64), None, None);
         let requests = app
             .take_next_bootstrap_requests()
             .expect("bootstrap request is valid")
@@ -1043,8 +1157,19 @@ mod tests {
     }
 
     #[test]
+    fn fully_resident_startup_skips_bootstrap_paging() {
+        let mut engine = engine_with_world(64, 64);
+        engine.materialize_initial_area().unwrap();
+
+        let app = ViewerApp::new(engine, None, None);
+
+        assert!(app.bootstrap_pager.is_none());
+        assert_eq!(app.population_status, PopulationStatus::Ready);
+    }
+
+    #[test]
     fn manual_generation_preempts_bootstrap_paging() {
-        let mut app = ViewerApp::new(engine_with_world(64, 64), None);
+        let mut app = ViewerApp::new(engine_with_world(64, 64), None, None);
         let manual_bounds = WorldRect {
             min: WorldPosition { x: 64, y: 0 },
             max: WorldPosition { x: 128, y: 64 },
@@ -1073,7 +1198,7 @@ mod tests {
 
     #[test]
     fn no_generation_is_scheduled_without_bootstrap_or_manual_work() {
-        let mut app = ViewerApp::new(engine_with_world(64, 64), None);
+        let mut app = ViewerApp::new(engine_with_world(64, 64), None, None);
         app.bootstrap_pager = None;
 
         assert!(!app.schedule_generation());
@@ -1083,7 +1208,7 @@ mod tests {
 
     #[test]
     fn requeued_bootstrap_page_is_preserved_until_higher_priority_manual_work_runs() {
-        let mut app = ViewerApp::new(engine_with_world(64, 64), None);
+        let mut app = ViewerApp::new(engine_with_world(64, 64), None, None);
         let bootstrap = app
             .engine
             .world()
@@ -1112,7 +1237,7 @@ mod tests {
 
     #[test]
     fn background_cancellation_never_discards_manual_generation() {
-        let mut app = ViewerApp::new(engine_with_world(64, 64), None);
+        let mut app = ViewerApp::new(engine_with_world(64, 64), None, None);
         app.active_generation = Some(ActiveGeneration {
             id: 10,
             kind: GenerationKind::Manual,
@@ -1140,7 +1265,7 @@ mod tests {
 
     #[test]
     fn cancellation_clears_an_active_right_drag_before_it_can_queue_manual_work() {
-        let mut app = ViewerApp::new(engine_with_world(64, 64), None);
+        let mut app = ViewerApp::new(engine_with_world(64, 64), None, None);
         let selection = WorldRect {
             min: WorldPosition { x: 0, y: 0 },
             max: WorldPosition { x: 64, y: 64 },

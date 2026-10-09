@@ -7,11 +7,12 @@ use sim_core::{EngineConfig, WorldConfig, WorldConfigError};
 
 pub const DEFAULT_CONFIG_PATH: &str = "config/simulation.toml";
 
-#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AppConfig {
     pub simulation: SimulationConfig,
     pub world: InitialWorldConfig,
+    pub world_cache: WorldCacheConfig,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -28,6 +29,13 @@ pub struct InitialWorldConfig {
     pub initial_height: u32,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WorldCacheConfig {
+    pub enabled: bool,
+    pub path: String,
+}
+
 impl AppConfig {
     pub fn load(path: impl AsRef<Path>) -> Result<Self, ConfigError> {
         let path = path.as_ref();
@@ -38,7 +46,7 @@ impl AppConfig {
         toml::from_str(&source).map_err(ConfigError::Parse)
     }
 
-    pub fn engine_config(self) -> Result<EngineConfig, ConfigError> {
+    pub fn engine_config(&self) -> Result<EngineConfig, ConfigError> {
         let world = WorldConfig::new(self.world.initial_width, self.world.initial_height)
             .map_err(ConfigError::InvalidWorld)?;
         Ok(EngineConfig {
@@ -46,6 +54,15 @@ impl AppConfig {
             ticks_per_second: self.simulation.ticks_per_second,
             world,
         })
+    }
+}
+
+impl Default for WorldCacheConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            path: "target/world-cache/world.ltbl-archive".to_owned(),
+        }
     }
 }
 
@@ -106,7 +123,7 @@ mod tests {
     #[test]
     fn parses_complete_configuration() {
         let config: AppConfig = toml::from_str(
-            "[simulation]\nseed = 42\nticks_per_second = 20\n[world]\ninitial_width = 640\ninitial_height = 480\n",
+            "[simulation]\nseed = 42\nticks_per_second = 20\n[world]\ninitial_width = 640\ninitial_height = 480\n[world_cache]\nenabled = true\npath = 'target/test.ltbl-archive'\n",
         )
         .unwrap();
         let engine = config.engine_config().unwrap();
@@ -114,6 +131,8 @@ mod tests {
         assert_eq!(engine.ticks_per_second, 20);
         assert_eq!(engine.world.initial_width(), 640);
         assert_eq!(engine.world.initial_height(), 480);
+        assert!(config.world_cache.enabled);
+        assert_eq!(config.world_cache.path, "target/test.ltbl-archive");
     }
 
     #[test]

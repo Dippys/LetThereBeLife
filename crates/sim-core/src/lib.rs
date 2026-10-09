@@ -53,14 +53,16 @@ pub use structures::{
     StructureView,
 };
 pub use world::{
-    BaseResource, BiomeType, CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkInspection,
-    ChunkLoadRequest, ChunkLocalPosition, ChunkPresence, ClimateSample, DEFAULT_INITIAL_WORLD_SIZE,
-    Feature, FeatureKind, GenerateAreaError, GeneratedCell, MAX_CHUNKS_PER_GENERATION,
-    MAX_GENERATED_CELLS, MAX_GENERATED_CHUNKS, MAX_GENERATED_TERRAIN_BYTES, MAX_INITIAL_CHUNKS,
+    ArchiveBakeProgress, ArchiveBakeStats, BaseResource, BiomeType, CHUNK_SIZE, ChunkCoord,
+    ChunkGenerator, ChunkInspection, ChunkLoadRequest, ChunkLocalPosition, ChunkOverview,
+    ChunkPresence, ClimateSample, DEFAULT_INITIAL_WORLD_SIZE, Feature, FeatureKind,
+    GenerateAreaError, GeneratedCell, MAX_CHUNKS_PER_GENERATION, MAX_GENERATED_CELLS,
+    MAX_GENERATED_CHUNKS, MAX_GENERATED_TERRAIN_BYTES, MAX_INITIAL_CHUNKS,
     MAX_TRAVERSABLE_ELEVATION_DELTA, PrevailingWind, ResourceKind, Standability, SurfaceType,
     TerrainCell, TerrainClass, TraversalKind, TraversalStep, WORLD_GENERATION_BOUNDS,
-    WORLD_HALF_EXTENT, WORLD_SIDE_CELLS, WaterSource, World, WorldChunk, WorldChunkLoad,
-    WorldConfig, WorldConfigError, WorldPosition, WorldQueryError, WorldRect,
+    WORLD_GENERATOR_VERSION, WORLD_HALF_EXTENT, WORLD_SIDE_CELLS, WaterSource, World, WorldArchive,
+    WorldArchiveError, WorldChunk, WorldChunkLoad, WorldConfig, WorldConfigError, WorldOverview,
+    WorldPosition, WorldQueryError, WorldRect,
 };
 
 use std::time::Duration;
