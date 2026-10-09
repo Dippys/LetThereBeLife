@@ -34,7 +34,7 @@ and a `tests.rs` or `tests/` folder next to it. Every file starts with a `//!` l
 | `engine/` | `Engine` facade. `mod.rs` (struct, config, commands, snapshot), `tick.rs` (event dispatch), `setup.rs` (world loads, population, spawn), `views.rs` (read-only accessors), `routes.rs`, `policy.rs` (activation with `PolicyOptions`, decision handling, drink/eat/gather effects), `cognition.rs` (observe → deliberate, gesture start/completion and who sees it, `mental_map`/`signal_events` views), `actions.rs` (sleep requests, action and wake completion), `shelter.rs`, `errors.rs` (error mapping) |
 | `agent/` | `AgentId(u32)`, `SimTime`, 6-byte `AgentRecord`, `AgentView`, errors, perception types, `ScheduledEvent` (32 B). `population/` splits the dense `Population` store: `init`, `movement`, `vitals` (needs + health), `policy`, `sleep`, `inventory`, `perception` |
 | `policy/` | Decision-making. `selection.rs` is the original reactive policy (what's in view only). `deliberate.rs` is the memory-driven policy: travel to remembered places by waypoints, spiral search when no water is known, novelty exploration with a walk-back leash, top-ups before trips, home shelters, pointing out places. `exploration.rs`, `state.rs` (`PolicyState`, 12 B) |
-| `cognition/` | Private beliefs. `map.rs`: per-agent `MentalMap` (256 B): 12 remembered places in per-kind slots (12 B each, first-hand or hint with a search radius), 24 recently explored 32×32 tiles, spiral-search and sharing state. `gesture.rs`: pointing gestures (direction + order-of-magnitude distance) and how watchers infer a rough place. `Minds` stores maps per `AgentId` |
+| `cognition/` | Private beliefs and identity. `map.rs`: per-agent `MentalMap` (256 B): 12 remembered places in per-kind slots (12 B each, first-hand or a hint with a search radius and its teller), 24 recently explored 32×32 tiles, spiral-search and sharing state. `social.rs`: `SocialMemory` (96 B), 6 acquaintances with familiarity, trust, and last-seen place. `personality.rs`: `Personality` (curiosity, caution, sociability, diligence), a pure function of seed and agent id. `gesture.rs`: pointing gestures (direction plus order-of-magnitude distance) and how watchers infer a rough place. `Minds` stores a `Mind { map, social }` per `AgentId` |
 | `scheduler` | Binary-heap event queue with a total order (see below), ≤4,096 due events per tick |
 | `needs` | Analytical fixed-point hunger/thirst/rest/exposure (`NeedState`, 32 B). Values are computed from rates, not ticked. |
 | `health` | Severe-need damage, incapacitation, death (`HealthState`, 16 B) |
@@ -87,7 +87,9 @@ perceive (radius 8, truth) ──► MentalMap::observe ──► deliberate ─
        (gesture::interpret) ◄──────┴──── awake agents in view see the gesture
 ```
 
-- `PolicyOptions { exploration, memory, sharing }` picks the policy at activation. The legacy
+- `PolicyOptions { exploration, memory, sharing, social }` picks the policy at activation.
+  `social` adds personalities (otherwise everyone is `Personality::AVERAGE`), relationships,
+  visiting friends, trust-weighted hints, and "I've been there" gestures. The legacy
   (`activate_physical_policy[_with_exploration]`) path is unchanged, and canonical scenarios use it.
   The viewer and the study use `PolicyOptions::full()`.
 - Beliefs never touch truth. A remembered place is checked only by looking again: if it's in view
@@ -95,6 +97,15 @@ perceive (radius 8, truth) ──► MentalMap::observe ──► deliberate ─
 - Sharing respects the vision's core rule: the sender's exact memory is never copied. Watchers get
   a direction and an order of magnitude and store a hint with a search radius, which is provably
   large enough to contain the real place (`cognition/gesture.rs` tests).
+- **Personality** tunes thresholds through `policy/deliberate.rs::Temperament`. Caution sets
+  top-up points, food reserve, and roaming leash. Curiosity sets exploration targets and
+  excursions. Sociability sets gesture cooldown, visiting friends, and staying with company.
+  Diligence sets how often a calm agent works instead of lounging. Average traits reproduce the
+  original thresholds.
+- **Relationships** form by seeing each other (familiarity) and by hints that turn out right or
+  wrong (trust, adjusted via the hint's teller slot). A watcher's hint confidence is
+  `48 + trust × 3/4`. Gestures have a topic: `Place(kind)`, or `Explored` ("I've been there"),
+  which marks that tile explored for watchers so groups spread out.
 - Perception includes `reserved_cells` (trees and rocks, including depleted ones) because nobody
   can sleep or build on them. Both policies use it to pick build sites, and the memory policy uses
   it to pick sleep spots.

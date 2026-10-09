@@ -12,7 +12,7 @@ lays out phases 0–10, from world → physical agents → cognition → communi
 | 0. Technical spikes: workspace, headless core, viewer, quality gate | Done |
 | 1. World foundation: terrain, climate, rivers/lakes, waterholes, biomes, resources | Done |
 | 2. Physical agents: movement, perception, needs, gathering, sleep, shelter, health, death | Done |
-| 3. Beliefs, memory, relationships | **In progress.** Mental maps done; relationships next. Plan: [`plans/MINDS.md`](plans/MINDS.md) |
+| 3. Beliefs, memory, relationships | **In progress.** Mental maps, personalities, and sparse relationships with trust are done; episodic memory isn't. Plan: [`plans/MINDS.md`](plans/MINDS.md) |
 | 4. Nonverbal communication | **Started.** Pointing gestures share rough place knowledge |
 | 5–7. Proto-language, children and transmission, invention and diffusion | Not started |
 | 8–10. Settlements and economy, migration and language divergence, conflict and institutions | Not started |
@@ -29,7 +29,12 @@ lays out phases 0–10, from world → physical agents → cognition → communi
   food, wood, stone, shelters) and forgets ones it finds empty. It explores new ground and
   spiral-searches when it knows no water. It walks back to remembered places, tops up before
   heading out, never strays farther from known water than it can walk back, and keeps a home
-  shelter. It points out places to agents nearby, who get only a rough hint to search.
+  shelter. It points out places, or ground it has already explored, to agents nearby, who get only
+  a rough hint to search.
+- **People are different (viewer and study):** four personality traits (curiosity, caution,
+  sociability, diligence) and up to six acquaintances with familiarity, trust, and last-seen
+  place. Sociable agents seek out friends and stay with company. Hints count for more from people
+  whose past hints were right.
 - **Viewer:** pan and zoom, HUD, `T` to spawn, the object-placement menu, speed 1×–256×. Hovering
   an agent shows its memory and draws its remembered places on the map.
 - **Headless:** canonical scenarios with fingerprint hashes, and the **behavior study**
@@ -37,26 +42,44 @@ lays out phases 0–10, from world → physical agents → cognition → communi
 
 ## Did agents stop camping and dying? (behavior study, 2026-10-10)
 
-20 agents, 600k ticks (~2.8 simulated hours), no supplies. Survivors per scenario:
+20 agents, 600k ticks (~2.8 simulated hours), no supplies. Survivors per scenario. Mind columns:
+legacy = old reactive policy, memory = mental map, sharing = plus gestures, full = plus
+personality and relationships (what the viewer runs).
 
-| Seed (terrain) | Spawn | legacy | memory | memory + gestures |
-|---|---|---|---|---|
-| 1 (savanna/desert) | random land | 9 | 20 | 20 |
-| 1 | groups of 5 | 11 | 18 | 20 |
-| 1 | near water | 16 | 19 | 19 |
-| 4 | random land | 11 | 20 | 19 |
-| 4 | groups | 14 | 20 | 20 |
-| 4 | near water | 13 | 20 | 20 |
-| 7 (desert/alpine) | random land | 1 | 2 | 2 |
-| 7 | groups | 1 | 1 | 2 |
-| 7 | near water | 7 | 14 | 16 |
-| 9 (small island) | random land | 5 | 14 | 16 |
-| 9 | groups | 5 | 16 | 16 |
-| 9 | near water | 11 | 20 | 18 |
-| 42 (forest) | random land | 18 | 20 | 20 |
-| 42 | groups | 16 | 20 | 20 |
-| 42 | near water | 16 | 20 | 20 |
-| **Total of 300** | | **154** | **244** | **248** |
+| Seed (terrain) | Spawn | legacy | memory | sharing | full |
+|---|---|---|---|---|---|
+| 1 (savanna/desert) | random land | 9 | 20 | 20 | 20 |
+| 1 | groups of 5 | 11 | 18 | 20 | 20 |
+| 1 | near water | 16 | 19 | 19 | 19 |
+| 4 | random land | 11 | 20 | 19 | 20 |
+| 4 | groups | 14 | 20 | 20 | 20 |
+| 4 | near water | 13 | 20 | 20 | 20 |
+| 7 (desert/alpine) | random land | 1 | 2 | 2 | 4 |
+| 7 | groups | 1 | 1 | 3 | 2 |
+| 7 | near water | 7 | 14 | 16 | 12 |
+| 9 (small island) | random land | 5 | 12 | 13 | 13 |
+| 9 | groups | 5 | 16 | 17 | 19 |
+| 9 | near water | 11 | 20 | 20 | 20 |
+| 42 (forest) | random land | 18 | 20 | 20 | 20 |
+| 42 | groups | 16 | 20 | 20 | 20 |
+| 42 | near water | 16 | 20 | 20 | 20 |
+| **Total of 300** | | **154** | **242** | **249** | **249** |
+
+The social layer doesn't add survival, since most scenarios were at their ceiling. It makes agents
+different from each other and makes sharing work: in group spawns, time in company and the share of
+gestures that tell someone something new rose severalfold on seeds 1, 9, and 42 (D-069). The seed 7
+near-water drop (16 → 12) is luck, not personality: the dead span every trait profile, and all
+starved without ever finding food in a desert with ~190 bushes.
+
+Do personalities behave differently? 100 agents in groups, seeds 1, 4, and 42 (agents below vs at
+or above each trait's midpoint):
+
+| Trait | Behavior | Low | High |
+|---|---|---|---|
+| Curiosity | ground explored (tiles) | 172–227 | 218–317 |
+| Caution | peak thirst | 3,978–4,786 | 3,449–4,370 |
+| Sociability | % time in company | 12–18% | 28–47% |
+| Diligence | % time idle | 64–70% | 48–66% |
 
 Over 2.4M ticks (~11 hours), seeds 1, 4, and 42 keep all 20 agents alive with the full mind, and
 idle time is around 55% instead of 80–90%. The "legacy" column already includes the waterholes.
@@ -64,8 +87,9 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Known problems and limitations
 
-- **Gestures help less than hoped.** Agents who meet usually know the same places, so few gestures
-  tell anyone something new. Next step: give agents reasons to regroup (see the plan).
+- **Sharing improves survival only where knowledge is scarce.** In most scenarios agents already
+  survive on their own knowledge. Sharing should matter more with bigger populations, scarcer
+  resources, or children who start out knowing nothing.
 - **Deserts and tiny islands are deadly** for agents spawned 100+ cells from water. That's
   arguably correct, but terrain cues (downhill, vegetation) could help.
 - **The canonical 100-agent run is ~35% slower** than before (≈4.2 s vs 3.1 s, ±15% noise).
@@ -81,6 +105,8 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
+- 2026-10-10 (later): personalities (D-067), relationships and trust (D-068), visiting friends
+  and "I've been there" gestures (D-069).
 - 2026-10-10: behavior study (D-061), waterholes and generator v2 (D-062), mental maps and the
   memory-driven policy (D-063), gestures (D-064), perception `reserved_cells` (D-065), and stale
   events pruned every tick (D-066).
@@ -88,5 +114,4 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## What's next
 
-Follow [`plans/MINDS.md`](plans/MINDS.md): reasons to regroup, then "nothing that way" gestures,
-then trust in whoever pointed. Run the study before and after each step.
+Follow [`plans/MINDS.md`](plans/MINDS.md). Run the study before and after each step.

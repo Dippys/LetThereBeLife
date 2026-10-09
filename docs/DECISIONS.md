@@ -95,3 +95,40 @@ events piled up unchecked. The new world's extra activity pushed the 100-agent c
 from 1,967 to 7,186, past its 2,000 bound. An agent holds at most about 7 live events.
 **Consequences:** The peak queue is now 1,247 with the same outcomes (74 living, 26 deaths). Stale
 diagnostics for pruned events no longer appear, which changes canonical report hashes.
+
+## D-067: Personality as a four-trait vector (2026-10-10)
+
+**Decision:** Each agent has curiosity, caution, sociability, and diligence (0–255; each the
+average of two random bytes, so most agents are moderate). Traits are a pure function of the world
+seed and agent id, and tune existing behavior through a per-decision `Temperament`. They add no
+new actions.
+**Why:** The user wanted different people to do different things. The spec asks for "a compact
+trait vector rather than a class hierarchy". Deriving traits from the id costs no storage and
+replays exactly.
+**Consequences:** Measured on 100-agent runs, each trait moves its behavior in the intended
+direction on every seed tested. Average traits reproduce the old thresholds. Traits can't be
+inherited or changed yet; storing them becomes necessary once they can.
+
+## D-068: Sparse relationships with trust feedback (2026-10-10)
+
+**Decision:** Each mind keeps 6 acquaintance slots (16 B each): familiarity (grows with
+sightings), trust (+32 when a hint they gave is confirmed, −48 when one is abandoned), and where
+they were last seen. Hints remember their teller's slot, and evicting an acquaintance detaches
+their hints.
+**Why:** The spec requires sparse ties and no all-pairs matrix. Trust gives gestures
+consequences, which is a first step toward reputation and deception.
+**Consequences:** Hint confidence now depends on trust. Mean trust stays close to the default in
+studies (≈128–134), because hints are confirmed and refuted at similar rates.
+
+## D-069: Visiting friends and "I've been there" gestures (2026-10-10)
+
+**Decision:** Lonely sociable agents travel to where a friend was last seen, and drop that place
+if the friend isn't there. Sociable agents with company skip casual excursions. Gestures can also
+point at recently explored ground, which watchers then treat as explored.
+**Why:** Sharing was weak because agents rarely regrouped after learning different things. The
+user also asked that explorers share exploration details.
+**Consequences:** In group spawns, time in company went from 4% to 58% (seed 1), 2% to 21%
+(seed 42), and 35% to 57% (seed 9), with no change on seed 4. The share of gestures that tell
+someone something new went from 10% to 30% (seed 1), 4% to 34% (seed 42), and 21% to 61% (seed 9).
+Total survival didn't change (249/300 with or without the social layer), because most scenarios
+were already at their ceiling.

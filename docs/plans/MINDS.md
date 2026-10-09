@@ -22,12 +22,14 @@ the behavior study (`sim-headless --study`, see [DEVELOPMENT.md](../DEVELOPMENT.
 | Spiral search when no water is known | `cognition/map.rs` (`search_target`) | Fixed a regression on an island seed (2 → 15 survivors) |
 | Home shelters and sleep/build spots that physics accepts | `deliberate.rs`, perception `reserved_cells` | Exhaustion deaths over 2.4M ticks 3–6 → 0 per scenario |
 | Pointing gestures: watchers infer a rough place plus a search radius | `sim-core/src/cognition/gesture.rs` | Mechanically correct; small measured benefit (see below) |
+| Personality (curiosity, caution, sociability, diligence) | `cognition/personality.rs`, `deliberate.rs` `Temperament` | Every trait shifts its behavior in the intended direction (100-agent runs, 3 seeds) |
+| Relationships: familiarity, trust from hint outcomes, last-seen place | `cognition/social.rs` | Hints weighted by trust; acquaintances ≈5 per agent |
+| Visiting friends, staying with company, "I've been there" gestures | `deliberate.rs`, `engine/cognition.rs` | Group company 4% → 58% and useful gestures 10% → 30% (seed 1) |
 
 ## Open findings
 
-- **Sharing rarely tells anyone something new.** Agents that meet usually explored the same area,
-  so in group spawns only a few percent of gestures inform a watcher. Sharing pays off when agents
-  separate, learn different places, and meet again, and nothing brings them back together yet.
+- **The social layer changes behavior but not survival.** Most scenarios already sit at 19–20/20.
+  Its value should show with scarcer resources, larger groups, or newcomers who know nothing.
 - **Deserts and tiny islands stay deadly.** Agents spawned 100+ cells from any water often die
   before their first drink. That may be fine (deserts should be harsh), or terrain cues could help.
 - **Food never regrows.** This hasn't mattered yet over 2.4M ticks with 20 agents. Re-measure with
@@ -35,13 +37,12 @@ the behavior study (`sim-headless --study`, see [DEVELOPMENT.md](../DEVELOPMENT.
 
 ## Next, in order
 
-1. **Reasons to regroup.** Shared home shelters, or returning to where you last saw companions,
-   so agents meet after exploring apart. Success: a higher share of gestures that inform someone,
-   and a survival gain from `full` over `memory` in group spawns.
-2. **"Nothing that way" gestures.** Share explored dead ends (marking tiles as explored for
-   watchers), the other half of sharing exploration.
-3. **Familiarity and trust.** Remember who pointed at what and whether it paid off; weigh hints by
-   the source's track record. This starts the relationships part of Phase 3.
+1. **Harder scenarios where knowledge matters.** Study runs with scarce food, large groups, and
+   late arrivals who know nothing, to measure what sharing and trust are worth.
+2. **Shared homes.** Friends settle near each other's shelters, a seed for households and
+   settlements (Phase 8).
+3. **Helping.** Friends give food or water to a struggling friend, the first exchange behavior,
+   costly and personality-dependent.
 4. **Terrain cues.** Downhill and lush vegetation suggest water, which gives desert and island
    agents a chance.
 5. **Regrowth** if longer or bigger studies show starvation.

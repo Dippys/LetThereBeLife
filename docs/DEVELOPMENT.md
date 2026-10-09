@@ -46,13 +46,17 @@ Measures how viewer-like agents actually fare. They spawn without supplies and r
 
 ```sh
 cargo run --release -p sim-headless -- --study [--near-water | --groups] [--seed N] [--agents N]
-    [--ticks N] [--mind legacy|memory|full] [--verbose] [--trace AGENT]
+    [--ticks N] [--mind legacy|memory|sharing|full] [--verbose] [--trace AGENT]
 ```
 
 - `--near-water` spawns within 6 cells of fresh water. `--groups` drops agents in groups of 5.
   The default spawns on random land.
 - `--mind legacy` is the old reactive policy (what the viewer used before). `memory` adds the
-  mental map. `full` (the default) adds gestures.
+  mental map. `sharing` adds gestures. `full` (the default) adds personalities and relationships.
+- The `social:` line shows the % of time agents spend near another agent, their acquaintances,
+  mean trust, and "I've been there" gestures. The `trait` lines split agents at each trait's
+  midpoint and compare the behavior that trait should change. That's how you check that different
+  personalities really behave differently.
 - The output starts with a world summary: fresh water, food, how much land is near water, and the
   biome mix. Then come survivors, death causes, roaming, idle %, meals, and gestures.
 - `--verbose` prints one line per agent, including what it remembers and its last need values.
@@ -74,7 +78,7 @@ Compare minds before and after any behavior change. Current numbers are in [STAT
 | `1`–`9` | Speed 1×, 2×, 4× … 256× |
 | `R` | Reset to zero agents (keeps terrain) |
 | `C` | Cancel pending generation |
-| Hover | Cell/chunk info in HUD. Hovering an agent shows its needs, goal, inventory, health, sleep, and memory, and draws its remembered places on the map (solid = seen, outline = hint with search area) |
+| Hover | Cell/chunk info in HUD. Hovering an agent shows its needs, goal, inventory, health, sleep, memory, personality (with a one-word summary such as EXPLORER or LONER), and friends with trust. The map shows its remembered places (solid = seen, outline = hint with search area) and dotted lines to where its acquaintances were last seen (violet = friend) |
 | `Esc` | Quit |
 
 ## Tests
