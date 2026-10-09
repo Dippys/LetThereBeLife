@@ -74,6 +74,10 @@ struct AgentTrack {
     waits: u64,
     signals: u64,
     informed: u64,
+    explored_gestures: u64,
+    company_samples: u64,
+    /// Highest thirst seen in any sample while alive.
+    peak_thirst: u16,
     /// Hunger, thirst, rest, exposure at the last sample while alive.
     last_needs: [u16; 4],
     shelters_built: u64,
@@ -99,6 +103,15 @@ pub struct StudyReport {
     pub wait_decisions: u64,
     pub signals: u64,
     pub agents_informed: u64,
+    /// Gestures that said "I've been over there" rather than pointing at a place.
+    pub explored_gestures: u64,
+    /// Percentage of sampled living time with another living agent within 8 cells.
+    pub company_percent: u64,
+    /// Mean acquaintances and mean trust in them at the end (social mind only).
+    pub mean_acquaintances: u64,
+    pub mean_trust: u64,
+    /// Per trait: (metric name, mean for agents below 128, mean for agents at or above 128).
+    pub trait_effects: Vec<(&'static str, &'static str, u64, u64)>,
     /// Mean remembered places per agent at the end (first-hand + hearsay).
     pub mean_known_places: u64,
     pub per_agent: Vec<StudyAgentLine>,
@@ -140,6 +153,7 @@ pub struct StudyAgentLine {
     /// Hunger, thirst, rest, exposure at the last sample while alive.
     pub last_needs: [u16; 4],
     pub shelters_built: u64,
+    pub personality: sim_core::Personality,
 }
 
 pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
@@ -204,6 +218,9 @@ fn collect_tick(engine: &Engine, tracks: &mut [AgentTrack]) {
         let track = &mut tracks[signal.sender.get() as usize];
         track.signals += 1;
         track.informed += u64::from(signal.informed);
+        if signal.topic == sim_core::GestureTopic::Explored {
+            track.explored_gestures += 1;
+        }
     }
     for outcome in engine.movement_outcomes() {
         if outcome.kind == sim_core::MovementOutcomeKind::Moved {
@@ -277,12 +294,25 @@ fn record_trace(engine: &Engine, agent: AgentId, trace: &mut std::collections::V
 }
 
 fn sample(engine: &Engine, tracks: &mut [AgentTrack], tiles: &mut [BTreeSet<(i64, i64)>]) {
+    let living: Vec<_> = engine
+        .agent_views(usize::MAX)
+        .filter(|view| view.activity != AgentActivity::Dead)
+        .collect();
+    for view in &living {
+        let in_company = living.iter().any(|other| {
+            other.id != view.id
+                && other.position.x.abs_diff(view.position.x) <= 8
+                && other.position.y.abs_diff(view.position.y) <= 8
+        });
+        tracks[view.id.get() as usize].company_samples += u64::from(in_company);
+    }
     for view in engine.agent_views(usize::MAX) {
         if matches!(view.activity, AgentActivity::Dead) {
             continue;
         }
         let index = view.id.get() as usize;
         if let Ok(needs) = engine.physical_needs(view.id) {
+            tracks[index].peak_thirst = tracks[index].peak_thirst.max(needs.thirst.value);
             tracks[index].last_needs = [
                 needs.hunger.value,
                 needs.thirst.value,
@@ -343,6 +373,9 @@ fn build_report(
             gathers: track.gathers,
             last_needs: track.last_needs,
             shelters_built: track.shelters_built,
+            personality: engine
+                .personality(AgentId::new(index as u32))
+                .unwrap_or(sim_core::Personality::AVERAGE),
             known: engine
                 .mental_map(AgentId::new(index as u32))
                 .map_or((0, 0, 0), |map| {
@@ -374,6 +407,23 @@ fn build_report(
         explore_decisions: tracks.iter().map(|track| track.explores).sum(),
         wait_decisions: tracks.iter().map(|track| track.waits).sum(),
         signals: tracks.iter().map(|track| track.signals).sum(),
+        explored_gestures: tracks.iter().map(|track| track.explored_gestures).sum(),
+        company_percent: percent(
+            tracks.iter().map(|track| track.company_samples).sum(),
+            alive_samples,
+        ),
+        mean_acquaintances: social_mean(engine, tracks.len(), |map| map.acquaintances.len() as u64),
+        mean_trust: {
+            let maps: Vec<_> = (0..tracks.len())
+                .filter_map(|index| engine.mental_map(AgentId::new(index as u32)))
+                .collect();
+            let trusts: Vec<u64> = maps
+                .iter()
+                .flat_map(|map| map.acquaintances.iter().map(|known| u64::from(known.trust)))
+                .collect();
+            trusts.iter().sum::<u64>() / (trusts.len() as u64).max(1)
+        },
+        trait_effects: trait_effects(engine, tracks, tiles),
         agents_informed: tracks.iter().map(|track| track.informed).sum(),
         mean_known_places: (0..tracks.len())
             .filter_map(|index| engine.mental_map(AgentId::new(index as u32)))
@@ -383,6 +433,67 @@ fn build_report(
         per_agent,
         trace: Vec::new(),
     }
+}
+
+fn social_mean(
+    engine: &Engine,
+    agents: usize,
+    measure: impl Fn(&sim_core::MentalMapView) -> u64,
+) -> u64 {
+    let values: Vec<u64> = (0..agents)
+        .filter_map(|index| engine.mental_map(AgentId::new(index as u32)))
+        .map(|map| measure(&map))
+        .collect();
+    values.iter().sum::<u64>() / (values.len() as u64).max(1)
+}
+
+/// Does each trait change the behavior it should? Splits agents at the trait
+/// midpoint and averages one metric per half.
+fn trait_effects(
+    engine: &Engine,
+    tracks: &[AgentTrack],
+    tiles: &[BTreeSet<(i64, i64)>],
+) -> Vec<(&'static str, &'static str, u64, u64)> {
+    let personalities: Vec<_> = (0..tracks.len())
+        .map(|index| {
+            engine
+                .personality(AgentId::new(index as u32))
+                .unwrap_or(sim_core::Personality::AVERAGE)
+        })
+        .collect();
+    let split = |name: &'static str,
+                 metric: &'static str,
+                 trait_of: fn(&sim_core::Personality) -> u8,
+                 value: &dyn Fn(usize) -> u64| {
+        let (mut low, mut high) = ((0, 0), (0, 0));
+        for (index, personality) in personalities.iter().enumerate() {
+            let bucket = if trait_of(personality) < 128 {
+                &mut low
+            } else {
+                &mut high
+            };
+            bucket.0 += value(index);
+            bucket.1 += 1_u64;
+        }
+        (name, metric, low.0 / low.1.max(1), high.0 / high.1.max(1))
+    };
+    vec![
+        split("curiosity", "tiles visited", |p| p.curiosity, &|i| {
+            tiles[i].len() as u64
+        }),
+        split("caution", "peak thirst", |p| p.caution, &|i| {
+            u64::from(tracks[i].peak_thirst)
+        }),
+        split(
+            "sociability",
+            "% time in company",
+            |p| p.sociability,
+            &|i| percent(tracks[i].company_samples, tracks[i].alive_samples),
+        ),
+        split("diligence", "% time idle", |p| p.diligence, &|i| {
+            percent(tracks[i].idle_samples, tracks[i].alive_samples)
+        }),
+    ]
 }
 
 fn percent(part: u64, whole: u64) -> u64 {
@@ -532,10 +643,11 @@ impl fmt::Display for StudyReport {
             config.population,
             config.ticks,
             config.spawn,
-            match (config.mind.memory, config.mind.sharing) {
-                (false, _) => "legacy",
-                (true, false) => "memory",
-                (true, true) => "full",
+            match (config.mind.memory, config.mind.sharing, config.mind.social) {
+                (false, _, _) => "legacy",
+                (true, false, false) => "memory",
+                (true, true, false) => "sharing",
+                (true, _, true) => "full",
             }
         )?;
         writeln!(
@@ -574,7 +686,19 @@ impl fmt::Display for StudyReport {
             self.signals,
             self.agents_informed,
             self.mean_known_places
-        )
+        )?;
+        write!(
+            formatter,
+            "\n  social: company={}% acquaintances={} trust={} explored-gestures={}",
+            self.company_percent, self.mean_acquaintances, self.mean_trust, self.explored_gestures
+        )?;
+        for (name, metric, low, high) in &self.trait_effects {
+            write!(
+                formatter,
+                "\n  trait {name:<11} {metric:<24} low={low:<6} high={high}"
+            )?;
+        }
+        Ok(())
     }
 }
 
@@ -586,7 +710,7 @@ impl fmt::Display for StudyAgentLine {
         };
         write!(
             formatter,
-            "  agent {:>3} spawn=({},{}) water_dist={:<5} {:<20} moves={:<6} tiles={:<4} max_dist={:<5} idle={:>3}% drinks={} eats={} gathers={} known w/f/o={}/{}/{} needs h/t/r/e={:?} shelters={}",
+            "  agent {:>3} spawn=({},{}) water_dist={:<5} {:<20} moves={:<6} tiles={:<4} max_dist={:<5} idle={:>3}% drinks={} eats={} gathers={} known w/f/o={}/{}/{} needs h/t/r/e={:?} shelters={} cur/cau/soc/dil={}/{}/{}/{}",
             self.agent.get(),
             self.spawn.x,
             self.spawn.y,
@@ -604,7 +728,11 @@ impl fmt::Display for StudyAgentLine {
             self.known.1,
             self.known.2,
             self.last_needs,
-            self.shelters_built
+            self.shelters_built,
+            self.personality.curiosity,
+            self.personality.caution,
+            self.personality.sociability,
+            self.personality.diligence
         )
     }
 }

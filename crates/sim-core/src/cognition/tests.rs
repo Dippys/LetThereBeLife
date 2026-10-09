@@ -51,6 +51,16 @@ fn with_food(mut perception: PhysicalPerception, cells: &[WorldPosition]) -> Phy
     perception
 }
 
+fn observe(
+    map: &mut MentalMap,
+    agent: u32,
+    origin: WorldPosition,
+    perception: &PhysicalPerception,
+    now: u32,
+) {
+    map.observe(agent, origin, perception, now, &mut |_, _| {});
+}
+
 fn landmarks(map: &MentalMap) -> Vec<LandmarkView> {
     map.views().collect()
 }
@@ -68,13 +78,15 @@ fn mental_map_layout_is_compact() {
 fn seeing_water_remembers_it_and_repeated_sightings_merge() {
     let mut map = MentalMap::default();
     let origin = at(100, 100);
-    map.observe(
+    observe(
+        &mut map,
         7,
         origin,
         &with_water(view_around(origin), &[at(104, 100)]),
         10,
     );
-    map.observe(
+    observe(
+        &mut map,
         7,
         origin,
         &with_water(view_around(origin), &[at(105, 101)]),
@@ -95,10 +107,16 @@ fn seeing_water_remembers_it_and_repeated_sightings_merge() {
 fn memories_persist_out_of_view_and_are_recalled() {
     let mut map = MentalMap::default();
     let lake = at(0, 0);
-    map.observe(1, at(3, 0), &with_water(view_around(at(3, 0)), &[lake]), 1);
+    observe(
+        &mut map,
+        1,
+        at(3, 0),
+        &with_water(view_around(at(3, 0)), &[lake]),
+        1,
+    );
     // Walk far away: nothing in view, but the lake is still remembered.
     let far = at(300, 40);
-    map.observe(1, far, &view_around(far), 2);
+    observe(&mut map, 1, far, &view_around(far), 2);
     let (destination, source) = map.recall(LandmarkKind::Water, 1, far).expect("remembered");
     assert_eq!((destination, source), (lake, LandmarkSource::Seen));
     assert_eq!(
@@ -111,7 +129,8 @@ fn memories_persist_out_of_view_and_are_recalled() {
 fn looking_at_an_empty_remembered_place_forgets_it() {
     let mut map = MentalMap::default();
     let bush = at(50, 50);
-    map.observe(
+    observe(
+        &mut map,
         1,
         at(52, 50),
         &with_food(view_around(at(52, 50)), &[bush]),
@@ -119,7 +138,7 @@ fn looking_at_an_empty_remembered_place_forgets_it() {
     );
     assert_eq!(map.seen_count(LandmarkKind::Food), 1);
     // The bush was eaten: the same spot is in view with no food anywhere.
-    map.observe(1, at(51, 50), &view_around(at(51, 50)), 2);
+    observe(&mut map, 1, at(51, 50), &view_around(at(51, 50)), 2);
     assert_eq!(map.seen_count(LandmarkKind::Food), 0);
 }
 
@@ -128,7 +147,8 @@ fn slots_are_bounded_per_kind_and_keep_the_freshest() {
     let mut map = MentalMap::default();
     for index in 0..10_i64 {
         let spot = at(index * 100, 0);
-        map.observe(
+        observe(
+            &mut map,
             1,
             spot,
             &with_water(view_around(spot), &[spot]),
@@ -146,33 +166,33 @@ fn slots_are_bounded_per_kind_and_keep_the_freshest() {
 #[test]
 fn hearsay_is_stored_with_uncertainty_and_never_overrides_first_hand_memory() {
     let mut map = MentalMap::default();
-    assert!(map.remember_told(LandmarkKind::Food, at(200, 0), 10, 5));
+    assert!(map.remember_told(LandmarkKind::Food, at(200, 0), 10, 5, None, 128));
     let told = landmarks(&map)[0];
     assert_eq!(told.source, LandmarkSource::Told);
     assert_eq!(told.search_radius, 40);
     // Hearing about the same area again reinforces instead of duplicating.
-    assert!(map.remember_told(LandmarkKind::Food, at(210, 4), 10, 6));
+    assert!(map.remember_told(LandmarkKind::Food, at(210, 4), 10, 6, None, 128));
     assert_eq!(landmarks(&map).len(), 1);
     assert!(landmarks(&map)[0].confidence > told.confidence);
     // Seeing food there replaces the hint with a precise memory.
     let spot = at(215, 3);
-    map.observe(1, spot, &with_food(view_around(spot), &[spot]), 7);
+    observe(&mut map, 1, spot, &with_food(view_around(spot), &[spot]), 7);
     let after = landmarks(&map);
     assert_eq!(after.len(), 1);
     assert_eq!(after[0].source, LandmarkSource::Seen);
     // Hearsay about a place it has seen adds nothing.
-    assert!(!map.remember_told(LandmarkKind::Food, at(212, 0), 3, 8));
+    assert!(!map.remember_told(LandmarkKind::Food, at(212, 0), 3, 8, None, 128));
 }
 
 #[test]
 fn a_hint_that_keeps_turning_up_empty_is_eventually_forgotten() {
     let mut map = MentalMap::default();
-    map.remember_told(LandmarkKind::Water, at(0, 0), 4, 1);
+    map.remember_told(LandmarkKind::Water, at(0, 0), 4, 1, None, 128);
     for step in 0..20 {
         let Some((probe, _)) = map.recall(LandmarkKind::Water, 3, at(0, 0)) else {
             return;
         };
-        map.observe(3, probe, &view_around(probe), 2 + step);
+        observe(&mut map, 3, probe, &view_around(probe), 2 + step);
     }
     panic!("hint should be forgotten after repeated empty searches");
 }
@@ -186,7 +206,7 @@ fn exploration_prefers_unvisited_directions() {
         Some(ExplorationHeading::East)
     );
     // Having been east already, exploration turns.
-    map.observe(1, at(48, 0), &view_around(at(48, 0)), 1);
+    observe(&mut map, 1, at(48, 0), &view_around(at(48, 0)), 1);
     let heading = map.novel_heading(origin, ExplorationHeading::East).unwrap();
     assert_ne!(heading, ExplorationHeading::East);
 }
@@ -195,7 +215,13 @@ fn exploration_prefers_unvisited_directions() {
 fn sharing_rotates_through_places_outside_the_view() {
     let mut map = MentalMap::default();
     for spot in [at(0, 0), at(200, 0)] {
-        map.observe(1, spot, &with_water(view_around(spot), &[spot]), 1);
+        observe(
+            &mut map,
+            1,
+            spot,
+            &with_water(view_around(spot), &[spot]),
+            1,
+        );
     }
     let here = view_around(at(0, 0)).area;
     let (first, rank) = map.shareable(here).expect("far lake is shareable");
@@ -212,4 +238,85 @@ fn sharing_rotates_through_places_outside_the_view() {
     map.mark_shared(70, first_rank);
     let (second, _) = map.shareable(elsewhere).unwrap();
     assert_ne!(first, second, "the next encounter shares a different place");
+}
+
+#[test]
+fn hint_outcomes_are_reported_to_the_teller() {
+    let mut map = MentalMap::default();
+    map.remember_told(LandmarkKind::Water, at(0, 0), 4, 1, Some(2), 144);
+    let mut outcomes = Vec::new();
+    let spot = at(3, 2);
+    map.observe(
+        1,
+        spot,
+        &with_water(view_around(spot), &[spot]),
+        2,
+        &mut |teller, confirmed| {
+            outcomes.push((teller, confirmed));
+        },
+    );
+    assert_eq!(
+        outcomes,
+        vec![(2, true)],
+        "seeing the place confirms the hint"
+    );
+
+    let mut map = MentalMap::default();
+    map.remember_told(LandmarkKind::Water, at(0, 0), 4, 1, Some(5), 144);
+    let mut outcomes = Vec::new();
+    for step in 0..20 {
+        let Some((probe, _)) = map.recall(LandmarkKind::Water, 3, at(0, 0)) else {
+            break;
+        };
+        map.observe(
+            3,
+            probe,
+            &view_around(probe),
+            2 + step,
+            &mut |teller, confirmed| {
+                outcomes.push((teller, confirmed));
+            },
+        );
+    }
+    assert_eq!(
+        outcomes,
+        vec![(5, false)],
+        "abandoning the hint refutes it once"
+    );
+}
+
+#[test]
+fn forgetting_a_teller_detaches_their_hints() {
+    let mut map = MentalMap::default();
+    map.remember_told(LandmarkKind::Food, at(0, 0), 4, 1, Some(1), 144);
+    map.forget_teller(1);
+    let mut outcomes = Vec::new();
+    let spot = at(2, 2);
+    map.observe(
+        1,
+        spot,
+        &with_food(view_around(spot), &[spot]),
+        2,
+        &mut |teller, confirmed| {
+            outcomes.push((teller, confirmed));
+        },
+    );
+    assert!(outcomes.is_empty());
+}
+
+#[test]
+fn explored_ground_can_be_shared_and_marked() {
+    let mut map = MentalMap::default();
+    observe(&mut map, 1, at(500, 500), &view_around(at(500, 500)), 1);
+    let here = view_around(at(0, 0)).area;
+    let (marker, _) = map
+        .shareable(here)
+        .expect("explored tile far away is shareable");
+    assert!(map.is_explored_marker(marker));
+    let mut watcher = MentalMap::default();
+    assert!(
+        watcher.record_visit(marker),
+        "the watcher marks that ground explored"
+    );
+    assert!(!watcher.record_visit(marker));
 }

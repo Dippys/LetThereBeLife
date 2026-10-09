@@ -1,12 +1,12 @@
 //! HUD and hovered-agent text formatting, including every enum label shown on screen.
 
-use std::fmt::Write;
+use std::{cmp::Reverse, fmt::Write};
 
 use sim_core::{
-    AgentActivity, BiomeType, ChunkPresence, DeathCause, ExplorationHeading, FeatureKind,
-    GenerateAreaError, HealthStatus, LandmarkKind, LandmarkSource, NeedKind, PhysicalGoal,
-    PhysicalPolicyView, PolicyReason, PrevailingWind, ResourceKind, SleepQuality, SurfaceType,
-    World,
+    ACQUAINTANCE_SLOTS, AcquaintanceView, AgentActivity, BiomeType, ChunkPresence, DeathCause,
+    ExplorationHeading, FRIEND_FAMILIARITY, FeatureKind, GenerateAreaError, HealthStatus,
+    LandmarkKind, LandmarkSource, NeedKind, Personality, PhysicalGoal, PhysicalPolicyView,
+    PolicyReason, PrevailingWind, ResourceKind, SleepQuality, SurfaceType, World,
 };
 
 use super::{
@@ -284,6 +284,89 @@ fn write_memory(output: &mut String, memory: &MemoryInspection) {
         memory.explored_tiles
     )
     .unwrap();
+    write_personality(output, memory.personality);
+    write_friends(output, memory.acquaintances());
+}
+
+/// Width cap for the personality and friend lines, so they never widen the card
+/// past its existing worst-case lines (`NEXT EXPOSURE AT TICK <u64::MAX>` is 42
+/// characters, `SLEEP OPEN GROUND  WAKE <u64::MAX>` is 44).
+pub(super) const AGENT_CARD_LINE_WIDTH: usize = 42;
+
+/// A trait this far from the average (128) is pronounced enough to name.
+const NOTABLE_TRAIT_DEVIATION: u8 = 48;
+
+/// One line: the most pronounced trait as a one-word nature, then all four values.
+fn write_personality(output: &mut String, personality: Personality) {
+    writeln!(
+        output,
+        "{}  CUR {} CAU {} SOC {} DIL {}",
+        personality_summary(personality),
+        personality.curiosity,
+        personality.caution,
+        personality.sociability,
+        personality.diligence,
+    )
+    .unwrap();
+}
+
+/// Names the trait that deviates most from average (ties go to the earlier
+/// trait in curiosity, caution, sociability, diligence order), or `BALANCED`
+/// when no trait is notable.
+pub(super) fn personality_summary(personality: Personality) -> &'static str {
+    let traits = [
+        (personality.curiosity, "EXPLORER", "HOMEBODY"),
+        (personality.caution, "CAREFUL", "DARING"),
+        (personality.sociability, "SOCIABLE", "LONER"),
+        (personality.diligence, "DILIGENT", "EASYGOING"),
+    ];
+    let mut summary = "BALANCED";
+    let mut strongest = NOTABLE_TRAIT_DEVIATION - 1;
+    for (value, high, low) in traits {
+        let deviation = value.abs_diff(128);
+        if deviation > strongest {
+            strongest = deviation;
+            summary = if value > 128 { high } else { low };
+        }
+    }
+    summary
+}
+
+/// `FRIENDS <friends> OF <known> KNOWN`, then, when there are friends, a `TOP`
+/// line listing the most familiar ones (familiarity, then trust, then lowest id)
+/// with their trust, as many as fit in `AGENT_CARD_LINE_WIDTH`.
+fn write_friends(output: &mut String, acquaintances: &[AcquaintanceView]) {
+    let known = &acquaintances[..acquaintances.len().min(ACQUAINTANCE_SLOTS)];
+    let is_friend =
+        |acquaintance: &&AcquaintanceView| acquaintance.familiarity >= FRIEND_FAMILIARITY;
+    let friend_count = known.iter().filter(is_friend).count();
+    writeln!(output, "FRIENDS {friend_count} OF {} KNOWN", known.len()).unwrap();
+    let Some(first) = known.iter().find(is_friend) else {
+        return;
+    };
+    let mut friends = [first; ACQUAINTANCE_SLOTS];
+    for (slot, friend) in friends.iter_mut().zip(known.iter().filter(is_friend)) {
+        *slot = friend;
+    }
+    let friends = &mut friends[..friend_count];
+    friends.sort_unstable_by_key(|friend| {
+        (
+            Reverse(friend.familiarity),
+            Reverse(friend.trust),
+            friend.agent.get(),
+        )
+    });
+    let line_start = output.len();
+    output.push_str("TOP");
+    for friend in friends.iter() {
+        let before = output.len();
+        write!(output, "  #{} T{}", friend.agent.get(), friend.trust).unwrap();
+        if output.len() - line_start > AGENT_CARD_LINE_WIDTH {
+            output.truncate(before);
+            break;
+        }
+    }
+    output.push('\n');
 }
 
 fn write_need(output: &mut String, label: &str, need: sim_core::NeedLevelView) {
@@ -359,6 +442,7 @@ const fn policy_reason_label(reason: PolicyReason) -> &'static str {
         PolicyReason::PrepareTrip => "PREPARING FOR TRIP",
         PolicyReason::Sharing => "SHARING A PLACE",
         PolicyReason::Returning => "RETURNING TO WATER",
+        PolicyReason::Visiting => "VISITING A FRIEND",
     }
 }
 

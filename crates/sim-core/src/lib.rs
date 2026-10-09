@@ -23,8 +23,9 @@ pub use agent::{
     RouteEventOutcome, RouteOutcomeKind, RouteScheduled, SimTime, SpawnInvalidReason,
 };
 pub use cognition::{
+    ACQUAINTANCE_SLOTS, AcquaintanceView, DEFAULT_TRUST, FRIEND_FAMILIARITY, GestureTopic,
     LANDMARK_SLOTS, LandmarkKind, LandmarkSource, LandmarkView, MERGE_RADIUS, MentalMapView,
-    PolicyOptions, SEARCH_SPACING, SHARE_COOLDOWN_SECONDS, SIGNAL_TICKS, SignalEvent,
+    Personality, PolicyOptions, SEARCH_SPACING, SHARE_COOLDOWN_SECONDS, SIGNAL_TICKS, SignalEvent,
     VISIT_TILE_SIZE, VISITED_TILE_SLOTS,
 };
 pub use diagnostics::{EngineCapacityMetrics, EngineDiagnostics, EngineWorkMetrics};
@@ -42,11 +43,10 @@ pub use needs::{
 };
 pub use placements::{SpawnKind, SpawnObjectError, SpawnedObjectView};
 pub use policy::{
-    CURIOSITY_TARGET, EXCURSION_EVERY, ExplorationHeading, FOOD_RESERVE, HOME_RANGE,
-    PHYSICAL_POLICY_ACTION_TICKS, PHYSICAL_POLICY_IDLE_RECHECK_TICKS,
-    PHYSICAL_POLICY_MAX_BACKOFF_TICKS, PHYSICAL_POLICY_RADIUS, PHYSICAL_POLICY_ROUTE_BUDGET,
-    PREPARE_EXPOSURE, PhysicalGoal, PhysicalPolicyView, PolicyActivationError, PolicyDiagnostic,
-    PolicyDiagnosticKind, PolicyFailureReason, PolicyReason, TOP_UP_HUNGER, TOP_UP_THIRST,
+    ExplorationHeading, HOME_RANGE, PHYSICAL_POLICY_ACTION_TICKS,
+    PHYSICAL_POLICY_IDLE_RECHECK_TICKS, PHYSICAL_POLICY_MAX_BACKOFF_TICKS, PHYSICAL_POLICY_RADIUS,
+    PHYSICAL_POLICY_ROUTE_BUDGET, PhysicalGoal, PhysicalPolicyView, PolicyActivationError,
+    PolicyDiagnostic, PolicyDiagnosticKind, PolicyFailureReason, PolicyReason,
 };
 pub use resources::{
     DRINK_THIRST_RELIEF, EAT_HUNGER_RELIEF, FOOD_CONSUMPTION, GATHER_YIELD,

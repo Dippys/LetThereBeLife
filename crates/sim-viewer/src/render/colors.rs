@@ -1,4 +1,4 @@
-//! Color palette for terrain, features, spawned objects, agents, structures, remembered places, and selection previews.
+//! Color palette for terrain, features, spawned objects, agents, structures, remembered places, relationships, and selection previews.
 
 use sim_core::{
     AgentActivity, BiomeType, FeatureKind, LandmarkKind, SpawnKind, StructureState, SurfaceType,
@@ -31,6 +31,15 @@ pub(super) const fn landmark_color(kind: LandmarkKind) -> u32 {
         LandmarkKind::Wood => rgba(164, 104, 52, 235),
         LandmarkKind::Stone => rgba(176, 176, 170, 235),
         LandmarkKind::Shelter => rgba(255, 150, 40, 235),
+    }
+}
+
+/// Relationship lines and last-seen markers: faint for acquaintances, strong for friends.
+pub(super) const fn relationship_color(friend: bool) -> u32 {
+    if friend {
+        rgba(214, 150, 255, 235)
+    } else {
+        rgba(214, 206, 236, 110)
     }
 }
 

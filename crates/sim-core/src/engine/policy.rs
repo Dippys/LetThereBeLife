@@ -62,6 +62,7 @@ impl Engine {
             exploration: options.exploration || options.memory,
             memory: options.memory,
             sharing: options.memory && options.sharing,
+            social: options.memory && options.social,
         };
         Ok(())
     }

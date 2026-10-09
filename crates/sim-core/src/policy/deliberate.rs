@@ -2,7 +2,9 @@
 //! but the agent also uses its mental map: it travels to remembered places that
 //! are out of view, explores directions it has not visited, tops up water and
 //! food before wandering, never explores farther from known water than it could
-//! walk back, and points out places to agents nearby.
+//! walk back, and points out places to agents nearby. Personality tunes every
+//! threshold (an all-average personality matches the original thresholds),
+//! and sociable agents visit friends and stay with company.
 
 use super::{
     exploration::{exploration_target, varied_exploration_heading},
@@ -13,23 +15,57 @@ use super::{
 };
 use crate::{
     InventoryView, NeedKind, PhysicalNeedsView, PhysicalPerception, ResourceKind, WorldPosition,
-    cognition::{LandmarkKind, MentalMap},
+    cognition::{LandmarkKind, MentalMap, Personality},
     policy::{ExplorationHeading, PHYSICAL_POLICY_IDLE_RECHECK_TICKS, PhysicalGoal, PolicyReason},
     structures::SHELTER_WOOD_COST,
 };
 
-/// Below their thresholds, agents still drink above this thirst before wandering.
-pub const TOP_UP_THIRST: u16 = 3_000;
-/// Below its threshold, agents still eat carried food above this hunger.
-pub const TOP_UP_HUNGER: u16 = 3_500;
-/// Agents keep at least this much food in hand when food is in view.
-pub const FOOD_RESERVE: u8 = 6;
-/// Agents keep exploring until they know this many water and food places.
-pub const CURIOSITY_TARGET: usize = 2;
-/// Agents that know enough still take an excursion on one in this many idle checks.
-pub const EXCURSION_EVERY: u64 = 3;
-/// Without a known shelter, agents fetch wood for one once exposure passes this.
-pub const PREPARE_EXPOSURE: u16 = 5_000;
+/// Personality-dependent thresholds for one decision. Average traits (128)
+/// give: top up thirst at ~3,000 and hunger at ~3,500, keep 6 food, explore
+/// until 2 water and 2 food places are known, take an excursion on ~1/3 of idle
+/// checks, prepare shelter at exposure ~5,000, and roam half the walk-back range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Temperament {
+    pub(crate) top_up_thirst: u16,
+    pub(crate) top_up_hunger: u16,
+    pub(crate) food_reserve: u8,
+    pub(crate) curiosity_target: usize,
+    /// Chance out of 256 that an idle check becomes an excursion.
+    pub(crate) excursion_chance: u16,
+    pub(crate) prepare_exposure: u16,
+    /// Percent of the thirst headroom an explorer may spend getting away from water.
+    pub(crate) leash_percent: u64,
+    /// Chance out of 256 that a calm agent works (gathers, builds) instead of moving on.
+    pub(crate) work_chance: u16,
+    /// Chance out of 256 that a lonely agent goes looking for a friend.
+    pub(crate) visit_chance: u16,
+    /// Agents this sociable stay with company instead of wandering off.
+    pub(crate) stays_with_company: bool,
+}
+
+impl Temperament {
+    pub(crate) fn of(personality: Personality) -> Self {
+        let Personality {
+            curiosity,
+            caution,
+            sociability,
+            diligence,
+        } = personality;
+        Self {
+            top_up_thirst: Personality::scale(caution, 4_000, 2_000) as u16,
+            top_up_hunger: Personality::scale(caution, 4_500, 2_500) as u16,
+            food_reserve: Personality::scale(caution, 3, 9) as u8,
+            curiosity_target: Personality::scale(curiosity, 1, 3) as usize,
+            excursion_chance: Personality::scale(curiosity, 30, 140) as u16,
+            prepare_exposure: Personality::scale(caution, 6_000, 4_000) as u16,
+            leash_percent: Personality::scale(caution, 65, 35) as u64,
+            work_chance: Personality::scale(diligence, 0, 512).min(256) as u16,
+            visit_chance: Personality::scale(sociability, 0, 200) as u16,
+            stays_with_company: sociability >= 160,
+        }
+    }
+}
+
 /// A remembered shelter this close counts as home: tired agents walk back to it,
 /// and agents don't build another one.
 pub const HOME_RANGE: u64 = 200;
@@ -68,6 +104,11 @@ pub(crate) struct MindInput<'a> {
     pub(crate) share_target: Option<WorldPosition>,
     /// Next spiral-search corner while the agent knows no water.
     pub(crate) search_target: Option<WorldPosition>,
+    pub(crate) personality: Personality,
+    /// Someone awake is in view.
+    pub(crate) company: bool,
+    /// Where a friend was last seen, offered only when the agent is alone.
+    pub(crate) friend_target: Option<WorldPosition>,
 }
 
 pub(crate) fn deliberate(
@@ -82,6 +123,7 @@ pub(crate) fn deliberate(
         needs,
         perception,
         mind: &mind,
+        temperament: Temperament::of(mind.personality),
     };
     let water_here = nearest_water_access(origin, perception);
     let food_here = nearest_resource_access(origin, perception, |kind| {
@@ -137,6 +179,7 @@ pub(crate) fn deliberate(
 }
 
 struct Planner<'a> {
+    temperament: Temperament,
     origin: WorldPosition,
     needs: PhysicalNeedsView,
     perception: &'a PhysicalPerception,
@@ -248,7 +291,8 @@ impl Planner<'_> {
         food_here: Option<WorldPosition>,
     ) -> Deliberation {
         let origin = self.origin;
-        if self.needs.thirst.value >= TOP_UP_THIRST {
+        let temperament = self.temperament;
+        if self.needs.thirst.value >= temperament.top_up_thirst {
             if let Some(target) = water_here {
                 return Deliberation::act(
                     PhysicalGoal::SeekWater,
@@ -261,10 +305,10 @@ impl Planner<'_> {
                 return travel.with_reason(PolicyReason::PrepareTrip);
             }
         }
-        if self.needs.hunger.value >= TOP_UP_HUNGER && inventory.food > 0 {
+        if self.needs.hunger.value >= temperament.top_up_hunger && inventory.food > 0 {
             return Deliberation::act(PhysicalGoal::Eat, origin, PolicyReason::PrepareTrip);
         }
-        if inventory.food < FOOD_RESERVE
+        if inventory.food < temperament.food_reserve
             && let Some(target) = food_here
         {
             return Deliberation::act(PhysicalGoal::SeekFood, target, PolicyReason::PrepareTrip);
@@ -272,8 +316,11 @@ impl Planner<'_> {
         if let Some(place) = self.mind.share_target {
             return Deliberation::act(PhysicalGoal::Signal, place, PolicyReason::Sharing);
         }
+        let works = self.roll(1) < temperament.work_chance;
         let shelter_in_view = nearest_shelter_access(origin, self.perception).is_some();
-        if !shelter_in_view && self.home_is_near() {
+        if !works {
+            // Not in the mood for work: skip to friends, needed exploration, or rest.
+        } else if !shelter_in_view && self.home_is_near() {
             // Already has a home nearby: gather what's around instead of building another.
             if let Some(target) =
                 nearest_resource_access(origin, self.perception, |kind| inventory.can_add(kind))
@@ -297,26 +344,49 @@ impl Planner<'_> {
                     heading: None,
                 };
             }
-            if self.needs.exposure.value >= PREPARE_EXPOSURE
+            if self.needs.exposure.value >= temperament.prepare_exposure
                 && self.mind.map.seen_count(LandmarkKind::Shelter) == 0
                 && let Some(wood) = self.gather_known_wood(inventory)
             {
                 return wood.with_reason(PolicyReason::PrepareTrip);
             }
         }
+        if let Some(friend) = self.mind.friend_target
+            && self.roll(2) < temperament.visit_chance
+            && let Some((waypoint, heading)) = self.waypoint_toward(friend)
+        {
+            return Deliberation {
+                selection: PolicySelection {
+                    goal: PhysicalGoal::Explore,
+                    target: Some(waypoint),
+                    reason: PolicyReason::Visiting,
+                },
+                heading: Some(heading),
+            };
+        }
         let map = self.mind.map;
-        let curious = map.seen_count(LandmarkKind::Water) < CURIOSITY_TARGET
-            || map.seen_count(LandmarkKind::Food) < CURIOSITY_TARGET;
-        let excursion = (self.needs.at.ticks() / PHYSICAL_POLICY_IDLE_RECHECK_TICKS
-            + u64::from(self.needs.agent.get()))
-            % EXCURSION_EVERY
-            == 0;
+        let curious = map.seen_count(LandmarkKind::Water) < temperament.curiosity_target
+            || map.seen_count(LandmarkKind::Food) < temperament.curiosity_target;
+        // Lounging agents (no mood for work) don't take casual excursions either.
+        let excursion = works
+            && self.roll(3) < temperament.excursion_chance
+            && !(self.mind.company && temperament.stays_with_company);
         if (curious || excursion)
             && let Some(explore) = self.explore(PolicyReason::NoUrgentNeed, true)
         {
             return explore;
         }
         Deliberation::wait(origin, PolicyReason::NoUrgentNeed)
+    }
+
+    /// A deterministic 0–255 roll for this agent and idle-check window.
+    fn roll(&self, salt: u64) -> u16 {
+        let mut key = (u64::from(self.needs.agent.get()) << 32)
+            ^ (self.needs.at.ticks() / PHYSICAL_POLICY_IDLE_RECHECK_TICKS)
+            ^ salt.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+        key = (key ^ (key >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        key = (key ^ (key >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        ((key ^ (key >> 31)) & 0xff) as u16
     }
 
     /// Head for the best remembered place of `kind`, one visible waypoint at a time.
@@ -395,8 +465,8 @@ impl Planner<'_> {
         let (target, heading) = exploration_target(origin, self.perception, preferred)?;
         if leashed {
             let thirst = self.needs.thirst;
-            let leash =
-                (u64::from(thirst.threshold.saturating_sub(thirst.value)) / 2).max(MIN_LEASH);
+            let headroom = u64::from(thirst.threshold.saturating_sub(thirst.value));
+            let leash = (headroom * self.temperament.leash_percent / 100).max(MIN_LEASH);
             let from_target = map.nearest_seen_distance(LandmarkKind::Water, target);
             let from_here = map.nearest_seen_distance(LandmarkKind::Water, origin);
             if let (Some(from_target), Some(from_here)) = (from_target, from_here)

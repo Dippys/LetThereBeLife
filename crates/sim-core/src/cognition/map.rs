@@ -21,8 +21,6 @@ pub const MERGE_RADIUS: u64 = 24;
 const NOVELTY_LOOKAHEAD: i64 = 48;
 /// Confidence of a first-hand observation.
 const SEEN_CONFIDENCE: u8 = 255;
-/// Confidence of a place inferred from someone else's gesture.
-pub(crate) const TOLD_CONFIDENCE: u8 = 128;
 /// Confidence lost each time a searched hint turns up nothing.
 const FAILED_PROBE_PENALTY: u8 = 40;
 /// Hints below this confidence, or searched this many times, are forgotten.
@@ -50,7 +48,8 @@ pub(crate) struct Landmark {
     /// Search radius in 4-cell units; zero for first-hand observations.
     uncertainty: u8,
     probes: u8,
-    _reserved: u8,
+    /// For hints: acquaintance slot + 1 of whoever pointed it out (0 = unknown).
+    teller: u8,
 }
 
 impl Landmark {
@@ -189,14 +188,17 @@ fn perceived_nearest(
 impl MentalMap {
     /// Updates beliefs from one perception: forgets places that turned out empty,
     /// remembers the nearest visible place of each kind, and marks the tile explored.
+    /// `on_hint(teller_slot, confirmed)` reports hints that were confirmed by
+    /// seeing the place or abandoned after failed searches.
     pub(crate) fn observe(
         &mut self,
         agent: u32,
         origin: WorldPosition,
         perception: &PhysicalPerception,
         now: u32,
+        on_hint: &mut impl FnMut(u8, bool),
     ) {
-        self.record_visit(origin);
+        let _ = self.record_visit(origin);
         let nearest = perceived_nearest(origin, perception);
         for slot in 0..LANDMARK_SLOTS {
             let landmark = self.landmarks[slot];
@@ -219,18 +221,27 @@ impl MentalMap {
                 slot_ref.probes = slot_ref.probes.saturating_add(1);
                 slot_ref.confidence = slot_ref.confidence.saturating_sub(FAILED_PROBE_PENALTY);
                 if slot_ref.confidence < FORGET_CONFIDENCE || slot_ref.probes >= MAX_PROBES {
+                    if slot_ref.teller != 0 {
+                        on_hint(slot_ref.teller - 1, false);
+                    }
                     *slot_ref = Landmark::default();
                 }
             }
         }
         for kind in LandmarkKind::ALL {
             if let Some(position) = nearest[kind as usize] {
-                self.remember_seen(kind, position, now);
+                self.remember_seen(kind, position, now, on_hint);
             }
         }
     }
 
-    fn remember_seen(&mut self, kind: LandmarkKind, position: WorldPosition, now: u32) {
+    fn remember_seen(
+        &mut self,
+        kind: LandmarkKind,
+        position: WorldPosition,
+        now: u32,
+        on_hint: &mut impl FnMut(u8, bool),
+    ) {
         let Some((x, y)) = compact(position) else {
             return;
         };
@@ -250,6 +261,9 @@ impl MentalMap {
             if !landmark.is_first_hand()
                 && chebyshev(landmark.position(), position) <= landmark.radius() + MERGE_RADIUS
             {
+                if landmark.teller != 0 {
+                    on_hint(landmark.teller - 1, true);
+                }
                 *landmark = Landmark::default();
             }
         }
@@ -262,19 +276,22 @@ impl MentalMap {
                 confidence: SEEN_CONFIDENCE,
                 uncertainty: 0,
                 probes: 0,
-                _reserved: 0,
+                teller: 0,
             };
         }
     }
 
-    /// Stores a place inferred from another agent's gesture. Returns whether the
-    /// map changed. First-hand memories are never displaced by hearsay.
+    /// Stores a place inferred from another agent's gesture, with a confidence
+    /// that reflects trust in the teller. Returns whether the map changed.
+    /// First-hand memories are never displaced by hearsay.
     pub(crate) fn remember_told(
         &mut self,
         kind: LandmarkKind,
         estimate: WorldPosition,
         uncertainty: u8,
         now: u32,
+        teller_slot: Option<u8>,
+        confidence: u8,
     ) -> bool {
         let Some((x, y)) = compact(estimate) else {
             return false;
@@ -303,12 +320,21 @@ impl MentalMap {
             x,
             y,
             seen: now,
-            confidence: TOLD_CONFIDENCE,
+            confidence: confidence.max(FORGET_CONFIDENCE),
             uncertainty: uncertainty.max(1),
             probes: 0,
-            _reserved: 0,
+            teller: teller_slot.map_or(0, |slot| slot + 1),
         };
         true
+    }
+
+    /// Detaches hints from an acquaintance slot that now holds someone else.
+    pub(crate) fn forget_teller(&mut self, slot: u8) {
+        for landmark in &mut self.landmarks {
+            if landmark.teller == slot + 1 {
+                landmark.teller = 0;
+            }
+        }
     }
 
     /// An empty slot, else the weakest hint, else (only for first-hand
@@ -406,8 +432,10 @@ impl MentalMap {
                     && landmark.is_first_hand()
                     && !contains(view, landmark.position())
             })
+            .map(|slot| self.landmarks[slot].position())
+            .chain(self.recent_explored_markers(view))
             .enumerate()
-            .map(|(rank, slot)| (self.landmarks[slot].position(), rank as u8));
+            .map(|(rank, place)| (place, rank as u8));
         let first = candidates.next()?;
         if first.1 >= self.share_cursor {
             return Some(first);
@@ -419,6 +447,24 @@ impl MentalMap {
         )
     }
 
+    /// Centers of the three most recently explored tiles outside `view`: what an
+    /// agent can sweep a hand over to say "I've been over there".
+    fn recent_explored_markers(&self, view: WorldRect) -> impl Iterator<Item = WorldPosition> + '_ {
+        let len = usize::from(self.visited_len);
+        let newest = usize::from(self.visited_cursor) + VISITED_TILE_SLOTS;
+        (1..=len)
+            .map(move |back| self.visited[(newest - back) % VISITED_TILE_SLOTS])
+            .map(tile_center)
+            .filter(move |center| !contains(view, *center))
+            .take(3)
+    }
+
+    /// Whether `position` is the center of an explored tile (an "explored" gesture target).
+    pub(crate) fn is_explored_marker(&self, position: WorldPosition) -> bool {
+        let tile = tile_of(position);
+        tile_center(tile) == position && self.visited(tile)
+    }
+
     pub(crate) fn share_ready(&self, now: u32, cooldown: u32) -> bool {
         self.last_share == u32::MAX || now.saturating_sub(self.last_share) >= cooldown
     }
@@ -428,16 +474,18 @@ impl MentalMap {
         self.share_cursor = rank.wrapping_add(1);
     }
 
-    fn record_visit(&mut self, position: WorldPosition) {
+    /// Marks the tile containing `position` explored. Returns whether it was new.
+    pub(crate) fn record_visit(&mut self, position: WorldPosition) -> bool {
         let tile = tile_of(position);
         let len = usize::from(self.visited_len);
         if self.visited[..len].contains(&tile) {
-            return;
+            return false;
         }
         let cursor = usize::from(self.visited_cursor);
         self.visited[cursor] = tile;
         self.visited_cursor = ((cursor + 1) % VISITED_TILE_SLOTS) as u8;
         self.visited_len = (len + 1).min(VISITED_TILE_SLOTS) as u8;
+        true
     }
 
     fn visited(&self, tile: (i16, i16)) -> bool {
@@ -533,6 +581,13 @@ fn spiral_corner(anchor: (i16, i16), step: u16) -> WorldPosition {
         }
     }
     WorldPosition { x, y }
+}
+
+fn tile_center(tile: (i16, i16)) -> WorldPosition {
+    WorldPosition {
+        x: i64::from(tile.0) * VISIT_TILE_SIZE + VISIT_TILE_SIZE / 2,
+        y: i64::from(tile.1) * VISIT_TILE_SIZE + VISIT_TILE_SIZE / 2,
+    }
 }
 
 fn compact(position: WorldPosition) -> Option<(i16, i16)> {

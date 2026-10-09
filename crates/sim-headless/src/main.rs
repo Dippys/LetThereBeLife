@@ -32,11 +32,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     Some("memory") => sim_core::PolicyOptions {
                         sharing: false,
+                        social: false,
+                        ..sim_core::PolicyOptions::full()
+                    },
+                    Some("sharing") => sim_core::PolicyOptions {
+                        social: false,
                         ..sim_core::PolicyOptions::full()
                     },
                     Some("full") => sim_core::PolicyOptions::full(),
                     _ => {
-                        eprintln!("--mind requires legacy, memory, or full");
+                        eprintln!("--mind requires legacy, memory, sharing, or full");
                         std::process::exit(2);
                     }
                 }
@@ -48,7 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--config" => config_path = parse_next(&mut args, "--config"),
             "--help" | "-h" => {
                 println!(
-                    "Usage: sim-headless [--canonical | --study [--near-water | --groups] [--mind legacy|memory|full] [--verbose] [--trace AGENT]] [--config PATH] [--ticks NUMBER] [--seed NUMBER] [--agents NUMBER] [--batch-size NUMBER]"
+                    "Usage: sim-headless [--canonical | --study [--near-water | --groups] [--mind legacy|memory|sharing|full] [--verbose] [--trace AGENT]] [--config PATH] [--ticks NUMBER] [--seed NUMBER] [--agents NUMBER] [--batch-size NUMBER]"
                 );
                 return Ok(());
             }

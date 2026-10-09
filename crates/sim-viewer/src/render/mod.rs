@@ -13,10 +13,10 @@ mod tests;
 use std::{borrow::Cow, sync::Arc, time::Instant};
 
 use sim_core::{
-    AgentView, ChunkInspection, DeathRecord, Engine, HealthView, InventoryView, LANDMARK_SLOTS,
-    LandmarkKind, LandmarkSource, LandmarkView, MentalMapView, PhysicalNeedsView,
-    PhysicalPolicyView, SimulationSnapshot, SleepView, SpawnKind, SpawnedObjectView, World,
-    WorldOverview, WorldPosition, WorldRect,
+    ACQUAINTANCE_SLOTS, AcquaintanceView, AgentId, AgentView, ChunkInspection, DeathRecord, Engine,
+    HealthView, InventoryView, LANDMARK_SLOTS, LandmarkKind, LandmarkSource, LandmarkView,
+    MentalMapView, Personality, PhysicalNeedsView, PhysicalPolicyView, SimulationSnapshot,
+    SleepView, SpawnKind, SpawnedObjectView, World, WorldOverview, WorldPosition, WorldRect,
 };
 use winit::window::Window;
 
@@ -25,8 +25,8 @@ use colors::{rgba, selection_color};
 use gpu::{CameraBinding, CameraUniform, Instance, InstanceBuffer, StaticInstanceBuffers};
 use hud::{write_agent_text, write_hud_text};
 use instances::{
-    build_agent_instances, build_memory_marker_instances, build_spawned_object_instances,
-    build_structure_instances, chunk_outline, world_border,
+    build_agent_instances, build_memory_marker_instances, build_relationship_marker_instances,
+    build_spawned_object_instances, build_structure_instances, chunk_outline, world_border,
 };
 use overlay::build_screen_overlay;
 use summary::{
@@ -68,12 +68,16 @@ pub struct AgentInspection {
     pub memory: Option<MemoryInspection>,
 }
 
-/// A bounded, copyable snapshot of one agent's mental map for the hover card and map markers.
+/// A bounded, copyable snapshot of one agent's mind (places, personality, and
+/// acquaintances) for the hover card and map markers.
 #[derive(Debug, Clone, Copy)]
 pub struct MemoryInspection {
     places: [LandmarkView; LANDMARK_SLOTS],
     len: u8,
     pub explored_tiles: usize,
+    pub personality: Personality,
+    acquaintances: [AcquaintanceView; ACQUAINTANCE_SLOTS],
+    acquaintance_len: u8,
 }
 
 impl MemoryInspection {
@@ -86,18 +90,35 @@ impl MemoryInspection {
             search_radius: 0,
             seen_second: 0,
         };
+        const STRANGER: AcquaintanceView = AcquaintanceView {
+            agent: AgentId::new(0),
+            familiarity: 0,
+            trust: 0,
+            last_seen_position: None,
+            last_seen_second: 0,
+        };
         let mut places = [EMPTY; LANDMARK_SLOTS];
         let len = view.landmarks.len().min(LANDMARK_SLOTS);
         places[..len].copy_from_slice(&view.landmarks[..len]);
+        let mut acquaintances = [STRANGER; ACQUAINTANCE_SLOTS];
+        let acquaintance_len = view.acquaintances.len().min(ACQUAINTANCE_SLOTS);
+        acquaintances[..acquaintance_len].copy_from_slice(&view.acquaintances[..acquaintance_len]);
         Self {
             places,
             len: len as u8,
             explored_tiles: view.explored_tiles,
+            personality: view.personality,
+            acquaintances,
+            acquaintance_len: acquaintance_len as u8,
         }
     }
 
     pub fn places(&self) -> &[LandmarkView] {
         &self.places[..usize::from(self.len)]
+    }
+
+    pub fn acquaintances(&self) -> &[AcquaintanceView] {
+        &self.acquaintances[..usize::from(self.acquaintance_len)]
     }
 }
 
@@ -135,6 +156,8 @@ pub struct Renderer {
     agent_instances: Vec<Instance>,
     memory_markers: InstanceBuffer,
     memory_marker_instances: Vec<Instance>,
+    relationship_markers: InstanceBuffer,
+    relationship_marker_instances: Vec<Instance>,
     world_overlay: InstanceBuffer,
     world_overlay_instances: Vec<Instance>,
     screen_overlay: InstanceBuffer,
@@ -278,6 +301,12 @@ impl Renderer {
                 MAX_MEMORY_MARKER_INSTANCES,
             ),
             memory_marker_instances: Vec::with_capacity(MAX_MEMORY_MARKER_INSTANCES),
+            relationship_markers: InstanceBuffer::dynamic(
+                &device,
+                "relationship marker instances",
+                MAX_RELATIONSHIP_MARKER_INSTANCES,
+            ),
+            relationship_marker_instances: Vec::with_capacity(MAX_RELATIONSHIP_MARKER_INSTANCES),
             world_overlay: InstanceBuffer::dynamic(
                 &device,
                 "world overlay",
@@ -444,18 +473,32 @@ impl Renderer {
         );
         self.spawned_objects
             .write(&self.queue, &self.spawned_object_instances);
+        let hovered_memory = state
+            .hovered_agent
+            .as_ref()
+            .and_then(|agent| Some((agent.view.position, agent.memory.as_ref()?)));
         build_memory_marker_instances(
-            state
-                .hovered_agent
-                .as_ref()
-                .and_then(|agent| agent.memory.as_ref())
-                .map_or(&[], MemoryInspection::places),
+            hovered_memory.map_or(&[], |(_, memory)| memory.places()),
             view.scale() as f32,
             &mut self.memory_marker_instances,
         );
         debug_assert!(self.memory_marker_instances.len() <= MAX_MEMORY_MARKER_INSTANCES);
         self.memory_markers
             .write(&self.queue, &self.memory_marker_instances);
+        match hovered_memory {
+            Some((origin, memory)) => build_relationship_marker_instances(
+                origin,
+                memory.acquaintances(),
+                view.scale() as f32,
+                &mut self.relationship_marker_instances,
+            ),
+            None => self.relationship_marker_instances.clear(),
+        }
+        debug_assert!(
+            self.relationship_marker_instances.len() <= MAX_RELATIONSHIP_MARKER_INSTANCES
+        );
+        self.relationship_markers
+            .write(&self.queue, &self.relationship_marker_instances);
 
         let world_overlay = &mut self.world_overlay_instances;
         world_overlay.clear();
@@ -535,6 +578,7 @@ impl Renderer {
             self.spawned_objects.draw(&mut pass);
             self.structures.draw(&mut pass);
             self.memory_markers.draw(&mut pass);
+            self.relationship_markers.draw(&mut pass);
             self.agents.draw(&mut pass);
             self.world_overlay.draw(&mut pass);
             pass.set_bind_group(0, &self.screen_camera.bind_group, &[]);
@@ -550,13 +594,20 @@ const MAX_INSTANCES_PER_BUFFER: usize = 1_000_000;
 const MIN_TERRAIN_SAMPLE_PIXELS: f32 = 2.0;
 const CACHE_MARGIN_PIXELS: f32 = 128.0;
 const WORLD_OVERLAY_CAPACITY: usize = 10;
-const SCREEN_OVERLAY_CAPACITY: usize = 9_216;
+/// The worst-case composed card measures 9_195 instances; the personality and
+/// friend lines add 885 of them, so the former 9_216 kept only 21 spare. 10_240
+/// restores roughly the ~900 instances of slack the budget had before them.
+const SCREEN_OVERLAY_CAPACITY: usize = 10_240;
 const HUD_TEXT_CAPACITY: usize = 640;
 const AGENT_TEXT_CAPACITY: usize = 768;
 const MAX_AGENT_INSTANCES: usize = 4_096;
 const MAX_STRUCTURE_INSTANCES: usize = 4_096;
 const MAX_SPAWNED_OBJECT_INSTANCES: usize = 16_384;
 const MAX_MEMORY_MARKER_INSTANCES: usize = LANDMARK_SLOTS * 4;
+/// Dots drawn along one acquaintance line, at most.
+const MAX_RELATIONSHIP_DOTS: usize = 16;
+/// Each acquaintance draws one end marker plus its dotted line.
+const MAX_RELATIONSHIP_MARKER_INSTANCES: usize = ACQUAINTANCE_SLOTS * (MAX_RELATIONSHIP_DOTS + 1);
 const MIN_DYNAMIC_INSTANCE_PIXELS: f32 = 1.25;
 const MIN_CHUNK_OUTLINE_PIXELS: f32 = 4.0;
 const MAX_CHUNK_OUTLINE_WORLD_WIDTH: f32 = 8.0;

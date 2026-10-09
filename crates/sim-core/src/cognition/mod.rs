@@ -1,14 +1,19 @@
-//! Agent cognition: private mental maps (remembered places, explored tiles) and
-//! pointing gestures that let agents pass place knowledge to each other through
-//! observable behavior. Beliefs live here; physical truth stays in the world,
-//! population, and resource stores.
+//! Agent cognition: private mental maps (remembered places, explored tiles),
+//! sparse relationships, personality, and pointing gestures that let agents pass
+//! knowledge to each other through observable behavior. Beliefs live here;
+//! physical truth stays in the world, population, and resource stores.
 
 mod gesture;
 mod map;
+mod personality;
+mod social;
 
 pub(crate) use gesture::{interpret, point};
 pub(crate) use map::MentalMap;
 pub use map::{LANDMARK_SLOTS, MERGE_RADIUS, SEARCH_SPACING, VISIT_TILE_SIZE, VISITED_TILE_SLOTS};
+pub use personality::Personality;
+pub(crate) use social::SocialMemory;
+pub use social::{ACQUAINTANCE_SLOTS, AcquaintanceView, DEFAULT_TRUST, FRIEND_FAMILIARITY};
 
 use crate::{AgentId, SimTime, WorldPosition};
 
@@ -17,8 +22,15 @@ pub(crate) fn belief_seconds(time: SimTime) -> u32 {
     u32::try_from(time.ticks() / 60).unwrap_or(u32::MAX - 1)
 }
 
-/// Minimum simulated seconds between two gestures by the same agent.
+/// Simulated seconds between two gestures by an agent of average sociability.
+/// The actual cooldown runs from 110 s (reserved) down to 10 s (chatty).
 pub const SHARE_COOLDOWN_SECONDS: u32 = 60;
+
+/// How sure a watcher is of a hint, given how much it trusts the teller.
+/// Strangers start at `DEFAULT_TRUST`, which gives 144 (a first-hand sighting is 255).
+pub(crate) const fn told_confidence(trust: u8) -> u8 {
+    48 + (trust as u16 * 3 / 4) as u8
+}
 /// How long a pointing gesture takes, in ticks.
 pub const SIGNAL_TICKS: u64 = 120;
 
@@ -65,12 +77,23 @@ pub struct LandmarkView {
     pub seen_second: u32,
 }
 
-/// A read-only copy of an agent's mental map.
+/// A read-only copy of what an agent knows and who it is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MentalMapView {
     pub agent: AgentId,
+    pub personality: Personality,
     pub landmarks: Vec<LandmarkView>,
     pub explored_tiles: usize,
+    pub acquaintances: Vec<AcquaintanceView>,
+}
+
+/// What a gesture was about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GestureTopic {
+    /// "There is water / food / ... over there."
+    Place(LandmarkKind),
+    /// "I've already been over there" (watchers treat that ground as explored).
+    Explored,
 }
 
 /// One pointing gesture observed during the latest tick.
@@ -78,7 +101,7 @@ pub struct MentalMapView {
 pub struct SignalEvent {
     pub sender: AgentId,
     pub at: SimTime,
-    pub kind: LandmarkKind,
+    pub topic: GestureTopic,
     /// Where watchers concluded the place is (what they can know, not the truth).
     pub inferred_position: WorldPosition,
     /// Watchers whose mental map changed.
@@ -97,36 +120,63 @@ pub struct PolicyOptions {
     pub memory: bool,
     /// Point out remembered places to nearby agents (requires `memory`).
     pub sharing: bool,
+    /// Individual personalities, relationships, visiting friends, and trust-
+    /// weighted hints (requires `memory`). Without it everyone is average.
+    pub social: bool,
 }
 
 impl PolicyOptions {
-    /// Memory, exploration, and sharing: the full current agent mind.
+    /// Every cognitive feature: the full current agent mind.
     pub const fn full() -> Self {
         Self {
             exploration: true,
             memory: true,
             sharing: true,
+            social: true,
         }
     }
 }
 
-/// Mental maps for every agent, indexed by `AgentId`, grown on demand.
+/// Everything one agent privately knows: places and people.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Mind {
+    pub(crate) map: MentalMap,
+    pub(crate) social: SocialMemory,
+}
+
+impl Mind {
+    /// Registers `other` as seen; keeps hint sources consistent if someone was forgotten.
+    pub(crate) fn notice(
+        &mut self,
+        other: AgentId,
+        position: WorldPosition,
+        now: u32,
+    ) -> Option<u8> {
+        let noticed = self.social.notice(other, position, now)?;
+        if noticed.evicted {
+            self.map.forget_teller(noticed.slot);
+        }
+        Some(noticed.slot)
+    }
+}
+
+/// Minds for every agent, indexed by `AgentId`, grown on demand.
 #[derive(Debug, Default)]
 pub(crate) struct Minds {
-    maps: Vec<MentalMap>,
+    minds: Vec<Mind>,
 }
 
 impl Minds {
-    pub(crate) fn get(&self, agent: AgentId) -> Option<&MentalMap> {
-        self.maps.get(agent.get() as usize)
+    pub(crate) fn get(&self, agent: AgentId) -> Option<&Mind> {
+        self.minds.get(agent.get() as usize)
     }
 
-    pub(crate) fn get_mut(&mut self, agent: AgentId) -> &mut MentalMap {
+    pub(crate) fn get_mut(&mut self, agent: AgentId) -> &mut Mind {
         let index = agent.get() as usize;
-        if index >= self.maps.len() {
-            self.maps.resize(index + 1, MentalMap::default());
+        if index >= self.minds.len() {
+            self.minds.resize(index + 1, Mind::default());
         }
-        &mut self.maps[index]
+        &mut self.minds[index]
     }
 }
 

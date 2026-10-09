@@ -2,17 +2,19 @@
 
 use bytemuck::Zeroable;
 use sim_core::{
-    AgentActivity, AgentView, DeathCause, DeathRecord, ExplorationHeading, HealthStatus,
-    HealthView, InventoryView, LANDMARK_SLOTS, LandmarkKind, LandmarkSource, LandmarkView,
-    MentalMapView, NeedKind, PhysicalGoal, PhysicalNeedsView, PhysicalPolicyView, PolicyReason,
-    SleepQuality, SleepView, SpawnKind, VISITED_TILE_SLOTS, WORLD_GENERATION_BOUNDS, World,
-    WorldConfig, WorldPosition,
+    ACQUAINTANCE_SLOTS, AcquaintanceView, AgentActivity, AgentView, DEFAULT_TRUST, DeathCause,
+    DeathRecord, ExplorationHeading, HealthStatus, HealthView, InventoryView, LANDMARK_SLOTS,
+    LandmarkKind, LandmarkSource, LandmarkView, MentalMapView, NeedKind, Personality, PhysicalGoal,
+    PhysicalNeedsView, PhysicalPolicyView, PolicyReason, SleepQuality, SleepView, SpawnKind,
+    VISITED_TILE_SLOTS, WORLD_GENERATION_BOUNDS, World, WorldConfig, WorldPosition,
 };
 
 use super::test_render_state;
 use crate::render::colors::{rgba, selection_color};
 use crate::render::gpu::{Instance, static_instance_chunks};
-use crate::render::hud::{write_agent_text, write_hud_text};
+use crate::render::hud::{
+    AGENT_CARD_LINE_WIDTH, personality_summary, write_agent_text, write_hud_text,
+};
 use crate::render::instances::{chunk_outline, world_border};
 use crate::render::overlay::build_screen_overlay;
 use crate::render::{
@@ -30,6 +32,126 @@ fn landmark(kind: LandmarkKind, source: LandmarkSource, x: i64) -> LandmarkView 
         seen_second: 10,
     }
 }
+
+fn acquaintance(id: u32, familiarity: u8, trust: u8) -> AcquaintanceView {
+    AcquaintanceView {
+        agent: sim_core::AgentId::new(id),
+        familiarity,
+        trust,
+        last_seen_position: Some(WorldPosition { x: 3, y: 4 }),
+        last_seen_second: 20,
+    }
+}
+
+fn mind(personality: Personality, acquaintances: Vec<AcquaintanceView>) -> MemoryInspection {
+    MemoryInspection::from_view(&MentalMapView {
+        agent: sim_core::AgentId::new(1),
+        personality,
+        landmarks: Vec::new(),
+        explored_tiles: 0,
+        acquaintances,
+    })
+}
+
+fn card_lines(memory: MemoryInspection) -> Vec<String> {
+    let inspection = AgentInspection {
+        view: AgentView {
+            id: sim_core::AgentId::new(1),
+            position: WorldPosition { x: 0, y: 0 },
+            activity: AgentActivity::Idle,
+        },
+        needs: None,
+        inventory: None,
+        health: None,
+        policy: None,
+        sleep: None,
+        death: None,
+        memory: Some(memory),
+    };
+    let mut text = String::new();
+    write_agent_text(&mut text, Some(inspection));
+    text.lines()
+        .skip_while(|line| !line.starts_with("SHELTER "))
+        .skip(1)
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn personality_summary_names_the_most_pronounced_trait_deterministically() {
+    let traits = |curiosity, caution, sociability, diligence| Personality {
+        curiosity,
+        caution,
+        sociability,
+        diligence,
+    };
+    assert_eq!(personality_summary(Personality::AVERAGE), "BALANCED");
+    assert_eq!(personality_summary(traits(175, 81, 128, 128)), "BALANCED");
+    assert_eq!(personality_summary(traits(220, 128, 128, 128)), "EXPLORER");
+    assert_eq!(personality_summary(traits(20, 128, 128, 128)), "HOMEBODY");
+    assert_eq!(personality_summary(traits(128, 200, 128, 128)), "CAREFUL");
+    assert_eq!(personality_summary(traits(128, 30, 128, 128)), "DARING");
+    assert_eq!(personality_summary(traits(150, 128, 240, 128)), "SOCIABLE");
+    assert_eq!(personality_summary(traits(150, 128, 10, 200)), "LONER");
+    assert_eq!(personality_summary(traits(128, 128, 128, 250)), "DILIGENT");
+    assert_eq!(personality_summary(traits(128, 128, 128, 0)), "EASYGOING");
+    // Equal deviations go to the earlier trait in field order.
+    assert_eq!(personality_summary(traits(200, 56, 200, 56)), "EXPLORER");
+    assert_eq!(personality_summary(traits(128, 56, 200, 128)), "DARING");
+}
+
+#[test]
+fn agent_card_lists_personality_and_most_familiar_friends() {
+    let personality = Personality {
+        curiosity: 183,
+        caution: 63,
+        sociability: 227,
+        diligence: 138,
+    };
+    let lines = card_lines(mind(
+        personality,
+        vec![
+            acquaintance(9, FRIEND - 1, 250),
+            acquaintance(12, 40, 160),
+            acquaintance(7, 40, DEFAULT_TRUST),
+            acquaintance(3, FRIEND, DEFAULT_TRUST),
+            acquaintance(30, 60, 90),
+        ],
+    ));
+    assert_eq!(
+        lines,
+        [
+            "SOCIABLE  CUR 183 CAU 63 SOC 227 DIL 138",
+            "FRIENDS 4 OF 5 KNOWN",
+            "TOP  #30 T90  #12 T160  #7 T128  #3 T128",
+        ]
+    );
+
+    let lines = card_lines(mind(Personality::AVERAGE, Vec::new()));
+    assert_eq!(
+        lines,
+        [
+            "BALANCED  CUR 128 CAU 128 SOC 128 DIL 128",
+            "FRIENDS 0 OF 0 KNOWN"
+        ]
+    );
+    let lines = card_lines(mind(
+        Personality::AVERAGE,
+        vec![acquaintance(5, FRIEND - 1, DEFAULT_TRUST)],
+    ));
+    assert_eq!(lines[1..], ["FRIENDS 0 OF 1 KNOWN"]);
+
+    // Long ids are dropped from the TOP line rather than widening the card.
+    let lines = card_lines(mind(
+        Personality::AVERAGE,
+        vec![acquaintance(u32::MAX, u8::MAX, u8::MAX); ACQUAINTANCE_SLOTS],
+    ));
+    assert_eq!(lines[1], "FRIENDS 6 OF 6 KNOWN");
+    assert_eq!(lines[2], "TOP  #4294967295 T255  #4294967295 T255");
+    assert!(lines.iter().all(|line| line.len() <= AGENT_CARD_LINE_WIDTH));
+}
+
+const FRIEND: u8 = sim_core::FRIEND_FAMILIARITY;
 
 #[test]
 fn static_buffers_partition_at_the_device_safe_limit() {
@@ -216,6 +338,8 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
         sleep: None,
         death: None,
         memory: Some(MemoryInspection::from_view(&MentalMapView {
+            personality: Personality::AVERAGE,
+            acquaintances: Vec::new(),
             agent: view.id,
             landmarks: vec![
                 landmark(LandmarkKind::Water, LandmarkSource::Seen, 0),
@@ -239,6 +363,8 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
     assert!(text.contains("SLEEP NONE"));
     assert!(text.contains("MEMORY WATER 2  FOOD 1  WOOD 0  STONE 0\n"));
     assert!(text.contains("SHELTER 1  HINTS 2  EXPLORED 37 TILES\n"));
+    assert!(text.contains("BALANCED  CUR 128 CAU 128 SOC 128 DIL 128\n"));
+    assert!(text.contains("FRIENDS 0 OF 0 KNOWN\n"));
     assert!(text.len() <= AGENT_TEXT_CAPACITY);
 
     let mut mindless = inspection;
@@ -325,6 +451,20 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
             position: budget_view.position,
         }),
         memory: Some(MemoryInspection::from_view(&MentalMapView {
+            // Glyph instances are per lit pixel run, so the worst case maximizes
+            // runs, not characters: '0' has the most runs of any digit, and four
+            // 3-digit traits are only possible while BALANCED. That makes this the
+            // heaviest personality line (41 characters).
+            personality: Personality {
+                curiosity: 100,
+                caution: 100,
+                sociability: 100,
+                diligence: 100,
+            },
+            // Every slot a friend; ten-digit ids and 3-digit trust heavy in '0's.
+            // The TOP line fits two of them (39 characters), and fewer, longer
+            // entries out-weigh more, shorter ones.
+            acquaintances: vec![acquaintance(4_000_000_000, u8::MAX, 100); ACQUAINTANCE_SLOTS],
             agent: budget_view.id,
             landmarks: (0..LANDMARK_SLOTS)
                 .map(|index| landmark(LandmarkKind::Shelter, LandmarkSource::Told, index as i64))
@@ -339,6 +479,9 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
     assert!(budget_text.contains("DEATH CAUSE EXHAUSTION"));
     assert!(budget_text.contains("DIED AT TICK 18446744073709551615"));
     assert!(budget_text.contains("SHELTER 12  HINTS 12  EXPLORED 24 TILES"));
+    assert!(budget_text.contains("BALANCED  CUR 100 CAU 100 SOC 100 DIL 100\n"));
+    assert!(budget_text.contains("FRIENDS 6 OF 6 KNOWN\n"));
+    assert!(budget_text.contains("TOP  #4000000000 T100  #4000000000 T100\n"));
     assert!(budget_text.len() <= AGENT_TEXT_CAPACITY);
 
     let world = World::generate(u64::MAX, WorldConfig::new(64, 64).unwrap());

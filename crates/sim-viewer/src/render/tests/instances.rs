@@ -1,17 +1,22 @@
-//! Agent, spawned-object, and structure instance tests.
+//! Agent, spawned-object, structure, and hovered-agent marker instance tests.
 
 use sim_core::{
-    AgentActivity, AgentView, LANDMARK_SLOTS, LandmarkKind, LandmarkSource, LandmarkView,
-    SpawnKind, SpawnedObjectView, StructureState, WorldPosition, WorldRect,
+    ACQUAINTANCE_SLOTS, AcquaintanceView, AgentActivity, AgentView, DEFAULT_TRUST,
+    FRIEND_FAMILIARITY, LANDMARK_SLOTS, LandmarkKind, LandmarkSource, LandmarkView, SpawnKind,
+    SpawnedObjectView, StructureState, WorldPosition, WorldRect,
 };
 
-use crate::render::colors::{agent_color, landmark_color, spawn_kind_color, structure_color};
+use crate::render::colors::{
+    agent_color, landmark_color, relationship_color, spawn_kind_color, structure_color,
+};
 use crate::render::instances::{
-    build_agent_instances, build_memory_marker_instances, build_spawned_object_instances,
+    build_agent_instances, build_memory_marker_instances, build_relationship_marker_instances,
+    build_spawned_object_instances,
 };
 use crate::render::summary::{CacheSyncAction, cache_sync_action};
 use crate::render::{
-    MAX_AGENT_INSTANCES, MAX_MEMORY_MARKER_INSTANCES, MAX_SPAWNED_OBJECT_INSTANCES,
+    MAX_AGENT_INSTANCES, MAX_MEMORY_MARKER_INSTANCES, MAX_RELATIONSHIP_DOTS,
+    MAX_RELATIONSHIP_MARKER_INSTANCES, MAX_SPAWNED_OBJECT_INSTANCES,
 };
 
 #[test]
@@ -188,5 +193,81 @@ fn memory_markers_show_seen_places_solid_and_hints_as_search_outlines() {
     build_memory_marker_instances(&hints, 4.0, &mut instances);
     assert_eq!(instances.len(), MAX_MEMORY_MARKER_INSTANCES);
     build_memory_marker_instances(&hints, 0.5, &mut instances);
+    assert!(instances.is_empty());
+}
+
+#[test]
+fn relationship_markers_dot_a_line_to_each_last_seen_position() {
+    let origin = WorldPosition { x: 0, y: 0 };
+    let friend = AcquaintanceView {
+        agent: sim_core::AgentId::new(3),
+        familiarity: FRIEND_FAMILIARITY,
+        trust: DEFAULT_TRUST,
+        last_seen_position: Some(WorldPosition { x: 10, y: 0 }),
+        last_seen_second: 40,
+    };
+    let acquaintance = AcquaintanceView {
+        agent: sim_core::AgentId::new(4),
+        familiarity: FRIEND_FAMILIARITY - 1,
+        last_seen_position: Some(WorldPosition { x: 0, y: -1 }),
+        ..friend
+    };
+    let lost = AcquaintanceView {
+        agent: sim_core::AgentId::new(5),
+        last_seen_position: None,
+        ..friend
+    };
+    let mut instances = Vec::new();
+
+    // At 4 px per cell the friend is 40 px away: 3 dots at 10 px spacing, then
+    // its end marker. The adjacent acquaintance is too close for dots.
+    build_relationship_marker_instances(origin, &[friend, acquaintance, lost], 4.0, &mut instances);
+    assert_eq!(instances.len(), 3 + 1 + 1);
+    let dot_centers: Vec<_> = instances[..3]
+        .iter()
+        .map(|dot| dot.position[0] + dot.size[0] / 2.0)
+        .collect();
+    assert_eq!(dot_centers, [3.0, 5.5, 8.0]);
+    assert!(instances[..3].iter().all(|dot| dot.size == [0.5, 0.5]
+        && dot.position[1] == 0.25
+        && dot.color == relationship_color(true)));
+    assert_eq!(instances[3].position, [9.625, -0.375]);
+    assert_eq!(instances[3].size, [1.75, 1.75]);
+    assert_eq!(instances[4].position, [0.0, -1.0]);
+    assert_eq!(instances[4].size, [1.0, 1.0]);
+    assert_eq!(instances[4].color, relationship_color(false));
+    assert_ne!(relationship_color(true), relationship_color(false));
+
+    // Long lines cap their dots, and slots beyond the acquaintance limit are ignored.
+    let far = AcquaintanceView {
+        last_seen_position: Some(WorldPosition {
+            x: 10_000,
+            y: -7_000,
+        }),
+        ..friend
+    };
+    build_relationship_marker_instances(
+        origin,
+        &[far; ACQUAINTANCE_SLOTS + 2],
+        4.0,
+        &mut instances,
+    );
+    assert_eq!(instances.len(), MAX_RELATIONSHIP_MARKER_INSTANCES);
+    assert_eq!(
+        MAX_RELATIONSHIP_MARKER_INSTANCES,
+        ACQUAINTANCE_SLOTS * (MAX_RELATIONSHIP_DOTS + 1)
+    );
+
+    let here = AcquaintanceView {
+        last_seen_position: Some(origin),
+        ..friend
+    };
+    build_relationship_marker_instances(origin, &[here], 4.0, &mut instances);
+    assert_eq!(
+        instances.len(),
+        1,
+        "an acquaintance at the agent's cell is just a marker"
+    );
+    build_relationship_marker_instances(origin, &[far], 0.5, &mut instances);
     assert!(instances.is_empty());
 }

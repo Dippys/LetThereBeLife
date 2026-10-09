@@ -7,10 +7,7 @@ mod exploration;
 mod selection;
 mod state;
 
-pub use deliberate::{
-    CURIOSITY_TARGET, EXCURSION_EVERY, FOOD_RESERVE, HOME_RANGE, PREPARE_EXPOSURE, TOP_UP_HUNGER,
-    TOP_UP_THIRST,
-};
+pub use deliberate::HOME_RANGE;
 pub(crate) use deliberate::{MindInput, deliberate};
 #[cfg(test)]
 pub(crate) use selection::select;
@@ -89,6 +86,8 @@ pub enum PolicyReason {
     Sharing,
     /// Turning back toward known water before straying out of range.
     Returning,
+    /// Going to where a friend was last seen.
+    Visiting,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

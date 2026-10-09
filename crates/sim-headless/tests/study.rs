@@ -32,3 +32,34 @@ fn memory_outlives_reactive_agents() {
     );
     assert!(full.mean_known_places > 0);
 }
+
+#[test]
+fn social_minds_keep_company_and_sociability_matters() {
+    let run = |mind: PolicyOptions| {
+        let mut config = StudyConfig::new(1, 20, 120_000);
+        config.spawn = StudySpawn::Groups;
+        config.mind = mind;
+        run_study(config).expect("seed 1 has land for every group")
+    };
+    let sharing = run(PolicyOptions {
+        social: false,
+        ..PolicyOptions::full()
+    });
+    let social = run(PolicyOptions::full());
+    assert!(
+        social.company_percent > sharing.company_percent,
+        "company {}% vs {}%",
+        social.company_percent,
+        sharing.company_percent
+    );
+    let (_, _, loners, sociable) = social
+        .trait_effects
+        .iter()
+        .copied()
+        .find(|(name, ..)| *name == "sociability")
+        .expect("sociability is measured");
+    assert!(
+        sociable > loners,
+        "sociable {sociable}% vs loners {loners}%"
+    );
+}

@@ -1,18 +1,18 @@
-//! Instance builders for agents, structures, spawned objects, remembered-place markers, exact world cells, chunk outlines, and the world border.
+//! Instance builders for agents, structures, spawned objects, remembered-place and relationship markers, exact world cells, chunk outlines, and the world border.
 
 use sim_core::{
-    AgentActivity, AgentView, CHUNK_SIZE, ChunkInspection, ChunkPresence, LANDMARK_SLOTS,
-    LandmarkSource, LandmarkView, SpawnKind, SpawnedObjectView, StructureView,
-    WORLD_GENERATION_BOUNDS, World, WorldRect,
+    ACQUAINTANCE_SLOTS, AcquaintanceView, AgentActivity, AgentView, CHUNK_SIZE, ChunkInspection,
+    ChunkPresence, FRIEND_FAMILIARITY, LANDMARK_SLOTS, LandmarkSource, LandmarkView, SpawnKind,
+    SpawnedObjectView, StructureView, WORLD_GENERATION_BOUNDS, World, WorldPosition, WorldRect,
 };
 
 use super::{
-    MAX_AGENT_INSTANCES, MAX_CHUNK_OUTLINE_WORLD_WIDTH, MAX_SPAWNED_OBJECT_INSTANCES,
-    MAX_STRUCTURE_INSTANCES, MAX_WORLD_BORDER_WIDTH, MIN_CHUNK_OUTLINE_PIXELS,
-    MIN_DYNAMIC_INSTANCE_PIXELS,
+    MAX_AGENT_INSTANCES, MAX_CHUNK_OUTLINE_WORLD_WIDTH, MAX_RELATIONSHIP_DOTS,
+    MAX_SPAWNED_OBJECT_INSTANCES, MAX_STRUCTURE_INSTANCES, MAX_WORLD_BORDER_WIDTH,
+    MIN_CHUNK_OUTLINE_PIXELS, MIN_DYNAMIC_INSTANCE_PIXELS,
     colors::{
-        agent_color, feature_color, landmark_color, rgba, spawn_kind_color, structure_color,
-        terrain_color,
+        agent_color, feature_color, landmark_color, relationship_color, rgba, spawn_kind_color,
+        structure_color, terrain_color,
     },
     gpu::Instance,
 };
@@ -124,6 +124,70 @@ const MEMORY_MARKER_PIXELS: f32 = 6.0;
 const MIN_MEMORY_MARKER_CELLS: f32 = 0.4;
 const MEMORY_OUTLINE_PIXELS: f32 = 2.0;
 const MIN_HINT_RADIUS_CELLS: u16 = 3;
+
+/// Links a hovered agent to where it last saw each acquaintance: a dotted line
+/// from the agent plus a square at the remembered spot, faint for acquaintances
+/// and bright (and larger) for friends. Dots keep a minimum screen spacing, so
+/// short or far-zoomed lines get fewer of them, never more than
+/// `MAX_RELATIONSHIP_DOTS`. Acquaintances with no remembered position are skipped.
+pub(super) fn build_relationship_marker_instances(
+    origin: WorldPosition,
+    acquaintances: &[AcquaintanceView],
+    scale: f32,
+    output: &mut Vec<Instance>,
+) {
+    output.clear();
+    if scale < MIN_DYNAMIC_INSTANCE_PIXELS {
+        return;
+    }
+    let scale = scale.max(f32::EPSILON);
+    let from_x = origin.x as f32 + 0.5;
+    let from_y = origin.y as f32 + 0.5;
+    let dot = (RELATIONSHIP_DOT_PIXELS / scale).max(MIN_RELATIONSHIP_DOT_CELLS);
+    for acquaintance in acquaintances.iter().take(ACQUAINTANCE_SLOTS) {
+        let Some(target) = acquaintance.last_seen_position else {
+            continue;
+        };
+        let friend = acquaintance.familiarity >= FRIEND_FAMILIARITY;
+        let color = relationship_color(friend);
+        let to_x = target.x as f32 + 0.5;
+        let to_y = target.y as f32 + 0.5;
+        let (dx, dy) = (to_x - from_x, to_y - from_y);
+        let screen_length = dx.hypot(dy) * scale;
+        let dots = ((screen_length / RELATIONSHIP_DOT_SPACING_PIXELS) as usize)
+            .saturating_sub(1)
+            .min(MAX_RELATIONSHIP_DOTS);
+        for step in 1..=dots {
+            let t = step as f32 / (dots + 1) as f32;
+            output.push(Instance::new(
+                from_x + dx * t - dot / 2.0,
+                from_y + dy * t - dot / 2.0,
+                dot,
+                dot,
+                color,
+            ));
+        }
+        let end_pixels = if friend {
+            FRIEND_MARKER_PIXELS
+        } else {
+            ACQUAINTANCE_MARKER_PIXELS
+        };
+        let end = (end_pixels / scale).max(MIN_MEMORY_MARKER_CELLS);
+        output.push(Instance::new(
+            to_x - end / 2.0,
+            to_y - end / 2.0,
+            end,
+            end,
+            color,
+        ));
+    }
+}
+
+const RELATIONSHIP_DOT_PIXELS: f32 = 2.0;
+const MIN_RELATIONSHIP_DOT_CELLS: f32 = 0.2;
+const RELATIONSHIP_DOT_SPACING_PIXELS: f32 = 10.0;
+const ACQUAINTANCE_MARKER_PIXELS: f32 = 4.0;
+const FRIEND_MARKER_PIXELS: f32 = 7.0;
 
 pub(super) fn build_structure_instances(
     views: impl IntoIterator<Item = StructureView>,
