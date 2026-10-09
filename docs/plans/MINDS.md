@@ -1,4 +1,7 @@
-# Plan: agent minds and sharing
+# Agent minds and sharing (record)
+
+> **Superseded as the active plan by [`VERTICAL_SLICE.md`](VERTICAL_SLICE.md) (2026-10-10).**
+> This file records what was built and measured on the way. Its "Next" list is kept for history.
 
 _Started 2026-10-10. This replaces the archived slice-by-slice Phase 3 plan
 ([`archive/PHASE3_BELIEFS_RELATIONSHIPS_PLAN.md`](../archive/PHASE3_BELIEFS_RELATIONSHIPS_PLAN.md)),

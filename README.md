@@ -7,6 +7,10 @@ climate, rivers, waterholes, biomes) and agents that seek water and food, sleep,
 and can die. Each agent remembers places it has seen, explores, and points out places to others,
 who infer only a rough idea of where they are.
 
+**Where it's heading:** agents who communicate only through observable signals, each with a
+personal lexicon, so that they can misunderstand each other believably and learn from it. See
+[docs/plans/VERTICAL_SLICE.md](docs/plans/VERTICAL_SLICE.md).
+
 ## Quick start
 
 ```sh

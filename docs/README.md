@@ -6,7 +6,8 @@
 | [ARCHITECTURE.md](ARCHITECTURE.md) | You need to know where code lives and which invariants hold |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Building, running, testing, viewer controls, tooling |
 | [DECISIONS.md](DECISIONS.md) | Recording or looking up a durable technical choice |
-| [plans/](plans/) | Detailed plans for upcoming phases (Phase 3 now) |
+| [plans/VERTICAL_SLICE.md](plans/VERTICAL_SLICE.md) | **The active plan:** reach the first believable misunderstanding |
+| [plans/](plans/) | Other plans and records (`MINDS.md` = how agent minds were built) |
 | [archive/](archive/) | Exhaustive Phase 1–2 history (frozen) |
 
 `../InitialDocumentation/` is the original design spec and is read-only. Start with its

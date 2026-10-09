@@ -7,6 +7,9 @@ plus survival agents (needs, gathering, sleep, shelter, health, death) with priv
 (remembered places, explored areas) and pointing gestures that share rough knowledge.
 
 **Start here:** read [`docs/STATUS.md`](docs/STATUS.md) for where things stand and what's next.
+The active plan is [`docs/plans/VERTICAL_SLICE.md`](docs/plans/VERTICAL_SLICE.md); its north star is
+the spec's definition of success: *an agent misunderstands a signal for a believable reason, acts
+on it, and both sides update using only observable evidence.*
 
 ## Repository map
 
@@ -58,14 +61,17 @@ The toolchain is installed on Windows. From WSL, call `cargo.exe` (e.g.
 4. **Measure behavior changes.** Run the behavior study (`--study`, several seeds and spawn modes,
    `--mind legacy|memory|full`) before and after changing agent decisions or world generation, and
    record the numbers. Use `--trace AGENT` to see why an agent died before guessing.
-5. **Beliefs are not truth.** Agent knowledge lives in `sim-core/src/cognition/` and changes only
+5. **No hidden meaning channel.** Receivers read only public signals (forms, pointing, gaze,
+   tone), never the sender's intent or concept. Communication never inserts a task into another
+   agent. Keep candidate sets and lexicons bounded.
+6. **Beliefs are not truth.** Agent knowledge lives in `sim-core/src/cognition/` and changes only
    through perception or observed gestures. Never let policy read world state directly for things
    the agent hasn't perceived.
-6. **Compact data, proven.** Hot per-agent records are small and pointer-free; add or keep
+7. **Compact data, proven.** Hot per-agent records are small and pointer-free; add or keep
    `size_of` assertions when touching them. Prefer scheduled events over per-tick scans of all agents.
-7. **Tests for new behavior and regressions.** Public-API scenario tests live in `crates/*/tests/`.
-8. **Keep it simple.** No speculative abstractions or unrelated cleanup. Remove dead code in the area you touch.
-9. **Don't weaken a failing check to make it pass.**
+8. **Tests for new behavior and regressions.** Public-API scenario tests live in `crates/*/tests/`.
+9. **Keep it simple.** No speculative abstractions or unrelated cleanup. Remove dead code in the area you touch.
+10. **Don't weaken a failing check to make it pass.**
 
 ## Definition of done
 

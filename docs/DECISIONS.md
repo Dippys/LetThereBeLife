@@ -132,3 +132,17 @@ user also asked that explorers share exploration details.
 someone something new went from 10% to 30% (seed 1), 4% to 34% (seed 42), and 21% to 61% (seed 9).
 Total survival didn't change (249/300 with or without the social layer), because most scenarios
 were already at their ceiling.
+
+## D-070: Re-plan around the spec's definition of success (2026-10-10)
+
+**Decision:** The active plan is `docs/plans/VERTICAL_SLICE.md`: a small valley scenario, a
+communication log, private intent separate from public signals, personal lexicons with a noisy
+founding proto-language, receivers that keep competing interpretations, learning and repair from
+observed consequences, and an automated test for the first believable misunderstanding. Requests
+(COME, GIVE) and children follow.
+**Why:** The user confirmed this is what the simulator should become. The spec warns against
+overbuilding terrain before proving the social simulation, and today's gestures still carry a
+hidden meaning channel (receivers are told the kind of place).
+**Consequences:** World-scale and terrain work is paused unless a milestone needs it.
+`GestureTopic` will be removed from the receiver path in M2. DANGER waits until the world has
+hazards. `MINDS.md` becomes a record.

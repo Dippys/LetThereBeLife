@@ -2,6 +2,14 @@
 
 _Last updated: 2026-10-10._
 
+## North star
+
+> An agent misunderstands a signal for a believable reason, acts on that misunderstanding, and
+> both participants update future behavior using only observable evidence.
+
+That's the spec's definition of success, and the active plan works toward it in a small valley:
+[`plans/VERTICAL_SLICE.md`](plans/VERTICAL_SLICE.md).
+
 ## Where the project is
 
 The design spec ([`InitialDocumentation/16_IMPLEMENTATION_ROADMAP.md`](../InitialDocumentation/16_IMPLEMENTATION_ROADMAP.md))
@@ -114,4 +122,7 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## What's next
 
-Follow [`plans/MINDS.md`](plans/MINDS.md). Run the study before and after each step.
+Follow [`plans/VERTICAL_SLICE.md`](plans/VERTICAL_SLICE.md), starting with **M1: valley scenario and
+communication log**, then private intent vs public signals, personal lexicons, interpretation with
+competing meanings, learning and repair, and finally the automated success test. Run the study
+before and after each milestone.
