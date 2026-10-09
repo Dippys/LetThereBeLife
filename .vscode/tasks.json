@@ -42,7 +42,7 @@
         "-ExecutionPolicy",
         "Bypass",
         "-File",
-        ".codex/skills/validate-rust-workspace/scripts/validate.ps1"
+        "scripts/validate.ps1"
       ],
       "group": "test",
       "problemMatcher": ["$rustc"]

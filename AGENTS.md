@@ -1,56 +1,68 @@
-# Let There Be Life Agent Instructions
+# Let There Be Life — Agent Guide
 
-These instructions apply to the entire repository.
+A deterministic, headless-first Rust simulation where society should emerge from individual
+agents. Long-term goal: agents with needs, beliefs, memory, relationships, and languages that
+emerge from signals (never directly transmitted meaning). Today: a procedurally generated world
+plus physical survival agents (needs, gathering, sleep, shelter, health, death).
 
-## Immutable input
+**Start here:** read [`docs/STATUS.md`](docs/STATUS.md) for where things stand and what's next.
 
-`InitialDocumentation/` is read-only source material. Never create, edit, format, rename, move, or delete anything inside it. The checksum gate in `.codex/initial-documentation.sha256` enforces this rule. Record all evolving knowledge under `Documentation/`.
+## Repository map
 
-## Required task flow
-
-1. Read this file and `.codex/skills/orient-let-there-be-life/SKILL.md` before non-trivial work.
-2. Inspect relevant code, tests, writable documentation, and only the necessary immutable design documents.
-3. Select the smallest applicable skill set from the routing table below.
-4. Implement or diagnose from repository evidence. Do not claim behavior without inspecting it.
-5. Apply `.codex/skills/maintain-living-docs/SKILL.md` after any change that affects behavior, architecture, dependencies, tests, controls, setup, status, or roadmap.
-6. Apply `.codex/skills/review-engine-quality/SKILL.md` after non-trivial code changes or when asked to review.
-7. Apply `.codex/skills/validate-rust-workspace/SKILL.md` before declaring a change complete.
-8. Report implementation, documentation, review findings, and exact validation evidence.
-
-## Delegation policy
-
-- The root `gpt-5.6-sol` agent owns planning, architectural decisions, integration, and final validation. Use it with high reasoning for architecture, difficult debugging or review, concurrency and performance work, integration decisions, and final high-risk review.
-- Delegate independent exploration, testing, research, ordinary review, and well-scoped implementation to `gpt-5.6-terra` with medium reasoning. Use `gpt-5.6-luna` with low reasoning only for objectively mechanical, low-risk tasks; never use it for architecture, broad implementation, concurrency, persistence, memory layout, security, or performance decisions.
-- Do not spawn subagents for trivial tasks or allow recursive spawning. Never have agents edit overlapping files concurrently, and review all delegated work before accepting it.
-
-## Skill routing
-
-| Task | Skill |
+| Path | What it is |
 |---|---|
-| Repository orientation, planning, impact mapping | `.codex/skills/orient-let-there-be-life/SKILL.md` |
-| Rust/Cargo implementation or refactoring | `.codex/skills/implement-rust-engine/SKILL.md` |
-| Living documentation updates or drift | `.codex/skills/maintain-living-docs/SKILL.md` |
-| Formatting, tests, linting, immutable-doc checks | `.codex/skills/validate-rust-workspace/SKILL.md` |
-| Code, architecture, determinism, or quality review | `.codex/skills/review-engine-quality/SKILL.md` |
-| Compact types, memory, allocations, hot paths, cleanup, or optimization | `.codex/skills/optimize-runtime-footprint/SKILL.md` |
-| Repeated workflow gap or new project skill | `.codex/skills/evolve-repository-skills/SKILL.md` plus the system `$skill-creator` |
-| Broad implementation lifecycle | `.codex/skills/maintain-let-there-be-life/SKILL.md` as coordinator |
+| `crates/sim-core` | The simulation. Engine, agents, scheduler, world + world generation. No window/GPU/OS deps. |
+| `crates/sim-config` | Loads `config/simulation.toml` for the binaries. |
+| `crates/sim-headless` | CLI runner + canonical survival scenarios and reports. |
+| `crates/sim-viewer` | `winit` + `wgpu` window: camera, HUD, spawning, background chunk loading. Read-only view of the sim. |
+| `config/simulation.toml` | Seed, tick rate, bootstrap area, world-archive path. |
+| `docs/` | Living docs: status, architecture, development guide, active plans. |
+| `docs/archive/` | Historical, very detailed docs from the first build-out. Useful for deep dives; may be stale. |
+| `InitialDocumentation/` | Original design spec (vision → 10M agents). **Read-only.** |
+| `scripts/validate.{sh,ps1}` | Full quality gate. |
 
-Read every selected `SKILL.md` completely before acting. Read referenced resources only when routed by that skill.
+Docs: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (how the code fits together),
+[`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) (build, run, test, controls, tooling),
+[`docs/DECISIONS.md`](docs/DECISIONS.md) (decision log).
 
-## Non-negotiable engineering rules
+## Commands
 
-- Keep `sim-core` independent from windowing, rendering, UI, and OS lifecycle dependencies.
-- Treat presentation objects as views, never persistent simulation truth.
-- Advance simulation through fixed deterministic ticks or scheduled events, never variable render frames.
-- Make seeds, ordering, ownership, mutation boundaries, and invalid-input behavior explicit.
-- Minimize work and stored state first, then allocations and layout, then variable width. Use the smallest proven representation and verify it with size assertions or benchmarks.
-- Treat source brevity as a maintenance preference, not a performance metric. Never sacrifice clarity, safety, determinism, or testability for fewer lines.
-- Remove dead code, unused state, unnecessary clones/allocations, and obsolete dependencies when touching the owning area.
-- Add tests for new behavior and regressions. Benchmark before scale-driven optimization.
-- Avoid unrelated cleanup and speculative abstraction.
-- Do not weaken or skip a failing quality gate to obtain a pass.
+```sh
+cargo test --workspace                                   # all tests
+cargo clippy --workspace --all-targets -- -D warnings    # lint, warnings are errors
+cargo fmt --all
+cargo run -p sim-viewer                                  # interactive viewer
+cargo run -p sim-headless -- --ticks 600 --seed 42       # headless smoke run
+scripts/validate.sh            # or: powershell -File scripts/validate.ps1
+```
+
+The toolchain is installed on Windows. From WSL, call `cargo.exe` (e.g.
+`/mnt/c/Users/ahmed/.cargo/bin/cargo.exe`); `scripts/validate.sh` finds it automatically.
+
+## Rules
+
+1. **Never modify `InitialDocumentation/`.** It is checksummed (`scripts/initial-documentation.sha256`);
+   the validate scripts fail if it changes. Put new knowledge in `docs/`.
+2. **`sim-core` stays headless.** No windowing, rendering, UI, or OS-lifecycle dependencies.
+   The viewer only reads engine state and mutates it through `EngineCommand` / explicit `Engine` methods.
+3. **Determinism is the foundation.** Same seed + same inputs ⇒ identical results.
+   - Simulation advances only by fixed ticks / scheduled events, never by frame time.
+   - Iteration that affects outcomes uses ordered collections (`BTreeMap`, sorted `Vec`).
+     `HashMap` is fine for keyed lookup only, never for iteration order.
+   - Simulation state and rules use integer / fixed-point math. Floats only appear in
+     presentation-facing values (speed multiplier, displayed seconds).
+   - Thread count and completion order must not change results.
+4. **Compact data, proven.** Hot per-agent records are small and pointer-free; add or keep
+   `size_of` assertions when touching them. Prefer scheduled events over per-tick scans of all agents.
+5. **Tests for new behavior and regressions.** Public-API scenario tests live in `crates/*/tests/`.
+6. **Keep it simple.** No speculative abstractions or unrelated cleanup. Remove dead code in the area you touch.
+7. **Don't weaken a failing check to make it pass.**
 
 ## Definition of done
 
-A change is complete only when code works, relevant tests exist, living documentation matches reality, review findings are resolved or disclosed, the immutable design checksum passes, and the full validation gate succeeds. If a check cannot run, report it as an explicit incomplete validation gap.
+- `cargo fmt`, `cargo test --workspace`, and `cargo clippy ... -D warnings` all pass
+  (or run `scripts/validate.sh`).
+- `docs/STATUS.md` is updated if what works, what's broken, or what's next changed.
+- `docs/ARCHITECTURE.md` is updated if a crate/module boundary, key invariant, or dependency changed.
+- Durable technical choices get a short entry in `docs/DECISIONS.md`.
+- Keep docs short: describe the current state in a few lines; don't append run logs or long histories.

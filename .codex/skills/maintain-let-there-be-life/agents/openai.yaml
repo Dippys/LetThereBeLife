@@ -1,4 +1,0 @@
-interface:
-  display_name: "Maintain Let There Be Life"
-  short_description: "Keep engine code and living docs synchronized"
-  default_prompt: "Use $maintain-let-there-be-life to implement this engine change and update all affected project documentation."

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Implement Rust Engine"
-  short_description: "Build cohesive deterministic Rust engine changes"
-  default_prompt: "Use $implement-rust-engine to implement this engine change with appropriate tests and clean crate boundaries."

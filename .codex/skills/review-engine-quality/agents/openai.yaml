@@ -1,4 +1,0 @@
-interface:
-  display_name: "Review Engine Quality"
-  short_description: "Review correctness architecture and quality"
-  default_prompt: "Use $review-engine-quality to review this change for correctness, determinism, architecture, tests, and documentation drift."

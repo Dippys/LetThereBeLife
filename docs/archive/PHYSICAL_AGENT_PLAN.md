@@ -1,0 +1,593 @@
+# Physical Agent Loop Implementation Plan
+
+Last synchronized: 2026-07-17.
+
+Status: **Implemented**. Phase 1 world foundation and all Phase 2 Slices 0-8 are complete. Phase 3 work is canonical in [PHASE3_BELIEFS_RELATIONSHIPS_PLAN.md](PHASE3_BELIEFS_RELATIONSHIPS_PLAN.md); later work must remain in dependency order unless a reviewed plan records a dependency change.
+
+## Purpose
+
+Build the complete Phase 2 physical-agent loop for 20-100 deterministic headless agents. The phase ends when agents can move, perceive nearby physical facts, experience physical needs, find and consume water and food, gather materials, sleep, construct and use minimal shelter, and survive or die for inspectable reasons.
+
+This is a physical simulation proof, not the cognition or society layer. Behavior may use a small deterministic action policy, but it must not introduce beliefs, personal memories, relationships, language, institutions, or presentation-owned simulation truth.
+
+## Phase 2 completion contract
+
+The implemented loop must include:
+
+- 20-100 persistent agents with stable compact identity;
+- deterministic event scheduling rather than a complete per-agent update every tick;
+- cardinal movement and bounded local routing through public `World` queries;
+- bounded local physical perception;
+- analytically evolving hunger, thirst, rest, and safety/exposure state;
+- gathering, compact carried resources, eating, and drinking;
+- sleep and wake transitions;
+- minimal shelter construction and use;
+- health consequences and simple death;
+- a deterministic headless scenario in which survival and failure reasons are reported clearly.
+
+The long-term ten-million-agent target constrains ownership, scheduling, and layout choices, but Phase 2 must prove understandable behavior at 20-100 agents before population scale increases.
+
+## Current baseline
+
+The repository already provides the world-side contracts needed to begin:
+
+- `Engine` owns deterministic simulation state and advances fixed ticks; `SimulationSnapshot` is the read-only presentation boundary.
+- `World::traversal_step` reports cardinal passability, traversal cost, elevation change, and explicit water, slope, or feature blocking.
+- `World::water_at` distinguishes drinkable lake/river water from salt water and from unloaded/outside terrain.
+- `World::resource_at` exposes immutable generated food, wood, or stone capacity while distinguishing resident absence from unavailable terrain.
+- `Feature::identity` provides a stable generated-feature key within one seed and eventual generator version.
+- deterministic resident cell/feature visitation and the Phase 1 settlement-candidate scenario provide bounded search building blocks.
+- `sim-headless` eagerly materializes the configured bootstrap area before ticking; `sim-viewer` streams terrain asynchronously and holds time at zero only while its population is empty. The first exact cursor spawn through `T` uses the resident terrain block under that cursor as its authoritative execution area without waiting for the bootstrap or fixed startup pages. Later spawns expand the active rectangle across resident terrain as needed.
+
+Slices 0-8 provide compact agent storage and inventory, scheduled overlap-tolerant movement, bounded objective perception, deterministic local routes, analytical physical needs, an explicitly activated deterministic physical policy, effective gather/eat/drink actions, sparse permanent generated-resource depletion, scheduled interruptible sleep, sparse minimal shelters with adjacent sheltered sleep, compact scheduled health deterioration, incapacitation, terminal physical death, deterministic causal reports, and bounded 20/100-agent survival soaks.
+
+## Non-negotiable constraints
+
+Every slice must preserve these rules:
+
+1. `sim-core` owns agents, scheduler state, physical needs, inventory, mutable resource deltas, structures, and all authoritative outcomes. `sim-viewer` presents only `AgentView`, `StructureView`, and snapshot copies.
+2. `World` remains immutable generated base plus resident materialization. Agent state and resource depletion must not be stored in generated `TerrainCell` or `Feature` records.
+3. Simulation results must depend on seed, configuration, commands, and deterministic event order—not render frames, wall-clock timing, Rayon completion, cache residency timing, map iteration accidents, or thread count.
+4. Terrain-dependent agent execution requires an explicit deterministic residency contract. An unloaded or outside-world query must yield a typed outcome; it must never synchronously generate terrain or opportunistically succeed because a viewer worker finished first.
+5. Event ordering must be total and documented. Equal-time events require stable tie-breakers such as event class, `AgentId`, and monotonic event sequence.
+6. Predictable needs evolve analytically from value, rate, and reference time. Do not scan every agent or increment every need on every simulation tick.
+7. Random-looking choices use explicit deterministic keyed streams or hashes with documented purpose domains. Do not share mutable global RNG state across systems.
+8. Agent and event storage must be data-oriented and measured. Do not use a generic ECS, one heap allocation per agent/event, or an oversized monolithic agent structure.
+9. Spatial queries must be bounded and return deterministic order. No all-pairs agent comparisons or whole-world searches may enter a normal event path.
+10. Each slice adds tests, size/throughput evidence where relevant, living-documentation updates, and a successful complete repository validation run.
+11. `InitialDocumentation/` remains immutable throughout.
+
+Phase 2 is headless-first. `Engine::new` must not auto-spawn agents into its initially nonresident world. Population initialization happens through an explicit fallible boundary only after a fixed simulation rectangle is completely resident; `sim-headless` calls it after eager materialization. Until the viewer has an equivalent deterministic startup gate, it may inspect an empty population but must not start physical-agent execution. Unexpected `Unloaded` results inside the declared active simulation rectangle are invariant/scenario failures, not timing-dependent retry signals.
+
+## Agent execution protocol
+
+An agent implementing one slice must:
+
+1. Read `AGENTS.md`, the repository orientation skill, this complete plan, the current roadmap, current implementation, architecture decisions, tests, and the predecessor slice's recorded result.
+2. Confirm that every prerequisite slice is marked **Implemented**. If not, implement only the earliest incomplete prerequisite.
+3. Keep the active slice coherent: code, focused tests, integration scenario, measurements, and living documentation land together.
+4. Record durable decisions in `ARCHITECTURE_DECISIONS.md`; do not silently settle an open checkpoint inside code.
+5. Update this plan's slice status and implementation notes only after executable behavior and validation exist.
+6. Apply the engine-quality review skill after non-trivial Rust changes and resolve or disclose every finding.
+7. Run the complete validation gate from the beginning after the final code or documentation edit.
+8. Stop after the active slice. Report the next slice, but do not begin it in the same task unless the user explicitly requests multiple slices.
+
+If implementation proves that a later slice depends on a missing contract, amend this plan and the roadmap with evidence. Do not hide the dependency in speculative abstraction.
+
+## Work sequence
+
+| Order | Slice | Primary result |
+| ---: | --- | --- |
+| 0 | Compact agents and scheduled movement | Stable identity, engine-owned storage, deterministic scheduler, and one-step movement |
+| 1 | Spatial occupancy, perception, and local routes | Bounded nearby queries, collision ownership, and deterministic short paths |
+| 2 | Analytical physical needs | Hunger, thirst, rest, and exposure thresholds without per-tick agent scans |
+| 3 | Deterministic physical action policy | Agents select and schedule understandable physical actions without cognition |
+| 4 | Water, gathering, inventory, and consumption | Drink/eat/gather behavior plus sparse generated-resource depletion |
+| 5 | Rest and sleep | Scheduled sleep/wake behavior with interruption and recovery |
+| 6 | Minimal shelter | Gathered-material construction and shelter use without terrain mutation |
+| 7 | Health, safety, and simple death | Physical failure consequences, terminal state, and causal reporting |
+| 8 | Phase 2 integrated survival proof | Deterministic 20-100-agent runs, soak evidence, budgets, and phase exit |
+
+## Slice 0: Compact agents and scheduled movement
+
+Status: **Implemented** on 2026-07-16.
+
+### Objective
+
+Create the smallest authoritative agent representation and event boundary that can move 20-100 agents deterministically through resident terrain without committing to cognition, needs, or presentation structures.
+
+### Decision checkpoints
+
+Before freezing public types, measure and record:
+
+- `u32` stable IDs versus any generational validation kept outside the hot record;
+- dense record layout candidates, whether stable ID is implicit in a slot table, and whether the proven `[-32,768, 32,768)` envelope justifies compact internal `i16` coordinates behind checked `WorldPosition` conversions;
+- scheduler candidates suitable for the initial population while preserving a path to bucketed or hierarchical scheduling;
+- event cancellation/rescheduling strategy, including stale-event detection;
+- exact simulation-time unit and overflow behavior.
+
+The first implementation may use a simple bounded scheduler if benchmarks justify it, but its API and event key must not require per-agent tick scans or nondeterministic heap ties.
+
+### Implementation area
+
+- a responsibility-focused agent module under `crates/sim-core/src/`;
+- a scheduler module under `crates/sim-core/src/`;
+- `Engine`, `EngineCommand`, reset behavior, and read-only agent inspection in `crates/sim-core/src/lib.rs`;
+- a focused headless integration scenario;
+- layout and scheduler measurements in `Documentation/PERFORMANCE.md`.
+
+### Deliverables
+
+- Define opaque `AgentId`, compact position/activity records, and an engine-owned dense population store.
+- Define explicit fallible population initialization after a fixed simulation rectangle is completely resident, with passable-position validation and deterministic ID allocation. Do not auto-spawn in `Engine::new`.
+- Define simulation time, event identity, movement event payload, and a total equal-time ordering rule.
+- Schedule at most the work due at the current simulation time; `Engine::tick` must not scan every agent. Bound due-event draining and zero-delay rescheduling so one timestamp cannot create an infinite reaction chain.
+- Execute one cardinal movement through `World::traversal_step`, scheduling completion from stable integer traversal cost.
+- Report success, blocked terrain, unloaded terrain, outside-world, invalid/non-cardinal input, missing/dead agent, and stale event through typed outcomes.
+- Expose bounded read-only agent state for headless tools and later presentation without exposing mutable storage.
+- Define reset semantics for IDs, agent state, scheduler state, and deterministic replay.
+
+### Acceptance criteria
+
+- Equal configuration, commands, spawn order, and ticks produce byte/equality-equivalent agent views and snapshots.
+- Reversing internal insertion order cannot change equal-time event application order.
+- Pausing prevents simulation events from executing; reset reproduces the initial state and ID sequence.
+- A valid move changes exactly one agent position at its scheduled completion time.
+- Blocked, unloaded, outside-world, invalid, stale, and duplicate events do not partially mutate state.
+- Agent state never causes terrain materialization.
+- Initialization rejects incomplete residency, insufficient valid spawn cells, and duplicate/invalid requested positions without partially creating a population.
+- Type sizes, alignments, retained population capacity, event bytes, scheduler insertion/reschedule/due-extraction time, and allocation counts are recorded for 20, 100, and at least one larger synthetic population.
+- The complete validation gate passes.
+
+### Implemented result
+
+`sim-core::agent` now owns dense zero-based `AgentId` slots, six-byte compact position/activity records, parallel movement generations, atomic resident-area initialization, exact validated additive spawning, and bounded read-only views/outcomes. `sim-core::scheduler` owns 32-byte heap events with the Slice 2-extended total `(time, class, agent, event detail, sequence)` order, checked sequence/time overflow, lazy stale-event invalidation, bounded stale retention, and a 4,096-event due-drain ceiling. `Engine` exposes explicit initialization, additive spawn, and typed movement scheduling, and clears population/scheduler/IDs on reset while preserving resident terrain. `sim-headless` initializes 20 agents by default; the viewer initializes its first agent only on `T` and appends later cursor spawns.
+
+Unit regressions cover initialization atomicity, invalid/duplicate/insufficient spawns, compact layouts, exact completion time, pause/reset, blocked and invalid requests, dead/missing IDs, active/world bounds, stale duplicate events, equal-time insertion reversal, overflow, and due backlog. The public-only `physical_agent_slice0` scenario replays 20 agents across forward/reverse command insertion. The ignored release harness records 20, 100, and 10,000-agent capacities, retained bytes, structural/growth allocation counts, and insertion/reschedule/extraction timings in `PERFORMANCE.md`. D-037 records the durable layout, time, ordering, cancellation, reset, and temporary heap decisions. The complete runtime validation gate passed after the final implementation and documentation synchronization.
+
+## Slice 1: Spatial occupancy, perception, and local routes
+
+Status: **Implemented** on 2026-07-16.
+
+### Objective
+
+Let agents discover nearby physical facts and navigate short distances without all-pairs checks, losing overlapped agents, whole-world scans, or a complete path vector stored per agent.
+
+### Decision checkpoints
+
+- Choose chunk/tile occupancy ownership and deterministic transfer order.
+- Allow multiple agents to share a cell while keeping deterministic per-cell `AgentId` order.
+- Select a bounded short-route algorithm and hard search budget.
+- Decide the compact route representation: shared route, bounded waypoint record, or recomputable destination/progress state.
+
+### Deliverables
+
+- Maintain a simulation-owned spatial index from world/chunk locations to present agent IDs.
+- Apply position and index changes atomically at deterministic command boundaries.
+- Provide bounded radius/rectangle queries returning currently implemented agents, drinkable water, immutable resources, and traversable cells in canonical order. Extend the same objective boundary with structures when Slice 6 introduces their authoritative store; do not invent structure identity or state in Slice 1.
+- Add short deterministic routing over cardinal `World::traversal_step` results with explicit no-path, budget-exhausted, unloaded, and invalid-target outcomes.
+- Schedule route or waypoint progress from traversal costs; do not create a movement event every engine tick.
+- Keep living-agent movement from invalidating routes; only durable blockers such as structures affect route edges.
+- Keep perception as objective nearby physical input. Do not add beliefs, memory, attention, or private interpretation.
+
+### Acceptance criteria
+
+- Each living non-traveling agent belongs to exactly one spatial bucket and one world position.
+- Equal-time movers may share a target and leave every spatial entry consistent regardless of request order.
+- Query and route output is stable across insertion order and map/cache state.
+- Normal perception and routing inspect bounded cells/buckets only.
+- Route execution cannot walk through water, excessive slope, structures, or unloaded terrain; agents and tree/bush/rock features are passable.
+- Focused tests cover signed coordinates, chunk boundaries, route ties, no-path, search-budget exhaustion, dynamic occupancy, and atomic transfer.
+- Query cost, route-search expansions, temporary allocations, and spatial-index bytes per agent are measured.
+
+### Implemented result
+
+`sim-core::spatial` owns sparse living-agent positions in a compact signed chunk map. Each bucket keeps eight-byte `(local cell, AgentId)` entries sorted by both fields, so shared cells retain every agent deterministically. Moving agents occupy their source until completion, and checked source-to-target transfer validates the exact agent entry before inserting at the target. Occupied targets remain legal for direct movement and routes.
+
+`Engine::perceive_physical` performs active-area-clipped radius queries through 31 cells and returns agents, drinkable water, immutable resources, all standable cells, and the observing agent's terrain-connected reachable component in global row-major order. The bounded component uses composed standability and exact slope passability, preventing policy from selecting geometrically near access cells across durable water, slope, or structure barriers. `Engine::request_route` uses deterministic traversal-cost A* with a caller budget capped at 4,096 expansions and distinct invalid, no-path, budget-exhausted, unloaded, and terrain-blocked outcomes. Its admissible Manhattan heuristic derives from the explicit minimum world step cost. Optional per-agent route state stores only a compact destination and budget; a reusable engine planner recomputes the next step after each positive-cost completion, so routes carry no path vector and cause no per-tick population scan.
+
+Unit and public integration regressions cover compact layouts, signed `-65/-64/-1/0/63/64` bucket boundaries, exact source validation, request-order-independent shared destinations, complete same-cell perception, budget exhaustion, water-blocked no-path, and scheduled arrival. `sim-headless` uses perception and routes for its 20-agent smoke. The ignored release harness records 20/100/10,000-agent spatial capacity and perception work plus a 75-expansion reusable route search. D-055 supersedes D-038's one-agent-per-cell collision rule while retaining its compact index and bounded route ownership.
+
+## Slice 2: Analytical physical needs
+
+Status: **Implemented** on 2026-07-16. Depends on Slices 0-1.
+
+### Objective
+
+Add hunger, thirst, rest, and safety/exposure as compact analytically evaluated state that schedules threshold work instead of being incremented for every agent every tick.
+
+### Decision checkpoints
+
+- Choose fixed-point ranges, rate units, saturation policy, and threshold semantics.
+- Separate hot next-event state from colder need details if measurement supports it.
+- Define threshold priority when several needs become due at the same time.
+- Define provisional age/body modifiers only if Phase 2 behavior requires them; reproduction and development remain deferred.
+
+### Deliverables
+
+- Add a compact `NeedState` representation storing value/rate at a reference time.
+- Derive current values with checked/saturating integer arithmetic.
+- Predict and schedule the next threshold for each relevant need.
+- Reschedule only when a rate, threshold, or reference value changes; stale threshold events must be harmless.
+- Add minimal activity-dependent rates for idle, moving, gathering, building, and sleeping states.
+- Represent exposure/safety as a physical input affected later by climate, sleep location, and shelter, without implementing fear, emotion, or social safety.
+- Expose read-only current needs and next threshold for debugging.
+
+### Acceptance criteria
+
+- Need interpolation, saturation, threshold prediction, rescheduling, and equal-time priority have exact tests.
+- Large time jumps produce the same result as reaching the same event time through smaller engine steps.
+- Sleeping or idle agents do not require routine per-tick need updates.
+- Paused time changes no need value; reset and replay reproduce all thresholds.
+- No floating-point value enters authoritative need state or event ordering unless a separately recorded determinism decision justifies it.
+- Need-state bytes per agent, threshold-event bytes, reschedule rate, and due-event throughput are recorded.
+
+### Implemented result
+
+`sim-core::needs` now owns a 32-byte fixed-point `NeedState` for hunger, thirst, rest, and exposure. Values use a 0-10,000 range, signed rates per 60 fixed simulation ticks, a shared reference time, and retained sub-unit remainders, so activity rebasing is exact without floating point or per-tick population updates. Idle, moving, gathering, building, and sleeping profiles are explicit; at Slice 2 completion only idle/moving transitions were reachable, while exposure remained a provisional physical pressure rather than fear or social safety.
+
+Population initialization atomically creates three applicable initial thresholds per agent; neutral exposure schedules none. Activity changes advance one bounded-safe wrapping need generation, rebase all four values exactly, and schedule only future positive-rate thresholds. Reached thresholds are one-shot wake/debug outcomes until a later value or rate change crosses them back below the actionable boundary. Superseded events are typed stale outcomes and participate in the existing bounded due drain and scheduler compaction. Equal-time order is `(time, threshold before movement, AgentId, hunger/thirst/rest/exposure, sequence)`, so a threshold reached at movement completion observes the finishing activity before its rate changes. Multi-waypoint routes remain continuously moving between route start and end instead of creating zero-duration idle reschedules.
+
+`Engine::physical_needs` exposes current values, rates, threshold state, and the next due need; `Engine::need_threshold_outcomes` exposes the latest advancing tick's reached/stale events. Unit and public integration regressions cover compact layout, interpolation, ceiling prediction, saturation, overflow, exact remainder-preserving activity changes, provisional activity profiles, pause/reset/replay, 90,000-tick chunking independence, movement rates, stale reschedules, and equal-time priority. The ignored release harness records 20, 100, and 10,000-agent need/event capacities and scheduling/extraction timings in `PERFORMANCE.md`. D-039 records the durable representation, threshold, ordering, and provisional-rate decisions.
+
+## Slice 3: Deterministic physical action policy
+
+Status: **Implemented** on 2026-07-16. Depends on Slices 0-2.
+
+### Objective
+
+Connect needs, perception, routes, and activities with a deliberately small deterministic policy so agents can pursue physical survival without introducing the later cognition architecture.
+
+### Deliverables
+
+- Define a compact physical goal/activity state for seeking water, seeking food, gathering a material, eating, drinking, sleeping, seeking shelter, building, waiting, and incapacitation.
+- Rank urgent physical actions from current need thresholds and immediately perceived options using integer scores and explicit tie-breakers.
+- Use deterministic keyed variation only where identical choices need stable diversification.
+- Separate decision events from movement/action-completion events.
+- Define interruption, commitment, retry/backoff, and no-valid-action behavior without unbounded same-time reaction chains.
+- Record the reason for each selected action and each failure in a compact diagnostic event or counter suitable for headless reports.
+
+### Acceptance criteria
+
+- The same perceived facts and agent state always select the same action.
+- Changing an irrelevant fact cannot reorder equal-scored candidates accidentally.
+- Unreachable, unloaded, depleted, occupied, or stale targets cause bounded reconsideration rather than tight loops.
+- One agent cannot schedule multiple conflicting physical commitments.
+- This module reads objective physical state only and exposes no belief, memory, relationship, personality, or language type.
+- Scenario tests make every supported activity and failure reason reachable.
+
+### Implemented result
+
+Private `sim-core::policy` defines a one-byte `PhysicalGoal` domain for seeking water, seeking food, gathering material, eating, drinking, sleeping, seeking shelter, building shelter, exploring, waiting, and incapacitation. One parallel 12-byte `PolicyState` stores the current compact target, generation, goal, packed phase/eight-way exploration heading, retry count, and reason without widening the six-byte hot agent record. `Engine::activate_physical_policy` is explicit and fallible after population initialization; it requires every agent to be idle and schedules one initial decision per agent, while non-activated manual tests retain the prior inert population boundary. The viewer uses the separate exploration-enabled activation boundary.
+
+Decisions read only the current analytical need view and radius-eight `PhysicalPerception`. Reached needs use normalized integer urgency and the explicit thirst, exposure, hunger, rest tie order. Water/food access targets use Manhattan distance followed by row and column coordinates after removing foreign occupied cells and targets claimed by perceived routing/acting agents; no random stream is required because every current tie has a meaningful stable physical key. Viewer exploration deterministically varies the retained compass heading without choosing an immediate reverse, then prefers the reachable forward perception edge with bounded rotated alternatives. It does not override a resolved wait at fresh-water or completed-shelter access. Current execution can wait, explore, seek and reach fresh-water/food access, gather food/wood/stone, drink, eat carried food, build/access shelter, sleep, become incapacitated, or die.
+
+The scheduler retains its 32-byte event record while adding separate action-completion and decision classes. Equal-time order is threshold, action completion, movement, decision, then `AgentId`, class detail, and sequence. One policy generation guarantees a single current commitment; activated engines reject public manual move/route requests with typed `PolicyControlled` errors. A reached need atomically interrupts a route or action, invalidates its movement/policy events, clears the route, rebases activity idle, and schedules a new decision one tick later. Missing targets plus typed perception/route failures schedule capped exponential backoff from 60 through 1,920 ticks. Retry depth now measures the current consecutive failure chain: beginning a route/action or scheduling an ordinary recheck resets it, while backoff retains the failed goal for inspection. Slice 4 gather/eat/drink completions now apply authoritative effects; sleep completion, shelter, and death still emit `DeferredToLaterSlice`. Latest-tick `PolicyDiagnostic` records selection, route/action start/completion, deferral, retry, and stale work with typed reasons/failures for headless reporting.
+
+Unit regressions cover the 12-byte state and packed-field independence, one-byte complete goal/heading discriminants, normalized urgency/tie ordering, irrelevant-fact independence, non-reversing consecutive exploration, safe water anchoring, disconnected-target rejection, occupied/claimed water and resource fallback selection, positive capped backoff, and complete equal-time class order. Focused engine regressions prove that a clear full radius-eight window commits exploration without route-budget backoff, a water-ring barrier exposes only the origin as reachable, and two thirsty agents in the same approach lane claim distinct access cells, both complete drinking, and remain at water through later wait/drink cycles. The public `physical_agent_slice3` scenario covers activation rejection for an existing manual commitment, explicit single activation, post-activation manual move/route rejection, initial waiting, deterministic replay at the 90,000-tick thirst crossing, one drink commitment, deferred completion, no-target retry, and absence of same-time reaction loops. The ignored release harness records 20, 100, and 10,000-agent policy/event capacity, insertion, extraction, and retained logical bytes in `PERFORMANCE.md`. `sim-headless` now activates the policy and reports selections and failures. D-040, D-050, D-051, and D-052 record the durable goal, activation, ordering, commitment, navigation, contention, retry, anchoring, and later-slice-effect boundaries.
+
+## Slice 4: Water, gathering, inventory, and consumption
+
+Status: **Implemented** on 2026-07-16. Depends on Slices 0-3.
+
+### Objective
+
+Let agents satisfy thirst and hunger, gather food/wood/stone, carry compact resources, and deplete generated resource capacity without mutating generated features.
+
+### Decision checkpoints
+
+- Choose compact inventory units, per-agent capacity, and overflow behavior.
+- Define gather duration/yield and eating/drinking effects in the same integer time/need units.
+- Decide whether depleted generated resources remain unavailable permanently for Phase 2 or use a separately scheduled regrowth rule. Permanent depletion is the smaller default.
+
+### Deliverables
+
+- Add a sparse simulation-owned resource-delta store keyed by stable generated feature identity.
+- Keep immutable `BaseResource` capacity in `World`; store only changed remaining quantity/removal state.
+- Add compact carried food, wood, and stone amounts without per-item heap allocation.
+- Add scheduled gather completion with target revalidation and deterministic contention.
+- Add drink actions adjacent to or at the supported fresh-water access position without storing water quantity.
+- Respect the current traversal contract: all water blocks walking, so ordinary drinking occurs from a revalidated adjacent passable land position unless a later recorded movement decision adds another access mode.
+- Add eating from carried food and explicit failure when no edible amount remains.
+- Make resource reads compose generated base plus sparse delta through a simulation-owned API.
+- Preserve atomicity: movement, gathering, inventory transfer, depletion, and need changes apply at defined event boundaries.
+
+### Acceptance criteria
+
+- Gathering cannot create resources, reduce a feature below zero, or let two equal-time gatherers consume the same final units.
+- Depleting one feature creates one bounded sparse delta and changes no generated `Feature` or `TerrainCell`.
+- Unmodified resources require no mutable record.
+- Drinking rejects ocean water, unloaded terrain, and stale/nonadjacent access.
+- Eating and drinking change only the intended need/reference values and schedule correct next thresholds.
+- Inventory capacity and overflow are explicit and tested.
+- Delta bytes per modified feature, inventory bytes per agent, gather throughput, and allocation behavior are recorded.
+
+### Implemented result
+
+Private `sim-core::resources` owns a parallel three-byte `InventoryView` per agent and a sparse `BTreeMap` from compact feature positions to changed `u16` remaining capacity. Food, wood, and stone each have an explicit 32-unit carried cap; a gather completion transfers at most four units and clamps to remaining inventory space. Unmodified features retain no mutable entry, depletion is permanent for Phase 2, and `Engine::available_resource_at` plus bounded physical perception compose immutable `World::resource_at` capacity with the sparse delta. `Engine::modified_resource_count` exposes the changed-feature count without exposing mutation handles, and reset clears inventories and deltas while preserving generated residency.
+
+Idle policy decisions gather the nearest available perceived resource in canonical order; urgent hunger eats one carried food or seeks and gathers food first. “Available” excludes current foreign occupancy and perceived active policy claims, preventing a crowd from repeatedly selecting one resource/water access cell. Action completions still revalidate same/cardinal resources or fresh water, apply in total scheduler order, and then reconsider one tick later. Equal-time gatherers therefore arbitrate by `AgentId`: one may take the last units and later completions receive typed `ResourceDepleted` without underflow. Drinking requires the agent to remain at its access target with resident same/cardinal lake or river water; ocean-only, unloaded, outside-world, and stale/nonadjacent attempts fail. Eating consumes exactly one food. Eating reduces hunger by 4,000 and drinking reduces thirst by 5,000 after exact analytical rebasing; both invalidate and reschedule threshold events without changing the other needs.
+
+Unit tests cover compact layouts, per-kind overflow, gather-capable policy selection, carried-food eating selection, exact atomic eating/no-food behavior, and ocean/unloaded drink rejection. Public `physical_agent_slice4` coverage proves two equal-time gatherers deplete one 12-unit berry feature into exactly one sparse delta while the generated `BaseResource` remains unchanged. The updated Slice 3 replay proves successful drinking and thirst relief. The ignored release harness records exact inventory reservation for 20, 100, and 10,000 agents plus repeated same-feature gather timing and delta retention in `PERFORMANCE.md`. D-041 records the durable inventory, yield, need-effect, depletion, access, and ordering decisions.
+
+## Slice 5: Rest and sleep
+
+Status: **Implemented** on 2026-07-16. Depends on Slices 0-4.
+
+### Objective
+
+Add scheduled sleep/wake behavior that restores rest, remains interruptible by physical conditions, and does not repeatedly update sleeping agents.
+
+### Deliverables
+
+- Add sleep intent, transition, scheduled wake, and interrupted-wake events.
+- Derive sleep recovery analytically from start time, location quality, and later shelter use.
+- Define valid sleep locations and explicit rejection for water, blocked, occupied, unloaded, or unsafe positions.
+- Apply reduced hunger/thirst rates and appropriate exposure while sleeping.
+- Ensure urgent physical thresholds can interrupt sleep through bounded rescheduling.
+- Expose sleep start, planned wake, quality, and interruption reason to headless diagnostics.
+
+### Acceptance criteria
+
+- A sleeping agent has one scheduled wake unless an earlier valid interruption supersedes it.
+- Repeated stale wake/threshold events cannot wake twice or duplicate work.
+- Analytical recovery matches exact boundary cases and is deterministic across tick batching.
+- Sleep cannot bypass hunger, thirst, exposure, or death thresholds.
+- Sleep event volume is independent of render frames and does not require per-tick updates.
+
+### Implemented result
+
+Private `sim-core::sleep` owns a fixed 24-byte pointer-free `SleepState` parallel to the hot agent record, plus public read-only `SleepView` and latest-tick `SleepDiagnostic` values. `Engine::request_sleep` provides an explicit fallible intent for headless/manual scenarios while the autonomous policy starts the same authoritative transition at a reached rest threshold. Current Slice 5 locations must be the agent's own resident standable cell, owned by that agent in the spatial index, and below the exposure threshold. Water, blocking features, another occupant, unloaded/outside coverage, unsafe exposure, remote targets, existing commitments, and scheduling exhaustion are typed rejections. Open ground is the only implemented quality; the `Sheltered` quality and faster recovery rate are reserved for Slice 6's authoritative structure input rather than inferred early.
+
+Sleep rebases needs once into reduced hunger/thirst, negative rest, and open-ground exposure rates, predicts the exact zero-rest boundary from the fixed-point numerator, and schedules one dedicated wake event. Event ordering is now threshold, wake, action completion, movement, then decision, so a same-time urgent physical threshold supersedes wake. Hunger, thirst, or exposure interruption invalidates the wake, returns the agent idle, records the causal reason, and schedules at most one policy reconsideration; sequence exhaustion settles the sleeper idle and makes the wake stale rather than allowing the threshold to be bypassed. Normal wake rebases once, records completion, and never scans sleeping agents per tick. Reset clears sleep state and diagnostics.
+
+Unit coverage fixes the 24-byte/alignment-eight sleep layout, exact open-ground/sheltered analytical boundaries, threshold-before-wake ordering, unsafe-location rejection, and atomic sequence-exhaustion behavior. Public `physical_agent_slice5` scenarios cover planned wake, pause preservation, thirst interruption, stale-wake harmlessness, self-occupancy, other-agent/water/feature rejection, and reset. The ignored optimized harness records exact state capacity and scheduled event volume for 20, 100, and 10,000 agents in `PERFORMANCE.md`. `sim-headless` now reports sleep starts, planned wakes, interrupted wakes, and currently sleeping agents. D-042 records the durable state, quality, validation, ordering, and interruption decisions.
+
+## Slice 6: Minimal shelter
+
+Status: **Implemented** on 2026-07-16.
+
+### Objective
+
+Let agents gather materials, choose a valid nearby site, construct a minimal shelter, and use it for safer/restorative sleep without introducing settlements, ownership economies, or terrain mutation.
+
+### Decision checkpoints
+
+- Define one provisional shelter recipe and build duration from measured Phase 2 resource availability.
+- Choose sparse structure identity, position/footprint, occupancy, and lifecycle representation.
+- Decide whether a shelter is personal, shareable, or unowned in Phase 2. Social ownership remains deferred.
+
+### Deliverables
+
+- Add a simulation-owned sparse structure store separate from generated features and terrain.
+- Validate dry, resident, traversable, unoccupied construction sites and bounded access.
+- Reserve/consume required inventory atomically at construction start or completion according to a recorded rule.
+- Schedule construction progress/completion without per-tick work.
+- Make completed shelter affect sleep quality and physical exposure only.
+- Include structures in bounded physical perception, routing obstacles/access, snapshots, and reset.
+
+### Acceptance criteria
+
+- Equal-time builders cannot create overlapping structures or double-spend materials.
+- Failed/cancelled construction follows an explicit refund or loss rule.
+- Structures do not enter generated world records and cannot be created on unloaded or invalid terrain.
+- Shelter benefit is measurable in the need/exposure model and cannot grant unrelated social or cognitive state.
+- Structure record size, spatial-index bytes, and build-event cost are recorded.
+
+### Implemented result
+
+Private `sim-core::structures` owns sparse one-cell shelter footprints separately from `World`. A shelter has monotonic dense `u32` identity, a 32-byte pointer-free lifecycle record, and a row-major `BTreeMap` footprint index; cancelled identities leave compact vector tombstones so a published handle is never reused. The provisional Phase 2 lean-to recipe consumes eight wood and no stone at construction start and takes 600 ticks. The wood-only recipe is deliberate: canonical seed-42 trials found timber locally within the radius-eight policy boundary while an 8-wood/4-stone candidate could not find both regionally separated resource types even in a 512 x 512 bootstrap. Shelters are unowned and shareable after completion; their blocking footprint is used only from a cardinal standable access cell.
+
+`Engine::request_build_shelter` and the autonomous policy validate resident dry standable terrain, active-area membership, cardinal access, agent and structure vacancy, recipe inventory, scheduler capacity, and construction identity before committing. Materials are consumed atomically at start. Need interruption cancels the reservation, refunds the complete recipe exactly once, and makes the old completion harmlessly stale. Equal-time policy decisions use the existing total event order, so lower `AgentId` reserves a contested footprint first without double spending.
+
+Structure footprints are returned in bounded row-major `PhysicalPerception`, removed from traversable cells, rejected by direct movement and route requests, and rechecked when a scheduled movement completes. Completed adjacent shelters select `SleepQuality::Sheltered`: rest recovers at 12 rather than eight units per 60 ticks and exposure falls by four rather than rising by two. Exposure-driven shelter use predicts one wake at the later of full rest recovery or crossing exposure below its actionable threshold, avoiding per-tick sleep/wake churn. `StructureView`, latest-tick diagnostics, snapshot count, headless counters, and reset complete the inspection boundary; no generated terrain or feature record changes.
+
+Focused unit coverage fixes layout and exposure arithmetic; proves overlap arbitration, interruption refund, stale completion, perception, direct/route blocking, and the in-flight movement race. Public `physical_agent_slice6` coverage lets one autonomous agent gather timber and complete a shelter, then proves bounded perception and reset. The ignored release harness records 20/100/10,000 structure/index/event layouts and construction scheduling/due-extraction observations in `PERFORMANCE.md`. D-043 records the durable representation, recipe, access, cancellation, and sheltered-rate decisions.
+
+## Slice 7: Health, safety, and simple death
+
+Status: **Implemented** on 2026-07-16. Depends on Slices 0-6.
+
+### Objective
+
+Turn prolonged physical failure into explicit health consequences and terminal death while preserving stable identity and understandable causality.
+
+### Decision checkpoints
+
+- Define the minimum health representation and the exact lethal thresholds/durations for dehydration, starvation, exhaustion, and exposure.
+- Define terminal record retention and whether dead-agent hot state is compacted while stable identity remains resolvable.
+
+### Deliverables
+
+- Add compact health/alive state and scheduled deterioration or threshold consequences.
+- Connect unmet thirst, hunger, rest, and exposure to health through explicit integer rules.
+- Add incapacitation where necessary to avoid agents walking/building through terminal physical states.
+- Add one terminal death transition with cause, time, and position.
+- Cancel or invalidate ordinary future events for dead agents while retaining inspectable historical identity.
+- Keep death physical only; inheritance, grief, relationships, burial, and historical archival belong to later phases.
+
+### Acceptance criteria
+
+- Dead agents never execute normal movement, perception, gathering, sleep, building, or decision events.
+- Death is applied once and has a stable cause even when multiple lethal thresholds share a timestamp.
+- Spatial occupancy and active-agent counts remain consistent after death.
+- A reproduced run yields identical death ordering, causes, times, and positions.
+- Headless reports distinguish survival, blocked progress, depletion, dehydration, starvation, exhaustion, exposure, and other implemented terminal causes.
+
+### Implemented result
+
+Private `sim-core::health` owns one 16-byte pointer-free `HealthState` per retained agent without widening the six-byte hot position/activity record. Hunger 9,000, thirst 8,000, rest 9,500, or exposure 8,500 schedules the first consequence analytically from the existing exact need state. While severe failure persists, one event every 600 ticks applies integer health loss: dehydration 2,500, exposure 2,000, starvation 1,000, or exhaustion 1,000 from a 10,000 maximum. A value at or below 2,500 incapacitates the agent; zero applies one terminal death. When several causes are severe together, the explicit stable precedence is dehydration, exposure, starvation, then exhaustion.
+
+Health consequences sort after same-time need thresholds but before wake, action completion, movement, and decision work. Need/rate/relief changes invalidate and analytically replace the projected health event; periodic deterioration preserves its established cadence rather than restarting on an activity transition. Incapacitation invalidates movement, routes, policy work, sleep, and construction. Death removes source-validated occupancy, leaves the stable dense identity and final `AgentView` resolvable, and appends one cold `DeathRecord` containing physical cause, causal due time, and position. Generated terrain is unchanged; grief, inheritance, burial, injury, disease, and archival compaction remain deferred.
+
+`Engine::health`, latest-tick `health_diagnostics`, persistent `death_records`, and snapshot total/living/active/death counts expose the read-only boundary. `sim-headless` now reports blocked/depletion failures and separate dehydration/starvation/exhaustion/exposure totals. Unit coverage fixes health/event layouts, simultaneous-cause precedence, exact repeated deterioration, health-before-movement ordering, occupancy cleanup, and stale-event behavior. Public `physical_agent_slice7` coverage reproduces an unmet-thirst death at tick 121,800, proves terminal API rejection and idempotence, and clears terminal state on reset. The release harness records 20/100/10,000 health/event capacities and insertion/extraction observations. D-044 records the durable rules and retention decision.
+
+## Slice 8: Phase 2 integrated survival proof
+
+Status: **Implemented**. Depends on Slices 0-7.
+
+### Objective
+
+Prove the complete physical loop with repeatable 20-100-agent headless scenarios, deterministic evidence, long-run stability, and measured storage/event costs.
+
+### Deliverables
+
+- Add canonical fixed-seed scenarios for at least 20 and 100 agents using only public engine/world contracts.
+- Select deterministic spawn locations with bounded access to fresh water and initial resources; record the selection inputs rather than adding a universal settlement score to `World`.
+- Run long enough for movement, need thresholds, gathering, consumption, sleep, construction, depletion/contention, and at least one understandable survival or failure path.
+- Emit a deterministic compact report containing initial conditions, final agent counts/states, action/failure/death counts, resource deltas, structures, scheduler totals, and a semantic state hash.
+- Add same-seed replay, different-command divergence, tick-batching equivalence, and reset/replay integration tests.
+- Add a bounded soak test that monitors event queue growth, stale-event ratio, retry chains, spatial-index consistency, resource-delta growth, and memory capacity.
+- Record release measurements for agent bytes, event bytes, event throughput, route/perception work, scenario elapsed time, allocations, and peak working set.
+- Update the roadmap so Phase 2 becomes completed and Phase 3 beliefs/relationships becomes the next active planning boundary only after all acceptance criteria pass.
+
+### Acceptance criteria
+
+- Canonical 20-agent and 100-agent scenarios finish with byte/equality-stable reports and hashes across repeated runs.
+- Agents survive or die for reasons derivable from recorded physical state and events.
+- No normal engine tick performs work proportional to the complete population when no event is due.
+- Event timestamps never move backward; causal chains and retry depth remain bounded.
+- No agent occupies two positions, no position violates the chosen occupancy rule, no resource is consumed twice, and no structure overlaps illegally.
+- Population, event queue, indexes, inventories, deltas, and structures remain within recorded capacities during the soak.
+- The full repository gate and the relevant release scenario/benchmark commands pass from a clean process.
+- Living documentation exactly matches the implemented Phase 2 boundary and lists remaining limitations.
+
+### Implemented result
+
+`sim-headless` now owns a reusable `ScenarioRunner`, canonical `ScenarioConfig`, compact equality-stable `ScenarioReport`, and explicitly versioned FNV-1a semantic encoding. The canonical seed-1, 2,048 x 2,048 scenario runs 600,000 driver ticks with 20 or 100 agents. It selects 75% of starts on deterministic standable cells cardinally adjacent to fresh water and concentrates the remaining 25% around one bounded wood source to exercise gathering, route/occupancy contention, and a reproducible dehydration failure cohort. Initial conditions record 32 carried food units for every agent and eight shelter-wood units for the freshwater cohort; `Engine::set_initial_inventory` accepts these supplies only at tick zero before policy activation. Full starting food, local timber, bounded perception, and waiting after shelter completion constrain the workload while preserving D-041's established generic no-urgent gathering behavior.
+
+The report includes selection inputs and hash, final activity/population state, gather/eat/drink/sleep/build/route/failure/death counts, sparse resource changes, structures, inventory totals, cumulative scheduled/processed/stale events, maximum due batch and queue depth, retry depth, route expansions, perception cells, retained capacities, and sampled invariant results. The semantic hash explicitly writes integer fields, enum ranks, positions, per-agent needs/health/inventory/policy, resource deltas, structures, and death records; it does not depend on `Debug`, platform hash randomization, floating-point display, or collection iteration accidents.
+
+Normal integration tests prove same-input equality and byte-stable display for 20 and 100 agents, driver batching equivalence, accepted-command divergence, and reset/replay. Ignored release tests repeat both complete canonical scenarios. After reachable/occupied/claimed objective selection, the 20-agent result retains 15 survivors and five intentional fallback-cohort dehydration deaths after 30 gathers, 19 completed shelters, 60 eats, 105 drinks, and 15 complete sleep/wake cycles. The 100-agent result retains 75 survivors and 25 fallback deaths after 60 gathers, 82 completed shelters, 300 eats, 525 drinks, and 75 sleep/wake cycles. Both 1,001-sample soaks report zero occupancy, resource, or structure invariant violations and no due backlog; peak consecutive retry depth is 21 for both and peak event queues are 604/1,931. D-045, D-050, and D-051 record the durable scenario, report, navigation, contention, initial-supply, and diagnostic boundaries.
+
+## Data ownership target
+
+```text
+sim-core::Engine
+  AgentStore
+    compact hot agent records
+    optional colder physical state/indexes
+  EventScheduler
+    deterministic future events
+    cancellation/stale-event validation
+  SpatialIndex
+    present agents
+    dynamic structures
+  ResourceDeltas
+    only modified generated feature capacities
+  SpawnedObjects
+    explicit sparse tree/berry/rock/fresh-water placements and remaining capacity
+  StructureStore
+    sparse constructed shelters
+  World
+    immutable generated terrain/features
+    deterministic resident materialization cache
+
+sim-headless
+  configuration, deterministic scenario driving, reports, benchmarks
+
+sim-viewer
+  no authoritative Phase 2 state
+  deterministic residency/startup orchestration
+  read-only agent/structure GPU presentation
+```
+
+Exact module names may change during implementation, but ownership may not drift across these boundaries without a recorded architecture decision.
+
+## Cross-cutting test matrix
+
+| Invariant | Required evidence |
+| --- | --- |
+| Identity | Stable IDs, invalid/stale references, reset sequence, terminal identity |
+| Time | No backward events, exact equal-time ordering, pause, large jumps, overflow |
+| Determinism | Repeat, insertion-order variation, tick batching, reset/replay |
+| Residency | Resident success, unloaded/outside typed failure, no implicit generation |
+| Movement | Passable, water/slope/feature blocked, collision, signed/chunk boundaries |
+| Spatial state | Exact source transfer, canonical query order, complete shared-cell entries |
+| Needs | Interpolation, thresholds, saturation, activity rates, stale rescheduling |
+| Resources | Base-plus-delta composition, contention, depletion, inventory conservation |
+| Sleep/shelter | Valid sites, recovery, interruption, construction contention |
+| Death | Single terminal transition, event invalidation, stable cause and report |
+| Scale | 20/100 scenarios, synthetic larger storage/scheduler workload, bounded soak |
+| Performance | Type sizes, retained capacities, allocations, throughput, peak working set |
+
+Small exact fixtures should prove ordering, arithmetic, conservation, and ownership. Integrated scenarios should prove composition. Avoid giant golden dumps when a structural invariant and compact semantic hash are sufficient.
+
+## Performance and storage checkpoints
+
+Every slice that changes hot data or events must record, in release mode where timing matters:
+
+- complete size/alignment of every hot agent, need, inventory, event, spatial-entry, delta, and structure record;
+- logical bytes and retained capacity for 20, 100, and a larger synthetic population;
+- scheduler insertion, cancellation/reschedule, and due-event extraction throughput;
+- events executed, stale events discarded, and maximum same-time chain depth;
+- spatial-query candidates, route expansions, and temporary allocations;
+- sparse resource/structure bytes per modified feature or constructed shelter;
+- scenario elapsed time, process peak working set, and allocation observations;
+- before/after evidence when an implementation is called an optimization.
+
+The first implementing slice must set explicit budgets for maximum hot agent-core size and event record size from measured candidates. Every narrowed ID, coordinate, need, counter, or quantity must document its valid range and overflow behavior. Later slices may revise budgets only with documented evidence. Source-line count is never a performance proxy.
+
+## Documentation updates per slice
+
+As each slice lands:
+
+- update `CURRENT_IMPLEMENTATION.md` with executable behavior and remaining gaps;
+- update `ARCHITECTURE.md` with ownership, event flow, residency, mutation, and read-only API contracts;
+- append `ARCHITECTURE_DECISIONS.md` for time representation, ID/storage layout, scheduler, occupancy, need arithmetic, resource deltas, structures, or death retention choices;
+- update `TESTING.md` with exact focused, scenario, soak, benchmark, and validation commands;
+- update `PERFORMANCE.md` with layouts, capacities, allocations, timings, and budgets;
+- update `ROADMAP.md` and this plan's status/implementation notes;
+- update the root `README.md` only when user-facing run commands, configuration, controls, or output change.
+
+Keep each fact canonical in its owning document and link to it elsewhere.
+
+## Explicitly deferred
+
+The following are outside Phase 2 unless an implemented physical-loop failure proves a direct dependency:
+
+- beliefs, episodic memory, relationships, personality-driven cognition, emotions, and social needs;
+- families, children, reproduction, aging stages, inheritance, and caregiving;
+- communication, signals, language, teaching, misunderstanding, and culture;
+- settlements, households, factions, economy, trade, occupations, laws, institutions, and warfare;
+- farming, cooking, crafting trees, equipment, detailed buildings, fire simulation, and itemized inventories;
+- combat, injuries, disease, pregnancy, healing, and advanced physiology;
+- long-distance journeys, region transfers, roads, hierarchical world routes, crowds, and flow fields;
+- dynamic ecology, regrowth beyond a deliberately minimal measured rule, seasons, weather, floods, and terrain modification;
+- agent or structure rendering until the headless Phase 2 proof is correct;
+- generator versioning, save/load, persistence, networking, and replay files. Their future boundaries must not be blocked, but they are not implementation work yet;
+- parallel mutable simulation and million-agent scaling. Phase 2 should preserve a path to them without introducing unmeasured concurrency.
+
+## Open decision gates
+
+These questions must be resolved in their owning slice, not guessed ahead of evidence:
+
+- exact simulation-time resolution and event scheduler representation;
+- maximum hot agent-core and event sizes;
+- generational stale-reference strategy;
+- occupancy and equal-time collision policy;
+- local route-search budget and compact route representation;
+- fixed-point need scales, rates, thresholds, and physical time calibration;
+- deterministic choice-stream keying;
+- inventory capacity, gather yields, and depletion/regrowth policy;
+- sleep validity and recovery rates;
+- shelter recipe, footprint, sharing, and cancellation/refund behavior;
+- health deterioration rates and terminal-cause precedence;
+- canonical scenario duration, spawn count/roles, success thresholds, and benchmark limits.
+
+Each decision must be justified by correctness, deterministic behavior, measured layout/cost, and the smallest requirements of the current slice.
+
+## Definition of done
+
+Phase 2 is complete only when:
+
+- Slices 0-8 are marked **Implemented** with code, tests, documentation, and validation evidence;
+- 20-100 agents execute through deterministic scheduled events rather than per-frame or full-population polling;
+- movement, physical perception, needs, gathering, consumption, sleep, shelter, health, and simple death work together;
+- generated terrain remains immutable and mutable physical state uses explicit simulation-owned stores;
+- unavailable terrain, failed actions, depletion, and death have typed, understandable outcomes;
+- deterministic reports prove repeatability and expose why agents survived or failed;
+- compact layouts, retained capacities, allocations, event throughput, scenario timing, and soak behavior are measured;
+- `InitialDocumentation/` passes its immutable checksum;
+- the complete repository validation gate succeeds after the final documentation edit; and
+- the next unresolved work belongs to Phase 3 beliefs and relationships rather than an unfinished physical-loop dependency.
