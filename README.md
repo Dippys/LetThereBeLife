@@ -3,14 +3,16 @@
 A deterministic Rust simulation where society is meant to emerge from individual people rather
 than being scripted. Agents should eventually communicate only through observable signals and
 develop their own languages. Today it has a 65,536² procedurally generated world (plates,
-climate, rivers, biomes) and physical agents that seek water and food, sleep, build shelters,
-and can die.
+climate, rivers, waterholes, biomes) and agents that seek water and food, sleep, build shelters,
+and can die. Each agent remembers places it has seen, explores, and points out places to others,
+who infer only a rough idea of where they are.
 
 ## Quick start
 
 ```sh
 cargo run --release -p sim-viewer          # open the world; press T over land to spawn agents
 cargo run -p sim-headless -- --ticks 600   # headless run, prints a deterministic report hash
+cargo run --release -p sim-headless -- --study   # how well agents survive (see docs/DEVELOPMENT.md)
 cargo test --workspace
 ```
 

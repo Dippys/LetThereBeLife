@@ -31,9 +31,10 @@ and a `tests.rs` or `tests/` folder next to it. Every file starts with a `//!` l
 | Module | Responsibility |
 |---|---|
 | `lib.rs` | `mod` declarations and public re-exports only |
-| `engine/` | `Engine` facade. `mod.rs` (struct, config, commands, snapshot), `tick.rs` (event dispatch), `setup.rs` (world loads, population, spawn), `views.rs` (read-only accessors), `routes.rs`, `policy.rs` (decision handling and drink/eat/gather effects), `actions.rs` (sleep requests, action and wake completion), `shelter.rs`, `errors.rs` (error mapping) |
+| `engine/` | `Engine` facade. `mod.rs` (struct, config, commands, snapshot), `tick.rs` (event dispatch), `setup.rs` (world loads, population, spawn), `views.rs` (read-only accessors), `routes.rs`, `policy.rs` (activation with `PolicyOptions`, decision handling, drink/eat/gather effects), `cognition.rs` (observe → deliberate, gesture start/completion and who sees it, `mental_map`/`signal_events` views), `actions.rs` (sleep requests, action and wake completion), `shelter.rs`, `errors.rs` (error mapping) |
 | `agent/` | `AgentId(u32)`, `SimTime`, 6-byte `AgentRecord`, `AgentView`, errors, perception types, `ScheduledEvent` (32 B). `population/` splits the dense `Population` store: `init`, `movement`, `vitals` (needs + health), `policy`, `sleep`, `inventory`, `perception` |
-| `policy/` | Physical decision-making: `selection.rs` (goal by urgency, target from perception), `exploration.rs`, `state.rs` (`PolicyState`, 12 B) |
+| `policy/` | Decision-making. `selection.rs` is the original reactive policy (what's in view only). `deliberate.rs` is the memory-driven policy: travel to remembered places by waypoints, spiral search when no water is known, novelty exploration with a walk-back leash, top-ups before trips, home shelters, pointing out places. `exploration.rs`, `state.rs` (`PolicyState`, 12 B) |
+| `cognition/` | Private beliefs. `map.rs`: per-agent `MentalMap` (256 B): 12 remembered places in per-kind slots (12 B each, first-hand or hint with a search radius), 24 recently explored 32×32 tiles, spiral-search and sharing state. `gesture.rs`: pointing gestures (direction + order-of-magnitude distance) and how watchers infer a rough place. `Minds` stores maps per `AgentId` |
 | `scheduler` | Binary-heap event queue with a total order (see below), ≤4,096 due events per tick |
 | `needs` | Analytical fixed-point hunger/thirst/rest/exposure (`NeedState`, 32 B). Values are computed from rates, not ticked. |
 | `health` | Severe-need damage, incapacitation, death (`HealthState`, 16 B) |
@@ -55,7 +56,7 @@ and a `tests.rs` or `tests/` folder next to it. Every file starts with a `//!` l
 | `storage/` | `World`: chunk-keyed resident storage (`BTreeMap` of 64×64 tiles), `loading.rs`, `queries.rs` (resident physical lookups), `visits.rs` (deterministic read-only iteration) |
 | `generator.rs` | `ChunkGenerator` (read-only sampler for tooling) and full-chunk synthesis |
 | `archive/` | Full-world archive: `format`, `writer`, `reader`, `overview` |
-| `worldgen/` | Private integer-only generator (see below): `plates`, `climate`, `noise`, `drainage/` (`lattice`, `channels`), `hydrology`, `regions`, `classification`, chunk synthesis in `mod.rs` |
+| `worldgen/` | Private integer-only generator (see below): `plates`, `climate`, `noise`, `drainage/` (`lattice`, `channels`), `hydrology`, `regions`, `ponds` (agent-scale waterholes), `classification`, chunk synthesis in `mod.rs` |
 
 ## Engine lifecycle
 
@@ -75,7 +76,28 @@ Engine::new(config)                         // empty world + empty population, O
   Cancellation is lazy: each agent carries a generation counter, so stale events are skipped.
 - **Needs are analytical.** Each need stores a rate and a reference time. The scheduler gets one
   event at the next threshold crossing instead of updating every tick.
-- **Reset** clears dynamic state (agents, events, time, spawned objects) but keeps loaded terrain.
+- **Reset** clears dynamic state (agents, events, time, spawned objects, minds) but keeps loaded terrain.
+
+## Agent minds (beliefs vs truth)
+
+```text
+perceive (radius 8, truth) ──► MentalMap::observe ──► deliberate ──► goal + target
+                                   ▲                       │
+       watcher infers rough place  │                       └─► Signal action (120 ticks)
+       (gesture::interpret) ◄──────┴──── awake agents in view see the gesture
+```
+
+- `PolicyOptions { exploration, memory, sharing }` picks the policy at activation. The legacy
+  (`activate_physical_policy[_with_exploration]`) path is unchanged, and canonical scenarios use it.
+  The viewer and the study use `PolicyOptions::full()`.
+- Beliefs never touch truth. A remembered place is checked only by looking again: if it's in view
+  and nothing of that kind is there, the memory is dropped (or a hint loses confidence).
+- Sharing respects the vision's core rule: the sender's exact memory is never copied. Watchers get
+  a direction and an order of magnitude and store a hint with a search radius, which is provably
+  large enough to contain the real place (`cognition/gesture.rs` tests).
+- Perception includes `reserved_cells` (trees and rocks, including depleted ones) because nobody
+  can sleep or build on them. Both policies use it to pick build sites, and the memory policy uses
+  it to pick sleep spots.
 
 ## World generation (three tiers, all integer, all seed-pure)
 
@@ -87,6 +109,12 @@ Engine::new(config)                         // empty world + empty population, O
    with exact seams. Cached (LRU of 64).
 4. **Chunk synthesis** (`worldgen/mod.rs`, `classification.rs`): interpolates the region, adds
    detail, rasterizes rivers and lakes, classifies biomes, and places sparse features.
+5. **Waterholes** (`ponds.rs`, generator version 2): at most one small pond (radius 2–6) per chunk,
+   placed well inside the chunk so it never crosses an edge. The chance follows local moisture:
+   about 3% of chunks in desert, ~27% in typical savanna, ~55% in grassland, up to 80% in wet
+   forest. Pond shores in dry or open country grow trees and berry bushes (oases). This exists
+   because continental drainage alone left most land thousands of cells from fresh water, far
+   beyond an agent's 8-cell view.
 
 Output: 4-byte `TerrainCell` (elevation, moisture, packed surface/biome) and sparse 24-byte `Feature`s.
 Worker count and completion order never change the output; tests enforce this.
@@ -106,7 +134,12 @@ only the bootstrap load area, not the world size.
 | `camera.rs` | Presentation-only camera, zoom/pan clamping |
 | `spawn_menu.rs` | Numpad object-placement menu |
 
-`sim-headless` is split into `scenario.rs` (runner), `spawns.rs`, `report.rs`, `invariants.rs`, and `hash.rs`.
+`sim-headless` is split into `scenario.rs` (runner), `spawns.rs`, `report.rs`, `invariants.rs`, `hash.rs`,
+and `study.rs` (behavior study: viewer-like agents, survival and roaming metrics, decision traces).
+
+The viewer's hover card shows the hovered agent's memory (counts by kind, hints, explored tiles),
+and the map draws its remembered places: solid squares for seen places, outlines sized to the
+search radius for hints (`render/instances.rs`).
 
 Wall-clock time is converted into whole fixed ticks. Render frames never drive simulation.
 Worker-built chunks are merged on the main thread after that frame's ticks.

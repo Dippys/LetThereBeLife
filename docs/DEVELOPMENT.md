@@ -40,6 +40,27 @@ The archive lets the viewer show the whole world instantly and stream exact chun
 zoom. If it is missing, stale, or the seed doesn't match, the viewer warns and generates
 procedurally instead. Re-run the command after changing the seed or the generator.
 
+## Behavior study
+
+Measures how viewer-like agents actually fare. They spawn without supplies and run headless:
+
+```sh
+cargo run --release -p sim-headless -- --study [--near-water | --groups] [--seed N] [--agents N]
+    [--ticks N] [--mind legacy|memory|full] [--verbose] [--trace AGENT]
+```
+
+- `--near-water` spawns within 6 cells of fresh water. `--groups` drops agents in groups of 5.
+  The default spawns on random land.
+- `--mind legacy` is the old reactive policy (what the viewer used before). `memory` adds the
+  mental map. `full` (the default) adds gestures.
+- The output starts with a world summary: fresh water, food, how much land is near water, and the
+  biome mix. Then come survivors, death causes, roaming, idle %, meals, and gestures.
+- `--verbose` prints one line per agent, including what it remembers and its last need values.
+  `--trace N` prints agent N's last 60 decisions (with failures) — the fastest way to see why an
+  agent died.
+
+Compare minds before and after any behavior change. Current numbers are in [STATUS.md](STATUS.md).
+
 ## Viewer controls
 
 | Input | Action |
@@ -47,13 +68,13 @@ procedurally instead. Re-run the command after changing the seed or the generato
 | Mouse wheel | Zoom around cursor (max zoom-out fits the whole world) |
 | Left-drag | Pan |
 | Right-drag | Select an area to generate/load (yellow = OK, red = over limit of 65,536 new chunks) |
-| `T` | Spawn an agent at the cursor (needs loaded, standable terrain; max 4,096) |
+| `T` | Spawn an agent at the cursor (needs loaded, standable terrain; max 4,096). Agents use the full mind |
 | Numpad `5` | Open the object menu / confirm. `2`/`8`/`4`/`6` select tree, berries, rock, water; left-click places; `0` closes |
 | `Space` | Pause / resume |
 | `1`–`9` | Speed 1×, 2×, 4× … 256× |
 | `R` | Reset to zero agents (keeps terrain) |
 | `C` | Cancel pending generation |
-| Hover | Cell/chunk info in HUD; hovering an agent shows its needs, goal, inventory, health, sleep |
+| Hover | Cell/chunk info in HUD. Hovering an agent shows its needs, goal, inventory, health, sleep, and memory, and draws its remembered places on the map (solid = seen, outline = hint with search area) |
 | `Esc` | Quit |
 
 ## Tests
@@ -81,13 +102,14 @@ Release harnesses and soaks are `#[ignore]`d. Run them explicitly:
 cargo test --release -p sim-headless --test canonical_scenarios -- --ignored --nocapture --test-threads=1
 ```
 
-Determinism fingerprints (last verified 2026-10-09). If one changes, simulation behavior changed:
+Determinism fingerprints (last verified 2026-10-10, world generator v2). If one changes,
+simulation behavior changed. Canonical runs use the legacy policy; the study covers the mind.
 
 | Run | Hash |
 |---|---|
-| `sim-headless --ticks 600 --seed 42` (20 agents) | `a7b3823045d32660` |
-| Canonical 20 agents, 600,000 ticks (release soak) | `be55f18f67d71983` |
-| Canonical 100 agents, 600,000 ticks (release soak) | `26a5c65e5427bd6d` |
+| `sim-headless --ticks 600 --seed 42` (20 agents) | `561a5ca41553db95` |
+| `sim-headless --canonical --agents 20` (600,000 ticks) | `358092051ec6b444` |
+| `sim-headless --canonical --agents 100` (600,000 ticks) | `e4842c31783f1ea1` |
 
 ## Tooling
 

@@ -3,7 +3,8 @@
 A deterministic, headless-first Rust simulation where society should emerge from individual
 agents. Long-term goal: agents with needs, beliefs, memory, relationships, and languages that
 emerge from signals (never directly transmitted meaning). Today: a procedurally generated world
-plus physical survival agents (needs, gathering, sleep, shelter, health, death).
+plus survival agents (needs, gathering, sleep, shelter, health, death) with private mental maps
+(remembered places, explored areas) and pointing gestures that share rough knowledge.
 
 **Start here:** read [`docs/STATUS.md`](docs/STATUS.md) for where things stand and what's next.
 
@@ -34,6 +35,7 @@ cargo clippy --workspace --all-targets -- -D warnings    # lint, warnings are er
 cargo fmt --all
 cargo run -p sim-viewer                                  # interactive viewer
 cargo run -p sim-headless -- --ticks 600 --seed 42       # headless smoke run
+cargo run --release -p sim-headless -- --study           # behavior study: survival, roaming, deaths
 scripts/validate.sh            # or: powershell -File scripts/validate.ps1
 ```
 
@@ -53,11 +55,17 @@ The toolchain is installed on Windows. From WSL, call `cargo.exe` (e.g.
    - Simulation state and rules use integer / fixed-point math. Floats only appear in
      presentation-facing values (speed multiplier, displayed seconds).
    - Thread count and completion order must not change results.
-4. **Compact data, proven.** Hot per-agent records are small and pointer-free; add or keep
+4. **Measure behavior changes.** Run the behavior study (`--study`, several seeds and spawn modes,
+   `--mind legacy|memory|full`) before and after changing agent decisions or world generation, and
+   record the numbers. Use `--trace AGENT` to see why an agent died before guessing.
+5. **Beliefs are not truth.** Agent knowledge lives in `sim-core/src/cognition/` and changes only
+   through perception or observed gestures. Never let policy read world state directly for things
+   the agent hasn't perceived.
+6. **Compact data, proven.** Hot per-agent records are small and pointer-free; add or keep
    `size_of` assertions when touching them. Prefer scheduled events over per-tick scans of all agents.
-5. **Tests for new behavior and regressions.** Public-API scenario tests live in `crates/*/tests/`.
-6. **Keep it simple.** No speculative abstractions or unrelated cleanup. Remove dead code in the area you touch.
-7. **Don't weaken a failing check to make it pass.**
+7. **Tests for new behavior and regressions.** Public-API scenario tests live in `crates/*/tests/`.
+8. **Keep it simple.** No speculative abstractions or unrelated cleanup. Remove dead code in the area you touch.
+9. **Don't weaken a failing check to make it pass.**
 
 ## Definition of done
 
