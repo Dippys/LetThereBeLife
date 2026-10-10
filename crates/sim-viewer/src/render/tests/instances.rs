@@ -137,8 +137,11 @@ fn dynamic_agents_do_not_enter_the_immutable_terrain_cache_key() {
 #[test]
 fn shelter_lifecycle_states_have_distinct_footprint_colors() {
     assert_ne!(
-        structure_color(StructureState::UnderConstruction),
-        structure_color(StructureState::Complete)
+        structure_color(
+            sim_core::StructureKind::Shelter,
+            StructureState::UnderConstruction
+        ),
+        structure_color(sim_core::StructureKind::Shelter, StructureState::Complete)
     );
 }
 

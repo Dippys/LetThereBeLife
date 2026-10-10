@@ -1,13 +1,12 @@
-//! Shelter construction: build requests, start, completion, and cancellation
-//! with material refunds.
+//! Construction (shelters and hearths): build requests, start, completion, and
+//! cancellation with material refunds.
 
 use super::errors::map_build_schedule_error;
 use crate::policy::PolicyAction;
 use crate::{
     AgentActivity, AgentId, BuildShelterError, Engine, PhysicalGoal, PolicyFailureReason,
-    PolicyReason, SHELTER_BUILD_TICKS, SHELTER_STONE_COST, SHELTER_WOOD_COST, Standability,
-    StructureDiagnostic, StructureDiagnosticKind, StructureView, WORLD_GENERATION_BOUNDS,
-    WorldPosition, WorldQueryError,
+    PolicyReason, Standability, StructureDiagnostic, StructureDiagnosticKind, StructureKind,
+    StructureView, WORLD_GENERATION_BOUNDS, WorldPosition, WorldQueryError,
 };
 
 impl Engine {
@@ -20,14 +19,20 @@ impl Engine {
         if self.policy_active {
             return Err(BuildShelterError::PolicyControlled);
         }
-        self.start_shelter_build(agent, site, PolicyReason::NoUrgentNeed)
+        self.start_build(
+            agent,
+            site,
+            PolicyReason::NoUrgentNeed,
+            StructureKind::Shelter,
+        )
     }
 
-    pub(super) fn start_shelter_build(
+    pub(super) fn start_build(
         &mut self,
         agent: AgentId,
         site: WorldPosition,
         reason: PolicyReason,
+        kind: StructureKind,
     ) -> Result<StructureView, BuildShelterError> {
         let view = self
             .population
@@ -74,7 +79,7 @@ impl Engine {
         {
             return Err(BuildShelterError::BlockingFeature);
         }
-        if !self.population.can_build_shelter(agent) {
+        if !self.population.can_build(agent, kind) {
             return Err(BuildShelterError::InsufficientMaterials);
         }
         self.compact_scheduler_if_needed();
@@ -85,20 +90,23 @@ impl Engine {
                 self.time,
                 agent,
                 PolicyAction {
-                    goal: PhysicalGoal::BuildShelter,
+                    goal: match kind {
+                        StructureKind::Shelter => PhysicalGoal::BuildShelter,
+                        StructureKind::Hearth => PhysicalGoal::BuildHearth,
+                    },
                     target: site,
                     reason,
-                    duration: SHELTER_BUILD_TICKS,
+                    duration: kind.build_ticks(),
                 },
             )
             .map_err(map_build_schedule_error)?;
         let structure = self
             .structures
-            .start(agent, site, self.time, due)
+            .start(agent, site, kind, self.time, due)
             .expect("construction capacity and conflicts were prevalidated");
         self.population
-            .consume_shelter_materials(agent)
-            .expect("shelter recipe was prevalidated");
+            .consume_build_materials(agent, kind)
+            .expect("recipe was prevalidated");
         self.structure_diagnostics.push(StructureDiagnostic {
             structure,
             at: self.time,
@@ -131,13 +139,23 @@ impl Engine {
         let Some(structure) = self.structures.cancel_for_builder(agent) else {
             return false;
         };
-        self.population.refund_shelter_materials(agent);
+        self.population
+            .refund_build_materials(agent, structure.kind);
+        let refunded = |wanted: crate::Material| {
+            structure
+                .kind
+                .cost()
+                .iter()
+                .filter(|(material, _)| *material == wanted)
+                .map(|&(_, amount)| amount)
+                .sum()
+        };
         self.structure_diagnostics.push(StructureDiagnostic {
             structure,
             at: self.time,
             kind: StructureDiagnosticKind::Cancelled,
-            refunded_wood: SHELTER_WOOD_COST,
-            refunded_stone: SHELTER_STONE_COST,
+            refunded_wood: refunded(crate::Material::Wood),
+            refunded_stone: refunded(crate::Material::Stone),
         });
         true
     }

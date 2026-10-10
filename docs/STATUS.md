@@ -7,8 +7,10 @@ _Last updated: 2026-10-10._
 > An agent misunderstands a signal for a believable reason, acts on that misunderstanding, and
 > both participants update future behavior using only observable evidence.
 
-That's the spec's definition of success, and the active plan works toward it in a small valley:
-[`plans/VERTICAL_SLICE.md`](plans/VERTICAL_SLICE.md).
+That's the spec's definition of success. The vertical slice that first met it is done
+([`plans/VERTICAL_SLICE.md`](plans/VERTICAL_SLICE.md)); the active plan is
+[`plans/LIVING_WORLD.md`](plans/LIVING_WORLD.md): things described by properties, knowledge that
+agents learn, wildlife, and construction.
 
 ## Where the project is
 
@@ -21,26 +23,34 @@ lays out phases 0–10, from world → physical agents → cognition → communi
 | 1. World foundation: terrain, climate, rivers/lakes, waterholes, biomes, resources | Done |
 | 2. Physical agents: movement, perception, needs, gathering, sleep, shelter, health, death | Done |
 | 3. Beliefs, memory, relationships | **In progress.** Mental maps, personalities, and sparse relationships with trust are done; episodic memory isn't. Plan: [`plans/MINDS.md`](plans/MINDS.md) |
-| 4. Nonverbal communication | **Mostly done (vertical slice).** Pointing, mimes, tone, questions, repairs, corrections, and requests for food |
+| 4. Nonverbal communication | **Mostly done.** Pointing, mimes, tone, questions, repairs, corrections, requests for food, and shouted warnings and calls to hunt |
 | 5. Proto-language | **Started (vertical slice).** Personal lexicons, two founding dialects, competing interpretations, learning from consequences |
-| 6. Children and transmission | **Started (vertical slice).** Children start with no words and pick up most of the band's from observation |
-| 7. Invention and diffusion | Not started |
+| 6. Children and transmission | **Started.** Children start with no words or knowledge and pick up words, what's edible, what's dangerous, and (sometimes) fire by watching |
+| 7. Invention and diffusion | **Started.** Food lore, animal lore, and the hearth spread between families by observation |
 | 8–10. Settlements and economy, migration and language divergence, conflict and institutions | Not started |
 
 ## What works today
 
 - **World:** a finite 65,536² world generated from a seed: plates, continents, mountains, latitude
-  climate, winds, whole-world drainage with lakes and rivers, biomes, trees, berry bushes, and rocks.
-  Generator v2 adds agent-scale **waterholes** with oasis vegetation, so most non-desert land has
-  fresh water within ~64 cells.
+  climate, winds, whole-world drainage with lakes and rivers, biomes, waterholes, trees, rocks, and
+  berry bushes, 30% of them bitter (generator v3). Things yield **materials with properties**
+  (nutrition, toxicity, building use, regrowth); picked bushes and trees grow back.
+- **Wildlife (valley):** deer and wolves as species traits with one rule set. Deer graze, herd, and
+  flee people; wolves hunt deer, avoid crowds, and bite lone people; populations breed and wander
+  back in. People hunt (better together), butcher carcasses for meat, and can be wounded; sleep heals.
 - **Agents:** hunger, thirst, rest, and exposure needs; routing; gathering, eating, and drinking;
   sleep; lean-to shelters; health, incapacitation, and death. Fully deterministic.
-- **Agent minds (viewer and study):** each agent remembers up to 12 places it has seen (water,
-  food, wood, stone, shelters) and forgets ones it finds empty. It explores new ground and
+- **Agent minds (viewer and study):** each agent remembers up to 16 places it has seen (water,
+  berries, bitter berries, wood, stone, shelters, hearths) and forgets ones it finds empty. It explores new ground and
   spiral-searches when it knows no water. It walks back to remembered places, tops up before
   heading out, never strays farther from known water than it can walk back, and keeps a home
   shelter. It points out places, or ground it has already explored, to agents nearby, who get only
   a rough hint to search.
+- **Learned knowledge:** what each material is good for, which animals are prey or dangerous, and
+  whether a hearth warms you are beliefs, changed only by evidence (eating, retching, bites,
+  watching others, family lore). The two founding families start with different lore.
+- **Hearths:** agents who know fire build one near home from stones and wood and warm up by it;
+  others learn fire by watching.
 - **Communication (vertical slice, `--valley`):** private intent is separate from the public
   signal (pointing, mime, a word from the speaker's own lexicon, tone). Listeners weigh competing
   readings, can misunderstand for recorded reasons, ask "this?", get repaired, learn from what
@@ -51,35 +61,40 @@ lays out phases 0–10, from world → physical agents → cognition → communi
   sociability, diligence) and up to six acquaintances with familiarity, trust, and last-seen
   place. Sociable agents seek out friends and stay with company. Hints count for more from people
   whose past hints were right.
-- **Viewer:** pan and zoom, HUD, `T` to spawn, the object-placement menu, speed 1×–256×. Hovering
-  an agent shows its memory and draws its remembered places on the map.
+- **Viewer:** pan and zoom, HUD, `T` to spawn, the object-placement menu, speed 1×–256×. Animals,
+  carcasses, and hearths are drawn. Hovering an agent shows its memory, what it eats, shuns, hunts,
+  and fears, and draws its remembered places on the map.
 - **Headless:** canonical scenarios with fingerprint hashes, and the **behavior study**
   (`--study`), which measures survival, roaming, idleness, and gestures, with per-agent traces.
 
-## Did agents stop camping and dying? (behavior study, 2026-10-10)
+## Survival (behavior study, refreshed 2026-10-10)
 
 20 agents, 600k ticks (~2.8 simulated hours), no supplies. Survivors per scenario. Mind columns:
 legacy = old reactive policy, memory = mental map, sharing = plus gestures, full = plus
-personality and relationships (what the viewer runs).
+personality, relationships, and learned knowledge (what the viewer runs).
 
 | Seed (terrain) | Spawn | legacy | memory | sharing | full |
 |---|---|---|---|---|---|
-| 1 (savanna/desert) | random land | 9 | 20 | 20 | 20 |
-| 1 | groups of 5 | 11 | 18 | 20 | 20 |
-| 1 | near water | 16 | 19 | 19 | 19 |
-| 4 | random land | 11 | 20 | 19 | 20 |
-| 4 | groups | 14 | 20 | 20 | 20 |
-| 4 | near water | 13 | 20 | 20 | 20 |
+| 1 (savanna/desert) | random land | 9 | 20 | 19 | 20 |
+| 1 | groups of 5 | 10 | 20 | 19 | 20 |
+| 1 | near water | 9 | 19 | 19 | 19 |
+| 4 | random land | 14 | 20 | 20 | 20 |
+| 4 | groups | 9 | 20 | 20 | 20 |
+| 4 | near water | 11 | 20 | 20 | 20 |
 | 7 (desert/alpine) | random land | 1 | 2 | 2 | 4 |
-| 7 | groups | 1 | 1 | 3 | 2 |
-| 7 | near water | 7 | 14 | 16 | 12 |
-| 9 (small island) | random land | 5 | 12 | 13 | 13 |
-| 9 | groups | 5 | 16 | 17 | 19 |
-| 9 | near water | 11 | 20 | 20 | 20 |
-| 42 (forest) | random land | 18 | 20 | 20 | 20 |
-| 42 | groups | 16 | 20 | 20 | 20 |
-| 42 | near water | 16 | 20 | 20 | 20 |
-| **Total of 300** | | **154** | **242** | **249** | **249** |
+| 7 | groups | 0 | 1 | 3 | 0 |
+| 7 | near water | 3 | 14 | 13 | 15 |
+| 9 (small island) | random land | 5 | 15 | 16 | 17 |
+| 9 | groups | 6 | 18 | 19 | 19 |
+| 9 | near water | 4 | 18 | 17 | 18 |
+| 42 (forest) | random land | 17 | 19 | 20 | 20 |
+| 42 | groups | 15 | 20 | 19 | 20 |
+| 42 | near water | 15 | 20 | 20 | 20 |
+| **Total of 300** | | **128** | **246** | **246** | **252** |
+
+Legacy fell from 154 because a third of the bushes are now bitter (less food for agents that
+don't remember places). The full mind is unchanged within noise (249 → 252). In the valley with
+wildlife and hearths, 119 of 120 agents survive 1.2M ticks across six seeds.
 
 The social layer doesn't add survival, since most scenarios were at their ceiling. It makes agents
 different from each other and makes sharing work: in group spawns, time in company and the share of
@@ -103,12 +118,14 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Known problems and limitations
 
-- **Complete misunderstanding episodes are rare.** Questions repair most misreadings on the spot.
-  Water and food co-locate at oases, so many misreadings are accidentally true, and cross-family
-  tips are about faraway places. The 16-adult seed 1 valley has one; the default valley with
-  children has none in 19 seeds, probably because children ask about nearly everything.
-- **Food doesn't regrow**, so in a scarce valley sharing only moves meals around: it carries more
-  agents through the first famine but doesn't raise mean lifespan.
+- **The release success test currently fails** (on the `living-world` branch; `main` is unchanged).
+  The regenerated world (bitter bushes) no longer contains the seed 1 episode, and the detector now
+  requires the listener to act before it learns better. Across 20 seeds × 2 band sizes × 4.8M ticks
+  no complete episode emerges naturally. The mechanism works end to end in a constructed test (a
+  wolf warning misread as deer, hunted, found out, and corrected), but cross-family misreadings
+  rarely reach the speaker again because the families live apart. Deciding how to gate this is open.
+- **Helping matters only in famines.** With regrowth and game, nobody needs to ask for food; the M7
+  helping test runs famine valleys (`--no-regrowth --no-wildlife --food 5`).
 - **COME (regroup) requests aren't implemented** (deferred from M7).
 - **Sharing improves survival only where knowledge is scarce.** In most scenarios agents already
   survive on their own knowledge. Sharing should matter more with bigger populations, scarcer
@@ -123,13 +140,19 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
   smokes after M7. It happens with and without agents. Cause unknown, possibly GPU teardown.
 - **No save/load.** Simulation state can't be persisted. The world archive needs regenerating for
   generator v2 (`--pregenerate-world`).
-- **Mental maps are 256 B per agent.** That's fine at viewer scale; the spec's 10M agents would
-  need 2.5 GB, so compaction comes later.
+- **Minds are 808 B per agent** (mental map 372 B). That's fine at viewer scale; the spec's 10M
+  agents would need ~8 GB, so compaction comes later.
+- **Greedy waypoints can pace around obstacles.** Agents no longer step straight back to where they
+  were and collapse into sleep when exhausted, but longer cycles are possible.
 
 ## Recent changes
 
-- 2026-10-10 (latest): M7, children and requests for food (D-077). The vertical slice is
-  complete except COME.
+- 2026-10-10 (latest, `living-world` branch): living world L1–L4: materials with properties,
+  bitter berries, learned food beliefs, regrowth, deer and wolves, hunting and bites, warnings and
+  calls to hunt, hearths, and fixes for agents pacing, chasing, or sleeping through bites
+  (D-078–D-080).
+- 2026-10-10: M7, children and requests for food (D-077). The vertical slice is complete except
+  COME.
 - 2026-10-10: M5, learning and repair from consequences, and M6, the success test
   (D-075, D-076).
 - 2026-10-10: M4, competing interpretations, two founding dialects, and hints that drive
@@ -147,16 +170,10 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## What's next
 
-The vertical slice in [`plans/VERTICAL_SLICE.md`](plans/VERTICAL_SLICE.md) is **done (M1–M7,
-COME deferred). The project's definition of success has been met:** in the 16-adult seed 1
-valley an agent misreads a gesture for a recorded reason, acts on it, and both sides change what
-they believe about that word from what they observed. It's still **rare**. Candidates for the next
-plan:
-
-1. **Make consequential misunderstandings common**, not just possible: more distinct food and
-   water places, children who act on half-understood hints, and words for more than places.
-2. **Renewable food** (regrowth), so helping and sharing can matter over a lifetime.
-3. **COME requests and leaving camp together**, building toward phase 8 (settlements).
-4. **Episodic memory** (phase 3), so agents remember who misled or helped them and when.
-
-Run the study before and after each change.
+1. **Decide the success gate** (see Known problems): pin a natural episode if one turns up, or gate
+   on the constructed end-to-end test and report natural emergence as a measure.
+2. **Make cross-family contact common**: shared hunts, a shared hearth, visiting, so misreadings
+   between dialects get noticed and repaired by the people involved.
+3. **Construction by properties (L4, continued)**: structures whose use comes from what they're
+   made of (wind-blocking, warmth, storage), hearths that need fuel, cooking.
+4. **Episodic memory** (phase 3), so agents remember who misled, helped, or warned them.

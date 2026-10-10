@@ -9,8 +9,8 @@
 use super::{
     exploration::{exploration_target, varied_exploration_heading},
     selection::{
-        PolicySelection, candidate_available, most_urgent, nearest_resource_access,
-        nearest_shelter_access, nearest_water_access, shelter_selection,
+        PolicySelection, candidate_available, most_urgent, nearest_build_site,
+        nearest_resource_access, nearest_shelter_access, nearest_water_access, shelter_selection,
     },
 };
 use crate::{
@@ -72,6 +72,10 @@ impl Temperament {
 /// A remembered shelter this close counts as home: tired agents walk back to it,
 /// and agents don't build another one.
 pub const HOME_RANGE: u64 = 200;
+/// A hearth is built only this close (cells) to the builder's home shelter.
+const HEARTH_FROM_HOME: u64 = 16;
+/// Tiredness (out of 10,000) at which an agent sleeps wherever it can.
+const REST_CRITICAL: u16 = 8_800;
 /// Exploration never shrinks the round-trip range below this many cells.
 const MIN_LEASH: u64 = 24;
 
@@ -131,6 +135,10 @@ pub(crate) struct MindInput<'a> {
     pub(crate) warn: Option<WorldPosition>,
     /// An animal in view worth calling the people nearby to hunt.
     pub(crate) recruit: Option<WorldPosition>,
+    /// It believes a hearth would warm it (and knows how to build one).
+    pub(crate) knows_hearths: bool,
+    /// Where it stood at its previous decision (it won't step straight back).
+    pub(crate) came_from: Option<WorldPosition>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -207,6 +215,9 @@ pub(crate) fn deliberate(
             .or_else(|| planner.explore(PolicyReason::HungerThreshold, true))
             .unwrap_or_else(|| Deliberation::wait(origin, PolicyReason::HungerThreshold)),
         Some(NeedKind::Rest) => planner.rest(inventory),
+        Some(NeedKind::Exposure) if mind.knows_hearths && planner.warm_up().is_some() => {
+            planner.warm_up().expect("checked")
+        }
         Some(NeedKind::Exposure) => {
             let reactive = shelter_selection(
                 origin,
@@ -222,6 +233,14 @@ pub(crate) fn deliberate(
             }
             planner
                 .travel_to_known(LandmarkKind::Shelter, PhysicalGoal::SeekShelter)
+                .or_else(|| {
+                    mind.knows_hearths
+                        .then(|| {
+                            planner.travel_to_known(LandmarkKind::Hearth, PhysicalGoal::Explore)
+                        })
+                        .flatten()
+                        .map(|trip| trip.with_reason(PolicyReason::Warming))
+                })
                 .or_else(|| planner.gather_known_wood(inventory))
                 .unwrap_or_else(|| Deliberation::wait(origin, PolicyReason::ExposureThreshold))
         }
@@ -245,6 +264,15 @@ impl Planner<'_> {
         let reason = PolicyReason::RestThreshold;
         if let Some(access) = self.sleepable_shelter_access() {
             return Deliberation::act(PhysicalGoal::Sleep, access, reason);
+        }
+        // Worn out with the weather mild, or about to collapse whatever the
+        // weather: sleep here rather than trek home.
+        let rest = self.needs.rest.value;
+        let mild = !self.needs.exposure.threshold_reached;
+        if ((rest >= REST_CRITICAL && mild) || rest >= crate::REST_COLLAPSE)
+            && let Some(spot) = self.free_sleeping_spot()
+        {
+            return Deliberation::act(PhysicalGoal::Sleep, spot, reason);
         }
         if self.home_is_near()
             && let Some(home) =
@@ -309,7 +337,10 @@ impl Planner<'_> {
         self.perception
             .structures
             .iter()
-            .filter(|structure| structure.state == crate::StructureState::Complete)
+            .filter(|structure| {
+                structure.state == crate::StructureState::Complete
+                    && structure.kind == crate::StructureKind::Shelter
+            })
             .flat_map(|structure| {
                 let at = structure.position;
                 [(0, -1), (-1, 0), (1, 0), (0, 1)].map(|(dx, dy)| WorldPosition {
@@ -383,9 +414,20 @@ impl Planner<'_> {
             return Deliberation::act(PhysicalGoal::Signal, place, PolicyReason::Sharing);
         }
         let works = self.roll(1) < temperament.work_chance;
+        // A bit chilly with a fire in view: warm up while it's easy.
+        if self.mind.knows_hearths
+            && self.needs.exposure.value >= temperament.prepare_exposure / 3
+            && let Some(warm) = self.warm_up()
+        {
+            return warm.with_reason(PolicyReason::PrepareTrip);
+        }
         // Hunting is work too, and prey in view is the best work there is.
         if works && let Some(hunt) = self.hunt() {
             return hunt;
+        }
+        // Someone who keeps fire and has none near home builds one.
+        if works && let Some(hearth) = self.make_hearth(inventory) {
+            return hearth;
         }
         let shelter_in_view = nearest_shelter_access(origin, self.perception).is_some();
         if !works {
@@ -495,6 +537,79 @@ impl Planner<'_> {
             }
         }
         Deliberation::wait(origin, PolicyReason::NoUrgentNeed)
+    }
+
+    /// Warms up at the hearth in view: right away if it's beside the agent,
+    /// otherwise walks over.
+    fn warm_up(&self) -> Option<Deliberation> {
+        let origin = self.origin;
+        let hearth = self
+            .perception
+            .structures
+            .iter()
+            .filter(|structure| {
+                structure.state == crate::StructureState::Complete
+                    && structure.kind == crate::StructureKind::Hearth
+            })
+            .min_by_key(|structure| (manhattan(origin, structure.position), structure.id.get()))?
+            .position;
+        if origin.x.abs_diff(hearth.x).max(origin.y.abs_diff(hearth.y)) <= 1 {
+            return Some(Deliberation::act(
+                PhysicalGoal::WarmUp,
+                origin,
+                PolicyReason::Warming,
+            ));
+        }
+        let (waypoint, heading) = self.waypoint_toward(hearth)?;
+        Some(Deliberation {
+            selection: PolicySelection {
+                goal: PhysicalGoal::Explore,
+                target: Some(waypoint),
+                reason: PolicyReason::Warming,
+            },
+            heading: Some(heading),
+        })
+    }
+
+    /// Builds a hearth near home if it keeps fire and knows of none close by,
+    /// gathering stone and wood for it first.
+    fn make_hearth(&self, inventory: InventoryView) -> Option<Deliberation> {
+        let map = self.mind.map;
+        let at_home = map
+            .nearest_seen_distance(LandmarkKind::Shelter, self.origin)
+            .is_some_and(|distance| distance <= HEARTH_FROM_HOME);
+        if !self.mind.knows_hearths
+            || !at_home
+            || map.remembers_near(LandmarkKind::Hearth, self.origin, HOME_RANGE)
+        {
+            return None;
+        }
+        let kind = crate::StructureKind::Hearth;
+        if kind.affordable(inventory) {
+            let site = nearest_build_site(self.origin, self.perception)?;
+            return Some(Deliberation::act(
+                PhysicalGoal::BuildHearth,
+                site,
+                PolicyReason::NoUrgentNeed,
+            ));
+        }
+        let missing = kind
+            .cost()
+            .into_iter()
+            .find(|&(material, amount)| inventory.amount(material) < amount)?
+            .0;
+        if let Some(target) = nearest_resource_access(self.origin, self.perception, |found| {
+            found == missing && inventory.can_add(found)
+        }) {
+            return Some(Deliberation::act(
+                PhysicalGoal::GatherMaterial,
+                target,
+                PolicyReason::HearthMaterials,
+            ));
+        }
+        LandmarkKind::of_material(missing)
+            .and_then(|place| self.travel_to_known(place, PhysicalGoal::GatherMaterial))
+            .map(|trip| trip.with_reason(PolicyReason::HearthMaterials))
     }
 
     /// Moves to the reachable cell in view farthest from `threat`.
@@ -650,12 +765,17 @@ impl Planner<'_> {
         let origin = self.origin;
         let heading = heading_toward(origin, destination);
         let current = manhattan(origin, destination);
+        let back = self.mind.came_from;
         let direct = self
             .perception
             .reachable_cells
             .iter()
             .copied()
-            .filter(|&cell| cell != origin && candidate_available(origin, self.perception, cell))
+            .filter(|&cell| {
+                cell != origin
+                    && back.is_none_or(|back| manhattan(cell, back) > 1)
+                    && candidate_available(origin, self.perception, cell)
+            })
             .map(|cell| (manhattan(cell, destination), cell))
             .filter(|&(distance, _)| distance < current)
             .min_by_key(|&(distance, cell)| (distance, cell.y, cell.x));

@@ -279,3 +279,18 @@ another animal. Urgent needs prefer places seen first-hand. Bushes grow back laz
 M7 helping test now needs a famine valley (no regrowth, no wildlife): with food renewing, nobody
 asks. The success detector now requires the listener to have acted before it learned better (it used
 to fall back to the lesson time).
+
+## D-080: Hearths, collapsing into sleep, and the success gate (2026-10-10)
+
+**Decision:** Structure kinds carry costs; a hearth (3 stone, 2 wood) relieves cold when an agent
+warms up beside it, and whether hearths warm you is a learned `Crafts` belief (one founding family
+keeps fire). Hearths are built only near the builder's home shelter when none is known nearby.
+Agents past `REST_COLLAPSE` sleep wherever they are, cold or not; a bite wakes a sleeper; waypoints
+avoid stepping straight back to the previous decision spot. The success detector requires action
+before the lesson, and the release success test is left failing rather than retargeted: no natural
+episode exists in the regenerated worlds under the stricter detector.
+**Why:** Plan L4's first step, and three deaths traced to pacing, exhaustion, and being bitten in
+one's sleep. The gate is the user's call: weakening it to pass would hide that natural episodes
+are, for now, too rare.
+**Consequences:** Valley survival is 119/120 with wildlife and hearths. The work lives on the
+`living-world` branch until the gate is resolved.

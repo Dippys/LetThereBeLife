@@ -257,7 +257,7 @@ impl Population {
         let activity = match action.goal {
             PhysicalGoal::Sleep => AgentActivity::Sleeping,
             PhysicalGoal::GatherMaterial => AgentActivity::Gathering,
-            PhysicalGoal::BuildShelter => AgentActivity::Building,
+            PhysicalGoal::BuildShelter | PhysicalGoal::BuildHearth => AgentActivity::Building,
             PhysicalGoal::SeekWater
             | PhysicalGoal::SeekFood
             | PhysicalGoal::Drink
@@ -266,6 +266,7 @@ impl Population {
             | PhysicalGoal::Explore
             | PhysicalGoal::Signal
             | PhysicalGoal::Hunt
+            | PhysicalGoal::WarmUp
             | PhysicalGoal::Wait => AgentActivity::Idle,
             PhysicalGoal::Incapacitated => AgentActivity::Incapacitated,
         };

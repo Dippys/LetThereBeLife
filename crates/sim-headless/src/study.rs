@@ -193,6 +193,11 @@ pub struct WildlifeStats {
     pub wolves: u64,
     /// At the end, for founders then children: how many fear wolves.
     pub fear_wolves: [u64; 2],
+    /// Hearths finished, warm-ups at them, and (founders, children) who know
+    /// hearths warm at the end.
+    pub hearths: u64,
+    pub warm_ups: u64,
+    pub know_fire: [u64; 2],
 }
 
 /// What the band ate and believes about food.
@@ -326,6 +331,19 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                         wildlife.failed_calls += 1;
                     }
                 }
+                for built in engine.structure_diagnostics() {
+                    wildlife.hearths += u64::from(
+                        built.kind == sim_core::StructureDiagnosticKind::Completed
+                            && built.structure.kind == sim_core::StructureKind::Hearth,
+                    );
+                }
+                for decision in engine.policy_diagnostics() {
+                    wildlife.warm_ups += u64::from(
+                        decision.goal == PhysicalGoal::WarmUp
+                            && decision.kind == PolicyDiagnosticKind::ActionCompleted
+                            && decision.failure.is_none(),
+                    );
+                }
                 for event in engine.wildlife_events() {
                     match *event {
                         sim_core::WildlifeEvent::Struck {
@@ -387,6 +405,7 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
             .iter()
             .any(|belief| belief.species == sim_core::Species::Wolf && belief.danger > 64);
         wildlife.fear_wolves[usize::from(mind.child)] += u64::from(fears);
+        wildlife.know_fire[usize::from(mind.child)] += u64::from(mind.knows_hearths);
     }
     report.food = food;
     wildlife.deer = engine.animal_count(sim_core::Species::Deer) as u64;
@@ -1194,6 +1213,12 @@ impl fmt::Display for StudyReport {
                 wild.wolves,
             )?;
         }
+        let [founders_fire, children_fire] = self.wildlife.know_fire;
+        write!(
+            formatter,
+            "\n  fire: hearths built {}, warm-ups {}; know hearths warm: founders {founders_fire}, children {children_fire}",
+            self.wildlife.hearths, self.wildlife.warm_ups
+        )?;
         if let Some((children, matching)) = self.children_vocabulary {
             write!(
                 formatter,

@@ -3,14 +3,15 @@
 //! is the agent's private belief, never authoritative world state.
 
 use crate::{
-    PhysicalPerception, WorldPosition, WorldRect, policy::ExplorationHeading,
-    structures::StructureState,
+    PhysicalPerception, WorldPosition, WorldRect,
+    policy::ExplorationHeading,
+    structures::{StructureKind, StructureState},
 };
 
 use super::{LandmarkKind, LandmarkSource, LandmarkView};
 
 /// Remembered-place slots per agent, partitioned by kind (see `slot_range`).
-pub const LANDMARK_SLOTS: usize = 14;
+pub const LANDMARK_SLOTS: usize = 16;
 /// Recently explored tiles remembered for novelty-seeking exploration.
 pub const VISITED_TILE_SLOTS: usize = 24;
 /// Edge length of an exploration tile in cells.
@@ -176,6 +177,10 @@ pub(crate) struct MentalMap {
     search_anchor: (i16, i16),
     /// Index of the spiral corner currently sought; `NO_SEARCH` when idle.
     search_step: u16,
+    /// Where it stood at its last decision, so it doesn't step straight back
+    /// there (pacing between two spots around an obstacle).
+    trail: (i16, i16),
+    has_trail: bool,
 }
 
 impl Default for MentalMap {
@@ -190,6 +195,8 @@ impl Default for MentalMap {
             last_share: u32::MAX,
             search_anchor: (0, 0),
             search_step: NO_SEARCH,
+            trail: (0, 0),
+            has_trail: false,
         }
     }
 }
@@ -202,6 +209,7 @@ const fn slot_range(kind: LandmarkKind) -> std::ops::Range<usize> {
         LandmarkKind::Stone => 9..10,
         LandmarkKind::Shelter => 10..12,
         LandmarkKind::Bitterberries => 12..14,
+        LandmarkKind::Hearth => 14..16,
     }
 }
 
@@ -212,7 +220,8 @@ const fn kind_of_slot(slot: usize) -> LandmarkKind {
         7..9 => LandmarkKind::Wood,
         9..10 => LandmarkKind::Stone,
         10..12 => LandmarkKind::Shelter,
-        _ => LandmarkKind::Bitterberries,
+        12..14 => LandmarkKind::Bitterberries,
+        _ => LandmarkKind::Hearth,
     }
 }
 
@@ -279,13 +288,22 @@ fn perceived_nearest(
                 .iter()
                 .map(|water| water.position),
         ),
-        _ => nearest(
-            &mut perception
-                .structures
-                .iter()
-                .filter(|structure| structure.state == StructureState::Complete)
-                .map(|structure| structure.position),
-        ),
+        (_, None) => {
+            let wanted = if kind == LandmarkKind::Hearth {
+                StructureKind::Hearth
+            } else {
+                StructureKind::Shelter
+            };
+            nearest(
+                &mut perception
+                    .structures
+                    .iter()
+                    .filter(|structure| {
+                        structure.state == StructureState::Complete && structure.kind == wanted
+                    })
+                    .map(|structure| structure.position),
+            )
+        }
     })
 }
 
@@ -602,6 +620,7 @@ impl MentalMap {
             LandmarkKind::Water,
             LandmarkKind::Berries,
             LandmarkKind::Shelter,
+            LandmarkKind::Hearth,
             LandmarkKind::Wood,
             LandmarkKind::Bitterberries,
             LandmarkKind::Stone,
@@ -717,6 +736,23 @@ impl MentalMap {
             }
             self.search_leg_decisions = self.search_leg_decisions.saturating_add(1);
             return corner;
+        }
+    }
+
+    /// Where the agent stood at its previous decision, if it has moved since.
+    pub(crate) fn came_from(&self, origin: WorldPosition) -> Option<WorldPosition> {
+        let previous = WorldPosition {
+            x: i64::from(self.trail.0),
+            y: i64::from(self.trail.1),
+        };
+        (self.has_trail && previous != origin).then_some(previous)
+    }
+
+    /// Remembers where it stands now for the next decision.
+    pub(crate) fn mark_decision(&mut self, origin: WorldPosition) {
+        if let Some(position) = compact(origin) {
+            self.trail = position;
+            self.has_trail = true;
         }
     }
 

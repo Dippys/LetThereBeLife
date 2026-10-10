@@ -6,7 +6,7 @@ use crate::{
     agent::{ActionEffectError, AgentId, SimTime},
     resources::{FOOD_CONSUMPTION, InitialInventoryError, InventoryView},
     scheduler::Scheduler,
-    structures::{BuildShelterError, SHELTER_WOOD_COST},
+    structures::BuildShelterError,
 };
 
 impl Population {
@@ -38,31 +38,35 @@ impl Population {
         Ok(())
     }
 
-    pub(crate) fn can_build_shelter(&self, agent: AgentId) -> bool {
+    pub(crate) fn can_build(&self, agent: AgentId, kind: crate::StructureKind) -> bool {
         self.inventory(agent)
-            .is_some_and(|inventory| inventory.amount(crate::Material::Wood) >= SHELTER_WOOD_COST)
+            .is_some_and(|inventory| kind.affordable(inventory))
     }
 
-    pub(crate) fn consume_shelter_materials(
+    pub(crate) fn consume_build_materials(
         &mut self,
         agent: AgentId,
+        kind: crate::StructureKind,
     ) -> Result<(), BuildShelterError> {
         let inventory = self
             .inventories
             .get_mut(agent.0 as usize)
             .ok_or(BuildShelterError::MissingAgent)?;
-        let wood = &mut inventory.items[crate::Material::Wood as usize];
-        if *wood < SHELTER_WOOD_COST {
+        if !kind.affordable(*inventory) {
             return Err(BuildShelterError::InsufficientMaterials);
         }
-        *wood -= SHELTER_WOOD_COST;
+        for (material, amount) in kind.cost() {
+            inventory.items[material as usize] -= amount;
+        }
         Ok(())
     }
 
-    pub(crate) fn refund_shelter_materials(&mut self, agent: AgentId) {
+    pub(crate) fn refund_build_materials(&mut self, agent: AgentId, kind: crate::StructureKind) {
         let inventory = &mut self.inventories[agent.0 as usize];
-        let wood = &mut inventory.items[crate::Material::Wood as usize];
-        *wood = wood.saturating_add(SHELTER_WOOD_COST);
+        for (material, amount) in kind.cost() {
+            let slot = &mut inventory.items[material as usize];
+            *slot = slot.saturating_add(amount);
+        }
     }
 
     pub(crate) fn add_inventory(

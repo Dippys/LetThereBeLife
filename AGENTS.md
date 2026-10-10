@@ -3,8 +3,9 @@
 A deterministic, headless-first Rust simulation where society should emerge from individual
 agents. Long-term goal: agents with needs, beliefs, memory, relationships, and languages that
 emerge from signals (never directly transmitted meaning). Today: a procedurally generated world
-plus survival agents (needs, gathering, sleep, shelter, health, death) with private mental maps
-(remembered places, explored areas) and pointing gestures that share rough knowledge.
+whose things have properties (materials, deer and wolves), and survival agents with private mental
+maps, learned beliefs (what's edible, what's dangerous, how to make fire), personalities,
+relationships, personal lexicons, and gestures and words that can be misunderstood.
 
 **Start here:** read [`docs/STATUS.md`](docs/STATUS.md) for where things stand and what's next.
 The active plan is [`docs/plans/VERTICAL_SLICE.md`](docs/plans/VERTICAL_SLICE.md); its north star is

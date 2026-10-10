@@ -101,6 +101,10 @@ pub enum PhysicalGoal {
     Signal = 11,
     /// Strike at an animal next to the agent.
     Hunt = 12,
+    /// Build a hearth on an adjacent cell.
+    BuildHearth = 13,
+    /// Stand by a hearth to warm up.
+    WarmUp = 14,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,6 +144,10 @@ pub enum PolicyReason {
     Warning,
     /// Pointing out an animal to hunt, to people nearby.
     Recruiting,
+    /// Cold: going to a hearth, or warming up by one.
+    Warming,
+    /// Gathering stone and wood for a hearth.
+    HearthMaterials,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

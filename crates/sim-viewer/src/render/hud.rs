@@ -522,6 +522,7 @@ const fn mime_label(mime: Mime) -> &'static str {
         Mime::Retch => "RETCH",
         Mime::Snarl => "SNARL",
         Mime::Spear => "SPEAR",
+        Mime::Warm => "WARM-HANDS",
     }
 }
 
@@ -570,6 +571,8 @@ const fn goal_label(goal: PhysicalGoal) -> &'static str {
         PhysicalGoal::Explore => "EXPLORE",
         PhysicalGoal::Signal => "POINT OUT PLACE",
         PhysicalGoal::Hunt => "HUNT",
+        PhysicalGoal::BuildHearth => "BUILD HEARTH",
+        PhysicalGoal::WarmUp => "WARM UP",
     }
 }
 
@@ -597,6 +600,8 @@ const fn policy_reason_label(reason: PolicyReason) -> &'static str {
         PolicyReason::Hunting => "HUNTING",
         PolicyReason::Warning => "WARNING OTHERS",
         PolicyReason::Recruiting => "CALLING OTHERS TO HUNT",
+        PolicyReason::Warming => "WARMING UP",
+        PolicyReason::HearthMaterials => "HEARTH MATERIALS",
     }
 }
 

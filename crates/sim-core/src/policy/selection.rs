@@ -198,13 +198,16 @@ pub(super) fn nearest_shelter_access(
     perception
         .structures
         .iter()
-        .filter(|structure| structure.state == StructureState::Complete)
+        .filter(|structure| {
+            structure.state == StructureState::Complete
+                && structure.kind == crate::StructureKind::Shelter
+        })
         .flat_map(|structure| cardinal_neighbors(structure.position))
         .filter(|candidate| candidate_available(origin, perception, *candidate))
         .min_by_key(|candidate| target_key(origin, *candidate))
 }
 
-fn nearest_build_site(
+pub(super) fn nearest_build_site(
     origin: WorldPosition,
     perception: &PhysicalPerception,
 ) -> Option<WorldPosition> {

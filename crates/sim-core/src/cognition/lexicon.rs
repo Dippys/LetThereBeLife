@@ -20,19 +20,14 @@ pub enum Concept {
     Home = 4,
     /// "I've been over there."
     Been = 5,
-    Come = 6,
-    Give = 7,
-    Me = 8,
-    You = 9,
-    Yes = 10,
-    No = 11,
-    Bitterberries = 12,
-    Deer = 13,
-    Wolf = 14,
+    Bitterberries = 6,
+    Deer = 7,
+    Wolf = 8,
+    Fire = 9,
 }
 
 impl Concept {
-    pub const COUNT: usize = 15;
+    pub const COUNT: usize = 10;
     pub const ALL: [Self; Self::COUNT] = [
         Self::Water,
         Self::Berries,
@@ -40,15 +35,10 @@ impl Concept {
         Self::Stone,
         Self::Home,
         Self::Been,
-        Self::Come,
-        Self::Give,
-        Self::Me,
-        Self::You,
-        Self::Yes,
-        Self::No,
         Self::Bitterberries,
         Self::Deer,
         Self::Wolf,
+        Self::Fire,
     ];
 
     const fn from_index(index: u8) -> Self {

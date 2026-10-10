@@ -415,7 +415,36 @@ impl Engine {
                     self.death_records.push(record);
                 }
             }
-            HealthDiagnosticKind::Deteriorated | HealthDiagnosticKind::StaleEvent => {}
+            HealthDiagnosticKind::Deteriorated => {
+                // The pain wakes a sleeper and makes anyone stop and react.
+                let sleeping = self.population.sleep_view(agent);
+                let woke = match self.population.interrupt_for_policy_decision(
+                    &mut self.scheduler,
+                    self.time,
+                    agent,
+                    self.policy_active,
+                ) {
+                    Ok((_, interrupted)) => interrupted.is_some(),
+                    Err(_) => {
+                        sleeping.is_some()
+                            && self
+                                .population
+                                .force_interrupt_sleep(self.time, agent)
+                                .is_some()
+                    }
+                };
+                if let Some(sleep) = sleeping
+                    && woke
+                {
+                    self.sleep_diagnostics.push(crate::SleepDiagnostic {
+                        sleep,
+                        at: self.time,
+                        kind: crate::SleepDiagnosticKind::Interrupted,
+                        interruption: Some(crate::SleepInterruptionReason::Injury),
+                    });
+                }
+            }
+            HealthDiagnosticKind::StaleEvent => {}
         }
         self.health_diagnostics.push(outcome);
     }

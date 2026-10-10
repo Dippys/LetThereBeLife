@@ -103,7 +103,10 @@ impl Engine {
                     Err(PolicyFailureReason::InconsistentState)
                 }
             }
-            PhysicalGoal::BuildShelter => self.apply_build_completion(event.agent),
+            PhysicalGoal::BuildShelter | PhysicalGoal::BuildHearth => {
+                self.apply_build_completion(event.agent)
+            }
+            PhysicalGoal::WarmUp => self.apply_warm_up(event.agent),
             PhysicalGoal::Signal => self.apply_signal(event.agent, target),
             PhysicalGoal::Hunt => self.apply_hunt(event.agent, target),
             PhysicalGoal::SeekShelter | PhysicalGoal::Incapacitated => {
@@ -194,6 +197,48 @@ impl Engine {
                 DRINK_THIRST_RELIEF,
             )
             .map_err(action_effect_failure)
+    }
+
+    /// Warms up by a hearth: the cold eases a lot. It learns hearths warm (it
+    /// felt it), and anyone watching sees it warming its hands.
+    pub(super) fn apply_warm_up(&mut self, agent: AgentId) -> Result<(), PolicyFailureReason> {
+        let position = self
+            .population
+            .view(agent)
+            .ok_or(PolicyFailureReason::InconsistentState)?
+            .position;
+        if !self.structures.hearth_beside(position) {
+            return Err(PolicyFailureReason::TargetUnavailable);
+        }
+        self.population
+            .apply_need_relief(
+                &mut self.scheduler,
+                self.time,
+                agent,
+                NeedKind::Exposure,
+                crate::HEARTH_WARMTH,
+            )
+            .map_err(action_effect_failure)?;
+        if self.policy_options.memory {
+            self.minds.get_mut(agent).crafts.warmed();
+            let watchers: Vec<AgentId> = self
+                .perceive_physical(agent, crate::PHYSICAL_POLICY_RADIUS)
+                .map(|perception| {
+                    perception
+                        .agents
+                        .iter()
+                        .filter(|other| {
+                            other.id != agent && super::cognition::can_watch(other.activity)
+                        })
+                        .map(|other| other.id)
+                        .collect()
+                })
+                .unwrap_or_default();
+            for watcher in watchers {
+                self.minds.get_mut(watcher).crafts.saw_warming();
+            }
+        }
+        Ok(())
     }
 
     /// Eats one unit of whatever carried material the agent most wants to eat.
@@ -294,6 +339,8 @@ impl Engine {
                         && (reason != PolicyReason::ShelterMaterials
                             || (resource.kind == Material::Wood
                                 && inventory.amount(Material::Wood) < SHELTER_WOOD_COST))
+                        && (reason != PolicyReason::HearthMaterials
+                            || matches!(resource.kind, Material::Stone | Material::Wood))
                 })
                 .map(|resource| (candidate, resource))
         })

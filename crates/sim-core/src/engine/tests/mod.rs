@@ -29,6 +29,7 @@ mod calls;
 mod cognition;
 mod food;
 mod health_sleep;
+mod hearth;
 mod lifecycle;
 mod measurements;
 mod movement;

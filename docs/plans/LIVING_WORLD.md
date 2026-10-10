@@ -86,7 +86,18 @@ endless chases (no hunting when worn out).
 - A predator hurts people. Agents learn which species are dangerous from experience and from
   seeing others hurt, avoid them, and can warn others (a danger signal that can be misread).
 
-### L4. Abstract construction
+### L4. Abstract construction (first step ✅ 2026-10-10: the hearth)
+
+**Result so far:** structure kinds carry their own costs (`StructureKind::cost`); a **hearth** is
+3 stones and 2 wood. Standing by one relieves cold (`WarmUp`), and whether hearths warm you is a
+learned belief (`Crafts`, 2 B): one founding family keeps fire, others learn by warming up or
+watching someone do it, and only those who know build one, near their home shelter. Hearths have a
+place kind, a concept (fire), and a mime (warming hands). In the valley, 19–28 hearths get built
+per run; knowledge spreads slowly (a founder of the other family and 1–2 children) because shelters
+already keep most agents warm. Still to do: structures whose use comes from their materials, fuel,
+cooking.
+
+**Plan as written:**
 
 - Structures get their properties from the materials placed in them (wind-blocking, warmth).
   Shelter is "a place that blocks exposure", not a recipe; a hearth is a discovery others can copy.

@@ -312,7 +312,7 @@ pub(super) fn build_structure_instances(
                 structure.position.y as f32 + 0.05,
                 0.9,
                 0.9,
-                structure_color(structure.state),
+                structure_color(structure.kind, structure.state),
             ));
         }
     }

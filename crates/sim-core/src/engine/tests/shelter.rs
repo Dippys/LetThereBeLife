@@ -110,7 +110,12 @@ fn construction_interruption_refunds_once_and_stale_completion_is_harmless() {
         .add_inventory(AgentId::new(0), crate::Material::Stone, SHELTER_STONE_COST);
     engine.time = SimTime::from_ticks(89_950);
     let started = engine
-        .start_shelter_build(AgentId::new(0), site, PolicyReason::NoUrgentNeed)
+        .start_build(
+            AgentId::new(0),
+            site,
+            PolicyReason::NoUrgentNeed,
+            crate::StructureKind::Shelter,
+        )
         .unwrap();
 
     while engine.snapshot().structure_count != 0 {
@@ -302,6 +307,7 @@ fn release_slice6_structure_measurement() {
                         x: i64::from(raw % 200),
                         y: i64::from(raw / 200),
                     },
+                    crate::StructureKind::Shelter,
                     SimTime::ZERO,
                     SimTime::from_ticks(SHELTER_BUILD_TICKS),
                 )

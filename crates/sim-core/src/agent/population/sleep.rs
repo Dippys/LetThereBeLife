@@ -65,11 +65,9 @@ impl Population {
         if let Some(structure) = structure {
             return Err(SleepRequestError::StructureOccupied(structure));
         }
-        if !sheltered
-            && self.needs[index]
-                .view(agent, now)
-                .exposure
-                .threshold_reached
+        // Too cold to sleep in the open, unless so exhausted it collapses anyway.
+        let needs = self.needs[index].view(agent, now);
+        if !sheltered && needs.exposure.threshold_reached && needs.rest.value < crate::REST_COLLAPSE
         {
             return Err(SleepRequestError::UnsafeExposure);
         }

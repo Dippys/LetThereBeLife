@@ -72,7 +72,7 @@ fn mental_map_layout_is_compact() {
     assert_eq!(size_of::<Landmark>(), 16);
     assert_eq!(
         size_of::<MentalMap>(),
-        16 * LANDMARK_SLOTS + 4 * VISITED_TILE_SLOTS + 16
+        16 * LANDMARK_SLOTS + 4 * VISITED_TILE_SLOTS + 20
     );
 }
 
@@ -80,18 +80,10 @@ fn mental_map_layout_is_compact() {
 fn mind_layout_is_bounded() {
     assert_eq!(size_of::<super::PendingCorrection>(), 32);
     assert_eq!(size_of::<super::Dialogue>(), 112);
-    assert_eq!(
-        size_of::<super::Mind>(),
-        size_of::<MentalMap>()
-            + size_of::<super::SocialMemory>()
-            + size_of::<super::Lexicon>()
-            + size_of::<super::Dialogue>()
-            + size_of::<super::Affordances>()
-            + size_of::<super::Fauna>()
-            + 11,
-        "the child flag and parent id pack into the padding after the beliefs"
-    );
-    assert_eq!(size_of::<super::Mind>(), 768);
+    // Map 372, social 96, lexicon 192, dialogue 112, beliefs 15 + 6 + 2,
+    // child flag and parent id, and padding.
+    assert_eq!(size_of::<MentalMap>(), 372);
+    assert_eq!(size_of::<super::Mind>(), 808);
 }
 
 #[test]

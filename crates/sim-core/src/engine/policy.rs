@@ -152,12 +152,23 @@ impl Engine {
             );
             return;
         };
-        if matches!(selection.goal, PhysicalGoal::Signal | PhysicalGoal::Hunt) {
+        if matches!(
+            selection.goal,
+            PhysicalGoal::Signal | PhysicalGoal::Hunt | PhysicalGoal::WarmUp
+        ) {
             self.start_timed_action(agent, selection.goal, target, selection.reason);
             return;
         }
-        if selection.goal == PhysicalGoal::BuildShelter {
-            match self.start_shelter_build(agent, target, selection.reason) {
+        if matches!(
+            selection.goal,
+            PhysicalGoal::BuildShelter | PhysicalGoal::BuildHearth
+        ) {
+            let kind = if selection.goal == PhysicalGoal::BuildHearth {
+                crate::StructureKind::Hearth
+            } else {
+                crate::StructureKind::Shelter
+            };
+            match self.start_build(agent, target, selection.reason, kind) {
                 Ok(structure) => self.policy_diagnostics.push(PolicyDiagnostic {
                     agent,
                     at: self.time,

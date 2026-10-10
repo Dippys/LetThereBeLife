@@ -54,6 +54,8 @@ type SightedAnimal = (crate::Species, WorldPosition);
 const IDENTIFY_DISTANCE: u64 = 6;
 /// A warned-about spot this close (cells) is worth running from.
 const ALARM_DISTANCE: u64 = 20;
+/// Ticks spent warming up by a hearth.
+const WARM_UP_TICKS: u64 = 120;
 /// Ticks a warning takes.
 const WARNING_TICKS: u64 = 40;
 /// How far a shouted warning or call to hunt carries (cells).
@@ -216,6 +218,7 @@ impl Engine {
             dialogue,
             affordances: _,
             fauna: _,
+            crafts,
             child: _,
             parent,
         } = mind;
@@ -339,8 +342,11 @@ impl Engine {
                 quarry: quarry_place,
                 warn: warn.map(|(_, position)| position),
                 recruit: recruit.map(|(_, position)| position),
+                knows_hearths: crafts.knows_hearths(),
+                came_from: map.came_from(origin),
             },
         );
+        self.minds.get_mut(agent).map.mark_decision(origin);
         match deliberation.selection.reason {
             PolicyReason::Warning | PolicyReason::Recruiting => {
                 let warning = deliberation.selection.reason == PolicyReason::Warning;
@@ -389,6 +395,7 @@ impl Engine {
     ) {
         let duration = match (goal, reason) {
             (PhysicalGoal::Hunt, _) => super::HUNT_TICKS,
+            (PhysicalGoal::WarmUp, _) => WARM_UP_TICKS,
             // A warning is quick: a shout and a point.
             (_, PolicyReason::Warning) => WARNING_TICKS,
             _ => SIGNAL_TICKS,
@@ -1163,6 +1170,7 @@ impl Engine {
             child: mind.child,
             affordances: mind.affordances.views().collect(),
             fauna: mind.fauna.views().collect(),
+            knows_hearths: mind.crafts.knows_hearths(),
             acquaintances: mind.social.views().collect(),
             lexicon: mind.lexicon.views().collect(),
         })

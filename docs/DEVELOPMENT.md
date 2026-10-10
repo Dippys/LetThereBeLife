@@ -66,7 +66,8 @@ cargo run --release -p sim-headless -- --study [--near-water | --groups | --vall
   founders and children ended up believing about bitter berries. The `wildlife:` line counts hunt
   and flee decisions, warnings and calls to hunt, strikes and kills (alone and together), bites,
   births, the animals left, and who fears wolves. The `animals:` line counts shouted calls and how
-  many listeners acted on them. The `episode funnel:` line shows how far candidate success episodes
+  many listeners acted on them. The `fire:` line counts hearths built, warm-ups, and who knows
+  hearths warm. The `episode funnel:` line shows how far candidate success episodes
   got (consequence lesson → from a gesture → misread → acted on and about the misreading → speaker
   learned). The `requests for food:` line counts requests, how many
   were first misread, and the answers. The `children:` line shows how much of the founders'

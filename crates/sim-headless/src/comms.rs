@@ -528,10 +528,10 @@ impl CommunicationLog {
 
 impl fmt::Display for CommunicationSummary {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let [water, berries, wood, stone, shelter, bitter] = self.place_exchanges;
+        let [water, berries, wood, stone, shelter, bitter, hearth] = self.place_exchanges;
         write!(
             formatter,
-            "  communication: exchanges={} (water {water}, berries {berries}, bitterberries {bitter}, wood {wood}, stone {stone}, shelter {shelter}, explored {}) receptions={} informed={} acted={} confirmed={} refuted={} misread={}",
+            "  communication: exchanges={} (water {water}, berries {berries}, bitterberries {bitter}, wood {wood}, stone {stone}, shelter {shelter}, hearth {hearth}, explored {}) receptions={} informed={} acted={} confirmed={} refuted={} misread={}",
             self.exchanges,
             self.explored_exchanges,
             self.receptions,

@@ -74,13 +74,13 @@ pub use sim_world::{
     camp_sites, family_camps, find_valley, score_square,
 };
 pub use sleep::{
-    SleepDiagnostic, SleepDiagnosticKind, SleepInterruptionReason, SleepQuality, SleepRequestError,
-    SleepView,
+    REST_COLLAPSE, SleepDiagnostic, SleepDiagnosticKind, SleepInterruptionReason, SleepQuality,
+    SleepRequestError, SleepView,
 };
 pub use structures::{
-    BuildShelterError, SHELTER_BUILD_TICKS, SHELTER_STONE_COST, SHELTER_WOOD_COST,
-    StructureDiagnostic, StructureDiagnosticKind, StructureId, StructureKind, StructureState,
-    StructureView,
+    BuildShelterError, HEARTH_BUILD_TICKS, HEARTH_STONE_COST, HEARTH_WARMTH, HEARTH_WOOD_COST,
+    SHELTER_BUILD_TICKS, SHELTER_STONE_COST, SHELTER_WOOD_COST, StructureDiagnostic,
+    StructureDiagnosticKind, StructureId, StructureKind, StructureState, StructureView,
 };
 pub use wildlife::{
     AnimalMode, AnimalView, CARCASS_TICKS, Species, SpeciesTraits, VALLEY_DEER, VALLEY_WOLVES,

@@ -98,6 +98,7 @@ fn mind_with_words(
         child: false,
         affordances: Vec::new(),
         fauna: Vec::new(),
+        knows_hearths: false,
         acquaintances,
         lexicon,
     })
@@ -220,7 +221,7 @@ fn agent_card_lists_each_place_word_with_the_most_net_evidence() {
         word(3, Concept::Stone, 4, 4),
         word(1, Concept::Home, 0, 0),
         // Non-place concepts are not listed.
-        word(0, Concept::Come, 9, 0),
+        word(0, Concept::Wolf, 9, 0),
     ];
     let lines = card_lines(mind_with_words(
         Personality::AVERAGE,
@@ -515,6 +516,7 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
         death: None,
         memory: Some(MemoryInspection::from_view(&MentalMapView {
             personality: Personality::AVERAGE,
+            knows_hearths: false,
             acquaintances: Vec::new(),
             lexicon: Vec::new(),
             agent: view.id,
@@ -591,6 +593,7 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
             sociability: 100,
             diligence: 100,
         },
+        knows_hearths: false,
         // Every slot a friend; ten-digit ids and 3-digit trust heavy in '0's.
         // The TOP line fits two of them (39 characters), and fewer, longer
         // entries out-weigh more, shorter ones.
@@ -665,7 +668,7 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
     assert!(budget_text.contains("WHY EXPOSURE THRESHOLD"));
     assert!(budget_text.contains("DEATH CAUSE EXHAUSTION"));
     assert!(budget_text.contains("DIED AT TICK 18446744073709551615"));
-    assert!(budget_text.contains("SHELTER 14  HINTS 14  EXPLORED 24 TILES"));
+    assert!(budget_text.contains("SHELTER 16  HINTS 16  EXPLORED 24 TILES"));
     assert!(budget_text.contains("BALANCED  CUR 100 CAU 100 SOC 100 DIL 100\n"));
     assert!(budget_text.contains("FRIENDS 6 OF 6 KNOWN\n"));
     assert!(budget_text.contains("TOP  #4000000000 T100  #4000000000 T100\n"));
@@ -760,6 +763,7 @@ fn the_card_shows_what_an_agent_believes_about_food_and_animals() {
                 evidence: 8,
             },
         ],
+        knows_hearths: false,
         acquaintances: Vec::new(),
         lexicon: Vec::new(),
     });

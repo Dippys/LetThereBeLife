@@ -5,6 +5,11 @@ use crate::{AgentId, SimTime, WorldPosition, agent::CompactPosition};
 pub const SHELTER_WOOD_COST: u8 = 8;
 pub const SHELTER_STONE_COST: u8 = 0;
 pub const SHELTER_BUILD_TICKS: u64 = 600;
+pub const HEARTH_STONE_COST: u8 = 3;
+pub const HEARTH_WOOD_COST: u8 = 2;
+pub const HEARTH_BUILD_TICKS: u64 = 300;
+/// Cold relieved by one warm-up at a hearth.
+pub const HEARTH_WARMTH: u16 = 3_500;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
@@ -19,7 +24,40 @@ impl StructureId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum StructureKind {
+    /// A lean-to: sleeping beside it keeps the cold off.
     Shelter = 0,
+    /// A ring of stones around a fire: standing by it warms you.
+    Hearth = 1,
+}
+
+impl StructureKind {
+    /// What it takes to build: materials and amounts.
+    pub const fn cost(self) -> [(crate::Material, u8); 2] {
+        match self {
+            Self::Shelter => [
+                (crate::Material::Wood, SHELTER_WOOD_COST),
+                (crate::Material::Stone, SHELTER_STONE_COST),
+            ],
+            Self::Hearth => [
+                (crate::Material::Stone, HEARTH_STONE_COST),
+                (crate::Material::Wood, HEARTH_WOOD_COST),
+            ],
+        }
+    }
+
+    pub const fn build_ticks(self) -> u64 {
+        match self {
+            Self::Shelter => SHELTER_BUILD_TICKS,
+            Self::Hearth => HEARTH_BUILD_TICKS,
+        }
+    }
+
+    /// Whether `inventory` holds everything this takes.
+    pub fn affordable(self, inventory: crate::InventoryView) -> bool {
+        self.cost()
+            .iter()
+            .all(|&(material, amount)| inventory.amount(material) >= amount)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -156,6 +194,7 @@ impl StructureStore {
         &mut self,
         builder: AgentId,
         position: WorldPosition,
+        kind: StructureKind,
         started_at: SimTime,
         completes_at: SimTime,
     ) -> Result<StructureView, BuildShelterError> {
@@ -175,7 +214,7 @@ impl StructureStore {
             position,
             builder,
             state: StructureState::UnderConstruction,
-            kind: StructureKind::Shelter,
+            kind,
         };
         self.records.push(Some(record));
         self.by_position.insert((position.y, position.x), id);
@@ -204,7 +243,25 @@ impl StructureStore {
         cardinal_neighbors(position).any(|candidate| {
             self.structure_at(candidate)
                 .and_then(|id| self.view(id))
-                .is_some_and(|view| view.state == StructureState::Complete)
+                .is_some_and(|view| {
+                    view.state == StructureState::Complete && view.kind == StructureKind::Shelter
+                })
+        })
+    }
+
+    /// Whether a finished hearth stands within one cell of `position`.
+    pub(crate) fn hearth_beside(&self, position: WorldPosition) -> bool {
+        (-1..=1).any(|dy| {
+            (-1..=1).any(|dx| {
+                self.structure_at(WorldPosition {
+                    x: position.x + dx,
+                    y: position.y + dy,
+                })
+                .and_then(|id| self.view(id))
+                .is_some_and(|view| {
+                    view.state == StructureState::Complete && view.kind == StructureKind::Hearth
+                })
+            })
         })
     }
 
@@ -282,6 +339,7 @@ mod tests {
             .start(
                 AgentId::new(0),
                 WorldPosition { x: 1, y: 0 },
+                StructureKind::Shelter,
                 SimTime::ZERO,
                 SimTime::from_ticks(600),
             )
@@ -291,6 +349,7 @@ mod tests {
             .start(
                 AgentId::new(0),
                 WorldPosition { x: 1, y: 0 },
+                StructureKind::Shelter,
                 SimTime::ZERO,
                 SimTime::from_ticks(600),
             )

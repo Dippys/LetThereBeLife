@@ -25,12 +25,18 @@ impl SleepQuality {
     }
 }
 
+/// Tiredness (out of 10,000) past which an agent falls asleep wherever it is,
+/// cold or not.
+pub const REST_COLLAPSE: u16 = 9_200;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum SleepInterruptionReason {
     Hunger,
     Thirst,
     Exposure,
+    /// Bitten in its sleep.
+    Injury,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

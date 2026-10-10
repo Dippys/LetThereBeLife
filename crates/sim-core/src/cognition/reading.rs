@@ -129,6 +129,7 @@ fn mime_evidence(mime: Mime, listener: &ListenerContext) -> [(Concept, i32); 3] 
         // close, less so in a hurry.
         Mime::Snarl => [(Concept::Wolf, 30), (Concept::Deer, 18), (Concept::Home, 0)],
         Mime::Spear => [(Concept::Deer, 30), (Concept::Wolf, 18), (Concept::Home, 0)],
+        Mime::Warm => [(Concept::Fire, 40), (Concept::Home, 10), (Concept::Been, 0)],
     };
     evidence.sort_by_key(|&(concept, weight)| (-weight, concept));
     evidence
@@ -159,6 +160,7 @@ pub(crate) const fn concept_kind(concept: Concept) -> Option<LandmarkKind> {
         Concept::Stone => Some(LandmarkKind::Stone),
         Concept::Home => Some(LandmarkKind::Shelter),
         Concept::Bitterberries => Some(LandmarkKind::Bitterberries),
+        Concept::Fire => Some(LandmarkKind::Hearth),
         _ => None,
     }
 }

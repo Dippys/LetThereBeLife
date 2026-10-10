@@ -4,6 +4,7 @@
 //! physical truth stays in the world, population, and resource stores.
 
 mod affordances;
+mod crafts;
 mod dialogue;
 mod fauna;
 mod gesture;
@@ -16,6 +17,7 @@ mod social;
 
 pub(crate) use affordances::Affordances;
 pub use affordances::{AffordanceView, BELIEF_UNIT};
+pub(crate) use crafts::Crafts;
 pub use dialogue::{CONSEQUENCE_WEIGHT, REPAIR_WEIGHT};
 pub(crate) use dialogue::{Dialogue, LEAD_SECONDS, Lead, PendingCorrection};
 pub(crate) use fauna::Fauna;
@@ -62,10 +64,11 @@ pub enum LandmarkKind {
     Stone = 3,
     Shelter = 4,
     Bitterberries = 5,
+    Hearth = 6,
 }
 
 impl LandmarkKind {
-    pub const COUNT: usize = 6;
+    pub const COUNT: usize = 7;
     pub const ALL: [Self; Self::COUNT] = [
         Self::Water,
         Self::Berries,
@@ -73,6 +76,7 @@ impl LandmarkKind {
         Self::Stone,
         Self::Shelter,
         Self::Bitterberries,
+        Self::Hearth,
     ];
 
     /// The kind of place where `material` can be gathered, if it stays put
@@ -94,7 +98,7 @@ impl LandmarkKind {
             Self::Bitterberries => Some(crate::Material::Bitterberries),
             Self::Wood => Some(crate::Material::Wood),
             Self::Stone => Some(crate::Material::Stone),
-            Self::Water | Self::Shelter => None,
+            Self::Water | Self::Shelter | Self::Hearth => None,
         }
     }
 }
@@ -135,6 +139,8 @@ pub struct MentalMapView {
     pub affordances: Vec<AffordanceView>,
     /// What it believes about animals (only species it has beliefs about).
     pub fauna: Vec<FaunaView>,
+    /// Believes a hearth would warm it (and knows how to build one).
+    pub knows_hearths: bool,
     pub acquaintances: Vec<AcquaintanceView>,
     /// What the agent believes words mean.
     pub lexicon: Vec<LexiconEntryView>,
@@ -351,6 +357,7 @@ impl GestureTopic {
             Self::Place(LandmarkKind::Stone) => Concept::Stone,
             Self::Place(LandmarkKind::Shelter) => Concept::Home,
             Self::Place(LandmarkKind::Bitterberries) => Concept::Bitterberries,
+            Self::Place(LandmarkKind::Hearth) => Concept::Fire,
             Self::Explored => Concept::Been,
             Self::Animal(crate::Species::Deer) => Concept::Deer,
             Self::Animal(crate::Species::Wolf) => Concept::Wolf,
@@ -369,6 +376,8 @@ pub(crate) struct Mind {
     pub(crate) affordances: Affordances,
     /// What it believes about animals.
     pub(crate) fauna: Fauna,
+    /// What it knows about things people make.
+    pub(crate) crafts: Crafts,
     /// Born into the band rather than founding it: starts with no words, stays
     /// close to its parent, and asks readily.
     pub(crate) child: bool,
@@ -461,6 +470,11 @@ impl Minds {
                 Fauna::default()
             } else {
                 Fauna::founding(self.seed, agent, FAMILY_SIZE)
+            },
+            crafts: if child {
+                Crafts::default()
+            } else {
+                Crafts::founding(self.seed, agent, FAMILY_SIZE)
             },
             child,
             ..Mind::default()

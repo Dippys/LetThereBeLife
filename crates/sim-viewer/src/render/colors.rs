@@ -1,14 +1,15 @@
 //! Color palette for terrain, features, spawned objects, agents, structures, remembered places, relationships, gestures, and selection previews.
 
 use sim_core::{
-    AgentActivity, BiomeType, FeatureKind, GestureTopic, LandmarkKind, SpawnKind, StructureState,
-    SurfaceType,
+    AgentActivity, BiomeType, FeatureKind, GestureTopic, LandmarkKind, SpawnKind, StructureKind,
+    StructureState, SurfaceType,
 };
 
-pub(super) const fn structure_color(state: StructureState) -> u32 {
-    match state {
-        StructureState::UnderConstruction => rgba(224, 170, 72, 230),
-        StructureState::Complete => rgba(116, 72, 38, 255),
+pub(super) const fn structure_color(kind: StructureKind, state: StructureState) -> u32 {
+    match (kind, state) {
+        (_, StructureState::UnderConstruction) => rgba(224, 170, 72, 230),
+        (StructureKind::Shelter, StructureState::Complete) => rgba(116, 72, 38, 255),
+        (StructureKind::Hearth, StructureState::Complete) => rgba(255, 120, 24, 255),
     }
 }
 
@@ -33,6 +34,7 @@ pub(super) const fn landmark_color(kind: LandmarkKind) -> u32 {
         LandmarkKind::Stone => rgba(176, 176, 170, 235),
         LandmarkKind::Shelter => rgba(255, 150, 40, 235),
         LandmarkKind::Bitterberries => rgba(150, 90, 230, 235),
+        LandmarkKind::Hearth => rgba(255, 90, 30, 235),
     }
 }
 

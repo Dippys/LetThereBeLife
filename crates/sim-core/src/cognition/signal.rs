@@ -59,6 +59,8 @@ pub enum Mime {
     Snarl,
     /// A crouch and a throwing arm: "something to hunt".
     Spear,
+    /// Hands held out and rubbed together: "warmth".
+    Warm,
 }
 
 /// How the sender looks while signalling, derived from its own state.
@@ -94,6 +96,7 @@ pub(crate) const fn mime_for(topic: GestureTopic, food: Option<i16>) -> Mime {
     match (topic, food) {
         (GestureTopic::Place(LandmarkKind::Water), _) => Mime::Scoop,
         (GestureTopic::Place(LandmarkKind::Shelter), _) => Mime::RestHead,
+        (GestureTopic::Place(LandmarkKind::Hearth), _) => Mime::Warm,
         (GestureTopic::Explored, _) => Mime::Sweep,
         (GestureTopic::Animal(_), Some(value)) if value < 0 => Mime::Snarl,
         (GestureTopic::Animal(_), _) => Mime::Spear,
@@ -176,6 +179,7 @@ pub(crate) const fn unmistakable(mime: Mime) -> Concept {
         Mime::Retch => Concept::Bitterberries,
         Mime::Snarl => Concept::Wolf,
         Mime::Spear => Concept::Deer,
+        Mime::Warm => Concept::Fire,
     }
 }
 
