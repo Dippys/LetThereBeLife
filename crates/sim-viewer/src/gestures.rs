@@ -1,59 +1,41 @@
-//! Presentation-only log of recently completed gestures: a bounded, briefly displayed ring plus HUD counts.
+//! Presentation-only log of recently completed gestures: a bounded, briefly displayed ring.
 
 use std::{
     collections::VecDeque,
     time::{Duration, Instant},
 };
 
-use sim_core::{GestureTopic, Mime, SignalEvent, VocalForm, WorldPosition};
+use sim_core::{AgentId, Mime, SignalEvent, VocalForm, WorldPosition};
 
 /// Recent gestures kept for drawing; older ones are dropped first.
 pub const RECENT_GESTURE_CAPACITY: usize = 32;
 /// Real time a completed gesture stays on the map.
 pub const GESTURE_DISPLAY_TIME: Duration = Duration::from_millis(2_500);
 
-/// Counts for the HUD: every gesture recorded since the last reset, and the latest one.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct GestureSummary {
-    pub total: u64,
-    pub last: Option<LastGesture>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LastGesture {
-    pub id: u64,
-    pub watchers: u16,
-    /// The spoken word, if the sender had one.
-    pub word: Option<VocalForm>,
-    pub mime: Mime,
-}
-
 /// What the viewer draws for one gesture: the public pointing line from the sender
-/// to where watchers concluded the place is, the public word and mime, plus the
-/// sender's private topic (debug-only; agents never see it).
+/// to where watchers concluded the place is, and the word and mime that went with it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GestureMark {
     pub id: u64,
+    pub sender: AgentId,
     pub origin: WorldPosition,
     pub inferred_position: WorldPosition,
-    pub search_radius: u16,
-    pub watchers: u16,
     pub word: Option<VocalForm>,
     pub mime: Mime,
-    pub topic: GestureTopic,
+    /// Shouted (warnings and calls to hunt).
+    pub loud: bool,
 }
 
 impl From<&SignalEvent> for GestureMark {
     fn from(event: &SignalEvent) -> Self {
         Self {
             id: event.id,
+            sender: event.signal.sender,
             origin: event.signal.origin,
             inferred_position: event.inferred_position,
-            search_radius: event.search_radius,
-            watchers: event.watchers,
             word: event.signal.vocal,
             mime: event.signal.mime,
-            topic: event.intent.topic,
+            loud: event.signal.loud,
         }
     }
 }
@@ -62,14 +44,12 @@ impl From<&SignalEvent> for GestureMark {
 #[derive(Debug, Default)]
 pub struct GestureLog {
     recent: VecDeque<(GestureMark, Instant)>,
-    summary: GestureSummary,
 }
 
 impl GestureLog {
     pub fn new() -> Self {
         Self {
             recent: VecDeque::with_capacity(RECENT_GESTURE_CAPACITY),
-            summary: GestureSummary::default(),
         }
     }
 
@@ -80,13 +60,6 @@ impl GestureLog {
                 self.recent.pop_front();
             }
             self.recent.push_back((event, now));
-            self.summary.total += 1;
-            self.summary.last = Some(LastGesture {
-                id: event.id,
-                watchers: event.watchers,
-                word: event.word,
-                mime: event.mime,
-            });
         }
     }
 
@@ -112,32 +85,25 @@ impl GestureLog {
         self.recent.is_empty()
     }
 
-    pub const fn summary(&self) -> GestureSummary {
-        self.summary
-    }
-
     /// Forgets everything (engine reset restarts gesture ids).
     pub fn clear(&mut self) {
         self.recent.clear();
-        self.summary = GestureSummary::default();
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sim_core::LandmarkKind;
 
     fn event(id: u64) -> GestureMark {
         GestureMark {
             id,
+            sender: AgentId::new(1),
             origin: WorldPosition { x: 0, y: 0 },
             inferred_position: WorldPosition { x: 40, y: 0 },
-            search_radius: 6,
-            watchers: id as u16,
             word: Some(VocalForm(id as u8)),
             mime: Mime::Scoop,
-            topic: GestureTopic::Place(LandmarkKind::Water),
+            loud: false,
         }
     }
 
@@ -150,22 +116,10 @@ mod tests {
         log.record(events[5..].iter().copied(), now);
         assert_eq!(log.recent().count(), RECENT_GESTURE_CAPACITY);
         assert_eq!(log.recent().next().unwrap().id, 9);
-        assert_eq!(
-            log.summary(),
-            GestureSummary {
-                total: events.len() as u64,
-                last: Some(LastGesture {
-                    id: 40,
-                    watchers: 40,
-                    word: Some(VocalForm(40)),
-                    mime: Mime::Scoop,
-                }),
-            }
-        );
     }
 
     #[test]
-    fn gestures_expire_after_the_display_time_but_counts_remain() {
+    fn gestures_expire_after_the_display_time() {
         let mut log = GestureLog::new();
         let start = Instant::now();
         log.record([event(1)], start);
@@ -175,9 +129,5 @@ mod tests {
         assert_eq!(log.recent().map(|event| event.id).collect::<Vec<_>>(), [2]);
         assert!(log.expire(start + Duration::from_secs(10)));
         assert!(log.is_empty());
-        assert_eq!(log.summary().total, 2);
-
-        log.clear();
-        assert_eq!(log.summary(), GestureSummary::default());
     }
 }

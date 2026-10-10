@@ -20,7 +20,7 @@ fn engine_with_world(width: u32, height: u32) -> Engine {
 
 #[test]
 fn streamed_changes_coalesce_into_one_dirty_region() {
-    let mut app = ViewerApp::new(engine_with_world(64, 64), None, None);
+    let mut app = ViewerApp::new(engine_with_world(64, 64), None, None, None);
     app.dirty = false;
     app.mark_world_changed(WorldRect {
         min: WorldPosition { x: -32, y: 8 },
@@ -43,7 +43,7 @@ fn streamed_changes_coalesce_into_one_dirty_region() {
 
 #[test]
 fn bootstrap_pager_materializes_once_then_releases_its_queue() {
-    let mut app = ViewerApp::new(engine_with_world(64, 64), None, None);
+    let mut app = ViewerApp::new(engine_with_world(64, 64), None, None, None);
     let requests = app
         .take_next_bootstrap_requests()
         .expect("bootstrap request is valid")
@@ -76,7 +76,7 @@ fn fully_resident_startup_skips_bootstrap_paging() {
     let mut engine = engine_with_world(64, 64);
     engine.materialize_initial_area().unwrap();
 
-    let app = ViewerApp::new(engine, None, None);
+    let app = ViewerApp::new(engine, None, None, None);
 
     assert!(app.bootstrap_pager.is_none());
     assert_eq!(app.population_status, PopulationStatus::Ready);
@@ -84,7 +84,7 @@ fn fully_resident_startup_skips_bootstrap_paging() {
 
 #[test]
 fn manual_generation_preempts_bootstrap_paging() {
-    let mut app = ViewerApp::new(engine_with_world(64, 64), None, None);
+    let mut app = ViewerApp::new(engine_with_world(64, 64), None, None, None);
     let manual_bounds = WorldRect {
         min: WorldPosition { x: 64, y: 0 },
         max: WorldPosition { x: 128, y: 64 },
@@ -113,7 +113,7 @@ fn manual_generation_preempts_bootstrap_paging() {
 
 #[test]
 fn no_generation_is_scheduled_without_bootstrap_or_manual_work() {
-    let mut app = ViewerApp::new(engine_with_world(64, 64), None, None);
+    let mut app = ViewerApp::new(engine_with_world(64, 64), None, None, None);
     app.bootstrap_pager = None;
 
     assert!(!app.schedule_generation());
@@ -123,7 +123,7 @@ fn no_generation_is_scheduled_without_bootstrap_or_manual_work() {
 
 #[test]
 fn requeued_bootstrap_page_is_preserved_until_higher_priority_manual_work_runs() {
-    let mut app = ViewerApp::new(engine_with_world(64, 64), None, None);
+    let mut app = ViewerApp::new(engine_with_world(64, 64), None, None, None);
     let bootstrap = app
         .engine
         .world()
@@ -152,7 +152,7 @@ fn requeued_bootstrap_page_is_preserved_until_higher_priority_manual_work_runs()
 
 #[test]
 fn background_cancellation_never_discards_manual_generation() {
-    let mut app = ViewerApp::new(engine_with_world(64, 64), None, None);
+    let mut app = ViewerApp::new(engine_with_world(64, 64), None, None, None);
     app.active_generation = Some(ActiveGeneration {
         id: 10,
         kind: GenerationKind::Manual,
@@ -180,7 +180,7 @@ fn background_cancellation_never_discards_manual_generation() {
 
 #[test]
 fn cancellation_clears_an_active_right_drag_before_it_can_queue_manual_work() {
-    let mut app = ViewerApp::new(engine_with_world(64, 64), None, None);
+    let mut app = ViewerApp::new(engine_with_world(64, 64), None, None, None);
     let selection = WorldRect {
         min: WorldPosition { x: 0, y: 0 },
         max: WorldPosition { x: 64, y: 64 },

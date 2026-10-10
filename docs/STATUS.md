@@ -61,9 +61,10 @@ lays out phases 0–10, from world → physical agents → cognition → communi
   sociability, diligence) and up to six acquaintances with familiarity, trust, and last-seen
   place. Sociable agents seek out friends and stay with company. Hints count for more from people
   whose past hints were right.
-- **Viewer:** pan and zoom, HUD, `T` to spawn, the object-placement menu, speed 1×–256×. Animals,
-  carcasses, and hearths are drawn. Hovering an agent shows its memory, what it eats, shuns, hunts,
-  and fears, and draws its remembered places on the map.
+- **Viewer:** a top bar (play, speed, time, head counts), hover tooltips, a person panel opened by
+  clicking (doing and why, need bars, beliefs, words, friends), a recent-events feed
+  (misunderstandings, bites, kills, gifts, deaths), speech bubbles, a build palette (`B`), help
+  with a legend (`H`), and an F3 technical readout. Animals, carcasses, and hearths are drawn.
 - **Headless:** canonical scenarios with fingerprint hashes, and the **behavior study**
   (`--study`), which measures survival, roaming, idleness, and gestures, with per-agent traces.
 

@@ -1,15 +1,47 @@
 //! Color palette for terrain, features, spawned objects, agents, structures, remembered places, relationships, gestures, and selection previews.
 
 use sim_core::{
-    AgentActivity, BiomeType, FeatureKind, GestureTopic, LandmarkKind, SpawnKind, StructureKind,
-    StructureState, SurfaceType,
+    AgentActivity, BiomeType, FeatureKind, LandmarkKind, SpawnKind, StructureKind, StructureState,
+    SurfaceType,
 };
+
+pub(super) const HUT: u32 = rgba(116, 72, 38, 255);
+pub(super) const HEARTH: u32 = rgba(255, 120, 24, 255);
+pub(super) const UNDER_CONSTRUCTION: u32 = rgba(224, 170, 72, 230);
+pub(super) const DEER: u32 = rgba(176, 128, 72, 255);
+pub(super) const DEER_ALERT: u32 = rgba(222, 170, 96, 255);
+pub(super) const WOLF: u32 = rgba(132, 132, 140, 255);
+pub(super) const WOLF_ALERT: u32 = rgba(200, 200, 214, 255);
+pub(super) const CARCASS: u32 = rgba(110, 24, 24, 255);
+
+/// Interface palette: dark translucent panels, light text, a few signal colors.
+pub(super) const UI_BAR: u32 = rgba(16, 20, 26, 236);
+pub(super) const UI_PANEL: u32 = rgba(18, 23, 30, 250);
+pub(super) const UI_TOOLTIP: u32 = rgba(28, 34, 44, 245);
+pub(super) const UI_TOAST: u32 = rgba(52, 44, 22, 240);
+pub(super) const UI_SCRIM: u32 = rgba(0, 0, 0, 150);
+pub(super) const UI_BORDER: u32 = rgba(255, 255, 255, 30);
+pub(super) const UI_BUTTON: u32 = rgba(44, 52, 64, 255);
+pub(super) const UI_BUTTON_HOVER: u32 = rgba(62, 74, 90, 255);
+pub(super) const UI_BUTTON_ACTIVE: u32 = rgba(40, 104, 150, 255);
+pub(super) const UI_TRACK: u32 = rgba(48, 56, 68, 255);
+pub(super) const UI_TITLE: u32 = rgba(255, 255, 255, 255);
+pub(super) const UI_TEXT: u32 = rgba(226, 230, 236, 255);
+pub(super) const UI_DIM: u32 = rgba(140, 150, 164, 255);
+pub(super) const UI_ACCENT: u32 = rgba(110, 190, 250, 255);
+pub(super) const UI_NEED: u32 = rgba(120, 170, 220, 255);
+pub(super) const UI_GOOD: u32 = rgba(110, 200, 120, 255);
+pub(super) const UI_WARN: u32 = rgba(240, 180, 70, 255);
+pub(super) const UI_BAD: u32 = rgba(236, 92, 80, 255);
+pub(super) const UI_TALK: u32 = rgba(190, 140, 250, 255);
+pub(super) const UI_BUBBLE: u32 = rgba(250, 248, 236, 240);
+pub(super) const UI_BUBBLE_LOUD: u32 = rgba(255, 196, 120, 245);
 
 pub(super) const fn structure_color(kind: StructureKind, state: StructureState) -> u32 {
     match (kind, state) {
-        (_, StructureState::UnderConstruction) => rgba(224, 170, 72, 230),
-        (StructureKind::Shelter, StructureState::Complete) => rgba(116, 72, 38, 255),
-        (StructureKind::Hearth, StructureState::Complete) => rgba(255, 120, 24, 255),
+        (_, StructureState::UnderConstruction) => UNDER_CONSTRUCTION,
+        (StructureKind::Shelter, StructureState::Complete) => HUT,
+        (StructureKind::Hearth, StructureState::Complete) => HEARTH,
     }
 }
 
@@ -40,15 +72,6 @@ pub(super) const fn landmark_color(kind: LandmarkKind) -> u32 {
 
 /// The public part of a gesture (pointing line and search square): one neutral color.
 pub(super) const GESTURE_COLOR: u32 = rgba(255, 252, 236, 220);
-
-/// Debug-only marker of a sender's private gesture topic.
-pub(super) const fn gesture_topic_color(topic: GestureTopic) -> u32 {
-    match topic {
-        GestureTopic::Place(kind) => landmark_color(kind),
-        GestureTopic::Explored => rgba(150, 150, 160, 235),
-        GestureTopic::Animal(_) => rgba(240, 60, 40, 235),
-    }
-}
 
 /// Relationship lines and last-seen markers: faint for acquaintances, strong for friends.
 pub(super) const fn relationship_color(friend: bool) -> u32 {

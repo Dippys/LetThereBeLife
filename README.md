@@ -20,8 +20,8 @@ cargo run --release -p sim-headless -- --study   # how well agents survive (see 
 cargo test --workspace
 ```
 
-Viewer basics: scroll to zoom, left-drag to pan, `T` to spawn an agent, `Space` to pause,
-`1`–`9` to set speed, `R` to reset. See the full controls in
+Viewer basics: press `H` for help, scroll to zoom, drag to pan, click a person to see what they
+think, `Space` to pause, `1`–`9` to set speed. See the full controls in
 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#viewer-controls).
 
 ## Layout

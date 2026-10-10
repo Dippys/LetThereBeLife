@@ -1,23 +1,27 @@
-//! Agent, spawned-object, structure, and hovered-agent marker instance tests.
+//! World-space instance tests: agents, objects, structures, the selected person's
+//! markers, gestures, chunk outlines, the world border, and buffer partitioning.
 
+use bytemuck::Zeroable;
 use sim_core::{
     ACQUAINTANCE_SLOTS, AcquaintanceView, AgentActivity, AgentView, DEFAULT_TRUST,
     FRIEND_FAMILIARITY, LANDMARK_SLOTS, LandmarkKind, LandmarkSource, LandmarkView, SpawnKind,
-    SpawnedObjectView, StructureState, WorldPosition, WorldRect,
+    SpawnedObjectView, StructureState, World, WorldConfig, WorldPosition, WorldRect,
 };
 
 use crate::gestures::{GestureMark, RECENT_GESTURE_CAPACITY};
 use crate::render::colors::{
-    GESTURE_COLOR, agent_color, gesture_topic_color, landmark_color, relationship_color,
+    GESTURE_COLOR, agent_color, landmark_color, relationship_color, rgba, selection_color,
     spawn_kind_color, structure_color,
 };
+use crate::render::gpu::{Instance, static_instance_chunks};
 use crate::render::instances::{
     build_agent_instances, build_gesture_instances, build_memory_marker_instances,
-    build_relationship_marker_instances, build_spawned_object_instances,
+    build_relationship_marker_instances, build_spawned_object_instances, chunk_outline,
+    world_border,
 };
 use crate::render::summary::{CacheSyncAction, cache_sync_action};
 use crate::render::{
-    MAX_AGENT_INSTANCES, MAX_GESTURE_DOTS, MAX_GESTURE_MARKER_INSTANCES,
+    MAX_AGENT_INSTANCES, MAX_GESTURE_DOTS, MAX_GESTURE_MARKER_INSTANCES, MAX_INSTANCES_PER_BUFFER,
     MAX_MEMORY_MARKER_INSTANCES, MAX_RELATIONSHIP_DOTS, MAX_RELATIONSHIP_MARKER_INSTANCES,
     MAX_SPAWNED_OBJECT_INSTANCES,
 };
@@ -279,48 +283,34 @@ fn relationship_markers_dot_a_line_to_each_last_seen_position() {
 }
 
 #[test]
-fn gestures_draw_a_neutral_dotted_line_search_square_and_topic_dot() {
+fn gestures_draw_a_neutral_dotted_line_and_an_end_square() {
     let gesture = GestureMark {
         id: 3,
+        sender: sim_core::AgentId::new(1),
         origin: WorldPosition { x: 0, y: 0 },
         inferred_position: WorldPosition { x: 10, y: 0 },
-        search_radius: 2,
-        watchers: 2,
         word: None,
         mime: sim_core::Mime::PickAndChew,
-        topic: sim_core::GestureTopic::Place(LandmarkKind::Berries),
+        loud: false,
     };
     let mut instances = Vec::new();
 
     // At 4 px per cell the line is 40 px: 4 dots at 8 px spacing, then the
-    // 4-sided search square around the inferred cell, then the topic dot.
+    // end square on the inferred cell.
     build_gesture_instances([&gesture], 4.0, &mut instances);
-    assert_eq!(instances.len(), 4 + 4 + 1);
+    assert_eq!(instances.len(), 4 + 1);
     let dot_centers: Vec<_> = instances[..4]
         .iter()
         .map(|dot| dot.position[0] + dot.size[0] / 2.0)
         .collect();
     assert_eq!(dot_centers, [2.5, 4.5, 6.5, 8.5]);
     assert!(
-        instances[..8]
+        instances
             .iter()
             .all(|instance| instance.color == GESTURE_COLOR)
     );
-    assert_eq!(instances[4].position, [8.0, -2.0]);
-    assert_eq!(instances[4].size, [5.0, 0.5]);
-    assert_eq!(instances[7].position, [12.5, -2.0]);
-    assert_eq!(instances[7].size, [0.5, 5.0]);
-    assert_eq!(instances[8].position, [-0.125, -0.125]);
-    assert_eq!(instances[8].size, [1.25, 1.25]);
-    assert_eq!(instances[8].color, landmark_color(LandmarkKind::Berries));
-    assert_eq!(
-        gesture_topic_color(sim_core::GestureTopic::Place(LandmarkKind::Berries)),
-        landmark_color(LandmarkKind::Berries)
-    );
-    assert_ne!(
-        gesture_topic_color(sim_core::GestureTopic::Explored),
-        GESTURE_COLOR
-    );
+    assert_eq!(instances[4].position, [9.875, -0.125]);
+    assert_eq!(instances[4].size, [1.25, 1.25]);
 
     // Long lines cap their dots, and more gestures than the ring holds are ignored.
     let far = GestureMark {
@@ -335,9 +325,63 @@ fn gestures_draw_a_neutral_dotted_line_search_square_and_topic_dot() {
     assert_eq!(instances.len(), MAX_GESTURE_MARKER_INSTANCES);
     assert_eq!(
         MAX_GESTURE_MARKER_INSTANCES,
-        RECENT_GESTURE_CAPACITY * (MAX_GESTURE_DOTS + 5)
+        RECENT_GESTURE_CAPACITY * (MAX_GESTURE_DOTS + 1)
     );
 
     build_gesture_instances([&gesture], 0.5, &mut instances);
     assert!(instances.is_empty(), "far zoom hides gesture markers");
+}
+
+#[test]
+fn static_buffers_partition_at_the_device_safe_limit() {
+    let instances = vec![Instance::zeroed(); MAX_INSTANCES_PER_BUFFER + 1];
+    let lengths: Vec<_> = static_instance_chunks(&instances).map(<[_]>::len).collect();
+    assert_eq!(lengths, [MAX_INSTANCES_PER_BUFFER, 1]);
+}
+
+#[test]
+fn invalid_selection_uses_red_preview() {
+    assert_eq!(selection_color(true), rgba(255, 220, 35, 72));
+    assert_eq!(selection_color(false), rgba(235, 48, 48, 96));
+}
+
+#[test]
+fn world_border_marks_the_centered_generation_envelope() {
+    let border = world_border(1.0);
+
+    assert_eq!(border[0].position, [-32_768.0, -32_768.0]);
+    assert_eq!(border[0].size, [65_536.0, 2.0]);
+    assert_eq!(border[1].position, [-32_768.0, 32_766.0]);
+    assert_eq!(border[2].size, [2.0, 65_536.0]);
+    assert_eq!(border[3].position, [32_766.0, -32_768.0]);
+    assert!(
+        border
+            .iter()
+            .all(|instance| instance.color == rgba(245, 40, 40, 230))
+    );
+}
+
+#[test]
+fn chunk_outline_uses_signed_chunk_bounds() {
+    let world = World::generate(1, WorldConfig::new(64, 64).unwrap());
+    let inspection = world
+        .inspect_chunk_at(WorldPosition { x: -1, y: 63 })
+        .unwrap();
+    let outline = chunk_outline(inspection, 1.0).unwrap();
+
+    assert_eq!(outline[0].position, [-64.0, 0.0]);
+    assert_eq!(outline[0].size, [64.0, 1.0]);
+    assert_eq!(outline[1].position, [-64.0, 63.0]);
+    assert_eq!(outline[2].position, [-64.0, 0.0]);
+    assert_eq!(outline[3].position, [-1.0, 0.0]);
+}
+
+#[test]
+fn subpixel_chunks_do_not_create_inspection_overlays() {
+    let world = World::generate(1, WorldConfig::new(64, 64).unwrap());
+    let inspection = world
+        .inspect_chunk_at(WorldPosition { x: 0, y: 0 })
+        .unwrap();
+    assert!(chunk_outline(inspection, 0.01).is_none());
+    assert!(chunk_outline(inspection, 0.1).is_some());
 }

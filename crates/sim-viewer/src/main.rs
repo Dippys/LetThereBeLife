@@ -2,11 +2,13 @@
 
 mod app;
 mod camera;
+mod feed;
 mod generation;
 mod gestures;
+mod labels;
 mod launch;
 mod render;
-mod spawn_menu;
+mod screenshot;
 mod startup;
 
 use std::time::Instant;
@@ -75,9 +77,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut app = ViewerApp::new(engine, archive, options.smoke_frames);
+    let mut app = ViewerApp::new(engine, archive, options.smoke_frames, options.screenshot);
     if let Some(start) = valley.flatten() {
         app = app.with_valley(start);
+    }
+    if options.advance > 0 {
+        let started = Instant::now();
+        app.advance(options.advance);
+        println!(
+            "advanced {} ticks in {:.2?}",
+            options.advance,
+            started.elapsed()
+        );
+    }
+    if let Some(person) = options.select {
+        app = app.with_selected(sim_core::AgentId::new(person));
     }
     event_loop.run_app(&mut app)?;
     Ok(())

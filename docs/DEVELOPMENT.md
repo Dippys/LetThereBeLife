@@ -103,24 +103,30 @@ Compare minds before and after any behavior change. Current numbers are in [STAT
 
 ## Viewer controls
 
+`H` (or the **? Help** button) shows the controls and a color legend; it opens on launch.
+
 | Input | Action |
 |---|---|
-| Mouse wheel | Zoom around cursor (max zoom-out fits the whole world) |
+| Mouse wheel | Zoom around the cursor |
 | Left-drag | Pan |
-| Right-drag | Select an area to generate/load (yellow = OK, red = over limit of 65,536 new chunks) |
-| `T` | Spawn an agent at the cursor (needs loaded, standable terrain; max 4,096). Agents use the full mind |
-| Numpad `5` | Open the object menu / confirm. `2`/`8`/`4`/`6` select tree, berries, rock, water; left-click places; `0` closes |
-| `Space` | Pause / resume |
-| `1`–`9` | Speed 1×, 2×, 4× … 256× |
-| `R` | Reset to zero agents (keeps terrain) |
-| `C` | Cancel pending generation |
-| Hover | Cell/chunk info in HUD. Hovering an agent shows its needs, goal, inventory, health, sleep, memory, personality (with a one-word summary such as EXPLORER or LONER), and friends with trust. The map shows its remembered places (solid = seen, outline = hint with search area) and dotted lines to where its acquaintances were last seen (violet = friend) |
-| `Esc` | Quit |
+| Click a person | Open their panel: what they're doing and why, need bars, what they carry, what they believe (eats, avoids, hunts, fears, fire), their words, and friends. The map shows their remembered places (solid = seen, outline = hint) and dotted lines to people they know |
+| `Tab` / `F` | Next living person / follow the picked person |
+| `Esc` | Close help, then the build palette, then the person panel (it no longer quits) |
+| `Space`, `1`–`9`, `+`/`-` | Pause, speed 1×–256×, step the speed (also buttons in the top bar) |
+| `T` | Add a person at the cursor |
+| `B` | Build palette: person, tree, berry bush, rock, water; click the map to place |
+| `Shift+R` | Remove everyone (keeps terrain) |
+| Right-drag, `C` | Select an area to generate (yellow = OK, red = too big); cancel pending generation |
+| `F3` | Technical details: ticks, seed, chunks, the cell under the cursor, the picked person's raw values |
 
-Gestures appear for 2.5 s as an off-white dotted line from the sender to where watchers think
-the place is, with the inferred search area outlined. A small colored dot at the sender shows the
-**private** topic: that's debug-only, since agents can't see it. The HUD counts gestures and shows
-the latest one.
+The top bar shows time, speed, and head counts. Hovering shows a one-line tooltip (person, animal,
+bush with what's left, terrain). **Recent events** (bottom left) lists deaths, bites, kills, gifts,
+warnings, and misunderstandings ("Person 16 took "kani" to mean water, but Person 3 meant
+berries"); click one to look. Words appear for 2.5 s as bubbles over the speaker with the gesture
+that went with them (uppercase when shouted), and a dotted line shows where the gesture pointed.
+
+For screenshots: `--valley --advance TICKS --select PERSON --smoke-frames N --screenshot out.png`
+renders hidden and saves the last frame.
 
 ## Tests
 

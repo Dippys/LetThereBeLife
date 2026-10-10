@@ -10,8 +10,8 @@ use winit::{
     window::WindowId,
 };
 
-use super::{FRAME_TIME, ViewerApp, selection::bounded_selection};
-use crate::generation::GenerationKind;
+use super::{DRAG_THRESHOLD, FRAME_TIME, TOAST_TIME, ViewerApp, selection::bounded_selection};
+use crate::{generation::GenerationKind, render::UiHit};
 
 impl ApplicationHandler for ViewerApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
@@ -42,7 +42,16 @@ impl ApplicationHandler for ViewerApp {
                     .constrain_to_viewport(self.viewport(size.width, size.height));
                 self.dirty = true;
             }
+            WindowEvent::ModifiersChanged(modifiers) => {
+                self.shift = modifiers.state().shift_key();
+            }
             WindowEvent::CursorMoved { position, .. } => {
+                if let Some(((start_x, start_y), dragged)) = &mut self.press
+                    && (position.x - *start_x).hypot(position.y - *start_y) > DRAG_THRESHOLD
+                {
+                    *dragged = true;
+                    self.following = false;
+                }
                 if self.dragging
                     && let Some((previous_x, previous_y)) = self.cursor
                 {
@@ -74,6 +83,8 @@ impl ApplicationHandler for ViewerApp {
                 self.inspected = None;
                 self.hovered = None;
                 self.dragging = false;
+                self.press = None;
+                self.hover = None;
                 self.selection_start = None;
                 self.selection = None;
                 self.dirty = true;
@@ -83,14 +94,30 @@ impl ApplicationHandler for ViewerApp {
                 button: MouseButton::Left,
                 ..
             } => {
-                if self.spawn_menu.is_placing() {
-                    self.dragging = false;
-                    if state == ElementState::Pressed {
-                        self.spawn_object_at_cursor();
+                match state {
+                    ElementState::Pressed => {
+                        let ui = self.cursor.and_then(|(x, y)| {
+                            self.renderer
+                                .as_ref()
+                                .and_then(|renderer| renderer.ui_at(x, y))
+                        });
+                        match ui {
+                            Some(UiHit::Action(action)) => self.apply_ui_action(action),
+                            Some(UiHit::Panel) => {}
+                            None => {
+                                self.dragging = true;
+                                self.press = self.cursor.map(|cursor| (cursor, false));
+                            }
+                        }
                     }
-                } else {
-                    self.dragging = state == ElementState::Pressed;
+                    ElementState::Released => {
+                        self.dragging = false;
+                        if let Some((_, false)) = self.press.take() {
+                            self.click_map();
+                        }
+                    }
                 }
+                self.update_hover();
                 self.dirty = true;
             }
             WindowEvent::MouseInput {
@@ -166,6 +193,14 @@ impl ApplicationHandler for ViewerApp {
         let snapshot = self.engine.snapshot();
         let now = Instant::now();
         self.dirty |= self.gestures.expire(now);
+        if self
+            .toast
+            .as_ref()
+            .is_some_and(|(_, shown)| now.saturating_duration_since(*shown) >= TOAST_TIME)
+        {
+            self.toast = None;
+            self.dirty = true;
+        }
         if self.smoke_deadline.is_some_and(|deadline| now >= deadline) {
             panic!("viewer smoke timed out before rendering streamed terrain");
         }
@@ -189,6 +224,7 @@ impl ApplicationHandler for ViewerApp {
             || self.generation_is_pending()
             || self.pending_world_changes.is_some()
             || !self.gestures.is_empty()
+            || self.toast.is_some()
             || self.dirty
         {
             if self.next_frame <= now {

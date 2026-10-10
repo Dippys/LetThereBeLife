@@ -1,66 +1,154 @@
 //! GPU world renderer: public render-state view types and the `Renderer` that syncs caches, builds instances, and draws a frame.
 
 mod colors;
+mod details;
 mod gpu;
-mod hud;
 mod instances;
-mod overlay;
 mod summary;
+mod text;
+mod ui;
 
 #[cfg(test)]
 mod tests;
 
-use std::{borrow::Cow, sync::Arc, time::Instant};
+use std::{borrow::Cow, path::PathBuf, sync::Arc, time::Instant};
 
 use sim_core::{
-    ACQUAINTANCE_SLOTS, AcquaintanceView, AgentId, AgentView, ChunkInspection, Concept,
-    DeathRecord, Engine, HealthView, InventoryView, LANDMARK_SLOTS, LEXICON_SLOTS, LandmarkKind,
-    LandmarkSource, LandmarkView, LexiconEntryView, Material, MentalMapView, Personality,
-    PhysicalNeedsView, PhysicalPolicyView, SimulationSnapshot, SleepView, SpawnKind,
-    SpawnedObjectView, Species, VocalForm, World, WorldOverview, WorldPosition, WorldRect,
+    ACQUAINTANCE_SLOTS, AcquaintanceView, AgentActivity, AgentId, AgentView, AnimalMode,
+    ChunkInspection, Concept, DeathRecord, Engine, HealthView, InventoryView, LANDMARK_SLOTS,
+    LEXICON_SLOTS, LandmarkKind, LandmarkSource, LandmarkView, LexiconEntryView, Material,
+    MentalMapView, Personality, PhysicalNeedsView, PhysicalPolicyView, SimulationSnapshot,
+    SleepView, SpawnKind, Species, StructureKind, StructureState, VocalForm, World, WorldOverview,
+    WorldPosition, WorldRect,
 };
 use winit::window::Window;
 
 use crate::{
     camera::Camera,
-    gestures::{GestureLog, GestureSummary, RECENT_GESTURE_CAPACITY},
+    feed::FeedEntry,
+    gestures::{GestureLog, GestureMark, RECENT_GESTURE_CAPACITY},
 };
 use colors::{rgba, selection_color};
+use details::write_details;
 use gpu::{CameraBinding, CameraUniform, Instance, InstanceBuffer, StaticInstanceBuffers};
-use hud::{write_agent_text, write_hud_text};
 use instances::{
     append_wildlife_instances, build_agent_instances, build_gesture_instances,
     build_memory_marker_instances, build_relationship_marker_instances,
     build_spawned_object_instances, build_structure_instances, chunk_outline, world_border,
 };
-use overlay::build_screen_overlay;
 use summary::{
     CacheSyncAction, WorldSummaryCache, cache_margin, cache_sync_action, terrain_sample_step,
 };
+use ui::{Hit, build_interface};
 
 pub struct RenderState {
     pub snapshot: SimulationSnapshot,
     pub camera: Camera,
     pub ui_scale: f32,
+    /// Mouse position in window pixels.
+    pub cursor: Option<(f64, f64)>,
     pub cursor_world: Option<WorldPosition>,
-    pub cursor_spawned_object: Option<SpawnedObjectView>,
     pub inspected: Option<ChunkInspection>,
     pub hovered: Option<WorldPosition>,
     pub selection: Option<WorldRect>,
     pub selection_valid: bool,
     pub generation_status: GenerationStatus,
     pub population_status: PopulationStatus,
-    pub hovered_agent: Option<AgentInspection>,
-    pub spawn_message: Option<String>,
-    pub spawn_menu: Option<SpawnMenuView>,
-    pub gestures: GestureSummary,
+    /// What is under the mouse, for the tooltip (`None` over the interface).
+    pub hover: Option<Hover>,
+    pub selected: Option<AgentInspection>,
+    pub following: bool,
+    pub toast: Option<String>,
+    pub help_open: bool,
+    pub details_open: bool,
+    /// The build palette's chosen tool while the palette is open.
+    pub build: Option<BuildTool>,
+    pub feed: Vec<FeedEntry>,
+    pub census: Census,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SpawnMenuView {
-    pub selected: SpawnKind,
-    pub placing: bool,
+/// Head counts for the top bar.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Census {
+    pub people: u32,
+    pub dead: u32,
+    pub deer: u32,
+    pub wolves: u32,
 }
+
+/// The thing under the mouse, described in the tooltip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hover {
+    Person {
+        id: AgentId,
+        activity: AgentActivity,
+    },
+    Animal {
+        species: Species,
+        mode: AnimalMode,
+    },
+    Carcass {
+        meat: u16,
+    },
+    Structure {
+        kind: StructureKind,
+        state: StructureState,
+    },
+    Resource {
+        label: &'static str,
+        remaining: Option<(u16, Material)>,
+    },
+    Terrain(&'static str),
+}
+
+/// What a click on the map places while the build palette is open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildTool {
+    Person,
+    Object(SpawnKind),
+}
+
+impl BuildTool {
+    pub const ALL: [Self; 5] = [
+        Self::Person,
+        Self::Object(SpawnKind::Tree),
+        Self::Object(SpawnKind::BerryBush),
+        Self::Object(SpawnKind::Rock),
+        Self::Object(SpawnKind::Water),
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Person => "Person",
+            Self::Object(kind) => crate::labels::spawn_kind(kind),
+        }
+    }
+}
+
+/// Something a click on the interface asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiAction {
+    TogglePause,
+    Slower,
+    Faster,
+    Help,
+    CloseSelected,
+    Follow,
+    NextPerson,
+    Tool(BuildTool),
+    /// The feed entry at this index (oldest first).
+    FeedEntry(usize),
+}
+
+/// What the interface has at a screen point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiHit {
+    Action(UiAction),
+    /// A panel that keeps the click from reaching the map.
+    Panel,
+}
+
+pub use ui::SPEEDS;
 
 #[derive(Debug, Clone, Copy)]
 pub struct AgentInspection {
@@ -92,6 +180,7 @@ pub struct MemoryInspection {
     pub food: [Option<i32>; Material::COUNT],
     /// Per species: (believed worth hunting, believed dangerous), if it has a belief.
     pub fauna: [Option<(bool, bool)>; Species::COUNT],
+    pub knows_hearths: bool,
 }
 
 impl MemoryInspection {
@@ -156,6 +245,7 @@ impl MemoryInspection {
                         )
                     })
             }),
+            knows_hearths: view.knows_hearths,
         }
     }
 
@@ -231,13 +321,15 @@ pub struct Renderer {
     world_overlay_instances: Vec<Instance>,
     screen_overlay: InstanceBuffer,
     screen_overlay_instances: Vec<Instance>,
-    hud_text: String,
-    agent_text: String,
+    screen_overlay_capacity: usize,
+    details_text: String,
+    hits: Vec<Hit>,
     world_revision: u64,
     cached_bounds: Option<WorldRect>,
     cached_step: u32,
     summaries: WorldSummaryCache,
     overview: Option<WorldOverview>,
+    capture: Option<PathBuf>,
 }
 
 impl Renderer {
@@ -278,14 +370,19 @@ impl Renderer {
             .await
             .map_err(|error| format!("request GPU device: {error}"))?;
         let capabilities = surface.get_capabilities(&adapter);
+        // Colors are authored in sRGB, so write them as-is to a non-sRGB surface
+        // (an sRGB surface would brighten and wash out every color).
         let format = capabilities
             .formats
             .iter()
             .copied()
-            .find(wgpu::TextureFormat::is_srgb)
+            .find(|format| !format.is_srgb())
             .unwrap_or(capabilities.formats[0]);
+        // Copying frames out (for `--screenshot`) needs COPY_SRC where the surface allows it.
+        let usage = wgpu::TextureUsages::RENDER_ATTACHMENT
+            | (capabilities.usages & wgpu::TextureUsages::COPY_SRC);
         let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage,
             format,
             width: size.width.max(1),
             height: size.height.max(1),
@@ -394,13 +491,15 @@ impl Renderer {
                 SCREEN_OVERLAY_CAPACITY,
             ),
             screen_overlay_instances: Vec::with_capacity(SCREEN_OVERLAY_CAPACITY),
-            hud_text: String::with_capacity(HUD_TEXT_CAPACITY),
-            agent_text: String::with_capacity(AGENT_TEXT_CAPACITY),
+            screen_overlay_capacity: SCREEN_OVERLAY_CAPACITY,
+            details_text: String::new(),
+            hits: Vec::new(),
             world_revision: world.revision(),
             cached_bounds: None,
             cached_step: 1,
             summaries: WorldSummaryCache::default(),
             overview,
+            capture: None,
             device,
             queue,
             config,
@@ -408,6 +507,21 @@ impl Renderer {
             world_camera,
             screen_camera,
         })
+    }
+
+    /// What the interface drawn in the latest frame has at window pixel (`x`, `y`).
+    pub fn ui_at(&self, x: f64, y: f64) -> Option<UiHit> {
+        let (x, y) = (x as f32, y as f32);
+        self.hits
+            .iter()
+            .rev()
+            .find(|hit| hit.contains(x, y))
+            .map(|hit| hit.action.map_or(UiHit::Panel, UiHit::Action))
+    }
+
+    /// Saves the next rendered frame as a PNG at `path`.
+    pub fn capture_next_frame(&mut self, path: PathBuf) {
+        self.capture = Some(path);
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -559,7 +673,7 @@ impl Renderer {
         self.spawned_objects
             .write(&self.queue, &self.spawned_object_instances);
         let hovered_memory = state
-            .hovered_agent
+            .selected
             .as_ref()
             .and_then(|agent| Some((agent.view.position, agent.memory.as_ref()?)));
         build_memory_marker_instances(
@@ -585,8 +699,9 @@ impl Renderer {
         self.relationship_markers
             .write(&self.queue, &self.relationship_marker_instances);
 
+        let recent_gestures: Vec<GestureMark> = gestures.recent().copied().collect();
         build_gesture_instances(
-            gestures.recent(),
+            recent_gestures.iter(),
             view.scale() as f32,
             &mut self.gesture_marker_instances,
         );
@@ -614,7 +729,20 @@ impl Renderer {
                 selection_color(state.selection_valid),
             ));
         }
-        if let Some(inspection) = state.inspected
+        if let Some(agent) = &state.selected {
+            world_overlay.extend_from_slice(&ring(
+                agent.view.position,
+                view.scale() as f32,
+                colors::UI_ACCENT,
+            ));
+        }
+        if let Some(Hover::Person { .. }) = state.hover
+            && let Some(position) = state.hovered
+        {
+            world_overlay.extend_from_slice(&ring(position, view.scale() as f32, colors::UI_DIM));
+        }
+        if state.details_open
+            && let Some(inspection) = state.inspected
             && let Some(outline) = chunk_outline(inspection, view.scale() as f32)
         {
             world_overlay.extend_from_slice(&outline);
@@ -623,20 +751,27 @@ impl Renderer {
         debug_assert!(world_overlay.len() <= WORLD_OVERLAY_CAPACITY);
         self.world_overlay.write(&self.queue, world_overlay);
 
-        write_hud_text(&mut self.hud_text, world, &state);
-        write_agent_text(&mut self.agent_text, state.hovered_agent);
-        build_screen_overlay(
+        if state.details_open {
+            write_details(&mut self.details_text, world, &state);
+        } else {
+            self.details_text.clear();
+        }
+        build_interface(
             &mut self.screen_overlay_instances,
-            &self.hud_text,
-            (!self.agent_text.is_empty()).then_some(self.agent_text.as_str()),
+            &mut self.hits,
             &state,
-            self.config.width,
-            self.config.height,
+            view,
+            &recent_gestures,
+            (!self.details_text.is_empty()).then_some(self.details_text.as_str()),
         );
-        assert!(
-            self.screen_overlay_instances.len() <= SCREEN_OVERLAY_CAPACITY,
-            "HUD instance budget must cover every supported status layout"
-        );
+        if self.screen_overlay_instances.len() > self.screen_overlay_capacity {
+            self.screen_overlay_capacity = self.screen_overlay_instances.len().next_power_of_two();
+            self.screen_overlay = InstanceBuffer::dynamic(
+                &self.device,
+                "screen overlay",
+                self.screen_overlay_capacity,
+            );
+        }
         self.screen_overlay
             .write(&self.queue, &self.screen_overlay_instances);
 
@@ -679,25 +814,95 @@ impl Renderer {
             pass.set_bind_group(0, &self.screen_camera.bind_group, &[]);
             self.screen_overlay.draw(&mut pass);
         }
+        let capture = self.capture.take().map(|path| {
+            let (width, height) = (self.config.width, self.config.height);
+            let row_bytes = (width * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
+                * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+            let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("screenshot"),
+                size: u64::from(row_bytes * height),
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+            encoder.copy_texture_to_buffer(
+                output.texture.as_image_copy(),
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &buffer,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(row_bytes),
+                        rows_per_image: Some(height),
+                    },
+                },
+                wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+            );
+            (path, buffer, row_bytes)
+        });
         self.queue.submit(Some(encoder.finish()));
+        if let Some((path, buffer, row_bytes)) = capture {
+            self.save_capture(&path, &buffer, row_bytes);
+        }
         output.present();
         Ok(())
     }
+
+    fn save_capture(&self, path: &std::path::Path, buffer: &wgpu::Buffer, row_bytes: u32) {
+        let slice = buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |_| {});
+        if let Err(error) = self.device.poll(wgpu::PollType::Wait) {
+            eprintln!("screenshot failed: {error}");
+            return;
+        }
+        let (width, height) = (self.config.width as usize, self.config.height as usize);
+        let bgra = matches!(
+            self.config.format,
+            wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
+        );
+        let mut pixels = Vec::with_capacity(width * height * 4);
+        for row in slice.get_mapped_range().chunks(row_bytes as usize) {
+            for pixel in row[..width * 4].chunks_exact(4) {
+                let (red, blue) = if bgra {
+                    (pixel[2], pixel[0])
+                } else {
+                    (pixel[0], pixel[2])
+                };
+                pixels.extend_from_slice(&[red, pixel[1], blue, 255]);
+            }
+        }
+        let png = crate::screenshot::encode_png(width as u32, height as u32, &pixels);
+        match std::fs::write(path, png) {
+            Ok(()) => println!("saved screenshot {}", path.display()),
+            Err(error) => eprintln!("screenshot {} failed: {error}", path.display()),
+        }
+    }
+}
+
+/// A square outline around `position`, a constant few pixels thick.
+fn ring(position: WorldPosition, scale: f32, color: u32) -> [Instance; 4] {
+    let line = (2.0 / scale.max(f32::EPSILON)).min(0.5);
+    let margin = (3.0 / scale.max(f32::EPSILON)).max(0.25);
+    let x = position.x as f32 - margin;
+    let y = position.y as f32 - margin;
+    let side = 1.0 + 2.0 * margin;
+    [
+        Instance::new(x, y, side, line, color),
+        Instance::new(x, y + side - line, side, line, color),
+        Instance::new(x, y, line, side, color),
+        Instance::new(x + side - line, y, line, side, color),
+    ]
 }
 
 const MAX_INSTANCES_PER_BUFFER: usize = 1_000_000;
 const MIN_TERRAIN_SAMPLE_PIXELS: f32 = 2.0;
 const CACHE_MARGIN_PIXELS: f32 = 128.0;
-const WORLD_OVERLAY_CAPACITY: usize = 10;
-/// The worst-case composed card measures 10_553 instances: the personality and
-/// friend lines took it to 9_195 (budget 10_240), then the two `WORDS` card
-/// lines and the spoken word and mime on the HUD gesture line overflowed 10_240.
-/// 11_520 keeps the ~900 instances of slack the budget has carried.
-const SCREEN_OVERLAY_CAPACITY: usize = 11_520;
-const HUD_TEXT_CAPACITY: usize = 640;
-/// The worst-case card is 800 bytes: 733 before the two `WORDS` lines (67 bytes)
-/// were added, which overflowed the former 768.
-const AGENT_TEXT_CAPACITY: usize = 832;
+/// Hovered cell, generation selection, two person rings, chunk outline, world border.
+const WORLD_OVERLAY_CAPACITY: usize = 18;
+/// Initial interface buffer; it grows when a frame needs more.
+const SCREEN_OVERLAY_CAPACITY: usize = 16_384;
 const MAX_AGENT_INSTANCES: usize = 4_096;
 const MAX_STRUCTURE_INSTANCES: usize = 4_096;
 const MAX_SPAWNED_OBJECT_INSTANCES: usize = 16_384;
@@ -708,8 +913,8 @@ const MAX_RELATIONSHIP_DOTS: usize = 16;
 const MAX_RELATIONSHIP_MARKER_INSTANCES: usize = ACQUAINTANCE_SLOTS * (MAX_RELATIONSHIP_DOTS + 1);
 /// Dots drawn along one gesture's pointing line, at most.
 const MAX_GESTURE_DOTS: usize = 16;
-/// Each recent gesture draws its dotted line, a 4-sided search square, and a topic dot.
-const MAX_GESTURE_MARKER_INSTANCES: usize = RECENT_GESTURE_CAPACITY * (MAX_GESTURE_DOTS + 5);
+/// Each recent gesture draws its dotted line and an end square.
+const MAX_GESTURE_MARKER_INSTANCES: usize = RECENT_GESTURE_CAPACITY * (MAX_GESTURE_DOTS + 1);
 const MIN_DYNAMIC_INSTANCE_PIXELS: f32 = 1.25;
 const MIN_CHUNK_OUTLINE_PIXELS: f32 = 4.0;
 const MAX_CHUNK_OUTLINE_WORLD_WIDTH: f32 = 8.0;

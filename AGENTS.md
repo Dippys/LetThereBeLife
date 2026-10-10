@@ -20,7 +20,7 @@ on it, and both sides update using only observable evidence.*
 | `crates/sim-world` | Terrain types, chunk storage, world generation, world archive. Knows nothing about agents. |
 | `crates/sim-config` | Loads `config/simulation.toml` for the binaries. |
 | `crates/sim-headless` | CLI runner + canonical survival scenarios and reports. |
-| `crates/sim-viewer` | `winit` + `wgpu` window: camera, HUD, spawning, background chunk loading. Read-only view of the sim. |
+| `crates/sim-viewer` | `winit` + `wgpu` window: camera, interface (person panel, event feed, help), spawning, background chunk loading. Read-only view of the sim. |
 | `config/simulation.toml` | Seed, tick rate, bootstrap area, world-archive path. |
 | `docs/` | Living docs: status, architecture, development guide, active plans. |
 | `docs/archive/` | Historical, very detailed docs from the first build-out. Useful for deep dives; may be stale. |

@@ -296,3 +296,16 @@ accepted an episode where the listener never acted. The test was moved only afte
 natural episode under the stricter rules; the check itself got harder, not easier.
 **Consequences:** Valley survival is 119/120 with wildlife and hearths. Natural episodes remain
 rare (1 in the first 32 runs of the scan).
+
+## D-081: A viewer for people, not just developers (2026-10-10)
+
+**Decision:** The viewer's text HUD and hover card were replaced by a plain-language interface:
+a top bar with buttons, hover tooltips, a person panel opened by clicking (need bars and sentences
+instead of raw values), a recent-events feed, speech bubbles, a build palette, and a help screen
+with a legend. The raw values moved to an F3 readout. The bitmap font gained lowercase letters.
+The surface format is now non-sRGB, since the palette is authored in sRGB and an sRGB surface
+washed every color out. `Esc` closes things instead of quitting; reset needs `Shift+R`.
+**Why:** The user found the old HUD crowded and hard to understand.
+**Consequences:** The interface records its clickable regions each frame, so input asks the
+renderer what is under the mouse. The feed and bubbles show the sender's private intent (who meant
+what); that is presentation only, and agents still never see it.

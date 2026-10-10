@@ -18,7 +18,7 @@ sim-world ◄── sim-core ◄── sim-headless
 | `sim-core` | All dynamic simulation truth: `Engine`, time, agents, scheduler, policy. Re-exports the `sim-world` public API, so clients only use `sim_core::…` | `sim-world` |
 | `sim-config` | Loading/validating `config/simulation.toml`; `build.rs` copies it next to built binaries | `sim-core`, `serde`, `toml` |
 | `sim-headless` | CLI runner, `ScenarioRunner`, canonical survival scenarios, versioned reports + hashes | `sim-core`, `sim-config` |
-| `sim-viewer` | Window, input, fixed-step driver, camera, HUD, spawning UI, background chunk loading, `wgpu` rendering | `sim-core`, `sim-config`, `winit`, `wgpu`, `pollster`, `bytemuck`, `rayon` |
+| `sim-viewer` | Window, input, fixed-step driver, camera, interface (top bar, person panel, event feed, help), background chunk loading, `wgpu` rendering | `sim-core`, `sim-config`, `winit`, `wgpu`, `pollster`, `bytemuck`, `rayon` |
 
 **Hard boundaries:** `sim-world` knows nothing about agents. `sim-core` never depends on presentation.
 Clients read state through views/snapshots and change it only through `Engine` methods / `EngineCommand`.
@@ -153,13 +153,14 @@ only the bootstrap load area, not the world size.
 
 | Module | Responsibility |
 |---|---|
-| `main.rs`, `launch.rs` | Entry point, CLI flags (`--config`, `--smoke-frames`, `--pregenerate-world`), archive loading |
-| `app/` | `ViewerApp`: `events.rs` (winit `ApplicationHandler`), `input.rs`, `simulation.rs` (fixed-step ticks, spawn, reset), `world_loading.rs` (generation and archive polling, dirty regions), `selection.rs`, `frame.rs` (window creation and redraw) |
-| `render/` | `wgpu` `Renderer`: `gpu.rs` (uniforms, instance buffers), `instances.rs` (agents, shelters, objects, outlines), `summary.rs` (multi-level chunk summaries for zoomed-out views), `colors.rs`, `hud.rs` (HUD and agent text), `overlay.rs` (screen overlay, spawn menu, bitmap font), `shader.wgsl` |
+| `main.rs`, `launch.rs` | Entry point, CLI flags (`--config`, `--smoke-frames`, `--pregenerate-world`, `--valley`, `--advance`, `--select`, `--screenshot`), archive loading |
+| `app/` | `ViewerApp`: `events.rs` (winit `ApplicationHandler`, click vs drag), `input.rs` (hover description, picking, keys, interface actions), `simulation.rs` (fixed-step ticks, spawn, reset), `world_loading.rs` (generation and archive polling, dirty regions), `selection.rs`, `frame.rs` (window creation, per-frame render state) |
+| `render/` | `wgpu` `Renderer`: `gpu.rs` (uniforms, instance buffers), `instances.rs` (agents, shelters, objects, markers, gestures), `summary.rs` (multi-level chunk summaries for zoomed-out views), `colors.rs`, `ui.rs` (screen interface and its clickable regions), `text.rs` (bitmap font), `details.rs` (F3 readout), `shader.wgsl` |
+| `labels.rs`, `feed.rs` | Plain-language names for everything shown; the recent-events feed built from engine event logs |
+| `screenshot.rs` | Dependency-free PNG encoding for `--screenshot` |
 | `generation/` | Background Rayon pool: `mod.rs` (`WorldGenerator`, jobs), `worker.rs`, `pager.rs` (center-out 32×32-chunk bootstrap pages) |
 | `startup.rs` | Cursor-spawn validation (`T`), residency readiness check, 4,096-agent viewer limit, reset |
 | `camera.rs` | Presentation-only camera, zoom/pan clamping |
-| `spawn_menu.rs` | Numpad object-placement menu |
 
 `sim-headless` is split into `scenario.rs` (runner), `spawns.rs`, `report.rs`, `invariants.rs`, `hash.rs`,
 `study.rs` (behavior study: viewer-like agents, survival and roaming metrics, decision traces,
@@ -174,9 +175,10 @@ Communication diagnostics (latest tick only, for tools; agents never read them):
 `Engine::signal_events` (id, private intent, public gesture, inferred place),
 `interpretation_events` (one per watcher), and `hint_outcomes` (confirmed or abandoned, with teller).
 
-The viewer's hover card shows the hovered agent's memory (counts by kind, hints, explored tiles),
-and the map draws its remembered places: solid squares for seen places, outlines sized to the
-search radius for hints (`render/instances.rs`).
+The interface is drawn as screen-space rectangles each frame; `Renderer::ui_at` answers what the
+latest frame has under a point (a button's `UiAction`, or a panel that blocks map clicks). The
+person panel and event feed read engine views and diagnostics only; the map draws the picked
+person's remembered places and acquaintances (`render/instances.rs`).
 
 Wall-clock time is converted into whole fixed ticks. Render frames never drive simulation.
 Worker-built chunks are merged on the main thread after that frame's ticks.

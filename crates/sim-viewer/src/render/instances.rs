@@ -12,8 +12,8 @@ use super::{
     MAX_SPAWNED_OBJECT_INSTANCES, MAX_STRUCTURE_INSTANCES, MAX_WORLD_BORDER_WIDTH,
     MIN_CHUNK_OUTLINE_PIXELS, MIN_DYNAMIC_INSTANCE_PIXELS,
     colors::{
-        GESTURE_COLOR, agent_color, feature_color, gesture_topic_color, landmark_color,
-        relationship_color, rgba, spawn_kind_color, structure_color, terrain_color,
+        CARCASS, DEER, DEER_ALERT, GESTURE_COLOR, WOLF, WOLF_ALERT, agent_color, feature_color,
+        landmark_color, relationship_color, rgba, spawn_kind_color, structure_color, terrain_color,
     },
     gpu::Instance,
 };
@@ -70,7 +70,7 @@ pub(super) fn append_wildlife_instances(
             position.y as f32 + 0.3,
             0.7,
             0.4,
-            rgba(110, 24, 24, 255),
+            CARCASS,
         ));
     }
     for animal in animals
@@ -79,10 +79,10 @@ pub(super) fn append_wildlife_instances(
     {
         let alert = matches!(animal.mode, AnimalMode::Fleeing | AnimalMode::Hunting);
         let (inset, color) = match (animal.species, alert) {
-            (Species::Deer, false) => (0.2, rgba(176, 128, 72, 255)),
-            (Species::Deer, true) => (0.2, rgba(222, 170, 96, 255)),
-            (Species::Wolf, false) => (0.1, rgba(132, 132, 140, 255)),
-            (Species::Wolf, true) => (0.1, rgba(200, 200, 214, 255)),
+            (Species::Deer, false) => (0.2, DEER),
+            (Species::Deer, true) => (0.2, DEER_ALERT),
+            (Species::Wolf, false) => (0.1, WOLF),
+            (Species::Wolf, true) => (0.1, WOLF_ALERT),
         };
         output.push(Instance::new(
             animal.position.x as f32 + inset,
@@ -237,9 +237,8 @@ const ACQUAINTANCE_MARKER_PIXELS: f32 = 4.0;
 const FRIEND_MARKER_PIXELS: f32 = 7.0;
 
 /// Draws recently completed gestures: a dotted line in one neutral color from the
-/// sender to where watchers concluded the place is (the public pointing), a
-/// hollow square spanning their search radius there, and a small dot at the
-/// sender colored by its private topic (debug-only: agents never see topics).
+/// sender to where watchers concluded the place is (the public pointing), ending
+/// in a small square there.
 pub(super) fn build_gesture_instances<'a>(
     gestures: impl IntoIterator<Item = &'a GestureMark>,
     scale: f32,
@@ -251,7 +250,7 @@ pub(super) fn build_gesture_instances<'a>(
     }
     let scale = scale.max(f32::EPSILON);
     let dot = (GESTURE_DOT_PIXELS / scale).max(MIN_RELATIONSHIP_DOT_CELLS);
-    let topic_dot = (GESTURE_TOPIC_DOT_PIXELS / scale).max(MIN_MEMORY_MARKER_CELLS);
+    let end = (GESTURE_END_PIXELS / scale).max(MIN_MEMORY_MARKER_CELLS);
     for gesture in gestures.into_iter().take(RECENT_GESTURE_CAPACITY) {
         let from_x = gesture.origin.x as f32 + 0.5;
         let from_y = gesture.origin.y as f32 + 0.5;
@@ -271,29 +270,19 @@ pub(super) fn build_gesture_instances<'a>(
                 GESTURE_COLOR,
             ));
         }
-        let half = f32::from(gesture.search_radius) + 0.5;
-        let side = half * 2.0;
-        let line = (MEMORY_OUTLINE_PIXELS / scale).clamp(0.1, half);
-        let (x, y) = (to_x - half, to_y - half);
-        output.extend_from_slice(&[
-            Instance::new(x, y, side, line, GESTURE_COLOR),
-            Instance::new(x, y + side - line, side, line, GESTURE_COLOR),
-            Instance::new(x, y, line, side, GESTURE_COLOR),
-            Instance::new(x + side - line, y, line, side, GESTURE_COLOR),
-            Instance::new(
-                from_x - topic_dot / 2.0,
-                from_y - topic_dot / 2.0,
-                topic_dot,
-                topic_dot,
-                gesture_topic_color(gesture.topic),
-            ),
-        ]);
+        output.push(Instance::new(
+            to_x - end / 2.0,
+            to_y - end / 2.0,
+            end,
+            end,
+            GESTURE_COLOR,
+        ));
     }
 }
 
 const GESTURE_DOT_PIXELS: f32 = 3.0;
 const GESTURE_DOT_SPACING_PIXELS: f32 = 8.0;
-const GESTURE_TOPIC_DOT_PIXELS: f32 = 5.0;
+const GESTURE_END_PIXELS: f32 = 5.0;
 
 pub(super) fn build_structure_instances(
     views: impl IntoIterator<Item = StructureView>,

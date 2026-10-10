@@ -1,14 +1,13 @@
 //! Renderer tests, split by topic, plus the shared render-state fixture.
 
-mod hud;
 mod instances;
 mod summary;
+mod ui;
 
 use sim_core::{SimulationSnapshot, WorldPosition};
 
 use crate::camera::Camera;
-use crate::gestures::GestureSummary;
-use crate::render::{GenerationStatus, PopulationStatus, RenderState};
+use crate::render::{Census, GenerationStatus, PopulationStatus, RenderState};
 
 pub(super) fn test_render_state(cursor_world: Option<WorldPosition>) -> RenderState {
     RenderState {
@@ -27,17 +26,22 @@ pub(super) fn test_render_state(cursor_world: Option<WorldPosition>) -> RenderSt
         },
         camera: Camera::at_origin(),
         ui_scale: 1.0,
+        cursor: None,
         cursor_world,
-        cursor_spawned_object: None,
         inspected: None,
         hovered: None,
         selection: None,
         selection_valid: true,
         generation_status: GenerationStatus::Idle,
         population_status: PopulationStatus::Active,
-        hovered_agent: None,
-        spawn_message: None,
-        spawn_menu: None,
-        gestures: GestureSummary::default(),
+        hover: None,
+        selected: None,
+        following: false,
+        toast: None,
+        help_open: false,
+        details_open: false,
+        build: None,
+        feed: Vec::new(),
+        census: Census::default(),
     }
 }

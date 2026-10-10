@@ -63,6 +63,13 @@ impl Camera {
         self.constrain_to_viewport(viewport);
     }
 
+    /// Centers on `center` without changing the zoom.
+    pub fn center_on(&mut self, center: WorldPosition, viewport: Viewport) {
+        self.center_x = center.x as f64 + 0.5;
+        self.center_y = center.y as f64 + 0.5;
+        self.constrain_to_viewport(viewport);
+    }
+
     pub fn scale(
         self,
         screen_width: u32,
@@ -225,6 +232,11 @@ impl CameraView {
 
     pub const fn scale(self) -> f64 {
         self.scale
+    }
+
+    /// Window size in pixels.
+    pub fn screen_size(self) -> (f32, f32) {
+        (self.screen_width as f32, self.screen_height as f32)
     }
 
     pub fn world_bounds(self) -> sim_core::WorldRect {
