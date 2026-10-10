@@ -140,6 +140,11 @@ pub fn start_valley(engine: &mut Engine) -> Result<ValleyStart, ValleyStartError
     )
     .ok_or(ValleyStartError::NoCamp)?;
     spawn_band(engine, valley.bounds, &layout.sites).map_err(ValleyStartError::Spawn)?;
+    engine.release_wildlife(
+        valley.bounds,
+        sim_core::VALLEY_DEER,
+        sim_core::VALLEY_WOLVES,
+    );
     engine.set_founders(layout.founders as u32);
     for &(child, parent) in &layout.parents {
         engine.bond(AgentId::new(child as u32), AgentId::new(parent as u32));

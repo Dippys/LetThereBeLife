@@ -59,6 +59,24 @@ impl Population {
         outcome
     }
 
+    /// Wounds a living agent at once (a bite). `None` if it isn't alive.
+    pub(crate) fn injure(
+        &mut self,
+        agent: AgentId,
+        amount: u16,
+        now: SimTime,
+    ) -> Option<HealthDiagnostic> {
+        let index = agent.0 as usize;
+        if self
+            .records
+            .get(index)
+            .is_none_or(|record| record.activity == AgentActivity::Dead)
+        {
+            return None;
+        }
+        Some(self.health[index].injure(amount, agent, now))
+    }
+
     pub(crate) fn health_view(&self, agent: AgentId) -> Option<HealthView> {
         self.health
             .get(agent.0 as usize)

@@ -206,6 +206,7 @@ impl Population {
             reachable_cells,
             reserved_cells,
             spent_resources,
+            animals: Vec::new(),
         })
     }
 }

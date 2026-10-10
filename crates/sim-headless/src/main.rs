@@ -21,6 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut mind = sim_core::PolicyOptions::full();
     let mut food_percent = 100_u8;
     let mut no_help = false;
+    let mut no_wildlife = false;
     let mut config_path = DEFAULT_CONFIG_PATH.to_owned();
     let mut args = std::env::args().skip(1);
 
@@ -34,6 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--valley" => valley = true,
             "--food" => food_percent = parse_next(&mut args, "--food"),
             "--no-help" => no_help = true,
+            "--no-wildlife" => no_wildlife = true,
             "--trace" => trace = Some(parse_next(&mut args, "--trace")),
             "--comms" => comms_lines = parse_next(&mut args, "--comms"),
             "--misreads" => misread_lines = parse_next(&mut args, "--misreads"),
@@ -69,7 +71,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--config" => config_path = parse_next(&mut args, "--config"),
             "--help" | "-h" => {
                 println!(
-                    "Usage: sim-headless [--canonical | --study [--near-water | --groups | --valley] [--mind legacy|memory|sharing|full] [--no-help] [--food PERCENT] [--verbose] [--trace AGENT] [--comms N] [--misreads N] [--successes N] [--lessons N] [--explain AGENT]] [--config PATH] [--ticks NUMBER] [--seed NUMBER] [--agents NUMBER] [--batch-size NUMBER]"
+                    "Usage: sim-headless [--canonical | --study [--near-water | --groups | --valley] [--mind legacy|memory|sharing|full] [--no-help] [--no-wildlife] [--food PERCENT] [--verbose] [--trace AGENT] [--comms N] [--misreads N] [--successes N] [--lessons N] [--explain AGENT]] [--config PATH] [--ticks NUMBER] [--seed NUMBER] [--agents NUMBER] [--batch-size NUMBER]"
                 );
                 return Ok(());
             }
@@ -92,6 +94,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ..mind
         };
         config.food_percent = food_percent.min(100);
+        config.wildlife = !no_wildlife;
         config.trace = trace.or(explain);
         if near_water {
             config.spawn = sim_headless::StudySpawn::NearWater;

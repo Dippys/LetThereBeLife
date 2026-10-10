@@ -43,6 +43,8 @@ pub(super) struct Question {
 const RUNNER_UP_MIN_PROBABILITY: u8 = 64;
 /// Relative need (128 = at threshold) that counts as urgent for that rule.
 const URGENT_NEED: u16 = 112;
+/// Agents run from animals they fear once they come this close (cells).
+const FLEE_DISTANCE: u64 = 7;
 /// Children ask "this?" unless at least this sure (out of 255, about 90%).
 const CHILD_ASKS_BELOW: u8 = 230;
 
@@ -163,6 +165,7 @@ impl Engine {
         let latest_signal = self.next_signal_id;
         let beg = self.beg_target(agent, perception);
         let food = self.food_values(agent);
+        let (danger, prey) = self.animals_of_interest(agent, origin, perception);
         let visible = visible_kinds(origin, perception);
         let spent = spent_kinds(perception);
         let hint_outcomes = &mut self.hint_outcomes;
@@ -184,6 +187,7 @@ impl Engine {
             lexicon,
             dialogue,
             affordances: _,
+            fauna: _,
             child: _,
             parent,
         } = mind;
@@ -296,6 +300,8 @@ impl Engine {
                 parent,
                 beg_target: beg.map(|(_, position)| position),
                 food,
+                danger,
+                prey,
             },
         );
         if deliberation.selection.reason == PolicyReason::Begging
@@ -313,41 +319,44 @@ impl Engine {
         (deliberation.selection, deliberation.heading)
     }
 
-    /// Begins a pointing gesture toward a remembered place.
-    pub(super) fn start_signal(
+    /// Begins an action done where the agent stands (a gesture toward a place,
+    /// or a strike at an animal next to it) that completes after its duration.
+    pub(super) fn start_timed_action(
         &mut self,
         agent: AgentId,
-        place: WorldPosition,
+        goal: PhysicalGoal,
+        target: WorldPosition,
         reason: PolicyReason,
     ) {
+        let duration = if goal == PhysicalGoal::Hunt {
+            super::HUNT_TICKS
+        } else {
+            SIGNAL_TICKS
+        };
         self.population.clear_route(agent);
         match self.population.schedule_policy_action(
             &mut self.scheduler,
             self.time,
             agent,
             PolicyAction {
-                goal: PhysicalGoal::Signal,
-                target: place,
+                goal,
+                target,
                 reason,
-                duration: SIGNAL_TICKS,
+                duration,
             },
         ) {
             Ok(_) => self.policy_diagnostics.push(PolicyDiagnostic {
                 agent,
                 at: self.time,
-                goal: PhysicalGoal::Signal,
-                target: Some(place),
+                goal,
+                target: Some(target),
                 reason,
                 kind: PolicyDiagnosticKind::ActionStarted,
                 failure: None,
             }),
-            Err(error) => self.schedule_policy_retry(
-                agent,
-                PhysicalGoal::Signal,
-                Some(place),
-                reason,
-                move_failure(error),
-            ),
+            Err(error) => {
+                self.schedule_policy_retry(agent, goal, Some(target), reason, move_failure(error));
+            }
         }
     }
 
@@ -609,6 +618,40 @@ impl Engine {
         mime_for(topic, food)
     }
 
+    /// The nearest animal in view `agent` believes is dangerous (if it's close
+    /// enough to worry about), and the nearest it believes is worth hunting.
+    fn animals_of_interest(
+        &self,
+        agent: AgentId,
+        origin: WorldPosition,
+        perception: &PhysicalPerception,
+    ) -> (Option<WorldPosition>, Option<WorldPosition>) {
+        let Some(mind) = self.minds.get(agent) else {
+            return (None, None);
+        };
+        let distance = |position: WorldPosition| {
+            origin
+                .x
+                .abs_diff(position.x)
+                .max(origin.y.abs_diff(position.y))
+        };
+        let nearest = |wanted: &dyn Fn(crate::Species) -> bool, within: u64| {
+            perception
+                .animals
+                .iter()
+                .filter(|animal| wanted(animal.species) && distance(animal.position) <= within)
+                .min_by_key(|animal| (distance(animal.position), animal.id))
+                .map(|animal| animal.position)
+        };
+        (
+            nearest(&|species| mind.fauna.dangerous(species), FLEE_DISTANCE),
+            nearest(
+                &|species| mind.fauna.prey(species) && !mind.fauna.dangerous(species),
+                u64::MAX,
+            ),
+        )
+    }
+
     /// What `agent` wants to eat. With a mind: its beliefs, plus (only while
     /// hungry) a taste of anything it has never tried. Without one (legacy
     /// policy): what an all-knowing agent would eat.
@@ -842,6 +885,7 @@ impl Engine {
             explored_tiles: mind.map.explored_tile_count(),
             child: mind.child,
             affordances: mind.affordances.views().collect(),
+            fauna: mind.fauna.views().collect(),
             acquaintances: mind.social.views().collect(),
             lexicon: mind.lexicon.views().collect(),
         })

@@ -97,6 +97,7 @@ fn mind_with_words(
         explored_tiles: 0,
         child: false,
         affordances: Vec::new(),
+        fauna: Vec::new(),
         acquaintances,
         lexicon,
     })
@@ -526,6 +527,7 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
             explored_tiles: 37,
             child: false,
             affordances: Vec::new(),
+            fauna: Vec::new(),
         })),
     };
     let mut text = String::with_capacity(AGENT_TEXT_CAPACITY);
@@ -604,6 +606,7 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
         explored_tiles: VISITED_TILE_SLOTS,
         child: false,
         affordances: Vec::new(),
+        fauna: Vec::new(),
     };
     let budget_inspection = AgentInspection {
         view: budget_view,

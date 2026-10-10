@@ -31,6 +31,7 @@ impl Engine {
         self.interpretation_events.clear();
         self.hint_outcomes.clear();
         self.meal_events.clear();
+        self.wildlife_events.clear();
         self.lesson_events.clear();
         self.repair_events.clear();
         self.request_events.clear();
@@ -190,6 +191,7 @@ impl Engine {
             .max(processed);
         let due_backlog = self.scheduler.has_due(self.time);
         self.runtime_counters.due_backlog_ticks += u64::from(due_backlog);
+        self.step_wildlife();
         // Autonomous agents re-schedule constantly; without this, stale events
         // were only pruned on manual commands and piled up during long runs.
         self.compact_scheduler_if_needed();

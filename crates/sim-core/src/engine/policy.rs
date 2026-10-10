@@ -152,8 +152,8 @@ impl Engine {
             );
             return;
         };
-        if selection.goal == PhysicalGoal::Signal {
-            self.start_signal(agent, target, selection.reason);
+        if matches!(selection.goal, PhysicalGoal::Signal | PhysicalGoal::Hunt) {
+            self.start_timed_action(agent, selection.goal, target, selection.reason);
             return;
         }
         if selection.goal == PhysicalGoal::BuildShelter {

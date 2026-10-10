@@ -265,6 +265,7 @@ impl Population {
             | PhysicalGoal::SeekShelter
             | PhysicalGoal::Explore
             | PhysicalGoal::Signal
+            | PhysicalGoal::Hunt
             | PhysicalGoal::Wait => AgentActivity::Idle,
             PhysicalGoal::Incapacitated => AgentActivity::Incapacitated,
         };

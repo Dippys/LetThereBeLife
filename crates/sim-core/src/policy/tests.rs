@@ -92,6 +92,7 @@ fn perception() -> PhysicalPerception {
         ],
         reserved_cells: Vec::new(),
         spent_resources: Vec::new(),
+        animals: Vec::new(),
     }
 }
 

@@ -242,7 +242,9 @@ fn tile_of(position: WorldPosition) -> (i16, i16) {
 pub(crate) fn spent_kinds(perception: &PhysicalPerception) -> [bool; LandmarkKind::COUNT] {
     let mut spent = [false; LandmarkKind::COUNT];
     for resource in &perception.spent_resources {
-        spent[LandmarkKind::of_material(resource.resource.kind) as usize] = true;
+        if let Some(kind) = LandmarkKind::of_material(resource.resource.kind) {
+            spent[kind as usize] = true;
+        }
     }
     spent
 }
@@ -478,20 +480,25 @@ impl MentalMap {
         origin: WorldPosition,
         now: u32,
     ) -> Option<(WorldPosition, LandmarkSource)> {
-        self.recall_scored(kind, agent, origin, now)
+        self.recall_scored(kind, agent, origin, now, false)
             .map(|(_, destination, source)| (destination, source))
     }
 
-    /// Like `recall`, with the expected cost, so places of different kinds can compete.
+    /// Like `recall`, with the expected cost, so places of different kinds can
+    /// compete. With `seen_only`, hints are ignored.
     pub(crate) fn recall_scored(
         &self,
         kind: LandmarkKind,
         agent: u32,
         origin: WorldPosition,
         now: u32,
+        seen_only: bool,
     ) -> Option<(u64, WorldPosition, LandmarkSource)> {
         slot_range(kind)
-            .filter(|&slot| !self.landmarks[slot].is_empty())
+            .filter(|&slot| {
+                let landmark = self.landmarks[slot];
+                !landmark.is_empty() && (!seen_only || landmark.is_first_hand())
+            })
             .map(|slot| {
                 let landmark = self.landmarks[slot];
                 let (destination, source) = if landmark.is_first_hand() {

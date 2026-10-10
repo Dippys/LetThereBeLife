@@ -99,6 +99,8 @@ pub enum PhysicalGoal {
     Explore = 10,
     /// Point out a remembered place to agents nearby.
     Signal = 11,
+    /// Strike at an animal next to the agent.
+    Hunt = 12,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,6 +132,10 @@ pub enum PolicyReason {
     Following,
     /// Asking someone nearby for food.
     Begging,
+    /// Getting away from an animal it believes is dangerous.
+    Fleeing,
+    /// Going after an animal it believes is worth hunting.
+    Hunting,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -29,9 +29,9 @@ use colors::{rgba, selection_color};
 use gpu::{CameraBinding, CameraUniform, Instance, InstanceBuffer, StaticInstanceBuffers};
 use hud::{write_agent_text, write_hud_text};
 use instances::{
-    build_agent_instances, build_gesture_instances, build_memory_marker_instances,
-    build_relationship_marker_instances, build_spawned_object_instances, build_structure_instances,
-    chunk_outline, world_border,
+    append_wildlife_instances, build_agent_instances, build_gesture_instances,
+    build_memory_marker_instances, build_relationship_marker_instances,
+    build_spawned_object_instances, build_structure_instances, chunk_outline, world_border,
 };
 use overlay::build_screen_overlay;
 use summary::{
@@ -526,6 +526,15 @@ impl Renderer {
             view.scale() as f32,
             &mut self.spawned_object_instances,
         );
+        append_wildlife_instances(
+            engine.animal_views(),
+            engine.carcass_views(),
+            view.world_bounds(),
+            view.scale() as f32,
+            &mut self.spawned_object_instances,
+        );
+        self.spawned_object_instances
+            .truncate(MAX_SPAWNED_OBJECT_INSTANCES);
         self.spawned_objects
             .write(&self.queue, &self.spawned_object_instances);
         let hovered_memory = state

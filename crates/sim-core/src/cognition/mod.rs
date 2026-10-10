@@ -5,6 +5,7 @@
 
 mod affordances;
 mod dialogue;
+mod fauna;
 mod gesture;
 mod lexicon;
 mod map;
@@ -17,6 +18,8 @@ pub(crate) use affordances::Affordances;
 pub use affordances::{AffordanceView, BELIEF_UNIT};
 pub use dialogue::{CONSEQUENCE_WEIGHT, REPAIR_WEIGHT};
 pub(crate) use dialogue::{Dialogue, PendingCorrection};
+pub(crate) use fauna::Fauna;
+pub use fauna::FaunaView;
 pub use gesture::Gesture;
 pub(crate) use gesture::reach_toward;
 pub(crate) use lexicon::Lexicon;
@@ -72,13 +75,15 @@ impl LandmarkKind {
         Self::Bitterberries,
     ];
 
-    /// The kind of place where `material` can be gathered.
-    pub const fn of_material(material: crate::Material) -> Self {
+    /// The kind of place where `material` can be gathered, if it stays put
+    /// (meat lies on carcasses that soon spoil, so nobody remembers them).
+    pub const fn of_material(material: crate::Material) -> Option<Self> {
         match material {
-            crate::Material::Berries => Self::Berries,
-            crate::Material::Bitterberries => Self::Bitterberries,
-            crate::Material::Wood => Self::Wood,
-            crate::Material::Stone => Self::Stone,
+            crate::Material::Berries => Some(Self::Berries),
+            crate::Material::Bitterberries => Some(Self::Bitterberries),
+            crate::Material::Wood => Some(Self::Wood),
+            crate::Material::Stone => Some(Self::Stone),
+            crate::Material::Meat => None,
         }
     }
 
@@ -128,6 +133,8 @@ pub struct MentalMapView {
     pub child: bool,
     /// What it believes materials are good for (only materials it has beliefs about).
     pub affordances: Vec<AffordanceView>,
+    /// What it believes about animals (only species it has beliefs about).
+    pub fauna: Vec<FaunaView>,
     pub acquaintances: Vec<AcquaintanceView>,
     /// What the agent believes words mean.
     pub lexicon: Vec<LexiconEntryView>,
@@ -344,6 +351,8 @@ pub(crate) struct Mind {
     pub(crate) dialogue: Dialogue,
     /// What it believes materials are good for.
     pub(crate) affordances: Affordances,
+    /// What it believes about animals.
+    pub(crate) fauna: Fauna,
     /// Born into the band rather than founding it: starts with no words, stays
     /// close to its parent, and asks readily.
     pub(crate) child: bool,
@@ -431,6 +440,11 @@ impl Minds {
                 Affordances::default()
             } else {
                 Affordances::founding(self.seed, agent, FAMILY_SIZE)
+            },
+            fauna: if child {
+                Fauna::default()
+            } else {
+                Fauna::founding(self.seed, agent, FAMILY_SIZE)
             },
             child,
             ..Mind::default()

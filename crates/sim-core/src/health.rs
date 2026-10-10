@@ -3,6 +3,8 @@ use crate::{AgentId, NeedKind, SimTime, WorldPosition, needs::NeedState};
 pub const HEALTH_MAX: u16 = 10_000;
 pub const HEALTH_CONSEQUENCE_INTERVAL_TICKS: u64 = 600;
 pub const HEALTH_INCAPACITATION_THRESHOLD: u16 = 2_500;
+/// Health a full sleep restores.
+pub const SLEEP_HEALING: u16 = 1_500;
 const FLAG_SCHEDULED: u8 = 1;
 const FLAG_DETERIORATING: u8 = 2;
 
@@ -21,10 +23,15 @@ pub enum DeathCause {
     Exposure = 1,
     Starvation = 2,
     Exhaustion = 3,
+    /// Bitten or wounded.
+    Injury = 4,
 }
 
 impl DeathCause {
-    pub(crate) const ALL: [Self; 4] = [
+    pub const COUNT: usize = 5;
+
+    /// Causes that come from a need staying severe, in tie-break order.
+    pub(crate) const NEEDS: [Self; 4] = [
         Self::Dehydration,
         Self::Exposure,
         Self::Starvation,
@@ -36,7 +43,7 @@ impl DeathCause {
             Self::Dehydration => NeedKind::Thirst,
             Self::Exposure => NeedKind::Exposure,
             Self::Starvation => NeedKind::Hunger,
-            Self::Exhaustion => NeedKind::Rest,
+            Self::Exhaustion | Self::Injury => NeedKind::Rest,
         }
     }
 
@@ -46,6 +53,7 @@ impl DeathCause {
             Self::Exposure => 8_500,
             Self::Starvation => 9_000,
             Self::Exhaustion => 9_500,
+            Self::Injury => u16::MAX,
         }
     }
 
@@ -54,6 +62,7 @@ impl DeathCause {
             Self::Dehydration => 2_500,
             Self::Exposure => 2_000,
             Self::Starvation | Self::Exhaustion => 1_000,
+            Self::Injury => 0,
         }
     }
 }
@@ -188,7 +197,7 @@ impl HealthState {
             return stale(agent, due, before);
         }
         self.flags &= !FLAG_SCHEDULED;
-        let cause = DeathCause::ALL
+        let cause = DeathCause::NEEDS
             .into_iter()
             .find(|cause| needs.value_at(cause.need(), due) >= cause.severe_threshold());
         let Some(cause) = cause else {
@@ -210,6 +219,43 @@ impl HealthState {
             agent,
             at: due,
             cause: Some(cause),
+            before,
+            after: self.value,
+            kind,
+        }
+    }
+
+    /// Rest heals: health rises by `amount` (never past the maximum), but only
+    /// for someone who is up and about.
+    pub(crate) fn heal(&mut self, amount: u16) {
+        if self.status == HealthStatus::Healthy {
+            self.value = self.value.saturating_add(amount).min(HEALTH_MAX);
+        }
+    }
+
+    /// A wound: health falls by `amount` at once.
+    pub(crate) fn injure(&mut self, amount: u16, agent: AgentId, at: SimTime) -> HealthDiagnostic {
+        let before = self.value;
+        if self.status == HealthStatus::Dead {
+            return stale(agent, at, before);
+        }
+        self.value = self.value.saturating_sub(amount);
+        let kind = if self.value == 0 {
+            self.status = HealthStatus::Dead;
+            self.flags = 0;
+            HealthDiagnosticKind::Died
+        } else if self.value <= HEALTH_INCAPACITATION_THRESHOLD
+            && self.status == HealthStatus::Healthy
+        {
+            self.status = HealthStatus::Incapacitated;
+            HealthDiagnosticKind::Incapacitated
+        } else {
+            HealthDiagnosticKind::Deteriorated
+        };
+        HealthDiagnostic {
+            agent,
+            at,
+            cause: Some(DeathCause::Injury),
             before,
             after: self.value,
             kind,
@@ -248,7 +294,7 @@ fn stale(agent: AgentId, at: SimTime, value: u16) -> HealthDiagnostic {
 }
 
 fn earliest_consequence(needs: NeedState, now: SimTime) -> Option<(SimTime, DeathCause)> {
-    DeathCause::ALL
+    DeathCause::NEEDS
         .into_iter()
         .filter_map(|cause| {
             needs
@@ -272,8 +318,8 @@ mod tests {
     fn health_state_is_compact_and_cause_priority_is_explicit() {
         assert_eq!(size_of::<HealthState>(), 16);
         assert_eq!(align_of::<HealthState>(), 8);
-        assert_eq!(DeathCause::ALL[0], DeathCause::Dehydration);
-        assert_eq!(DeathCause::ALL[1], DeathCause::Exposure);
+        assert_eq!(DeathCause::NEEDS[0], DeathCause::Dehydration);
+        assert_eq!(DeathCause::NEEDS[1], DeathCause::Exposure);
     }
 
     #[test]

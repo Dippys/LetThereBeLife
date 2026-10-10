@@ -105,6 +105,7 @@ impl Engine {
             }
             PhysicalGoal::BuildShelter => self.apply_build_completion(event.agent),
             PhysicalGoal::Signal => self.apply_signal(event.agent, target),
+            PhysicalGoal::Hunt => self.apply_hunt(event.agent, target),
             PhysicalGoal::SeekShelter | PhysicalGoal::Incapacitated => {
                 Err(PolicyFailureReason::DeferredToLaterSlice)
             }
@@ -319,7 +320,9 @@ impl Engine {
         let maximum = inventory
             .remaining_capacity(resource.kind)
             .min(GATHER_YIELD);
-        let gathered = if self.spawned_objects.at(resource_position).is_some() {
+        let gathered = if resource.kind == Material::Meat {
+            self.wildlife.butcher(resource_position, maximum)
+        } else if self.spawned_objects.at(resource_position).is_some() {
             self.spawned_objects.gather(resource_position, maximum)
         } else {
             self.resource_deltas

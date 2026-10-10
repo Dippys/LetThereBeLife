@@ -22,6 +22,8 @@ pub enum Material {
     Bitterberries,
     Wood,
     Stone,
+    /// From a carcass. It spoils where it lies, but keeps once carried.
+    Meat,
 }
 
 /// What a material physically does when eaten or used. Need units match the
@@ -37,9 +39,14 @@ pub struct MaterialProperties {
 }
 
 impl Material {
-    pub const COUNT: usize = 4;
-    pub const ALL: [Self; Self::COUNT] =
-        [Self::Berries, Self::Bitterberries, Self::Wood, Self::Stone];
+    pub const COUNT: usize = 5;
+    pub const ALL: [Self; Self::COUNT] = [
+        Self::Berries,
+        Self::Bitterberries,
+        Self::Wood,
+        Self::Stone,
+        Self::Meat,
+    ];
 
     pub const fn properties(self) -> MaterialProperties {
         match self {
@@ -60,6 +67,11 @@ impl Material {
             },
             Self::Stone => MaterialProperties {
                 nutrition: 0,
+                toxicity: 0,
+                builds: false,
+            },
+            Self::Meat => MaterialProperties {
+                nutrition: 6_000,
                 toxicity: 0,
                 builds: false,
             },

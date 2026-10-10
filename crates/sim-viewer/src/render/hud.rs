@@ -513,6 +513,7 @@ const fn goal_label(goal: PhysicalGoal) -> &'static str {
         PhysicalGoal::Incapacitated => "INCAPACITATED",
         PhysicalGoal::Explore => "EXPLORE",
         PhysicalGoal::Signal => "POINT OUT PLACE",
+        PhysicalGoal::Hunt => "HUNT",
     }
 }
 
@@ -536,6 +537,8 @@ const fn policy_reason_label(reason: PolicyReason) -> &'static str {
         PolicyReason::Visiting => "VISITING A FRIEND",
         PolicyReason::Following => "FOLLOWING A PARENT",
         PolicyReason::Begging => "ASKING FOR FOOD",
+        PolicyReason::Fleeing => "FLEEING AN ANIMAL",
+        PolicyReason::Hunting => "HUNTING",
     }
 }
 
@@ -545,6 +548,7 @@ const fn death_cause_label(cause: DeathCause) -> &'static str {
         DeathCause::Exposure => "EXPOSURE",
         DeathCause::Starvation => "STARVATION",
         DeathCause::Exhaustion => "EXHAUSTION",
+        DeathCause::Injury => "INJURY",
     }
 }
 
@@ -659,5 +663,6 @@ const fn resource_label(resource: Material) -> &'static str {
         Material::Bitterberries => "BITTERBERRIES",
         Material::Wood => "WOOD",
         Material::Stone => "STONE",
+        Material::Meat => "MEAT",
     }
 }

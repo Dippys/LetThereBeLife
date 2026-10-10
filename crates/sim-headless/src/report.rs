@@ -46,6 +46,8 @@ pub struct DeathCounts {
     pub exposure: u32,
     pub starvation: u32,
     pub exhaustion: u32,
+    /// Deaths from bites (canonical scenarios have no wildlife, so the report omits it).
+    pub injury: u32,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -194,6 +196,7 @@ pub(crate) fn build_report(
             DeathCause::Exposure => deaths.exposure += 1,
             DeathCause::Starvation => deaths.starvation += 1,
             DeathCause::Exhaustion => deaths.exhaustion += 1,
+            DeathCause::Injury => deaths.injury += 1,
         }
     }
     let resource_units_removed = engine

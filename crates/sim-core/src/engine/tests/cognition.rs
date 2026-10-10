@@ -44,6 +44,7 @@ fn remember_water(engine: &mut Engine, agent: AgentId, place: WorldPosition) {
         reachable_cells: Vec::new(),
         reserved_cells: Vec::new(),
         spent_resources: Vec::new(),
+        animals: Vec::new(),
     };
     engine
         .minds

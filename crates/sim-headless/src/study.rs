@@ -29,6 +29,8 @@ pub struct StudyConfig {
     pub trace: Option<u32>,
     /// Percent of the generated food left at the start (100 = all; lower is scarcer).
     pub food_percent: u8,
+    /// Release deer and wolves into the valley.
+    pub wildlife: bool,
 }
 
 /// Where study agents start.
@@ -65,6 +67,7 @@ struct Start {
 pub use sim_core::VALLEY_SIDE;
 
 pub const GROUP_SIZE: usize = 5;
+pub use sim_core::{VALLEY_DEER, VALLEY_WOLVES};
 
 pub const NEAR_WATER_DISTANCE: u64 = 6;
 
@@ -79,6 +82,7 @@ impl StudyConfig {
             mind: PolicyOptions::full(),
             trace: None,
             food_percent: 100,
+            wildlife: true,
         }
     }
 }
@@ -115,7 +119,7 @@ pub struct StudyReport {
     pub config: StudyConfig,
     pub world: StudyWorldSummary,
     pub survivors: u32,
-    pub deaths: [u32; 4],
+    pub deaths: [u32; DeathCause::COUNT],
     /// Death ticks sorted ascending; empty when nobody died.
     pub death_ticks: Vec<u64>,
     pub mean_moves: u64,
@@ -159,6 +163,29 @@ pub struct StudyReport {
     pub children_vocabulary: Option<(u64, u64)>,
     /// Eating and what agents came to believe about food.
     pub food: FoodStats,
+    /// Hunting, bites, and the animals left.
+    pub wildlife: WildlifeStats,
+}
+
+/// What happened between people and animals.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct WildlifeStats {
+    /// Decisions to go after an animal, and to run from one.
+    pub hunt_decisions: u64,
+    pub flee_decisions: u64,
+    pub strikes: u64,
+    /// Animals people brought down, and how many of those kills had helpers.
+    pub kills: u64,
+    pub group_kills: u64,
+    /// Deer brought down by wolves.
+    pub predator_kills: u64,
+    pub bites: u64,
+    pub births: u64,
+    /// Living deer and wolves at the end.
+    pub deer: u64,
+    pub wolves: u64,
+    /// At the end, for founders then children: how many fear wolves.
+    pub fear_wolves: [u64; 2],
 }
 
 /// What the band ate and believes about food.
@@ -240,6 +267,9 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
             .strip_food(active_area, config.food_percent)
             .map_err(|_| ScenarioError("food can only be stripped before the first tick".into()))?;
     }
+    if config.wildlife && config.spawn == StudySpawn::Valley {
+        engine.release_wildlife(active_area, VALLEY_DEER, VALLEY_WOLVES);
+    }
     if let Some(founders) = founders {
         engine.set_founders(founders);
     }
@@ -260,10 +290,33 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     let mut comms = crate::comms::CommunicationLog::default();
     let mut early_vocabulary = 0;
     let mut food = FoodStats::default();
+    let mut wildlife = WildlifeStats::default();
     for tick in 1..=config.ticks {
         match engine.tick() {
             TickOutcome::Advanced { .. } => {
                 collect_tick(&engine, &mut tracks);
+                for decision in engine.policy_diagnostics() {
+                    if decision.kind == PolicyDiagnosticKind::Selected {
+                        wildlife.hunt_decisions +=
+                            u64::from(decision.reason == sim_core::PolicyReason::Hunting);
+                        wildlife.flee_decisions +=
+                            u64::from(decision.reason == sim_core::PolicyReason::Fleeing);
+                    }
+                }
+                for event in engine.wildlife_events() {
+                    match *event {
+                        sim_core::WildlifeEvent::Struck {
+                            killed, helpers, ..
+                        } => {
+                            wildlife.strikes += 1;
+                            wildlife.kills += u64::from(killed);
+                            wildlife.group_kills += u64::from(killed && helpers > 0);
+                        }
+                        sim_core::WildlifeEvent::Killed { .. } => wildlife.predator_kills += 1,
+                        sim_core::WildlifeEvent::Bite { .. } => wildlife.bites += 1,
+                        sim_core::WildlifeEvent::Born { .. } => wildlife.births += 1,
+                    }
+                }
                 for meal in engine.meal_events() {
                     food.meals[meal.material as usize] += 1;
                     food.sick += u64::from(meal.retched);
@@ -306,8 +359,16 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
             None => 2,
         };
         food.bitter_beliefs[usize::from(mind.child)][slot] += 1;
+        let fears = mind
+            .fauna
+            .iter()
+            .any(|belief| belief.species == sim_core::Species::Wolf && belief.danger > 64);
+        wildlife.fear_wolves[usize::from(mind.child)] += u64::from(fears);
     }
     report.food = food;
+    wildlife.deer = engine.animal_count(sim_core::Species::Deer) as u64;
+    wildlife.wolves = engine.animal_count(sim_core::Species::Wolf) as u64;
+    report.wildlife = wildlife;
     Ok(report)
 }
 
@@ -448,11 +509,15 @@ fn record_trace(engine: &Engine, agent: AgentId, trace: &mut std::collections::V
             needs.exposure.value,
         ]
     });
+    let at = engine
+        .agent_views(usize::MAX)
+        .find(|view| view.id == agent)
+        .map(|view| (view.position.x, view.position.y));
     let mut lines = Vec::new();
     for diagnostic in engine.policy_diagnostics() {
         if diagnostic.agent == agent && diagnostic.kind != PolicyDiagnosticKind::RouteScheduled {
             lines.push(format!(
-                "t={now} {:?} {:?} {:?} target={:?} failure={:?} needs(h/t/r/e)={needs:?}",
+                "t={now} at={at:?} {:?} {:?} {:?} target={:?} failure={:?} needs(h/t/r/e)={needs:?}",
                 diagnostic.kind,
                 diagnostic.goal,
                 diagnostic.reason,
@@ -533,7 +598,7 @@ fn build_report(
     tracks: &[AgentTrack],
     tiles: &[BTreeSet<(i64, i64)>],
 ) -> StudyReport {
-    let mut deaths = [0_u32; 4];
+    let mut deaths = [0_u32; DeathCause::COUNT];
     let mut death_ticks = Vec::new();
     let mut death_by_agent = vec![None; tracks.len()];
     for record in engine.death_records() {
@@ -627,6 +692,7 @@ fn build_report(
         vocabulary_agreement: [0, 0],
         children_vocabulary: None,
         food: FoodStats::default(),
+        wildlife: WildlifeStats::default(),
         minds: (0..tracks.len())
             .map(|index| engine.mental_map(AgentId::new(index as u32)))
             .collect(),
@@ -926,7 +992,9 @@ fn summarize_world(engine: &Engine, fresh_water: &[WorldPosition]) -> StudyWorld
         match feature.base_resource().kind {
             sim_core::Material::Berries => summary.food_features += 1,
             sim_core::Material::Wood => summary.wood_features += 1,
-            sim_core::Material::Bitterberries | sim_core::Material::Stone => {}
+            sim_core::Material::Bitterberries
+            | sim_core::Material::Stone
+            | sim_core::Material::Meat => {}
         }
     }
     // Coarse occupancy grid of fresh water at 64-cell blocks, then test sampled land cells.
@@ -1024,12 +1092,13 @@ impl fmt::Display for StudyReport {
         )?;
         writeln!(
             formatter,
-            "  survivors={}  deaths dehydration/exposure/starvation/exhaustion={}/{}/{}/{}  median_death_tick={}",
+            "  survivors={}  deaths dehydration/exposure/starvation/exhaustion/injury={}/{}/{}/{}/{}  median_death_tick={}",
             self.survivors,
             self.deaths[DeathCause::Dehydration as usize],
             self.deaths[DeathCause::Exposure as usize],
             self.deaths[DeathCause::Starvation as usize],
             self.deaths[DeathCause::Exhaustion as usize],
+            self.deaths[DeathCause::Injury as usize],
             median_death
         )?;
         writeln!(
@@ -1072,15 +1141,34 @@ impl fmt::Display for StudyReport {
         ] = food.bitter_beliefs;
         write!(
             formatter,
-            "\n  food: meals berries {} bitterberries {} wood {} stone {}; sick {}, first tastes {}, watched {}; bitterberries thought food/sickening/unknown: founders {founders_eat}/{founders_avoid}/{founders_unsure}, children {children_eat}/{children_avoid}/{children_unsure}",
+            "\n  food: meals berries {} bitterberries {} wood {} stone {} meat {}; sick {}, first tastes {}, watched {}; bitterberries thought food/sickening/unknown: founders {founders_eat}/{founders_avoid}/{founders_unsure}, children {children_eat}/{children_avoid}/{children_unsure}",
             food.meals[sim_core::Material::Berries as usize],
             food.meals[sim_core::Material::Bitterberries as usize],
             food.meals[sim_core::Material::Wood as usize],
             food.meals[sim_core::Material::Stone as usize],
+            food.meals[sim_core::Material::Meat as usize],
             food.sick,
             food.first_tastes,
             food.watched,
         )?;
+        let wild = &self.wildlife;
+        if self.config.wildlife && self.config.spawn == StudySpawn::Valley {
+            let [founders_fear, children_fear] = wild.fear_wolves;
+            write!(
+                formatter,
+                "\n  wildlife: hunt decisions {}, flee decisions {}, strikes {}, kills by people {} ({} together), deer killed by wolves {}, bites {}, births {}; left: deer {} wolves {}; fear wolves: founders {founders_fear}, children {children_fear}",
+                wild.hunt_decisions,
+                wild.flee_decisions,
+                wild.strikes,
+                wild.kills,
+                wild.group_kills,
+                wild.predator_kills,
+                wild.bites,
+                wild.births,
+                wild.deer,
+                wild.wolves,
+            )?;
+        }
         if let Some((children, matching)) = self.children_vocabulary {
             write!(
                 formatter,

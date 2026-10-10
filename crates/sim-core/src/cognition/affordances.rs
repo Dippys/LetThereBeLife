@@ -84,6 +84,7 @@ impl Affordances {
         affordances.beliefs[Material::Berries as usize] = known(3_800, 0);
         affordances.beliefs[Material::Wood as usize] = known(0, 0);
         affordances.beliefs[Material::Stone as usize] = known(0, 0);
+        affordances.beliefs[Material::Meat as usize] = known(5_800, 0);
         let family_eats_bitter = (mix(seed ^ 0x4249_5454_4552) + family) % 2 == 0;
         let ignorant = mix(seed ^ 0x49_474e ^ (u64::from(founder.get()) << 8)) % 8 == 0;
         if !ignorant {

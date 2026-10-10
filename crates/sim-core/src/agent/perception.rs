@@ -44,6 +44,9 @@ pub struct PhysicalPerception {
     /// Trees, bushes, and rocks in view that have been picked clean (capacity 0):
     /// visible evidence that someone got there first. Row-major.
     pub spent_resources: Vec<PerceivedResource>,
+    /// Living animals in view, in id order. Carcasses appear among `resources`
+    /// (as meat).
+    pub animals: Vec<crate::AnimalView>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

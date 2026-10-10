@@ -23,7 +23,7 @@ pub(crate) fn select_spawn_locations(
     for feature in engine.world().all_features() {
         match feature.base_resource().kind {
             Material::Wood => wood.push(feature.position),
-            Material::Berries | Material::Bitterberries | Material::Stone => {}
+            Material::Berries | Material::Bitterberries | Material::Stone | Material::Meat => {}
         }
     }
     let target_count = population as usize;

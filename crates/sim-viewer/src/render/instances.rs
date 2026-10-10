@@ -1,9 +1,10 @@
 //! Instance builders for agents, structures, spawned objects, remembered-place, relationship, and gesture markers, exact world cells, chunk outlines, and the world border.
 
 use sim_core::{
-    ACQUAINTANCE_SLOTS, AcquaintanceView, AgentActivity, AgentView, CHUNK_SIZE, ChunkInspection,
-    ChunkPresence, FRIEND_FAMILIARITY, LANDMARK_SLOTS, LandmarkSource, LandmarkView, SpawnKind,
-    SpawnedObjectView, StructureView, WORLD_GENERATION_BOUNDS, World, WorldPosition, WorldRect,
+    ACQUAINTANCE_SLOTS, AcquaintanceView, AgentActivity, AgentView, AnimalMode, AnimalView,
+    CHUNK_SIZE, ChunkInspection, ChunkPresence, FRIEND_FAMILIARITY, LANDMARK_SLOTS, LandmarkSource,
+    LandmarkView, SpawnKind, SpawnedObjectView, Species, StructureView, WORLD_GENERATION_BOUNDS,
+    World, WorldPosition, WorldRect,
 };
 
 use super::{
@@ -44,6 +45,51 @@ pub(super) fn build_spawned_object_instances(
             1.0 - inset * 2.0,
             1.0 - inset * 2.0,
             spawn_kind_color(object.kind),
+        ));
+    }
+}
+
+/// Animals (deer tan, wolves grey, brighter while fleeing or hunting) and
+/// carcasses (dark red), appended to `output`.
+pub(super) fn append_wildlife_instances(
+    animals: impl IntoIterator<Item = AnimalView>,
+    carcasses: impl IntoIterator<Item = (WorldPosition, u8)>,
+    visible: WorldRect,
+    scale: f32,
+    output: &mut Vec<Instance>,
+) {
+    if scale < MIN_DYNAMIC_INSTANCE_PIXELS {
+        return;
+    }
+    for (position, _) in carcasses
+        .into_iter()
+        .filter(|(position, _)| visible.contains(*position))
+    {
+        output.push(Instance::new(
+            position.x as f32 + 0.15,
+            position.y as f32 + 0.3,
+            0.7,
+            0.4,
+            rgba(110, 24, 24, 255),
+        ));
+    }
+    for animal in animals
+        .into_iter()
+        .filter(|animal| visible.contains(animal.position))
+    {
+        let alert = matches!(animal.mode, AnimalMode::Fleeing | AnimalMode::Hunting);
+        let (inset, color) = match (animal.species, alert) {
+            (Species::Deer, false) => (0.2, rgba(176, 128, 72, 255)),
+            (Species::Deer, true) => (0.2, rgba(222, 170, 96, 255)),
+            (Species::Wolf, false) => (0.1, rgba(132, 132, 140, 255)),
+            (Species::Wolf, true) => (0.1, rgba(200, 200, 214, 255)),
+        };
+        output.push(Instance::new(
+            animal.position.x as f32 + inset,
+            animal.position.y as f32 + inset,
+            1.0 - inset * 2.0,
+            1.0 - inset * 2.0,
+            color,
         ));
     }
 }

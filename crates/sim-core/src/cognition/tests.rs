@@ -24,6 +24,7 @@ fn view_around(center: WorldPosition) -> PhysicalPerception {
         reachable_cells: Vec::new(),
         reserved_cells: Vec::new(),
         spent_resources: Vec::new(),
+        animals: Vec::new(),
     }
 }
 
@@ -86,10 +87,11 @@ fn mind_layout_is_bounded() {
             + size_of::<super::Lexicon>()
             + size_of::<super::Dialogue>()
             + size_of::<super::Affordances>()
-            + 12,
-        "the child flag and parent id pack into the 12 bytes after the beliefs"
+            + size_of::<super::Fauna>()
+            + 11,
+        "the child flag and parent id pack into the padding after the beliefs"
     );
-    assert_eq!(size_of::<super::Mind>(), 696);
+    assert_eq!(size_of::<super::Mind>(), 704);
 }
 
 #[test]

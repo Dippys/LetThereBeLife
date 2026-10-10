@@ -119,6 +119,10 @@ pub(crate) struct MindInput<'a> {
     pub(crate) beg_target: Option<WorldPosition>,
     /// What the agent believes is worth eating.
     pub(crate) food: FoodValues,
+    /// The nearest animal in view it believes is dangerous, if close.
+    pub(crate) danger: Option<WorldPosition>,
+    /// The nearest animal in view it believes is worth hunting.
+    pub(crate) prey: Option<WorldPosition>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,6 +147,12 @@ pub(crate) fn deliberate(
         mind: &mind,
         temperament: Temperament::of(mind.personality),
     };
+    // Getting away from something dangerous comes before everything else.
+    if let Some(threat) = mind.danger
+        && let Some(escape) = planner.flee_from(threat)
+    {
+        return escape;
+    }
     let water_here = nearest_water_access(origin, perception);
     let food = mind.food;
     let food_here = nearest_resource_access(origin, perception, |kind| {
@@ -171,6 +181,7 @@ pub(crate) fn deliberate(
                     PolicyReason::HungerThreshold,
                 )
             })
+            .or_else(|| planner.hunt())
             .or_else(|| planner.travel_to_food(PhysicalGoal::SeekFood))
             .or_else(|| {
                 // Knowing no food anywhere, ask someone nearby before searching blind.
@@ -351,6 +362,10 @@ impl Planner<'_> {
             return Deliberation::act(PhysicalGoal::Signal, place, PolicyReason::Sharing);
         }
         let works = self.roll(1) < temperament.work_chance;
+        // Hunting is work too, and prey in view is the best work there is.
+        if works && let Some(hunt) = self.hunt() {
+            return hunt;
+        }
         let shelter_in_view = nearest_shelter_access(origin, self.perception).is_some();
         if !works {
             // Not in the mood for work: skip to friends, needed exploration, or rest.
@@ -448,6 +463,54 @@ impl Planner<'_> {
         Deliberation::wait(origin, PolicyReason::NoUrgentNeed)
     }
 
+    /// Moves to the reachable cell in view farthest from `threat`.
+    fn flee_from(&self, threat: WorldPosition) -> Option<Deliberation> {
+        let origin = self.origin;
+        let (_, cell) = self
+            .perception
+            .reachable_cells
+            .iter()
+            .copied()
+            .filter(|&cell| cell != origin && candidate_available(origin, self.perception, cell))
+            .map(|cell| (manhattan(cell, threat), cell))
+            .filter(|&(distance, _)| distance > manhattan(origin, threat))
+            .max_by_key(|&(distance, cell)| (distance, -cell.y, -cell.x))?;
+        Some(Deliberation {
+            selection: PolicySelection {
+                goal: PhysicalGoal::Explore,
+                target: Some(cell),
+                reason: PolicyReason::Fleeing,
+            },
+            heading: Some(heading_toward(origin, cell)),
+        })
+    }
+
+    /// Strikes at the prey in view if it's in reach, else closes in. Never
+    /// chases beyond the range it could walk back to water from, nor while thirsty.
+    fn hunt(&self) -> Option<Deliberation> {
+        let prey = self.mind.prey?;
+        if self.needs.thirst.value >= self.temperament.top_up_thirst || !self.within_leash(prey) {
+            return None;
+        }
+        let origin = self.origin;
+        if origin.x.abs_diff(prey.x).max(origin.y.abs_diff(prey.y)) <= crate::STRIKE_RANGE as u64 {
+            return Some(Deliberation::act(
+                PhysicalGoal::Hunt,
+                prey,
+                PolicyReason::Hunting,
+            ));
+        }
+        let (waypoint, heading) = self.waypoint_toward(prey)?;
+        Some(Deliberation {
+            selection: PolicySelection {
+                goal: PhysicalGoal::Explore,
+                target: Some(waypoint),
+                reason: PolicyReason::Hunting,
+            },
+            heading: Some(heading),
+        })
+    }
+
     /// A deterministic 0–255 roll for this agent and idle-check window.
     fn roll(&self, salt: u64) -> u16 {
         let mut key = (u64::from(self.needs.agent.get()) << 32)
@@ -476,16 +539,34 @@ impl Planner<'_> {
         self.travel_to_best(&kinds, goal)
     }
 
+    /// Head for the best remembered place among `kinds`. When the need behind the
+    /// trip is already urgent, a place it has seen itself beats any hint: there's
+    /// no time to search.
     fn travel_to_best(&self, kinds: &[LandmarkKind], goal: PhysicalGoal) -> Option<Deliberation> {
         let now = (self.needs.at.ticks() / 60) as u32;
-        let (_, destination, source) = kinds
-            .iter()
-            .filter_map(|&kind| {
-                self.mind
-                    .map
-                    .recall_scored(kind, self.needs.agent.get(), self.origin, now)
-            })
-            .min_by_key(|&(score, destination, _)| (score, destination.y, destination.x))?;
+        let urgent = match goal {
+            PhysicalGoal::SeekWater => self.needs.thirst.threshold_reached,
+            PhysicalGoal::SeekFood => self.needs.hunger.threshold_reached,
+            _ => false,
+        };
+        let best = |seen_only: bool| {
+            kinds
+                .iter()
+                .filter_map(|&kind| {
+                    self.mind.map.recall_scored(
+                        kind,
+                        self.needs.agent.get(),
+                        self.origin,
+                        now,
+                        seen_only,
+                    )
+                })
+                .min_by_key(|&(score, destination, _)| (score, destination.y, destination.x))
+        };
+        let (_, destination, source) = urgent
+            .then(|| best(true))
+            .flatten()
+            .or_else(|| best(false))?;
         let reason = match source {
             crate::LandmarkSource::Seen => PolicyReason::RememberedPlace,
             crate::LandmarkSource::Told => PolicyReason::ToldPlace,

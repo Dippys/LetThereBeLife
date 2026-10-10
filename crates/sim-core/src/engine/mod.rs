@@ -13,6 +13,8 @@ pub use setup::SimulationAdvanced;
 mod shelter;
 mod tick;
 mod views;
+mod wildlife;
+pub use wildlife::{HUNT_TICKS, STRIKE_RANGE};
 
 use std::time::Duration;
 
@@ -130,6 +132,8 @@ pub struct Engine {
     interpretation_events: Vec<InterpretationEvent>,
     hint_outcomes: Vec<HintOutcomeEvent>,
     meal_events: Vec<crate::MealEvent>,
+    wildlife: crate::wildlife::Wildlife,
+    wildlife_events: Vec<crate::WildlifeEvent>,
     lesson_events: Vec<crate::LessonEvent>,
     repair_events: Vec<crate::RepairEvent>,
     request_events: Vec<crate::RequestEvent>,
@@ -171,6 +175,8 @@ impl Engine {
             interpretation_events: Vec::new(),
             hint_outcomes: Vec::new(),
             meal_events: Vec::new(),
+            wildlife: crate::wildlife::Wildlife::default(),
+            wildlife_events: Vec::new(),
             lesson_events: Vec::new(),
             repair_events: Vec::new(),
             request_events: Vec::new(),
@@ -219,6 +225,8 @@ impl Engine {
                 self.interpretation_events.clear();
                 self.hint_outcomes.clear();
                 self.meal_events.clear();
+                self.wildlife = crate::wildlife::Wildlife::default();
+                self.wildlife_events.clear();
                 self.lesson_events.clear();
                 self.repair_events.clear();
                 self.request_events.clear();

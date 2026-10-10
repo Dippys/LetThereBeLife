@@ -18,14 +18,48 @@ impl Engine {
         agent: AgentId,
         radius: u8,
     ) -> Result<PhysicalPerception, PerceptionError> {
-        self.population.perceive(
-            &self.world,
-            &self.spawned_objects,
-            &self.resource_deltas,
-            &self.structures,
-            agent,
-            radius,
-        )
+        self.population
+            .perceive(
+                &self.world,
+                &self.spawned_objects,
+                &self.resource_deltas,
+                &self.structures,
+                agent,
+                radius,
+            )
+            .map(|perception| self.with_wildlife(perception))
+    }
+
+    /// Adds the animals and carcasses inside the perceived area.
+    fn with_wildlife(&self, mut perception: PhysicalPerception) -> PhysicalPerception {
+        let area = perception.area;
+        perception.animals = self
+            .wildlife
+            .views()
+            .filter(|animal| area.contains(animal.position))
+            .collect();
+        let carcasses = self
+            .wildlife
+            .carcasses
+            .iter()
+            .filter(|carcass| carcass.meat > 0 && area.contains(carcass.position()));
+        let mut added = false;
+        for carcass in carcasses {
+            perception.resources.push(crate::PerceivedResource {
+                position: carcass.position(),
+                resource: BaseResource {
+                    capacity: u16::from(carcass.meat),
+                    kind: crate::Material::Meat,
+                },
+            });
+            added = true;
+        }
+        if added {
+            perception
+                .resources
+                .sort_by_key(|resource| (resource.position.y, resource.position.x));
+        }
+        perception
     }
 
     /// Returns objective facts for a bounded half-open rectangle inside the active area.
@@ -34,14 +68,16 @@ impl Engine {
         agent: AgentId,
         area: WorldRect,
     ) -> Result<PhysicalPerception, PerceptionError> {
-        self.population.perceive_area(
-            &self.world,
-            &self.spawned_objects,
-            &self.resource_deltas,
-            &self.structures,
-            agent,
-            area,
-        )
+        self.population
+            .perceive_area(
+                &self.world,
+                &self.spawned_objects,
+                &self.resource_deltas,
+                &self.structures,
+                agent,
+                area,
+            )
+            .map(|perception| self.with_wildlife(perception))
     }
 
     /// Returns at most `limit` canonical read-only views in ascending ID order.
@@ -94,6 +130,12 @@ impl Engine {
         &self,
         position: WorldPosition,
     ) -> Result<Option<BaseResource>, WorldQueryError> {
+        if let Some(meat) = self.wildlife.carcass_meat(position) {
+            return Ok(Some(BaseResource {
+                capacity: u16::from(meat),
+                kind: crate::Material::Meat,
+            }));
+        }
         if let Some(resource) = self.spawned_objects.resource_at(position) {
             // Preserve the same typed residency contract as generated resources.
             self.world.cell(position).ok_or_else(|| {

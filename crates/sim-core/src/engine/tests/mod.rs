@@ -33,6 +33,7 @@ mod measurements;
 mod movement;
 mod requests;
 mod shelter;
+mod wildlife;
 
 fn resident_engine(size: u32) -> Engine {
     let mut engine = Engine::new(EngineConfig {

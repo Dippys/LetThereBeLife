@@ -14,6 +14,7 @@ mod scheduler;
 mod sleep;
 mod spatial;
 mod structures;
+mod wildlife;
 
 pub use agent::{
     AgentActivity, AgentId, AgentSpawnError, AgentView, EventId, MAX_PERCEPTION_CELLS,
@@ -35,12 +36,12 @@ pub use cognition::{
 };
 pub use diagnostics::{EngineCapacityMetrics, EngineDiagnostics, EngineWorkMetrics};
 pub use engine::{
-    Engine, EngineCommand, EngineCommandOutcome, EngineConfig, MAX_SIMULATION_SPEED,
-    SimulationAdvanced, SimulationSnapshot, TickOutcome,
+    Engine, EngineCommand, EngineCommandOutcome, EngineConfig, HUNT_TICKS, MAX_SIMULATION_SPEED,
+    STRIKE_RANGE, SimulationAdvanced, SimulationSnapshot, TickOutcome,
 };
 pub use health::{
     DeathCause, DeathRecord, HEALTH_CONSEQUENCE_INTERVAL_TICKS, HEALTH_INCAPACITATION_THRESHOLD,
-    HEALTH_MAX, HealthDiagnostic, HealthDiagnosticKind, HealthStatus, HealthView,
+    HEALTH_MAX, HealthDiagnostic, HealthDiagnosticKind, HealthStatus, HealthView, SLEEP_HEALING,
 };
 pub use needs::{
     NEED_MAX, NEED_RATE_PERIOD_TICKS, NeedKind, NeedLevelView, NeedQueryError, NeedThreshold,
@@ -80,4 +81,8 @@ pub use structures::{
     BuildShelterError, SHELTER_BUILD_TICKS, SHELTER_STONE_COST, SHELTER_WOOD_COST,
     StructureDiagnostic, StructureDiagnosticKind, StructureId, StructureKind, StructureState,
     StructureView,
+};
+pub use wildlife::{
+    AnimalMode, AnimalView, CARCASS_TICKS, Species, SpeciesTraits, VALLEY_DEER, VALLEY_WOLVES,
+    WILDLIFE_TICKS, WildlifeEvent,
 };
