@@ -16,9 +16,9 @@ pub const WILDLIFE_TICKS: u64 = 3;
 pub const CARCASS_TICKS: u64 = 60 * 60 * 20;
 /// A wolf that just ate leaves deer alone this long.
 const FED_TICKS: u64 = 60 * 60 * 30;
-/// A biting wolf backs off this long before it can bite again (a bite is a
-/// warning more than a hunt).
-const BITE_RECOVERY_TICKS: u64 = 60 * 120;
+/// A biting wolf backs off this long before it bites anyone again (a bite is
+/// a warning more than a hunt): longer than a wounded person lies down.
+const BITE_RECOVERY_TICKS: u64 = 60 * 60 * 20;
 /// People this close together scare wolves off.
 const CROWD_RADIUS: i64 = 4;
 /// This many people within `CROWD_RADIUS` count as a crowd.
@@ -41,6 +41,8 @@ pub struct SpeciesTraits {
     pub hurried_step_ticks: u64,
     /// Runs from people who come near.
     pub shy: bool,
+    /// How far (Chebyshev cells) it can smell what it hunts.
+    pub scent: i64,
     /// Health a bite takes from a person (0 = harmless).
     pub bite: u16,
     /// Successful hits it takes to bring one down.
@@ -51,7 +53,8 @@ pub struct SpeciesTraits {
     pub preys_on: Option<Species>,
     /// It never breeds past this many.
     pub max_population: u16,
-    /// Ticks between births while below the cap.
+    /// Ticks between young for each animal while below the cap: a herd of
+    /// ten breeds ten times as often as a single animal would.
     pub birth_ticks: u64,
 }
 
@@ -66,24 +69,26 @@ impl Species {
                 calm_step_ticks: 150,
                 hurried_step_ticks: 13,
                 shy: true,
+                scent: 4,
                 bite: 0,
                 toughness: 2,
                 meat: 16,
                 preys_on: None,
                 max_population: 40,
-                birth_ticks: 60 * 60 * 15,
+                birth_ticks: 60 * 60 * 60 * 2,
             },
             Self::Wolf => SpeciesTraits {
                 senses: 10,
                 calm_step_ticks: 90,
                 hurried_step_ticks: 9,
                 shy: false,
+                scent: 24,
                 bite: 1_500,
                 toughness: 4,
                 meat: 6,
                 preys_on: Some(Self::Deer),
                 max_population: 4,
-                birth_ticks: 60 * 60 * 120,
+                birth_ticks: 60 * 60 * 60 * 16,
             },
         }
     }
@@ -293,7 +298,7 @@ pub(crate) fn decide(
             .animals
             .iter()
             .filter(|(other, species, position)| {
-                *other != index && *species == prey_species && near(*position, traits.senses)
+                *other != index && *species == prey_species && near(*position, traits.scent)
             })
             .min_by_key(|(other, _, position)| (chebyshev(here, *position), *other))
             .copied();

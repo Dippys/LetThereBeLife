@@ -212,7 +212,7 @@ pub(crate) fn deliberate(
                     PolicyReason::HungerThreshold,
                 )
             })
-            .or_else(|| planner.hunt())
+            .or_else(|| planner.hunt(inventory))
             .or_else(|| planner.travel_to_food(PhysicalGoal::SeekFood))
             .or_else(|| {
                 // Knowing no food anywhere, ask someone nearby before searching blind.
@@ -414,7 +414,7 @@ impl Planner<'_> {
         }
         // Answering a call to hunt comes before chores and chatter.
         if self.mind.quarry.is_some()
-            && let Some(hunt) = self.hunt()
+            && let Some(hunt) = self.hunt(inventory)
         {
             return hunt;
         }
@@ -430,7 +430,7 @@ impl Planner<'_> {
             return warm.with_reason(PolicyReason::PrepareTrip);
         }
         // Hunting is work too, and prey in view is the best work there is.
-        if works && let Some(hunt) = self.hunt() {
+        if works && let Some(hunt) = self.hunt(inventory) {
             return hunt;
         }
         // Someone who keeps fire and has none near home builds one.
@@ -660,8 +660,17 @@ impl Planner<'_> {
 
     /// Strikes at the prey in view if it's in reach, else closes in. Never
     /// chases beyond the range it could walk back to water from, nor while thirsty.
-    fn hunt(&self) -> Option<Deliberation> {
+    fn hunt(&self, inventory: InventoryView) -> Option<Deliberation> {
         let prey = self.mind.prey.or(self.mind.quarry)?;
+        // Nobody goes after more meat while carrying some or with a carcass in view.
+        let meat_in_view = self
+            .perception
+            .resources
+            .iter()
+            .any(|resource| resource.resource.kind == crate::Material::Meat);
+        if inventory.amount(crate::Material::Meat) > 0 || meat_in_view {
+            return None;
+        }
         // A chase is hard work: not while thirsty, worn out, or cold, and never
         // beyond the range it could walk back to water from.
         let needs = self.needs;

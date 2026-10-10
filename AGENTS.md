@@ -8,7 +8,8 @@ maps, learned beliefs (what's edible, what's dangerous, how to make fire), perso
 relationships, personal lexicons, and gestures and words that can be misunderstood.
 
 **Start here:** read [`docs/STATUS.md`](docs/STATUS.md) for where things stand and what's next.
-The active plan is [`docs/plans/VERTICAL_SLICE.md`](docs/plans/VERTICAL_SLICE.md); its north star is
+The active plan is [`docs/plans/GENERATIONS.md`](docs/plans/GENERATIONS.md). The north star (from
+[`docs/plans/VERTICAL_SLICE.md`](docs/plans/VERTICAL_SLICE.md)) is
 the spec's definition of success: *an agent misunderstands a signal for a believable reason, acts
 on it, and both sides update using only observable evidence.*
 

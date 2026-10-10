@@ -1,6 +1,6 @@
 # Living world: properties, learned affordances, wildlife, construction
 
-Status: active (started 2026-10-10). Follows the completed vertical slice
+Status: paused for [`GENERATIONS.md`](GENERATIONS.md) (started 2026-10-10); fuel and cooking remain. Follows the completed vertical slice
 ([`VERTICAL_SLICE.md`](VERTICAL_SLICE.md)).
 
 ## Goal

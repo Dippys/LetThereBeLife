@@ -20,6 +20,9 @@ const STRIKE_CHANCE: u64 = 45;
 const HELPER_CHANCE: u64 = 20;
 /// Each wound slows an animal's hurried step by this many ticks.
 const WOUND_SLOWDOWN_TICKS: u64 = 5;
+/// A thinned herd still breeds as if it had this many animals (stragglers
+/// from beyond the area join it).
+const MIN_BREEDERS: usize = 8;
 /// How long someone knocked down by a wound lies before coming round (5 minutes).
 pub(super) const WOUND_RECOVERY_TICKS: u64 = 18_000;
 
@@ -30,7 +33,7 @@ impl Engine {
     pub fn release_wildlife(&mut self, area: WorldRect, deer: u16, wolves: u16) -> usize {
         self.wildlife = Wildlife {
             area: Some(area),
-            next_birth: Species::ALL.map(|species| species.traits().birth_ticks),
+            next_birth: Species::ALL.map(|species| species.traits().birth_ticks / MIN_BREEDERS as u64),
             ..Wildlife::default()
         };
         let seed = self.config.seed;
@@ -172,7 +175,9 @@ impl Engine {
                 .animals
                 .iter()
                 .enumerate()
-                .filter(|(_, other)| other.alive && chebyshev(here, other.position()) <= reach)
+                .filter(|(_, other)| {
+                    other.alive && chebyshev(here, other.position()) <= reach.max(traits.scent)
+                })
                 .map(|(other, animal)| (other, animal.species, animal.position()))
                 .collect();
             let senses = Senses {
@@ -263,7 +268,6 @@ impl Engine {
                 continue;
             }
             let traits = species.traits();
-            self.wildlife.next_birth[slot] = now + traits.birth_ticks;
             let living: Vec<usize> = self
                 .wildlife
                 .animals
@@ -272,6 +276,10 @@ impl Engine {
                 .filter(|(_, animal)| animal.alive && animal.species == species)
                 .map(|(index, _)| index)
                 .collect();
+            // Every animal breeds, so a bigger herd recovers faster; a few
+            // stragglers from beyond the area keep a thinned herd going.
+            let breeders = living.len().max(MIN_BREEDERS) as u64;
+            self.wildlife.next_birth[slot] = now + traits.birth_ticks / breeders;
             if living.len() < 2 {
                 // Nearly gone: a newcomer wanders in from the edge of the area.
                 self.immigrate(species, now);

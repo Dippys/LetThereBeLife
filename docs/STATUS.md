@@ -9,8 +9,10 @@ _Last updated: 2026-10-10._
 
 That's the spec's definition of success. The vertical slice that first met it is done
 ([`plans/VERTICAL_SLICE.md`](plans/VERTICAL_SLICE.md)); the active plan is
-[`plans/LIVING_WORLD.md`](plans/LIVING_WORLD.md): things described by properties, knowledge that
-agents learn, wildlife, and construction.
+[`plans/GENERATIONS.md`](plans/GENERATIONS.md): age, sex, relationships, births, and names, so the
+band renews itself and language can pass between generations. Before it,
+[`plans/LIVING_WORLD.md`](plans/LIVING_WORLD.md) added things described by properties, learned
+knowledge, wildlife, and hearths.
 
 ## Where the project is
 

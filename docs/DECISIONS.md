@@ -340,3 +340,16 @@ idle (58-69% instead of 60-75%). Collapsed agents used to stay down for good and
 survivors (168 of 1,303 in 66 valleys); now 1,238 of 1,320 are standing at the end, against 1,135
 before. Consequence lessons that drop what the speaker meant stay rare (about 1 in 15).
 
+
+## D-083: Herds that recover, hunting for need, wolves that hunt deer (2026-10-10)
+
+**Decision:** Each animal breeds (a herd's birth interval is the per-animal interval divided by its
+size, never fewer than 8 breeders), so thinned herds recover. People don't start a hunt while they
+carry meat or a carcass with meat is in view. Wolves smell deer from 24 cells, and a wolf that
+bites someone leaves people alone for 20 minutes (longer than a wounded person lies down).
+**Why:** Deer fell from 24 to a handful in two simulated hours (40-50 kills a run, most of the meat
+rotting), wolves rarely found deer and bit people instead, and they kept biting the same person
+each time they came round.
+**Consequences:** 8-15 kills a run, more meat eaten, herds near their cap, wolves taking deer, bites
+13-26 a run instead of 30-130. In 66 valleys, 1,311 of 1,320 people are standing at the end
+(1,238 before). The planned "prefer company near wolves" change wasn't needed.
