@@ -82,14 +82,14 @@ fn reset_restores_runtime_state_but_preserves_config() {
 }
 
 #[test]
-fn simulation_speed_accepts_the_nine_key_ceiling() {
+fn simulation_speed_accepts_the_viewer_ceiling_and_caps_above_it() {
     let mut engine = Engine::default();
     assert_eq!(
-        engine.command(EngineCommand::SetSpeed(256.0)),
+        engine.command(EngineCommand::SetSpeed(4096.0)),
         EngineCommandOutcome::Applied
     );
     assert_eq!(engine.snapshot().speed, MAX_SIMULATION_SPEED);
-    engine.command(EngineCommand::SetSpeed(512.0));
+    engine.command(EngineCommand::SetSpeed(8192.0));
     assert_eq!(engine.snapshot().speed, MAX_SIMULATION_SPEED);
 }
 
