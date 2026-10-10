@@ -8,6 +8,56 @@ pub const SHELTER_BUILD_TICKS: u64 = 600;
 pub const HEARTH_STONE_COST: u8 = 3;
 pub const HEARTH_WOOD_COST: u8 = 2;
 pub const HEARTH_BUILD_TICKS: u64 = 300;
+/// How far around a building site `would_enclose` looks for a way out.
+const ENCLOSURE_RADIUS: i64 = 4;
+
+/// Whether putting a structure on `site` would shut someone in: some walkable
+/// cell next to it could get out of the surrounding area before, and can't
+/// once the site is blocked (people move in the four directions). `open` says
+/// whether a cell is walkable now; pockets that were already closed don't count.
+pub(crate) fn would_enclose(site: WorldPosition, open: impl Fn(WorldPosition) -> bool) -> bool {
+    const SIDE: usize = (2 * ENCLOSURE_RADIUS + 1) as usize;
+    let index = |cell: WorldPosition| {
+        ((cell.y - site.y + ENCLOSURE_RADIUS) as usize) * SIDE
+            + (cell.x - site.x + ENCLOSURE_RADIUS) as usize
+    };
+    let distance = |cell: WorldPosition| cell.x.abs_diff(site.x).max(cell.y.abs_diff(site.y));
+    let escapes = |start: WorldPosition, blocked: bool| {
+        let mut seen = [false; SIDE * SIDE];
+        let mut frontier = vec![start];
+        seen[index(start)] = true;
+        while let Some(cell) = frontier.pop() {
+            if distance(cell) == ENCLOSURE_RADIUS as u64 {
+                return true;
+            }
+            for (dx, dy) in [(0, -1), (-1, 0), (1, 0), (0, 1)] {
+                let next = WorldPosition {
+                    x: cell.x + dx,
+                    y: cell.y + dy,
+                };
+                if distance(next) > ENCLOSURE_RADIUS as u64
+                    || seen[index(next)]
+                    || (blocked && next == site)
+                    || !(next == site || open(next))
+                {
+                    continue;
+                }
+                seen[index(next)] = true;
+                frontier.push(next);
+            }
+        }
+        false
+    };
+    (-1..=1)
+        .flat_map(|dy| (-1..=1).map(move |dx| (dx, dy)))
+        .filter(|&offset| offset != (0, 0))
+        .map(|(dx, dy)| WorldPosition {
+            x: site.x + dx,
+            y: site.y + dy,
+        })
+        .any(|cell| open(cell) && escapes(cell, false) && !escapes(cell, true))
+}
+
 /// A fire holds at most this much fuel (seconds of burning) at once.
 pub const MAX_FUEL_SECONDS: u32 = 2 * 3_600;
 /// Cold relieved by one warm-up at a hearth.
@@ -146,6 +196,8 @@ pub enum BuildShelterError {
     Occupied(AgentId),
     StructureOccupied(StructureId),
     InsufficientMaterials,
+    /// It would shut a walkable cell nearby off from everywhere else.
+    WouldEnclose,
     TimeOverflow,
     RescheduleLimit,
     EventSequenceExhausted,
@@ -432,6 +484,27 @@ mod tests {
         assert_eq!(size_of::<StructureKind>(), 1);
         assert_eq!(size_of::<StructureState>(), 1);
         assert_eq!(size_of::<StructureRecord>(), 32);
+    }
+
+    #[test]
+    fn a_site_that_would_seal_a_cell_in_is_refused() {
+        let at = |x, y| WorldPosition { x, y };
+        // A one-cell nook: water all around (0, 0) except its way out at (1, 0).
+        let water = [
+            at(-1, -1),
+            at(0, -1),
+            at(1, -1),
+            at(-1, 0),
+            at(-1, 1),
+            at(0, 1),
+            at(1, 1),
+        ];
+        let open = |cell: WorldPosition| !water.contains(&cell);
+        assert!(would_enclose(at(1, 0), open), "blocking the nook's mouth");
+        assert!(!would_enclose(at(3, 3), open), "open ground elsewhere");
+        // A nook that is already closed off isn't this site's doing.
+        let closed = |cell: WorldPosition| !water.contains(&cell) && cell != at(1, 0);
+        assert!(!would_enclose(at(2, 0), closed));
         assert_eq!(align_of::<StructureRecord>(), 8);
     }
 

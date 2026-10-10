@@ -109,6 +109,13 @@ impl Population {
         }
     }
 
+    /// Records that the agent chose to wait (so its last action no longer shows).
+    pub(crate) fn record_policy_wait(&mut self, agent: AgentId) {
+        if let Some(state) = self.policies.get_mut(agent.0 as usize) {
+            state.goal = PhysicalGoal::Wait;
+        }
+    }
+
     pub(crate) fn policy_commitment(
         &self,
         agent: AgentId,

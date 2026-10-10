@@ -79,6 +79,16 @@ impl Engine {
         {
             return Err(BuildShelterError::BlockingFeature);
         }
+        let open = |cell: WorldPosition| {
+            self.structures.structure_at(cell).is_none()
+                && self
+                    .spawned_objects
+                    .standability_at(&self.world, cell)
+                    .is_ok_and(|standability| standability == Standability::Standable)
+        };
+        if crate::structures::would_enclose(site, open) {
+            return Err(BuildShelterError::WouldEnclose);
+        }
         if !self.population.can_build(agent, kind) {
             return Err(BuildShelterError::InsufficientMaterials);
         }

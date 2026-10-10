@@ -161,14 +161,13 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
   generator v2 (`--pregenerate-world`).
 - **Minds are 912 B per agent** (mental map 372 B). That's fine at viewer scale; the spec's 10M
   agents would need ~8 GB, so compaction comes later.
-- **Structures could wall off ponds:** shelters and hearths are no longer built on shore cells,
-  but agents can still occasionally start or end up in a pocket with no way to water.
 - **Greedy waypoints can pace around obstacles.** Agents no longer step straight back to where they
   were and collapse into sleep when exhausted, but longer cycles are possible.
 
 ## Recent changes
 
-- 2026-10-11 (latest): the viewer's top bar shows the year and season (raw clock in F3).
+- 2026-10-11 (latest): no building that shuts anyone in; idle people show as resting (D-100).
+- 2026-10-11: a year is one turn of the seasons (D-099); the viewer's top bar shows the year and season (raw clock in F3).
 - 2026-10-11: only a look at the spot can refute a word (D-098).
 - 2026-10-11: listeners report back, holding up what they found (D-097).
 - 2026-10-10: two-valley start, `--apart` (D-096).

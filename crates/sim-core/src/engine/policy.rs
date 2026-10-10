@@ -194,6 +194,7 @@ impl Engine {
         }
         if selection.goal == PhysicalGoal::Wait {
             self.population.clear_route(agent);
+            self.population.record_policy_wait(agent);
             if let Err(error) = self.population.schedule_policy_decision(
                 &mut self.scheduler,
                 self.time,

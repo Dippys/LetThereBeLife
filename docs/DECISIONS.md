@@ -606,3 +606,17 @@ hunger cycle and undo D-093/D-094.
 **Consequences:** Lives and generations take four times as long in simulated time. Seed 1 over 30
 years (now 120 hours): 26 survivors, 15 babies, 239 episodes (before, at one-hour years: 34-43
 survivors and 19-26 babies on seeds 1, 4, 5). Short runs see far fewer births.
+
+## D-100: No building that shuts anyone in; idle people show as resting (2026-10-11)
+
+**Decision:** Before a hut or hearth goes up, `would_enclose` flood-fills (four directions) a 9x9
+area around the site: if any walkable cell next to it could reach the edge of that area before and
+can't with the site blocked, the build is refused (`BuildShelterError::WouldEnclose`). People apply
+the same test to what they see when choosing a site (cells out of view count as open), so they pick
+another spot rather than retrying. Pockets that were already closed don't count against a site.
+Separately, choosing to wait now records `Wait` as the agent's goal; before, the panel kept showing
+the last action (so idle people seemed to be "pointing something out" for minutes).
+**Why:** People beside water could be boxed in by a hut and a hearth built next to them.
+**Consequences:** Six 10-year valleys: 139 vs 140 survivors, 0 vs 1 deaths from thirst (traps were
+rare in headless runs; the unit test covers the nook case). The "Pointing" label fell from 28% to 2%
+of samples; behavior is unchanged.

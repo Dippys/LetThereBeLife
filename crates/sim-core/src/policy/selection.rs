@@ -219,10 +219,14 @@ pub(super) fn nearest_build_site(
             .iter()
             .any(|water| cell.x.abs_diff(water.position.x) + cell.y.abs_diff(water.position.y) <= 1)
     };
+    // Nor where it would shut anyone in. Cells out of view count as open.
+    let open =
+        |cell: WorldPosition| !perception.area.contains(cell) || traversable(perception, cell);
     cardinal_neighbors(origin)
         .filter(|candidate| {
             candidate_available(origin, perception, *candidate)
                 && !shore(*candidate)
+                && !crate::structures::would_enclose(*candidate, open)
                 && perception
                     .reserved_cells
                     .binary_search_by_key(&(candidate.y, candidate.x), |cell| (cell.y, cell.x))

@@ -214,6 +214,7 @@ pub(super) fn build_failure(error: BuildShelterError) -> PolicyFailureReason {
         BuildShelterError::EventSequenceExhausted => PolicyFailureReason::EventSequenceExhausted,
         BuildShelterError::Water
         | BuildShelterError::BlockingFeature
+        | BuildShelterError::WouldEnclose
         | BuildShelterError::NotCardinallyAdjacent => PolicyFailureReason::BuildSiteInvalid,
         BuildShelterError::MissingAgent
         | BuildShelterError::DeadAgent
