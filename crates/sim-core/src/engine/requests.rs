@@ -101,6 +101,7 @@ impl Engine {
             vocal,
             negated: None,
             addressee: Some(giver),
+            loud: false,
             tone: Tone { urgency },
         };
         let id = self.next_signal_id;

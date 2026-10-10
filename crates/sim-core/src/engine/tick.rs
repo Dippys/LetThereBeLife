@@ -31,6 +31,7 @@ impl Engine {
         self.interpretation_events.clear();
         self.hint_outcomes.clear();
         self.meal_events.clear();
+        self.lead_events.clear();
         self.wildlife_events.clear();
         self.lesson_events.clear();
         self.repair_events.clear();

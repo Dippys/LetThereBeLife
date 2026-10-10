@@ -466,6 +466,8 @@ const fn mime_label(mime: Mime) -> &'static str {
         Mime::RestHead => "REST-HEAD",
         Mime::Sweep => "SWEEP",
         Mime::Retch => "RETCH",
+        Mime::Snarl => "SNARL",
+        Mime::Spear => "SPEAR",
     }
 }
 
@@ -539,6 +541,8 @@ const fn policy_reason_label(reason: PolicyReason) -> &'static str {
         PolicyReason::Begging => "ASKING FOR FOOD",
         PolicyReason::Fleeing => "FLEEING AN ANIMAL",
         PolicyReason::Hunting => "HUNTING",
+        PolicyReason::Warning => "WARNING OTHERS",
+        PolicyReason::Recruiting => "CALLING OTHERS TO HUNT",
     }
 }
 

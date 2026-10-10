@@ -2,11 +2,13 @@
 //! deliberation, pointing gestures and who sees them, and read-only belief views.
 
 use super::errors::{move_failure, perception_failure};
+use crate::agent::CompactPosition;
 use crate::cognition::{
-    CONSEQUENCE_WEIGHT, Concept, DesiredEffect, HintCheck, HintSource, LessonCause, LessonEvent,
-    ListenerContext, PendingCorrection, Personality, PublicSignal, REPAIR_WEIGHT, RepairEvent,
-    RepairResponse, UtteranceIntent, VocalForm, belief_seconds, express, locate, mime_for,
-    spent_kinds, told_confidence, understand, unmistakable, visible_kinds,
+    CONSEQUENCE_WEIGHT, Concept, DesiredEffect, HintCheck, HintSource, LEAD_SECONDS, Lead,
+    LessonCause, LessonEvent, ListenerContext, PendingCorrection, Personality, PublicSignal,
+    REPAIR_WEIGHT, RepairEvent, RepairResponse, UtteranceIntent, VocalForm, belief_seconds,
+    express, locate, mime_for, spent_kinds, told_confidence, understand, unmistakable,
+    visible_kinds,
 };
 use crate::policy::{
     FoodValues, MindInput, ParentInput, PolicyAction, PolicySelection, deliberate,
@@ -45,6 +47,17 @@ const RUNNER_UP_MIN_PROBABILITY: u8 = 64;
 const URGENT_NEED: u16 = 112;
 /// Agents run from animals they fear once they come this close (cells).
 const FLEE_DISTANCE: u64 = 7;
+/// An animal in view: its species and where it is.
+type SightedAnimal = (crate::Species, WorldPosition);
+
+/// Animals closer than this (cells) can be told apart.
+const IDENTIFY_DISTANCE: u64 = 6;
+/// A warned-about spot this close (cells) is worth running from.
+const ALARM_DISTANCE: u64 = 20;
+/// Ticks a warning takes.
+const WARNING_TICKS: u64 = 40;
+/// How far a shouted warning or call to hunt carries (cells).
+const CALL_RADIUS: u8 = 16;
 /// Children ask "this?" unless at least this sure (out of 255, about 90%).
 const CHILD_ASKS_BELOW: u8 = 230;
 
@@ -115,7 +128,7 @@ fn learn_from_consequence(
     let Some(actual) = check.alternative.filter(|alternative| {
         crate::cognition::concept_topic(*alternative).is_some_and(|topic| match topic {
             GestureTopic::Place(kind) => context.visible[kind as usize],
-            GestureTopic::Explored => false,
+            GestureTopic::Explored | GestureTopic::Animal(_) => false,
         })
     }) else {
         return;
@@ -165,7 +178,22 @@ impl Engine {
         let latest_signal = self.next_signal_id;
         let beg = self.beg_target(agent, perception);
         let food = self.food_values(agent);
-        let (danger, prey) = self.animals_of_interest(agent, origin, perception);
+        self.check_leads(agent, perception, now);
+        let (seen_danger, seen_prey) = self.animals_of_interest(agent, origin, perception);
+        let (alarm, quarry) = self.minds.get_mut(agent).dialogue.current_leads(now);
+        let near = |place: WorldPosition, within: u64| {
+            origin.x.abs_diff(place.x).max(origin.y.abs_diff(place.y)) <= within
+        };
+        // A warned-about spot nearby is a danger even out of sight; a tip about
+        // something to hunt is worth following when nothing better is in view.
+        let alarm_place = alarm
+            .map(|lead| lead.place())
+            .filter(|place| near(*place, ALARM_DISTANCE));
+        let danger = seen_danger.or(alarm_place);
+        let quarry_place = quarry
+            .map(|lead| lead.place())
+            .filter(|_| seen_prey.is_none());
+        let (warn, recruit) = self.signals_worth_making(agent, perception, now);
         let visible = visible_kinds(origin, perception);
         let spent = spent_kinds(perception);
         let hint_outcomes = &mut self.hint_outcomes;
@@ -301,9 +329,34 @@ impl Engine {
                 beg_target: beg.map(|(_, position)| position),
                 food,
                 danger,
-                prey,
+                prey: seen_prey,
+                quarry: quarry_place,
+                warn: warn.map(|(_, position)| position),
+                recruit: recruit.map(|(_, position)| position),
             },
         );
+        match deliberation.selection.reason {
+            PolicyReason::Warning | PolicyReason::Recruiting => {
+                let warning = deliberation.selection.reason == PolicyReason::Warning;
+                if let Some((species, position)) = if warning { warn } else { recruit } {
+                    self.minds
+                        .get_mut(agent)
+                        .dialogue
+                        .plan_animal(species, position, warning, now);
+                }
+            }
+            PolicyReason::Fleeing => {
+                if let Some(lead) = alarm {
+                    self.follow_lead(agent, lead, true);
+                }
+            }
+            PolicyReason::Hunting if seen_prey.is_none() => {
+                if let Some(lead) = quarry {
+                    self.follow_lead(agent, lead, false);
+                }
+            }
+            _ => {}
+        }
         if deliberation.selection.reason == PolicyReason::Begging
             && let Some((giver, position)) = beg
         {
@@ -328,10 +381,11 @@ impl Engine {
         target: WorldPosition,
         reason: PolicyReason,
     ) {
-        let duration = if goal == PhysicalGoal::Hunt {
-            super::HUNT_TICKS
-        } else {
-            SIGNAL_TICKS
+        let duration = match (goal, reason) {
+            (PhysicalGoal::Hunt, _) => super::HUNT_TICKS,
+            // A warning is quick: a shout and a point.
+            (_, PolicyReason::Warning) => WARNING_TICKS,
+            _ => SIGNAL_TICKS,
         };
         self.population.clear_route(agent);
         match self.population.schedule_policy_action(
@@ -384,10 +438,15 @@ impl Engine {
         if let Some(correction) = correction {
             return self.apply_correction(sender, from, correction);
         }
-        let topic = self
+        let animal = self
             .minds
-            .get(sender)
-            .and_then(|mind| {
+            .get_mut(sender)
+            .dialogue
+            .take_animal(place)
+            .map(GestureTopic::Animal);
+        let topic = animal
+            .or_else(|| {
+                let mind = self.minds.get(sender)?;
                 mind.map
                     .seen_kind_at(place)
                     .map(GestureTopic::Place)
@@ -440,8 +499,13 @@ impl Engine {
         let (estimate, uncertainty) = locate(public);
         let bearing = crate::policy::heading_toward(public.origin, estimate);
         let mut questions = Vec::new();
+        let reach = if public.loud {
+            CALL_RADIUS
+        } else {
+            PHYSICAL_POLICY_RADIUS
+        };
         let perception = self
-            .perceive_physical(public.sender, PHYSICAL_POLICY_RADIUS)
+            .perceive_physical(public.sender, reach)
             .map_err(perception_failure)?;
         let now = belief_seconds(self.time);
         let (mut watchers, mut informed) = (0_u16, 0_u16);
@@ -523,6 +587,33 @@ impl Engine {
                     };
                     mind.map
                         .remember_told(kind, estimate, uncertainty, now, source, confidence)
+                }
+                GestureTopic::Animal(species) => {
+                    // With no idea about the animal it read, the mime says
+                    // what kind of animal it is: a snarl warns, a spear says hunt.
+                    let fauna = &mut mind.fauna;
+                    if !fauna.dangerous(species) && !fauna.prey(species) {
+                        match public.mime {
+                            crate::Mime::Snarl => fauna.heard_of_danger(species),
+                            crate::Mime::Spear => fauna.saw_hunted(species),
+                            _ => {}
+                        }
+                    }
+                    let lead = CompactPosition::checked(estimate).map(|place| Lead {
+                        signal: id,
+                        speaker: public.sender,
+                        until: now + LEAD_SECONDS,
+                        place,
+                        species,
+                        form: public.vocal,
+                        warned: public.mime == crate::Mime::Snarl,
+                    });
+                    if mind.fauna.dangerous(species) {
+                        mind.dialogue.alarm = lead;
+                    } else if mind.fauna.prey(species) {
+                        mind.dialogue.quarry = lead;
+                    }
+                    lead.is_some()
                 }
             };
             // Stakes: a likely-enough reading of something urgently needed is kept too.
@@ -614,8 +705,188 @@ impl Engine {
                 .material()
                 .and_then(|material| self.minds.affordances(agent).food_value(material)),
             GestureTopic::Explored => None,
+            // For animals the "value" is whether it's feared or hunted.
+            GestureTopic::Animal(species) => {
+                let fauna = self.minds.get(agent).map(|mind| mind.fauna);
+                fauna.map(|fauna| {
+                    if fauna.dangerous(species) {
+                        -1
+                    } else {
+                        i16::from(fauna.prey(species))
+                    }
+                })
+            }
         };
         mime_for(topic, food)
+    }
+
+    /// Whether anyone awake is within shouting range of `agent`.
+    fn someone_within_call(&self, agent: AgentId) -> bool {
+        let Some(origin) = self.population.view(agent).map(|view| view.position) else {
+            return false;
+        };
+        let reach = i64::from(CALL_RADIUS);
+        let mut nearby = Vec::new();
+        self.population.spatial().agents_in(
+            crate::WorldRect {
+                min: WorldPosition {
+                    x: origin.x - reach,
+                    y: origin.y - reach,
+                },
+                max: WorldPosition {
+                    x: origin.x + reach + 1,
+                    y: origin.y + reach + 1,
+                },
+            },
+            &mut nearby,
+        );
+        nearby.into_iter().any(|other| {
+            other != agent
+                && self
+                    .population
+                    .view(other)
+                    .is_some_and(|view| can_watch(view.activity))
+        })
+    }
+
+    /// Logs that `agent` acted on a tip (once per tip).
+    fn follow_lead(&mut self, agent: AgentId, lead: Lead, fled: bool) {
+        let already = self
+            .lead_events
+            .iter()
+            .any(|event| event.agent == agent && event.signal == lead.signal);
+        if !already {
+            self.lead_events.push(crate::LeadFollowedEvent {
+                agent,
+                at: self.time,
+                signal: lead.signal,
+                species: lead.species,
+                fled,
+            });
+        }
+    }
+
+    /// A dangerous animal in view worth warning the others about, and an animal
+    /// worth calling them to hunt, when someone awake is near and it hasn't
+    /// just done so.
+    fn signals_worth_making(
+        &self,
+        agent: AgentId,
+        perception: &PhysicalPerception,
+        now: u32,
+    ) -> (Option<SightedAnimal>, Option<SightedAnimal>) {
+        let Some(mind) = self.minds.get(agent) else {
+            return (None, None);
+        };
+        if !self.policy_options.sharing || !self.someone_within_call(agent) {
+            return (None, None);
+        }
+        let first = |wanted: &dyn Fn(crate::Species) -> bool| {
+            perception
+                .animals
+                .iter()
+                .filter(|animal| wanted(animal.species))
+                .min_by_key(|animal| animal.id)
+                .map(|animal| (animal.species, animal.position))
+        };
+        // Someone who was just warned assumes the others heard it too.
+        let warn = (mind.dialogue.may_warn(now) && mind.dialogue.alarm.is_none())
+            .then(|| first(&|species| mind.fauna.dangerous(species)))
+            .flatten();
+        let recruit = mind
+            .dialogue
+            .may_recruit(now)
+            .then(|| first(&|species| mind.fauna.prey(species) && !mind.fauna.dangerous(species)))
+            .flatten();
+        (warn, recruit)
+    }
+
+    /// Checks tips about animals against what's actually there, once the agent
+    /// is close enough to tell one animal from another. Finding another animal
+    /// where one was pointed out (a wolf where it understood "deer") teaches what
+    /// the word must have meant, and it plans to tell the speaker. Finding nothing
+    /// once there just ends the tip (animals move).
+    fn check_leads(&mut self, agent: AgentId, perception: &PhysicalPerception, now: u32) {
+        let origin = self.population.view(agent).map(|view| view.position);
+        let at = self.time;
+        let mind = self.minds.get_mut(agent);
+        for quarry in [false, true] {
+            let lead = if quarry {
+                mind.dialogue.quarry
+            } else {
+                mind.dialogue.alarm
+            };
+            let Some(lead) = lead else {
+                continue;
+            };
+            let place = lead.place();
+            let near_place = |position: WorldPosition| {
+                position
+                    .x
+                    .abs_diff(place.x)
+                    .max(position.y.abs_diff(place.y))
+                    <= 8
+            };
+            let identifiable = |position: WorldPosition| {
+                origin.is_some_and(|origin| {
+                    origin
+                        .x
+                        .abs_diff(position.x)
+                        .max(origin.y.abs_diff(position.y))
+                        <= IDENTIFY_DISTANCE
+                })
+            };
+            let there: Vec<crate::Species> = perception
+                .animals
+                .iter()
+                .filter(|animal| near_place(animal.position) && identifiable(animal.position))
+                .map(|animal| animal.species)
+                .collect();
+            let clear = |dialogue: &mut crate::cognition::Dialogue| {
+                if quarry {
+                    dialogue.quarry = None;
+                } else {
+                    dialogue.alarm = None;
+                }
+            };
+            if there.contains(&lead.species) {
+                continue;
+            }
+            if let Some(&actual) = there.first() {
+                // It was warned with a snarl and found this: so this is the
+                // dangerous one.
+                if lead.warned {
+                    mind.fauna.heard_of_danger(actual);
+                }
+                let misread = GestureTopic::Animal(lead.species).concept();
+                let meant = GestureTopic::Animal(actual).concept();
+                if let Some(form) = lead.form {
+                    mind.lexicon.contradict(form, misread, CONSEQUENCE_WEIGHT);
+                    mind.lexicon.reinforce(form, meant, CONSEQUENCE_WEIGHT);
+                    self.lesson_events.push(LessonEvent {
+                        agent,
+                        at,
+                        form,
+                        strengthened: Some(meant),
+                        weakened: Some(misread),
+                        use_worked: None,
+                        cause: LessonCause::Consequence,
+                        signal: Some(lead.signal),
+                    });
+                    mind.dialogue.plan_correction(PendingCorrection {
+                        speaker: lead.speaker,
+                        form,
+                        misread,
+                        actual: meant,
+                        place,
+                        since: now,
+                    });
+                }
+                clear(&mut mind.dialogue);
+            } else if identifiable(place) {
+                clear(&mut mind.dialogue);
+            }
+        }
     }
 
     /// The nearest animal in view `agent` believes is dangerous (if it's close
@@ -795,7 +1066,7 @@ impl Engine {
     /// "You said that word, but over there was this, not that": points back at
     /// the place, says the word, shows what was really there, and waves away
     /// what it was taken to mean.
-    fn apply_correction(
+    pub(super) fn apply_correction(
         &mut self,
         sender: AgentId,
         from: WorldPosition,
@@ -933,6 +1204,11 @@ impl Engine {
     /// How each watcher read the latest tick's gestures.
     pub fn interpretation_events(&self) -> &[InterpretationEvent] {
         &self.interpretation_events
+    }
+
+    /// Tips about animals acted on during the latest tick (for logs and tools).
+    pub fn lead_events(&self) -> &[crate::LeadFollowedEvent] {
+        &self.lead_events
     }
 
     /// Meals eaten during the latest tick (for logs and tools).

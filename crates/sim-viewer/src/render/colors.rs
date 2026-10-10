@@ -44,6 +44,7 @@ pub(super) const fn gesture_topic_color(topic: GestureTopic) -> u32 {
     match topic {
         GestureTopic::Place(kind) => landmark_color(kind),
         GestureTopic::Explored => rgba(150, 150, 160, 235),
+        GestureTopic::Animal(_) => rgba(240, 60, 40, 235),
     }
 }
 

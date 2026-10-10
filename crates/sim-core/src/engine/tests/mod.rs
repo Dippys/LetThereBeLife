@@ -25,6 +25,7 @@ use crate::{agent, needs, policy, resources, sleep, spatial, structures};
 
 mod actions;
 mod autonomy;
+mod calls;
 mod cognition;
 mod food;
 mod health_sleep;

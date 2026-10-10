@@ -46,6 +46,10 @@ pub struct CommunicationSummary {
     pub exchanges: u64,
     /// Exchanges pointing at a place, by kind: water, food, wood, stone, shelter.
     pub place_exchanges: [u64; sim_core::LandmarkKind::COUNT],
+    /// Warnings about and calls to hunt each species (by `Species as usize`).
+    pub animal_exchanges: [u64; sim_core::Species::COUNT],
+    /// Receptions acted on by running from or going after a pointed-out animal.
+    pub leads_followed: u64,
     pub explored_exchanges: u64,
     pub receptions: u64,
     /// Receptions that changed the receiver's beliefs.
@@ -75,6 +79,8 @@ pub struct CommunicationSummary {
     pub corrections: u64,
     /// Complete episodes of the project's definition of success (see `success_episodes`).
     pub success_episodes: u64,
+    /// See `CommunicationLog::success_funnel`.
+    pub success_funnel: [u64; 5],
     /// Requests for food: asked, first misread, given, refused, nothing to give.
     pub requests: [u64; 5],
 }
@@ -97,6 +103,7 @@ pub struct CommunicationLog {
     exchanges: Vec<Exchange>,
     lessons: Vec<LessonEvent>,
     requests: Vec<sim_core::RequestEvent>,
+    leads_followed: u64,
 }
 
 const fn kind_for_goal(goal: PhysicalGoal) -> Option<LandmarkKind> {
@@ -167,6 +174,24 @@ impl CommunicationLog {
         }
         self.lessons.extend_from_slice(engine.lesson_events());
         self.requests.extend_from_slice(engine.request_events());
+        for lead in engine.lead_events() {
+            if let Some(reception) = self
+                .exchanges
+                .iter_mut()
+                .rev()
+                .find(|exchange| exchange.signal.id == lead.signal)
+                .and_then(|exchange| {
+                    exchange
+                        .receptions
+                        .iter_mut()
+                        .find(|reception| reception.interpretation.receiver == lead.agent)
+                })
+                && reception.acted_at.is_none()
+            {
+                reception.acted_at = Some(lead.at.ticks());
+                self.leads_followed += 1;
+            }
+        }
         for request in engine.request_events() {
             if let Some(exchange) = self
                 .exchanges
@@ -207,7 +232,7 @@ impl CommunicationLog {
                     && match (kind, reception.interpretation.understood) {
                         (Some(kind), understood) => understood == GestureTopic::Place(kind),
                         (None, GestureTopic::Place(_)) => true,
-                        (None, GestureTopic::Explored) => false,
+                        (None, GestureTopic::Explored | GestureTopic::Animal(_)) => false,
                     }
                     && accept(reception)
             })
@@ -228,6 +253,18 @@ impl CommunicationLog {
     /// believes about that word because of something that same listener visibly
     /// did (corrected it, or used it in the other sense).
     pub fn success_episodes(&self) -> Vec<SuccessEpisode> {
+        self.trace_episodes().0
+    }
+
+    /// How far candidate episodes get: listener consequence lessons, of those
+    /// tied to an informing gesture, with a misread reception of that word, about
+    /// the misreading, and with a speaker lesson caused by that listener.
+    pub fn success_funnel(&self) -> [u64; 5] {
+        self.trace_episodes().1
+    }
+
+    fn trace_episodes(&self) -> (Vec<SuccessEpisode>, [u64; 5]) {
+        let mut funnel = [0_u64; 5];
         let exchange_by_id = |id: u64| {
             self.exchanges
                 .iter()
@@ -240,6 +277,7 @@ impl CommunicationLog {
             else {
                 continue;
             };
+            funnel[0] += 1;
             let Some(index) = exchange_by_id(id) else {
                 continue;
             };
@@ -248,6 +286,7 @@ impl CommunicationLog {
             if exchange.signal.intent.effect != DesiredEffect::Inform {
                 continue;
             }
+            funnel[1] += 1;
             let Some(reception) = exchange.receptions.iter().find(|reception| {
                 reception.interpretation.receiver == listener_lesson.agent
                     && reception.interpretation.heard == Some(listener_lesson.form)
@@ -255,6 +294,7 @@ impl CommunicationLog {
             }) else {
                 continue;
             };
+            funnel[2] += 1;
             let misread = reception.interpretation.understood.concept();
             // The lesson must be about the misreading: dropping it or confirming it.
             if listener_lesson.weakened != Some(misread)
@@ -262,6 +302,7 @@ impl CommunicationLog {
             {
                 continue;
             }
+            funnel[3] += 1;
             let speaker = exchange.signal.signal.sender;
             let Some(speaker_lesson) = self.lessons.iter().find(|lesson| {
                 let by_listener = lesson.signal.and_then(exchange_by_id).is_some_and(|other| {
@@ -279,6 +320,7 @@ impl CommunicationLog {
             }) else {
                 continue;
             };
+            funnel[4] += 1;
             episodes.push(SuccessEpisode {
                 exchange: index,
                 listener: listener_lesson.agent,
@@ -287,7 +329,7 @@ impl CommunicationLog {
                 speaker_lesson: *speaker_lesson,
             });
         }
-        episodes
+        (episodes, funnel)
     }
 
     /// A step-by-step account of one success episode.
@@ -405,7 +447,10 @@ impl CommunicationLog {
             };
             summary.lessons[slot] += 1;
         }
-        summary.success_episodes = self.success_episodes().len() as u64;
+        let (episodes, funnel) = self.trace_episodes();
+        summary.success_episodes = episodes.len() as u64;
+        summary.success_funnel = funnel;
+        summary.leads_followed = self.leads_followed;
         for request in &self.requests {
             summary.requests[0] += 1;
             summary.requests[1] += u64::from(request.read_as != sim_core::Concept::Berries);
@@ -434,6 +479,7 @@ impl CommunicationLog {
                 _ if exchange.signal.intent.effect == DesiredEffect::Request => {}
                 GestureTopic::Place(kind) => summary.place_exchanges[kind as usize] += 1,
                 GestureTopic::Explored => summary.explored_exchanges += 1,
+                GestureTopic::Animal(species) => summary.animal_exchanges[species as usize] += 1,
             }
             for reception in &exchange.receptions {
                 summary.receptions += 1;
@@ -508,6 +554,17 @@ impl fmt::Display for CommunicationSummary {
             "\n  repair: questions {} (repaired {}), corrections {}; word lessons: consequence {consequence}, confirmation {confirmation}, repair {repair}, correction {correction}, usage {usage}; SUCCESS EPISODES {}",
             self.questions, self.repaired, self.corrections, self.success_episodes
         )?;
+        let [lessons, informing, misread, about, speaker] = self.success_funnel;
+        write!(
+            formatter,
+            "\n  episode funnel: consequence lessons {lessons} -> from a gesture {informing} -> misread {misread} -> about the misreading {about} -> speaker learned {speaker}"
+        )?;
+        let [deer, wolves] = self.animal_exchanges;
+        write!(
+            formatter,
+            "\n  animals: calls to hunt deer {deer}, wolf warnings {wolves}; acted on {}",
+            self.leads_followed
+        )?;
         let [asked, misread, gave, refused, empty] = self.requests;
         write!(
             formatter,
@@ -520,6 +577,7 @@ fn topic_name(topic: GestureTopic) -> String {
     match topic {
         GestureTopic::Place(kind) => format!("{kind:?}").to_uppercase(),
         GestureTopic::Explored => "BEEN-THERE".to_owned(),
+        GestureTopic::Animal(species) => format!("{species:?}").to_uppercase(),
     }
 }
 

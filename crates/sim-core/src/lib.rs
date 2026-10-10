@@ -27,12 +27,12 @@ pub use cognition::{
     ACQUAINTANCE_SLOTS, AcquaintanceView, AffordanceView, CONSEQUENCE_WEIGHT, Concept,
     DEFAULT_TRUST, DesiredEffect, FAMILY_SIZE, FRIEND_FAMILIARITY, Gesture, GestureTopic,
     HintOutcomeEvent, InterpretationEvent, LANDMARK_SLOTS, LEXICON_SLOTS, LandmarkKind,
-    LandmarkSource, LandmarkView, LessonCause, LessonEvent, LexiconEntryView, MERGE_RADIUS,
-    MealEvent, MentalMapView, Mime, Personality, PolicyOptions, PublicSignal, READING_CANDIDATES,
-    REPAIR_WEIGHT, Reading, ReadingReasons, RepairEvent, RepairResponse, RequestEvent,
-    RequestResponse, SEARCH_SPACING, SHARE_COOLDOWN_SECONDS, SIGNAL_TICKS, SignalEvent, Tone,
-    Understanding, UtteranceIntent, VISIT_TILE_SIZE, VISITED_TILE_SLOTS, VOCAL_FORMS, VocalForm,
-    concept_topic,
+    LandmarkSource, LandmarkView, LeadFollowedEvent, LessonCause, LessonEvent, LexiconEntryView,
+    MERGE_RADIUS, MealEvent, MentalMapView, Mime, Personality, PolicyOptions, PublicSignal,
+    READING_CANDIDATES, REPAIR_WEIGHT, Reading, ReadingReasons, RepairEvent, RepairResponse,
+    RequestEvent, RequestResponse, SEARCH_SPACING, SHARE_COOLDOWN_SECONDS, SIGNAL_TICKS,
+    SignalEvent, Tone, Understanding, UtteranceIntent, VISIT_TILE_SIZE, VISITED_TILE_SLOTS,
+    VOCAL_FORMS, VocalForm, concept_topic,
 };
 pub use diagnostics::{EngineCapacityMetrics, EngineDiagnostics, EngineWorkMetrics};
 pub use engine::{

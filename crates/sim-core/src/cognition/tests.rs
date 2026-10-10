@@ -79,7 +79,7 @@ fn mental_map_layout_is_compact() {
 #[test]
 fn mind_layout_is_bounded() {
     assert_eq!(size_of::<super::PendingCorrection>(), 32);
-    assert_eq!(size_of::<super::Dialogue>(), 48);
+    assert_eq!(size_of::<super::Dialogue>(), 112);
     assert_eq!(
         size_of::<super::Mind>(),
         size_of::<MentalMap>()
@@ -91,7 +91,7 @@ fn mind_layout_is_bounded() {
             + 11,
         "the child flag and parent id pack into the padding after the beliefs"
     );
-    assert_eq!(size_of::<super::Mind>(), 704);
+    assert_eq!(size_of::<super::Mind>(), 768);
 }
 
 #[test]

@@ -132,6 +132,7 @@ pub struct Engine {
     interpretation_events: Vec<InterpretationEvent>,
     hint_outcomes: Vec<HintOutcomeEvent>,
     meal_events: Vec<crate::MealEvent>,
+    lead_events: Vec<crate::LeadFollowedEvent>,
     wildlife: crate::wildlife::Wildlife,
     wildlife_events: Vec<crate::WildlifeEvent>,
     lesson_events: Vec<crate::LessonEvent>,
@@ -175,6 +176,7 @@ impl Engine {
             interpretation_events: Vec::new(),
             hint_outcomes: Vec::new(),
             meal_events: Vec::new(),
+            lead_events: Vec::new(),
             wildlife: crate::wildlife::Wildlife::default(),
             wildlife_events: Vec::new(),
             lesson_events: Vec::new(),
@@ -225,6 +227,7 @@ impl Engine {
                 self.interpretation_events.clear();
                 self.hint_outcomes.clear();
                 self.meal_events.clear();
+                self.lead_events.clear();
                 self.wildlife = crate::wildlife::Wildlife::default();
                 self.wildlife_events.clear();
                 self.lesson_events.clear();

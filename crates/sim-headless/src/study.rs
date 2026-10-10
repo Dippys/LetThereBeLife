@@ -173,6 +173,10 @@ pub struct WildlifeStats {
     /// Decisions to go after an animal, and to run from one.
     pub hunt_decisions: u64,
     pub flee_decisions: u64,
+    /// Decisions to warn others of an animal or call them to hunt one, and how
+    /// many of those gestures failed to happen.
+    pub call_decisions: u64,
+    pub failed_calls: u64,
     pub strikes: u64,
     /// Animals people brought down, and how many of those kills had helpers.
     pub kills: u64,
@@ -301,6 +305,19 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                             u64::from(decision.reason == sim_core::PolicyReason::Hunting);
                         wildlife.flee_decisions +=
                             u64::from(decision.reason == sim_core::PolicyReason::Fleeing);
+                    }
+                    let call = matches!(
+                        decision.reason,
+                        sim_core::PolicyReason::Warning | sim_core::PolicyReason::Recruiting
+                    );
+                    if call && decision.kind == PolicyDiagnosticKind::Selected {
+                        wildlife.call_decisions += 1;
+                    }
+                    if call
+                        && decision.kind == PolicyDiagnosticKind::ActionCompleted
+                        && decision.failure.is_some()
+                    {
+                        wildlife.failed_calls += 1;
                     }
                 }
                 for event in engine.wildlife_events() {
@@ -1156,9 +1173,11 @@ impl fmt::Display for StudyReport {
             let [founders_fear, children_fear] = wild.fear_wolves;
             write!(
                 formatter,
-                "\n  wildlife: hunt decisions {}, flee decisions {}, strikes {}, kills by people {} ({} together), deer killed by wolves {}, bites {}, births {}; left: deer {} wolves {}; fear wolves: founders {founders_fear}, children {children_fear}",
+                "\n  wildlife: hunt decisions {}, flee decisions {}, calls {} ({} failed), strikes {}, kills by people {} ({} together), deer killed by wolves {}, bites {}, births {}; left: deer {} wolves {}; fear wolves: founders {founders_fear}, children {children_fear}",
                 wild.hunt_decisions,
                 wild.flee_decisions,
+                wild.call_decisions,
+                wild.failed_calls,
                 wild.strikes,
                 wild.kills,
                 wild.group_kills,

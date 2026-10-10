@@ -123,6 +123,12 @@ pub(crate) struct MindInput<'a> {
     pub(crate) danger: Option<WorldPosition>,
     /// The nearest animal in view it believes is worth hunting.
     pub(crate) prey: Option<WorldPosition>,
+    /// Where someone called it to come and hunt (when nothing is in view).
+    pub(crate) quarry: Option<WorldPosition>,
+    /// A dangerous animal in view worth warning the people nearby about.
+    pub(crate) warn: Option<WorldPosition>,
+    /// An animal in view worth calling the people nearby to hunt.
+    pub(crate) recruit: Option<WorldPosition>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -147,7 +153,14 @@ pub(crate) fn deliberate(
         mind: &mind,
         temperament: Temperament::of(mind.personality),
     };
-    // Getting away from something dangerous comes before everything else.
+    // Danger comes before everything else: warn the others unless it's already
+    // close, then get away.
+    let threat_close = mind
+        .danger
+        .is_some_and(|threat| origin.x.abs_diff(threat.x).max(origin.y.abs_diff(threat.y)) <= 3);
+    if !threat_close && let Some(target) = mind.warn {
+        return Deliberation::act(PhysicalGoal::Signal, target, PolicyReason::Warning);
+    }
     if let Some(threat) = mind.danger
         && let Some(escape) = planner.flee_from(threat)
     {
@@ -358,6 +371,12 @@ impl Planner<'_> {
                 return trip.with_reason(PolicyReason::PrepareTrip);
             }
         }
+        // Answering a call to hunt comes before chores and chatter.
+        if self.mind.quarry.is_some()
+            && let Some(hunt) = self.hunt()
+        {
+            return hunt;
+        }
         if let Some(place) = self.mind.share_target {
             return Deliberation::act(PhysicalGoal::Signal, place, PolicyReason::Sharing);
         }
@@ -488,9 +507,17 @@ impl Planner<'_> {
     /// Strikes at the prey in view if it's in reach, else closes in. Never
     /// chases beyond the range it could walk back to water from, nor while thirsty.
     fn hunt(&self) -> Option<Deliberation> {
-        let prey = self.mind.prey?;
+        let prey = self.mind.prey.or(self.mind.quarry)?;
         if self.needs.thirst.value >= self.temperament.top_up_thirst || !self.within_leash(prey) {
             return None;
+        }
+        // Hunting goes better together: call the others first.
+        if let Some(target) = self.mind.recruit {
+            return Some(Deliberation::act(
+                PhysicalGoal::Signal,
+                target,
+                PolicyReason::Recruiting,
+            ));
         }
         let origin = self.origin;
         if origin.x.abs_diff(prey.x).max(origin.y.abs_diff(prey.y)) <= crate::STRIKE_RANGE as u64 {

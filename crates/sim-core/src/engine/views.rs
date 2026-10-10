@@ -11,6 +11,9 @@ use crate::{
     WorldPosition, WorldQueryError, WorldRect,
 };
 
+/// How far (cells) agents spot animals.
+pub const ANIMAL_SIGHT: i64 = 16;
+
 impl Engine {
     /// Returns objective nearby physical facts in canonical world row order.
     pub fn perceive_physical(
@@ -30,13 +33,27 @@ impl Engine {
             .map(|perception| self.with_wildlife(perception))
     }
 
-    /// Adds the animals and carcasses inside the perceived area.
+    /// Adds the carcasses inside the perceived area, and the animals within
+    /// `ANIMAL_SIGHT` of its center (big, moving animals are spotted from farther
+    /// away than a bush).
     fn with_wildlife(&self, mut perception: PhysicalPerception) -> PhysicalPerception {
         let area = perception.area;
+        let center = WorldPosition {
+            x: (area.min.x + area.max.x - 1) / 2,
+            y: (area.min.y + area.max.y - 1) / 2,
+        };
+        let sight = ANIMAL_SIGHT.max((area.max.x - area.min.x) / 2);
         perception.animals = self
             .wildlife
             .views()
-            .filter(|animal| area.contains(animal.position))
+            .filter(|animal| {
+                animal
+                    .position
+                    .x
+                    .abs_diff(center.x)
+                    .max(animal.position.y.abs_diff(center.y))
+                    <= sight as u64
+            })
             .collect();
         let carcasses = self
             .wildlife

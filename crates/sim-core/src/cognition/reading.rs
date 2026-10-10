@@ -125,6 +125,10 @@ fn mime_evidence(mime: Mime, listener: &ListenerContext) -> [(Concept, i32); 3] 
         ],
         Mime::RestHead => [(Concept::Home, 40), (Concept::Been, 0), (Concept::Wood, 0)],
         Mime::Sweep => [(Concept::Been, 40), (Concept::Home, 0), (Concept::Wood, 0)],
+        // Both are tense postures aimed at an animal: easy to tell apart up
+        // close, less so in a hurry.
+        Mime::Snarl => [(Concept::Wolf, 30), (Concept::Deer, 18), (Concept::Home, 0)],
+        Mime::Spear => [(Concept::Deer, 30), (Concept::Wolf, 18), (Concept::Home, 0)],
     };
     evidence.sort_by_key(|&(concept, weight)| (-weight, concept));
     evidence
@@ -163,6 +167,8 @@ pub(crate) const fn concept_kind(concept: Concept) -> Option<LandmarkKind> {
 pub const fn concept_topic(concept: Concept) -> Option<GestureTopic> {
     match concept {
         Concept::Been => Some(GestureTopic::Explored),
+        Concept::Deer => Some(GestureTopic::Animal(crate::Species::Deer)),
+        Concept::Wolf => Some(GestureTopic::Animal(crate::Species::Wolf)),
         _ => match concept_kind(concept) {
             Some(kind) => Some(GestureTopic::Place(kind)),
             None => None,
@@ -183,6 +189,10 @@ pub(crate) fn read(signal: &PublicSignal, listener: ListenerContext) -> Reading 
     let thirst = need_weight(listener.thirst);
     let hunger = need_weight(listener.hunger);
     scores[Concept::Water as usize] += thirst;
+    // A hungry listener hears a call about an animal as a call to hunt.
+    if scores[Concept::Deer as usize] > 0 {
+        scores[Concept::Deer as usize] += hunger;
+    }
     // Hunger favors whatever the listener thinks is food.
     for (material, concept) in [
         (Material::Berries, Concept::Berries),
@@ -236,6 +246,9 @@ pub(crate) fn read(signal: &PublicSignal, listener: ListenerContext) -> Reading 
     };
     let mut need_scores = [0_i32; Concept::COUNT];
     need_scores[Concept::Water as usize] = thirst;
+    if scores[Concept::Deer as usize] > hunger {
+        need_scores[Concept::Deer as usize] = hunger;
+    }
     for (material, concept) in [
         (Material::Berries, Concept::Berries),
         (Material::Bitterberries, Concept::Bitterberries),
@@ -278,6 +291,7 @@ mod tests {
             vocal: Some(VocalForm(3)),
             negated: None,
             addressee: None,
+            loud: false,
             tone: Tone { urgency },
         }
     }

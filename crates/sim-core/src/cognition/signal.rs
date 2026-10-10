@@ -11,7 +11,7 @@ use crate::{AgentId, WorldPosition};
 
 use super::{
     Concept, GestureTopic, LandmarkKind, VocalForm,
-    gesture::{Gesture, interpret, point},
+    gesture::{Gesture, MIN_ANIMAL_POINTING_DISTANCE, interpret, point, point_within},
     reading::{ListenerContext, Reading, concept_topic, read},
 };
 
@@ -55,6 +55,10 @@ pub enum Mime {
     Sweep,
     /// Hand on the belly and a grimace: "that makes you sick".
     Retch,
+    /// Bared teeth and clawing hands: "something dangerous".
+    Snarl,
+    /// A crouch and a throwing arm: "something to hunt".
+    Spear,
 }
 
 /// How the sender looks while signalling, derived from its own state.
@@ -77,6 +81,8 @@ pub struct PublicSignal {
     pub negated: Option<Mime>,
     /// For requests: who the open hand is held out to.
     pub addressee: Option<AgentId>,
+    /// Shouted (warnings and calls to hunt carry farther than a quiet gesture).
+    pub loud: bool,
     pub tone: Tone,
 }
 
@@ -89,6 +95,8 @@ pub(crate) const fn mime_for(topic: GestureTopic, food: Option<i16>) -> Mime {
         (GestureTopic::Place(LandmarkKind::Water), _) => Mime::Scoop,
         (GestureTopic::Place(LandmarkKind::Shelter), _) => Mime::RestHead,
         (GestureTopic::Explored, _) => Mime::Sweep,
+        (GestureTopic::Animal(_), Some(value)) if value < 0 => Mime::Snarl,
+        (GestureTopic::Animal(_), _) => Mime::Spear,
         (_, Some(value)) if value > 0 => Mime::PickAndChew,
         (_, Some(value)) if value < 0 => Mime::Retch,
         (GestureTopic::Place(LandmarkKind::Wood), _) => Mime::Chop,
@@ -109,14 +117,23 @@ pub(crate) fn express(
     vocal: Option<VocalForm>,
     urgency: u8,
 ) -> Option<PublicSignal> {
+    // Animals in plain sight, and the spot a correction is about, can be
+    // pointed at from close by.
+    let pointing = match (intent.topic, intent.effect) {
+        (GestureTopic::Animal(_), _) | (_, DesiredEffect::Correct) => {
+            point_within(origin, intent.place, MIN_ANIMAL_POINTING_DISTANCE)?
+        }
+        _ => point(origin, intent.place)?,
+    };
     Some(PublicSignal {
         sender,
         origin,
-        pointing: point(origin, intent.place)?,
+        pointing,
         mime,
         vocal,
         negated: None,
         addressee: None,
+        loud: matches!(intent.topic, GestureTopic::Animal(_)),
         tone: Tone { urgency },
     })
 }
@@ -157,6 +174,8 @@ pub(crate) const fn unmistakable(mime: Mime) -> Concept {
         Mime::RestHead => Concept::Home,
         Mime::Sweep => Concept::Been,
         Mime::Retch => Concept::Bitterberries,
+        Mime::Snarl => Concept::Wolf,
+        Mime::Spear => Concept::Deer,
     }
 }
 

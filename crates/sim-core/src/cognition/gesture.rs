@@ -45,9 +45,22 @@ fn rounded_div(numerator: i64, denominator: i64) -> i64 {
 
 /// The gesture an agent at `from` makes to indicate `to`.
 pub(crate) fn point(from: WorldPosition, to: WorldPosition) -> Option<Gesture> {
+    point_within(from, to, MIN_POINTING_DISTANCE)
+}
+
+/// Pointing at something in plain sight (an animal) works at closer range
+/// than pointing out a place.
+pub(crate) const MIN_ANIMAL_POINTING_DISTANCE: u64 = 2;
+
+/// Like `point`, refusing only targets closer than `minimum` cells.
+pub(crate) fn point_within(
+    from: WorldPosition,
+    to: WorldPosition,
+    minimum: u64,
+) -> Option<Gesture> {
     let (dx, dy) = (to.x - from.x, to.y - from.y);
     let distance = dx.unsigned_abs().max(dy.unsigned_abs());
-    if distance < MIN_POINTING_DISTANCE {
+    if distance < minimum {
         return None;
     }
     let scale = distance as i64;

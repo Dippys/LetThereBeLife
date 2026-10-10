@@ -136,6 +136,10 @@ pub enum PolicyReason {
     Fleeing,
     /// Going after an animal it believes is worth hunting.
     Hunting,
+    /// Pointing out a dangerous animal to people nearby.
+    Warning,
+    /// Pointing out an animal to hunt, to people nearby.
+    Recruiting,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

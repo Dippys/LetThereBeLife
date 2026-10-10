@@ -17,7 +17,7 @@ mod social;
 pub(crate) use affordances::Affordances;
 pub use affordances::{AffordanceView, BELIEF_UNIT};
 pub use dialogue::{CONSEQUENCE_WEIGHT, REPAIR_WEIGHT};
-pub(crate) use dialogue::{Dialogue, PendingCorrection};
+pub(crate) use dialogue::{Dialogue, LEAD_SECONDS, Lead, PendingCorrection};
 pub(crate) use fauna::Fauna;
 pub use fauna::FaunaView;
 pub use gesture::Gesture;
@@ -147,6 +147,8 @@ pub enum GestureTopic {
     Place(LandmarkKind),
     /// "I've already been over there" (watchers treat that ground as explored).
     Explored,
+    /// "There's a deer / wolf over there": a call to hunt or a warning.
+    Animal(crate::Species),
 }
 
 /// One gesture completed during the latest tick, for logs and tools only.
@@ -271,6 +273,18 @@ pub struct RepairEvent {
     pub response: RepairResponse,
 }
 
+/// Someone acted on a tip about an animal: ran from a warned-about spot, or
+/// went after an animal someone pointed out (latest tick, for logs and tools).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LeadFollowedEvent {
+    pub agent: AgentId,
+    pub at: SimTime,
+    pub signal: u64,
+    pub species: crate::Species,
+    /// Ran from it (a warning) rather than going after it.
+    pub fled: bool,
+}
+
 /// Someone ate something (latest tick, for logs and tools only). Eating and
 /// retching are visible, so `watchers` saw it and learned from it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -338,6 +352,8 @@ impl GestureTopic {
             Self::Place(LandmarkKind::Shelter) => Concept::Home,
             Self::Place(LandmarkKind::Bitterberries) => Concept::Bitterberries,
             Self::Explored => Concept::Been,
+            Self::Animal(crate::Species::Deer) => Concept::Deer,
+            Self::Animal(crate::Species::Wolf) => Concept::Wolf,
         }
     }
 }

@@ -27,10 +27,12 @@ pub enum Concept {
     Yes = 10,
     No = 11,
     Bitterberries = 12,
+    Deer = 13,
+    Wolf = 14,
 }
 
 impl Concept {
-    pub const COUNT: usize = 13;
+    pub const COUNT: usize = 15;
     pub const ALL: [Self; Self::COUNT] = [
         Self::Water,
         Self::Berries,
@@ -45,6 +47,8 @@ impl Concept {
         Self::Yes,
         Self::No,
         Self::Bitterberries,
+        Self::Deer,
+        Self::Wolf,
     ];
 
     const fn from_index(index: u8) -> Self {

@@ -16,6 +16,33 @@ pub const CONSEQUENCE_WEIGHT: u16 = 3;
 pub const REPAIR_WEIGHT: u16 = 2;
 /// Corrections older than this (simulated seconds) are dropped.
 const CORRECTION_PATIENCE_SECONDS: u32 = 3_600;
+/// A tip about an animal is worth acting on for this many seconds.
+pub const LEAD_SECONDS: u32 = 90;
+/// Seconds between warnings, and between calls to hunt.
+const WARNING_COOLDOWN_SECONDS: u32 = 30;
+const RECRUIT_COOLDOWN_SECONDS: u32 = 90;
+
+/// Something someone pointed out about an animal: what the listener took it to
+/// be, roughly where, until when it's worth acting on, and where the tip came
+/// from (so finding something else there can teach about the word).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Lead {
+    pub(crate) signal: u64,
+    pub(crate) speaker: AgentId,
+    pub(crate) until: u32,
+    pub(crate) place: CompactPosition,
+    pub(crate) species: crate::Species,
+    pub(crate) form: Option<VocalForm>,
+    /// The speaker snarled (it meant something dangerous).
+    pub(crate) warned: bool,
+}
+
+impl Lead {
+    pub(crate) fn place(self) -> WorldPosition {
+        self.place.world()
+    }
+}
+
 /// Seconds before asking again after a request was answered.
 const REQUEST_COOLDOWN_SECONDS: u32 = 120;
 /// Seconds before asking again after a refusal.
@@ -41,9 +68,60 @@ pub(crate) struct Dialogue {
     request: Option<(AgentId, CompactPosition)>,
     /// Simulated second from which the agent may ask again.
     next_request: u32,
+    /// A warned-about animal to stay away from, and one to go and hunt.
+    pub(crate) alarm: Option<Lead>,
+    pub(crate) quarry: Option<Lead>,
+    /// An animal the agent is about to point out, and where it was.
+    animal: Option<(crate::Species, CompactPosition)>,
+    /// Simulated seconds from which it may warn, or call others to hunt, again.
+    next_warning: u32,
+    next_recruit: u32,
 }
 
 impl Dialogue {
+    pub(crate) const fn may_warn(&self, now: u32) -> bool {
+        now >= self.next_warning
+    }
+
+    pub(crate) const fn may_recruit(&self, now: u32) -> bool {
+        now >= self.next_recruit
+    }
+
+    /// Plans to point out an animal (a warning or a call to hunt) and starts
+    /// the matching cooldown.
+    pub(crate) fn plan_animal(
+        &mut self,
+        species: crate::Species,
+        place: WorldPosition,
+        warning: bool,
+        now: u32,
+    ) {
+        self.animal = CompactPosition::checked(place).map(|place| (species, place));
+        if warning {
+            self.next_warning = now.saturating_add(WARNING_COOLDOWN_SECONDS);
+        } else {
+            self.next_recruit = now.saturating_add(RECRUIT_COOLDOWN_SECONDS);
+        }
+    }
+
+    /// The animal planned to be pointed out at `place`, consumed.
+    pub(crate) fn take_animal(&mut self, place: WorldPosition) -> Option<crate::Species> {
+        self.animal.take().and_then(|(species, at)| {
+            (Some(at) == CompactPosition::checked(place)).then_some(species)
+        })
+    }
+
+    /// Leads still worth acting on (expired ones are dropped).
+    pub(crate) fn current_leads(&mut self, now: u32) -> (Option<Lead>, Option<Lead>) {
+        if self.alarm.is_some_and(|lead| lead.until < now) {
+            self.alarm = None;
+        }
+        if self.quarry.is_some_and(|lead| lead.until < now) {
+            self.quarry = None;
+        }
+        (self.alarm, self.quarry)
+    }
+
     pub(crate) const fn may_request(&self, now: u32) -> bool {
         now >= self.next_request
     }
