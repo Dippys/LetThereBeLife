@@ -238,6 +238,11 @@ impl Engine {
         &self.policy_diagnostics
     }
 
+    /// Fires tended during the latest tick (for logs and tools).
+    pub fn fire_events(&self) -> &[crate::FireEvent] {
+        &self.fire_events
+    }
+
     pub fn snapshot(&self) -> SimulationSnapshot {
         SimulationSnapshot {
             tick: self.time.ticks(),

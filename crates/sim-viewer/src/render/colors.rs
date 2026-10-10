@@ -7,6 +7,7 @@ use sim_core::{
 
 pub(super) const HUT: u32 = rgba(116, 72, 38, 255);
 pub(super) const HEARTH: u32 = rgba(255, 120, 24, 255);
+pub(super) const COLD_HEARTH: u32 = rgba(90, 84, 80, 255);
 pub(super) const UNDER_CONSTRUCTION: u32 = rgba(224, 170, 72, 230);
 pub(super) const DEER: u32 = rgba(176, 128, 72, 255);
 pub(super) const DEER_ALERT: u32 = rgba(222, 170, 96, 255);

@@ -154,7 +154,10 @@ impl Engine {
         };
         if matches!(
             selection.goal,
-            PhysicalGoal::Signal | PhysicalGoal::Hunt | PhysicalGoal::WarmUp
+            PhysicalGoal::Signal
+                | PhysicalGoal::Hunt
+                | PhysicalGoal::WarmUp
+                | PhysicalGoal::TendFire
         ) {
             self.start_timed_action(agent, selection.goal, target, selection.reason);
             return;

@@ -335,9 +335,20 @@ pub(super) fn hover_lines(hover: &Hover) -> (String, Option<String>) {
             labels::animal_mode(mode).map(str::to_owned),
         ),
         Hover::Carcass { meat } => ("Carcass".to_owned(), Some(format!("{meat} meat left"))),
-        Hover::Structure { kind, state } => (
+        Hover::Structure {
+            kind,
+            state,
+            burning,
+        } => (
             labels::structure(kind).to_owned(),
-            (state == StructureState::UnderConstruction).then(|| "being built".to_owned()),
+            if state == StructureState::UnderConstruction {
+                Some("being built".to_owned())
+            } else {
+                burning.map(|left| match left {
+                    0 => "gone out".to_owned(),
+                    _ => format!("burning, {} left", labels::duration(f64::from(left))),
+                })
+            },
         ),
         Hover::Resource { label, remaining } => (
             label.to_owned(),

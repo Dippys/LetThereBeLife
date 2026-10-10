@@ -109,9 +109,14 @@ impl ViewerApp {
             .structure_views(VIEWER_AGENT_LIMIT)
             .find(|structure| structure.position == position)
         {
+            let now = (self.engine.snapshot().tick / 60) as u32;
             return Some(Hover::Structure {
                 kind: structure.kind,
                 state: structure.state,
+                burning: structure
+                    .kind
+                    .burns()
+                    .then(|| structure.fuel_until.saturating_sub(now)),
             });
         }
         let world = self.engine.world();

@@ -121,9 +121,16 @@ impl Engine {
         &mut self,
         agent: AgentId,
     ) -> Result<(), PolicyFailureReason> {
+        // A fire starts burning on whatever fuel went into building it.
+        let now = crate::cognition::belief_seconds(self.time);
+        let built_in_fuel: u32 = crate::StructureKind::Hearth
+            .cost()
+            .iter()
+            .map(|&(material, amount)| material.properties().fuel_seconds * u32::from(amount))
+            .sum();
         let structure = self
             .structures
-            .complete_for_builder(agent)
+            .complete_for_builder(agent, now + built_in_fuel)
             .ok_or(PolicyFailureReason::InconsistentState)?;
         self.structure_diagnostics.push(StructureDiagnostic {
             structure,

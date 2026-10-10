@@ -169,6 +169,7 @@ pub const fn goal(goal: PhysicalGoal) -> &'static str {
         PhysicalGoal::Hunt => "Hunting",
         PhysicalGoal::BuildHearth => "Building a hearth",
         PhysicalGoal::WarmUp => "Warming up by a fire",
+        PhysicalGoal::TendFire => "Putting wood on a fire",
     }
 }
 
@@ -198,7 +199,8 @@ pub const fn reason(reason: PolicyReason) -> Option<&'static str> {
         | PolicyReason::RouteArrived
         | PolicyReason::ActionCompleted
         | PolicyReason::Hunting
-        | PolicyReason::Warming => return None,
+        | PolicyReason::Warming
+        | PolicyReason::Tending => return None,
     })
 }
 

@@ -108,6 +108,7 @@ impl Engine {
                 self.apply_build_completion(event.agent)
             }
             PhysicalGoal::WarmUp => self.apply_warm_up(event.agent),
+            PhysicalGoal::TendFire => self.apply_tend_fire(event.agent),
             PhysicalGoal::Signal => self.apply_signal(event.agent, target),
             PhysicalGoal::Hunt => self.apply_hunt(event.agent, target),
             PhysicalGoal::SeekShelter | PhysicalGoal::Incapacitated => {
@@ -208,7 +209,8 @@ impl Engine {
             .view(agent)
             .ok_or(PolicyFailureReason::InconsistentState)?
             .position;
-        if !self.structures.hearth_beside(position) {
+        let now = crate::cognition::belief_seconds(self.time);
+        if !self.structures.fire_beside(position, now) {
             return Err(PolicyFailureReason::TargetUnavailable);
         }
         self.population
@@ -222,6 +224,64 @@ impl Engine {
             .map_err(action_effect_failure)?;
         if self.policy_options.memory {
             self.minds.get_mut(agent).crafts.warmed();
+            let watchers: Vec<AgentId> = self
+                .perceive_physical(agent, crate::PHYSICAL_POLICY_RADIUS)
+                .map(|perception| {
+                    perception
+                        .agents
+                        .iter()
+                        .filter(|other| {
+                            other.id != agent && super::cognition::can_watch(other.activity)
+                        })
+                        .map(|other| other.id)
+                        .collect()
+                })
+                .unwrap_or_default();
+            for watcher in watchers {
+                self.minds.get_mut(watcher).crafts.saw_warming();
+            }
+        }
+        Ok(())
+    }
+
+    /// Puts one unit of something that burns on the fire beside the agent,
+    /// relighting it if it was out. Anyone watching sees fire being kept.
+    pub(super) fn apply_tend_fire(&mut self, agent: AgentId) -> Result<(), PolicyFailureReason> {
+        let position = self
+            .population
+            .view(agent)
+            .ok_or(PolicyFailureReason::InconsistentState)?
+            .position;
+        let fire = self
+            .structures
+            .hearth_position_beside(position)
+            .ok_or(PolicyFailureReason::TargetUnavailable)?;
+        let inventory = self
+            .population
+            .inventory(agent)
+            .ok_or(PolicyFailureReason::InconsistentState)?;
+        let fuel = crate::Material::ALL
+            .into_iter()
+            .find(|material| {
+                material.properties().fuel_seconds > 0 && inventory.amount(*material) > 0
+            })
+            .ok_or(PolicyFailureReason::TargetUnavailable)?;
+        let now = crate::cognition::belief_seconds(self.time);
+        let was_burning = self.structures.fire_beside(position, now);
+        if self.population.take(agent, fuel, 1) == 0
+            || !self
+                .structures
+                .add_fuel(fire, fuel.properties().fuel_seconds, now)
+        {
+            return Err(PolicyFailureReason::TargetUnavailable);
+        }
+        self.fire_events.push(crate::FireEvent {
+            agent,
+            at: fire,
+            relit: !was_burning,
+        });
+        if self.policy_options.memory {
+            self.minds.get_mut(agent).crafts.saw_warming();
             let watchers: Vec<AgentId> = self
                 .perceive_physical(agent, crate::PHYSICAL_POLICY_RADIUS)
                 .map(|perception| {

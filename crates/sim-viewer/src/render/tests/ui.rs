@@ -303,7 +303,8 @@ fn tooltips_name_what_is_under_the_mouse() {
     assert_eq!(
         hover_lines(&Hover::Structure {
             kind: StructureKind::Hearth,
-            state: StructureState::UnderConstruction
+            state: StructureState::UnderConstruction,
+            burning: Some(600)
         }),
         ("Hearth".to_owned(), Some("being built".to_owned()))
     );

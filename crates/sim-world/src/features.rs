@@ -51,6 +51,8 @@ pub struct MaterialProperties {
     pub fixed_source: bool,
     /// Grows back only outside winter (fruit).
     pub seasonal: bool,
+    /// Seconds one unit keeps a fire burning (0 = doesn't burn).
+    pub fuel_seconds: u32,
     /// Hunger relieved by eating one unit.
     pub nutrition: u16,
     /// Sickness from eating one unit: added to thirst and to tiredness.
@@ -74,6 +76,7 @@ impl Material {
     pub const fn properties(self) -> MaterialProperties {
         match self {
             Self::Berries => MaterialProperties {
+                fuel_seconds: 0,
                 seasonal: true,
                 handling: Handling::Pick,
                 fixed_source: true,
@@ -83,6 +86,7 @@ impl Material {
                 regrow_seconds: 600,
             },
             Self::Bitterberries => MaterialProperties {
+                fuel_seconds: 0,
                 seasonal: true,
                 handling: Handling::Pick,
                 fixed_source: true,
@@ -92,6 +96,7 @@ impl Material {
                 regrow_seconds: 600,
             },
             Self::Wood => MaterialProperties {
+                fuel_seconds: 1_800,
                 seasonal: false,
                 handling: Handling::Chop,
                 fixed_source: true,
@@ -101,6 +106,7 @@ impl Material {
                 regrow_seconds: 3_600,
             },
             Self::Stone => MaterialProperties {
+                fuel_seconds: 0,
                 seasonal: false,
                 handling: Handling::Strike,
                 fixed_source: true,
@@ -110,6 +116,7 @@ impl Material {
                 regrow_seconds: 0,
             },
             Self::Meat => MaterialProperties {
+                fuel_seconds: 0,
                 seasonal: false,
                 handling: Handling::Carve,
                 fixed_source: false,

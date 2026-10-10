@@ -368,6 +368,15 @@ pub enum WordEvent {
     },
 }
 
+/// Someone put fuel on a fire (latest tick, for logs and tools).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FireEvent {
+    pub agent: AgentId,
+    pub at: WorldPosition,
+    /// The fire had gone out and was lit again.
+    pub relit: bool,
+}
+
 /// Two people became a couple (latest tick, for logs and tools).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoupleEvent {

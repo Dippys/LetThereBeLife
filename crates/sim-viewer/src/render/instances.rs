@@ -12,9 +12,9 @@ use super::{
     MAX_SPAWNED_OBJECT_INSTANCES, MAX_STRUCTURE_INSTANCES, MAX_WORLD_BORDER_WIDTH,
     MIN_CHUNK_OUTLINE_PIXELS, MIN_DYNAMIC_INSTANCE_PIXELS,
     colors::{
-        CARCASS, DEER, DEER_ALERT, ELDER_EDGE, GESTURE_COLOR, PARTNER, WOLF, WOLF_ALERT,
-        agent_color, feature_color, landmark_color, relationship_color, rgba, spawn_kind_color,
-        structure_color, terrain_color,
+        CARCASS, COLD_HEARTH, DEER, DEER_ALERT, ELDER_EDGE, GESTURE_COLOR, PARTNER, WOLF,
+        WOLF_ALERT, agent_color, feature_color, landmark_color, relationship_color, rgba,
+        spawn_kind_color, structure_color, terrain_color,
     },
     gpu::Instance,
 };
@@ -310,10 +310,12 @@ const GESTURE_DOT_PIXELS: f32 = 3.0;
 const GESTURE_DOT_SPACING_PIXELS: f32 = 8.0;
 const GESTURE_END_PIXELS: f32 = 5.0;
 
+/// Structures as squares; a fire that has gone out is drawn cold and grey.
 pub(super) fn build_structure_instances(
     views: impl IntoIterator<Item = StructureView>,
     visible: WorldRect,
     scale: f32,
+    now: u32,
     output: &mut Vec<Instance>,
 ) {
     output.clear();
@@ -327,7 +329,14 @@ pub(super) fn build_structure_instances(
                 structure.position.y as f32 + 0.05,
                 0.9,
                 0.9,
-                structure_color(structure.kind, structure.state),
+                if structure.kind.burns()
+                    && structure.state == sim_core::StructureState::Complete
+                    && !structure.working(now)
+                {
+                    COLD_HEARTH
+                } else {
+                    structure_color(structure.kind, structure.state)
+                },
             ));
         }
     }

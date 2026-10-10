@@ -145,6 +145,7 @@ pub struct Engine {
     family_events: Vec<FamilyEvent>,
     name_events: Vec<NameEvent>,
     word_events: Vec<crate::WordEvent>,
+    fire_events: Vec<crate::FireEvent>,
     wildlife: crate::wildlife::Wildlife,
     wildlife_events: Vec<crate::WildlifeEvent>,
     /// Sex and birth of people born during the run (others are derived from the seed).
@@ -199,6 +200,7 @@ impl Engine {
             family_events: Vec::new(),
             name_events: Vec::new(),
             word_events: Vec::new(),
+            fire_events: Vec::new(),
             wildlife: crate::wildlife::Wildlife::default(),
             wildlife_events: Vec::new(),
             lives: Vec::new(),
@@ -258,6 +260,7 @@ impl Engine {
                 self.family_events.clear();
                 self.name_events.clear();
                 self.word_events.clear();
+                self.fire_events.clear();
                 self.wildlife = crate::wildlife::Wildlife::default();
                 self.wildlife_events.clear();
                 self.lives.clear();

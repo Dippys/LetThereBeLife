@@ -38,6 +38,7 @@ impl Engine {
         self.family_events.clear();
         self.name_events.clear();
         self.word_events.clear();
+        self.fire_events.clear();
         self.wildlife_events.clear();
         self.lesson_events.clear();
         self.repair_events.clear();

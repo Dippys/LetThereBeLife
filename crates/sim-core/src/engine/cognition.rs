@@ -479,7 +479,7 @@ impl Engine {
     ) {
         let duration = match (goal, reason) {
             (PhysicalGoal::Hunt, _) => super::HUNT_TICKS,
-            (PhysicalGoal::WarmUp, _) => WARM_UP_TICKS,
+            (PhysicalGoal::WarmUp | PhysicalGoal::TendFire, _) => WARM_UP_TICKS,
             // A warning is quick: a shout and a point.
             (_, PolicyReason::Warning) => WARNING_TICKS,
             _ => SIGNAL_TICKS,

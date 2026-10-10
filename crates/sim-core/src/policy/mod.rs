@@ -105,6 +105,8 @@ pub enum PhysicalGoal {
     BuildHearth = 13,
     /// Stand by a hearth to warm up.
     WarmUp = 14,
+    /// Put fuel on a fire beside the agent.
+    TendFire = 15,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,6 +150,8 @@ pub enum PolicyReason {
     Warming,
     /// Gathering stone and wood for a hearth.
     HearthMaterials,
+    /// Keeping a fire going.
+    Tending,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

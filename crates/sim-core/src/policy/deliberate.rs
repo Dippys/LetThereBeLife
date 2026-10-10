@@ -80,6 +80,8 @@ pub const HOME_RANGE: u64 = 200;
 const HEARTH_FROM_HOME: u64 = 16;
 /// Tiredness (out of 10,000) at which an agent sleeps wherever it can.
 const REST_CRITICAL: u16 = 8_800;
+/// A fire with less than this much burning left (seconds) is worth feeding.
+const LOW_FUEL_SECONDS: u32 = 20 * 60;
 /// Idle agents go to look at places pointed out within this many cells.
 const NOSY_RANGE: u64 = 48;
 /// Exploration never shrinks the round-trip range below this many cells.
@@ -227,6 +229,12 @@ pub(crate) fn deliberate(
         Some(NeedKind::Rest) => planner.rest(inventory),
         Some(NeedKind::Exposure) if mind.knows_hearths && planner.warm_up().is_some() => {
             planner.warm_up().expect("checked")
+        }
+        // Cold with only a dead fire in view: get it going again.
+        Some(NeedKind::Exposure)
+            if mind.knows_hearths && planner.tend_fire(inventory).is_some() =>
+        {
+            planner.tend_fire(inventory).expect("checked")
         }
         Some(NeedKind::Exposure) => {
             let reactive = shelter_selection(
@@ -432,6 +440,10 @@ impl Planner<'_> {
         {
             return warm.with_reason(PolicyReason::PrepareTrip);
         }
+        // Someone who keeps fire feeds one that's burning low.
+        if works && let Some(tend) = self.tend_fire(inventory) {
+            return tend;
+        }
         // Hunting is work too, and prey in view is the best work there is.
         if works && let Some(hunt) = self.hunt(inventory) {
             return hunt;
@@ -571,14 +583,12 @@ impl Planner<'_> {
     /// otherwise walks over.
     fn warm_up(&self) -> Option<Deliberation> {
         let origin = self.origin;
+        let now = (self.needs.at.ticks() / 60) as u32;
         let hearth = self
             .perception
             .structures
             .iter()
-            .filter(|structure| {
-                structure.state == crate::StructureState::Complete
-                    && structure.kind == crate::StructureKind::Hearth
-            })
+            .filter(|structure| structure.kind.burns() && structure.working(now))
             .min_by_key(|structure| (manhattan(origin, structure.position), structure.id.get()))?
             .position;
         if origin.x.abs_diff(hearth.x).max(origin.y.abs_diff(hearth.y)) <= 1 {
@@ -594,6 +604,47 @@ impl Planner<'_> {
                 goal: PhysicalGoal::Explore,
                 target: Some(waypoint),
                 reason: PolicyReason::Warming,
+            },
+            heading: Some(heading),
+        })
+    }
+
+    /// Feeds a fire in view that is out or burning low, if it knows fire and
+    /// carries something that burns: right away if beside it, otherwise walks over.
+    fn tend_fire(&self, inventory: InventoryView) -> Option<Deliberation> {
+        if !self.mind.knows_hearths
+            || !crate::Material::ALL.into_iter().any(|material| {
+                material.properties().fuel_seconds > 0 && inventory.amount(material) > 0
+            })
+        {
+            return None;
+        }
+        let now = (self.needs.at.ticks() / 60) as u32;
+        let origin = self.origin;
+        let fire = self
+            .perception
+            .structures
+            .iter()
+            .filter(|structure| {
+                structure.kind.burns()
+                    && structure.state == crate::StructureState::Complete
+                    && structure.fuel_until < now + LOW_FUEL_SECONDS
+            })
+            .min_by_key(|structure| (manhattan(origin, structure.position), structure.id.get()))?
+            .position;
+        if origin.x.abs_diff(fire.x).max(origin.y.abs_diff(fire.y)) <= 1 {
+            return Some(Deliberation::act(
+                PhysicalGoal::TendFire,
+                origin,
+                PolicyReason::Tending,
+            ));
+        }
+        let (waypoint, heading) = self.waypoint_toward(fire)?;
+        Some(Deliberation {
+            selection: PolicySelection {
+                goal: PhysicalGoal::Explore,
+                target: Some(waypoint),
+                reason: PolicyReason::Tending,
             },
             heading: Some(heading),
         })

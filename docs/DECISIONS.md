@@ -516,3 +516,17 @@ everywhere, 60% idle). Seasons bring scarcity and cold without scripting what pe
 over 30 years 443 warm-ups, with fire known by 13 founders and 20 children (8 founders before).
 Over 30 years 5 people died of cold. Agents don't know about seasons; they feel the cold and find
 bushes bare. The success test found 16 episodes in 7 valleys.
+
+## D-094: Fires that need fuel (2026-10-10)
+
+**Decision:** Materials have `fuel_seconds` (wood burns 30 minutes a unit). A finished hearth burns
+on the fuel built into it (an hour from its two wood) and then goes out; only a burning fire warms.
+Anyone who knows fire, carries something that burns, and sees a fire that's out or has under 20
+minutes left may feed it (a new `TendFire` action, up to two hours of fuel ahead), especially when
+cold; watchers learn about fire from it. The viewer draws dead fires grey, shows the time left on
+hover, and the feed notes relit fires. The study counts fuel added and relights.
+**Why:** Plan step 3: things that give people reasons to cooperate. A shared fire that anyone can
+keep going gives people a reason to return to the same place, and pairs with winter.
+**Consequences:** 82-864 fuel additions per 5.5-hour run; over 30 years 751, with 323 relights, no
+deaths from cold (5 before), and fire known by 16 founders and 28 children. More hearths get built
+(50-80 per run), since people build one near home when they remember none burning.

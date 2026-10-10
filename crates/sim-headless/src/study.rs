@@ -237,6 +237,9 @@ pub struct WildlifeStats {
     pub hearths: u64,
     pub warm_ups: u64,
     pub know_fire: [u64; 2],
+    /// Fuel put on fires, and how often that relit a dead one.
+    pub tends: u64,
+    pub relit: u64,
 }
 
 /// What the band ate and believes about food.
@@ -462,6 +465,10 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                     food.sick += u64::from(meal.retched);
                     food.first_tastes += u64::from(meal.first_taste);
                     food.watched += u64::from(meal.watchers);
+                }
+                for fire in engine.fire_events() {
+                    wildlife.tends += 1;
+                    wildlife.relit += u64::from(fire.relit);
                 }
                 for event in engine.word_events() {
                     match *event {
@@ -1549,8 +1556,8 @@ impl fmt::Display for StudyReport {
         let [founders_fire, children_fire] = self.wildlife.know_fire;
         write!(
             formatter,
-            "\n  fire: hearths built {}, warm-ups {}; know hearths warm: founders {founders_fire}, children {children_fire}",
-            self.wildlife.hearths, self.wildlife.warm_ups
+            "\n  fire: hearths built {}, warm-ups {}, fuel added {} ({} relit); know hearths warm: founders {founders_fire}, children {children_fire}",
+            self.wildlife.hearths, self.wildlife.warm_ups, self.wildlife.tends, self.wildlife.relit
         )?;
         if let Some((children, matching)) = self.children_vocabulary {
             write!(

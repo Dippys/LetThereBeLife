@@ -172,6 +172,15 @@ impl Feed {
             }
         }
 
+        for fire in engine.fire_events().iter().filter(|fire| fire.relit) {
+            self.push(
+                format!("{} relit a fire", name(engine, fire.agent)),
+                Tone::Good,
+                Some(fire.agent),
+                fire.at,
+            );
+        }
+
         for couple in engine.couple_events() {
             self.push(
                 format!(

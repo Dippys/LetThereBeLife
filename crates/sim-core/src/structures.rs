@@ -8,6 +8,8 @@ pub const SHELTER_BUILD_TICKS: u64 = 600;
 pub const HEARTH_STONE_COST: u8 = 3;
 pub const HEARTH_WOOD_COST: u8 = 2;
 pub const HEARTH_BUILD_TICKS: u64 = 300;
+/// A fire holds at most this much fuel (seconds of burning) at once.
+pub const MAX_FUEL_SECONDS: u32 = 2 * 3_600;
 /// Cold relieved by one warm-up at a hearth.
 pub const HEARTH_WARMTH: u16 = 3_500;
 
@@ -42,6 +44,11 @@ pub enum Purpose {
 impl StructureKind {
     pub const COUNT: usize = 2;
     pub const ALL: [Self; Self::COUNT] = [Self::Shelter, Self::Hearth];
+
+    /// Whether it needs fuel to work (a fire).
+    pub const fn burns(self) -> bool {
+        matches!(self.purpose(), Purpose::Warmth)
+    }
 
     pub const fn purpose(self) -> Purpose {
         match self {
@@ -95,6 +102,16 @@ pub struct StructureView {
     pub builder: Option<AgentId>,
     pub started_at: SimTime,
     pub completes_at: SimTime,
+    /// For a fire: the simulated second it burns out (0 if it never burned).
+    pub fuel_until: u32,
+}
+
+impl StructureView {
+    /// Finished and, if it's a fire, burning at simulated second `now`.
+    pub const fn working(self, now: u32) -> bool {
+        matches!(self.state, StructureState::Complete)
+            && (!self.kind.burns() || self.fuel_until > now)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,6 +169,8 @@ pub(crate) struct StructureRecord {
     builder: AgentId,
     state: StructureState,
     kind: StructureKind,
+    /// For a fire: the simulated second it burns out.
+    fuel_until: u32,
 }
 
 impl StructureRecord {
@@ -164,6 +183,7 @@ impl StructureRecord {
             builder: (self.state == StructureState::UnderConstruction).then_some(self.builder),
             started_at: self.started_at,
             completes_at: self.completes_at,
+            fuel_until: self.fuel_until,
         }
     }
 }
@@ -234,6 +254,7 @@ impl StructureStore {
             builder,
             state: StructureState::UnderConstruction,
             kind,
+            fuel_until: 0,
         };
         self.records.push(Some(record));
         self.by_position.insert((position.y, position.x), id);
@@ -242,11 +263,37 @@ impl StructureStore {
         Ok(record.view(id))
     }
 
-    pub(crate) fn complete_for_builder(&mut self, builder: AgentId) -> Option<StructureView> {
+    /// Finishes `builder`'s structure; a fire starts burning on the fuel built
+    /// into it (`fuel_until`).
+    pub(crate) fn complete_for_builder(
+        &mut self,
+        builder: AgentId,
+        fuel_until: u32,
+    ) -> Option<StructureView> {
         let id = self.by_builder.remove(&builder)?;
         let record = self.records.get_mut(id.0 as usize)?.as_mut()?;
         record.state = StructureState::Complete;
+        if record.kind.burns() {
+            record.fuel_until = fuel_until;
+        }
         Some(record.view(id))
+    }
+
+    /// Adds `seconds` of burning to the fire at `position` (relighting it if
+    /// it's out), up to `MAX_FUEL_SECONDS` ahead of `now`. Returns whether
+    /// there was a finished fire there.
+    pub(crate) fn add_fuel(&mut self, position: WorldPosition, seconds: u32, now: u32) -> bool {
+        let Some(id) = self.structure_at(position) else {
+            return false;
+        };
+        let Some(record) = self.records.get_mut(id.0 as usize).and_then(Option::as_mut) else {
+            return false;
+        };
+        if !record.kind.burns() || record.state != StructureState::Complete {
+            return false;
+        }
+        record.fuel_until = (record.fuel_until.max(now) + seconds).min(now + MAX_FUEL_SECONDS);
+        true
     }
 
     pub(crate) fn cancel_for_builder(&mut self, builder: AgentId) -> Option<StructureView> {
@@ -268,7 +315,44 @@ impl StructureStore {
         })
     }
 
-    /// Whether a finished hearth stands within one cell of `position`.
+    /// A burning fire within one cell of `position` at simulated second `now`.
+    pub(crate) fn fire_beside(&self, position: WorldPosition, now: u32) -> bool {
+        self.structure_beside(position, |view| view.kind.burns() && view.working(now))
+    }
+
+    /// A finished fire within one cell of `position`, burning or not.
+    pub(crate) fn hearth_position_beside(&self, position: WorldPosition) -> Option<WorldPosition> {
+        (-1..=1)
+            .flat_map(|dy| (-1..=1).map(move |dx| (dx, dy)))
+            .map(|(dx, dy)| WorldPosition {
+                x: position.x + dx,
+                y: position.y + dy,
+            })
+            .find(|&cell| {
+                self.structure_at(cell)
+                    .and_then(|id| self.view(id))
+                    .is_some_and(|view| view.kind.burns() && view.state == StructureState::Complete)
+            })
+    }
+
+    fn structure_beside(
+        &self,
+        position: WorldPosition,
+        wanted: impl Fn(StructureView) -> bool,
+    ) -> bool {
+        (-1..=1).any(|dy| {
+            (-1..=1).any(|dx| {
+                self.structure_at(WorldPosition {
+                    x: position.x + dx,
+                    y: position.y + dy,
+                })
+                .and_then(|id| self.view(id))
+                .is_some_and(&wanted)
+            })
+        })
+    }
+
+    #[cfg(test)]
     pub(crate) fn hearth_beside(&self, position: WorldPosition) -> bool {
         (-1..=1).any(|dy| {
             (-1..=1).any(|dx| {

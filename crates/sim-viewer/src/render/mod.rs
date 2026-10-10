@@ -95,6 +95,8 @@ pub enum Hover {
     Structure {
         kind: StructureKind,
         state: StructureState,
+        /// For a fire: seconds of burning left (0 = out).
+        burning: Option<u32>,
     },
     Resource {
         label: &'static str,
@@ -646,6 +648,7 @@ impl Renderer {
             engine.structure_views(MAX_STRUCTURE_INSTANCES),
             view.world_bounds(),
             view.scale() as f32,
+            (state.snapshot.tick / 60) as u32,
             &mut self.structure_instances,
         );
         debug_assert!(self.structure_instances.len() <= MAX_STRUCTURE_INSTANCES);

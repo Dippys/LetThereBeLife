@@ -103,3 +103,47 @@ fn warming_up_needs_a_hearth_beside_you() {
         Err(crate::PolicyFailureReason::TargetUnavailable)
     );
 }
+
+#[test]
+fn a_fire_burns_out_and_someone_with_wood_relights_it() {
+    let (mut engine, site) = builder_and_watcher();
+    engine
+        .start_build(
+            AgentId::new(0),
+            site,
+            PolicyReason::NoUrgentNeed,
+            StructureKind::Hearth,
+        )
+        .unwrap();
+    engine.apply_build_completion(AgentId::new(0)).unwrap();
+    let builder = engine.population.view(AgentId::new(0)).unwrap().position;
+    // Two wood went in: an hour of burning.
+    assert!(engine.structures.fire_beside(builder, 3_599));
+    assert!(!engine.structures.fire_beside(builder, 3_600), "burned out");
+    engine.time = SimTime::from_ticks(3_600 * 60);
+    assert_eq!(
+        engine.apply_warm_up(AgentId::new(0)),
+        Err(PolicyFailureReason::TargetUnavailable),
+        "a dead fire warms nobody"
+    );
+
+    engine
+        .population
+        .add_inventory(AgentId::new(0), Material::Wood, 1);
+    engine.apply_tend_fire(AgentId::new(0)).unwrap();
+    assert!(engine.fire_events()[0].relit);
+    assert!(engine.structures.fire_beside(builder, 3_600 + 1_799));
+    assert_eq!(
+        engine
+            .population
+            .inventory(AgentId::new(0))
+            .unwrap()
+            .amount(Material::Wood),
+        0
+    );
+    assert_eq!(
+        engine.apply_tend_fire(AgentId::new(0)),
+        Err(PolicyFailureReason::TargetUnavailable),
+        "nothing left to burn"
+    );
+}
