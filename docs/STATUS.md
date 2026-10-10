@@ -77,25 +77,27 @@ personality, relationships, and learned knowledge (what the viewer runs).
 | Seed (terrain) | Spawn | legacy | memory | sharing | full |
 |---|---|---|---|---|---|
 | 1 (savanna/desert) | random land | 9 | 20 | 19 | 20 |
-| 1 | groups of 5 | 10 | 20 | 19 | 20 |
-| 1 | near water | 9 | 19 | 19 | 19 |
+| 1 | groups of 5 | 10 | 20 | 20 | 20 |
+| 1 | near water | 10 | 19 | 19 | 19 |
 | 4 | random land | 14 | 20 | 20 | 20 |
-| 4 | groups | 9 | 20 | 20 | 20 |
-| 4 | near water | 11 | 20 | 20 | 20 |
+| 4 | groups | 10 | 20 | 20 | 20 |
+| 4 | near water | 13 | 20 | 20 | 20 |
 | 7 (desert/alpine) | random land | 1 | 2 | 2 | 4 |
 | 7 | groups | 0 | 1 | 3 | 0 |
-| 7 | near water | 3 | 14 | 13 | 15 |
-| 9 (small island) | random land | 5 | 15 | 16 | 17 |
-| 9 | groups | 6 | 18 | 19 | 19 |
-| 9 | near water | 4 | 18 | 17 | 18 |
-| 42 (forest) | random land | 17 | 19 | 20 | 20 |
-| 42 | groups | 15 | 20 | 19 | 20 |
+| 7 | near water | 5 | 14 | 15 | 17 |
+| 9 (small island) | random land | 5 | 16 | 17 | 16 |
+| 9 | groups | 6 | 18 | 18 | 20 |
+| 9 | near water | 4 | 18 | 19 | 19 |
+| 42 (forest) | random land | 16 | 19 | 20 | 20 |
+| 42 | groups | 14 | 20 | 20 | 20 |
 | 42 | near water | 15 | 20 | 20 | 20 |
-| **Total of 300** | | **128** | **246** | **246** | **252** |
+| **Total of 300** | | **132** | **247** | **252** | **255** |
 
-Legacy fell from 154 because a third of the bushes are now bitter (less food for agents that
-don't remember places). The full mind is unchanged within noise (249 → 252). In the valley with
-wildlife and hearths, 119 of 120 agents survive 1.2M ticks across six seeds.
+Legacy fell from 154 when a third of the bushes became bitter (less food for agents that don't
+remember places). In the valley (20 people with wildlife, 1.2M ticks, the 66 livable valleys among
+seeds 1-120), 1,238 of 1,320 are alive and on their feet at the end. Earlier figures (such as
+"119 of 120") counted people lying collapsed after wolf bites as survivors: before wounded people
+could come round (D-082), 168 of 1,303 "survivors" were collapsed for good.
 
 The social layer doesn't add survival, since most scenarios were at their ceiling. It makes agents
 different from each other and makes sharing work: in group spawns, time in company and the share of
@@ -119,13 +121,13 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Known problems and limitations
 
-- **Complete misunderstanding episodes are still rare.** The success test now pins a natural
-  episode in the 16-adult seed 13 valley (bitter berries pointed out as food, read as berries,
-  visited, and the speaker later doubting its word). Under the stricter detector (the listener must
-  act before it learns better; the speaker's lesson must concern the meaning at stake), it was the
-  only one in the first 32 runs of a 40-seed × 2-band × 4.8M-tick scan. Misreadings are mostly
-  between the two families, who live apart, so the speaker rarely learns. A constructed test covers
-  the animal-call version end to end (a wolf warning misread as deer, hunted, found out, corrected).
+- **Complete misunderstanding episodes happen in about one valley in seven** (7 in the 40 valleys
+  the success test runs; 10 in 66 valleys over seeds 1-120), mostly bitter berries pointed out as
+  food and read as berries. The families do meet (people spend about 25% of their time near the
+  other family); what's limited is the speaker learning afterwards. A constructed test covers the
+  animal-call version end to end (a wolf warning misread as deer, hunted, found out, corrected).
+- **Wolves are hard on loners.** Agents who wander off alone get bitten; wounded people now come
+  round after 5 minutes, but some die of thirst while down or soon after.
 - **Helping matters only in famines.** With regrowth and game, nobody needs to ask for food; the M7
   helping test runs famine valleys (`--no-regrowth --no-wildlife --food 5`).
 - **COME (regroup) requests aren't implemented** (deferred from M7).
@@ -151,7 +153,11 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
-- 2026-10-10 (latest): living world L1–L4: materials with properties,
+- 2026-10-10 (latest): misunderstandings that run their course: worded hints are judged at the
+  spot pointed at, idle agents check what was pointed out nearby, a corrected speaker trusts its
+  word less, errands avoid wolves in view, wounded people come round, and the success test runs 40
+  valleys instead of pinning one episode (D-082). Also a plain-language viewer (D-081).
+- 2026-10-10: living world L1–L4: materials with properties,
   bitter berries, learned food beliefs, regrowth, deer and wolves, hunting and bites, warnings and
   calls to hunt, hearths, and fixes for agents pacing, chasing, or sleeping through bites
   (D-078–D-080).

@@ -89,6 +89,8 @@ pub enum HealthDiagnosticKind {
     Incapacitated,
     Died,
     StaleEvent,
+    /// Came round after being knocked down by a wound.
+    Recovered,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -231,6 +233,21 @@ impl HealthState {
         if self.status == HealthStatus::Healthy {
             self.value = self.value.saturating_add(amount).min(HEALTH_MAX);
         }
+    }
+
+    /// Comes round after a wound knocked it down: back on its feet with health
+    /// just above collapsing. Returns `(before, after)`, or `None` if it isn't
+    /// lying wounded.
+    pub(crate) fn revive(&mut self) -> Option<(u16, u16)> {
+        if self.status != HealthStatus::Incapacitated {
+            return None;
+        }
+        let before = self.value;
+        self.value = self
+            .value
+            .max(HEALTH_INCAPACITATION_THRESHOLD + crate::SLEEP_HEALING);
+        self.status = HealthStatus::Healthy;
+        Some((before, self.value))
     }
 
     /// A wound: health falls by `amount` at once.

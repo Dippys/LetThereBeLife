@@ -448,3 +448,72 @@ fn curious_agents_pick_the_most_promising_unchecked_hint() {
     );
     assert_eq!(map.hint_to_check(1, at(0, 0)), Some(at(30, 0)));
 }
+
+fn bush(position: WorldPosition, kind: Material) -> PerceivedResource {
+    PerceivedResource {
+        position,
+        resource: BaseResource { capacity: 12, kind },
+    }
+}
+
+/// A berries hint said with a word, where the listener also weighed bitter berries.
+fn worded_berries_hint(map: &mut MentalMap, spot: WorldPosition) {
+    let source = HintSource {
+        form: Some(VocalForm(4)),
+        alternative: Some(Concept::Bitterberries),
+        ..HintSource::from_teller(1)
+    };
+    assert!(map.remember_told(LandmarkKind::Berries, spot, 3, 1, source, 144));
+}
+
+#[test]
+fn a_worded_hint_is_judged_by_what_stands_at_the_spot() {
+    let spot = at(0, 0);
+    // A berry bush 10 cells away, known first-hand, doesn't make the hint old news.
+    let mut map = MentalMap::default();
+    observe(
+        &mut map,
+        1,
+        at(10, 0),
+        &with_food(view_around(at(10, 0)), &[at(10, 0)]),
+        1,
+    );
+    worded_berries_hint(&mut map, spot);
+
+    // Seen from afar, berries elsewhere in view don't settle it.
+    let far = at(8, 0);
+    let mut checks = Vec::new();
+    let mut view = view_around(far);
+    view.resources = vec![
+        bush(at(10, 0), Material::Berries),
+        bush(at(1, 0), Material::Bitterberries),
+    ];
+    map.observe(1, far, &view, 2, &mut |check| checks.push(check));
+    assert!(checks.is_empty(), "{checks:?}");
+
+    // Up close, the bitter bush stands closest to the spot: the word was misread.
+    let near = at(3, 0);
+    let mut view = view_around(near);
+    view.resources = vec![
+        bush(at(3, 1), Material::Berries),
+        bush(at(1, 0), Material::Bitterberries),
+    ];
+    map.observe(1, near, &view, 3, &mut |check| checks.push(check));
+    assert_eq!(checks.len(), 1);
+    assert!(!checks[0].confirmed);
+    assert_eq!(checks[0].alternative, Some(Concept::Bitterberries));
+    assert_eq!(checks[0].form, Some(VocalForm(4)));
+
+    // With berries closest to the spot, the same hint is confirmed.
+    let mut map = MentalMap::default();
+    worded_berries_hint(&mut map, spot);
+    let mut checks = Vec::new();
+    let mut view = view_around(near);
+    view.resources = vec![
+        bush(at(0, 1), Material::Berries),
+        bush(at(2, 0), Material::Bitterberries),
+    ];
+    map.observe(1, near, &view, 3, &mut |check| checks.push(check));
+    assert_eq!(checks.len(), 1);
+    assert!(checks[0].confirmed);
+}

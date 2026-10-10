@@ -181,7 +181,7 @@ impl Engine {
         let beg = self.beg_target(agent, perception);
         let food = self.food_values(agent);
         self.check_leads(agent, perception, now);
-        let (seen_danger, seen_prey) = self.animals_of_interest(agent, origin, perception);
+        let (seen_danger, seen_prey, wary) = self.animals_of_interest(agent, origin, perception);
         let (alarm, quarry) = self.minds.get_mut(agent).dialogue.current_leads(now);
         let near = |place: WorldPosition, within: u64| {
             origin.x.abs_diff(place.x).max(origin.y.abs_diff(place.y)) <= within
@@ -338,6 +338,7 @@ impl Engine {
                 beg_target: beg.map(|(_, position)| position),
                 food,
                 danger,
+                wary,
                 prey: seen_prey,
                 quarry: quarry_place,
                 warn: warn.map(|(_, position)| position),
@@ -657,17 +658,24 @@ impl Engine {
                 let wrong = unmistakable(negated);
                 let right = unmistakable(public.mime);
                 let speaks_it = mind.lexicon.produce(right) == Some(form);
-                mind.lexicon.contradict(form, wrong, REPAIR_WEIGHT);
-                mind.lexicon.reinforce(form, right, REPAIR_WEIGHT);
-                if speaks_it {
+                let (strengthened, weakened) = if speaks_it {
+                    // Its own word was taken the wrong way. As after a failed
+                    // round of a naming game, it trusts the word less for what
+                    // it meant: others evidently hear it otherwise.
+                    mind.lexicon.contradict(form, right, REPAIR_WEIGHT);
                     mind.lexicon.record_use(form, right, false);
-                }
+                    (None, Some(right))
+                } else {
+                    mind.lexicon.contradict(form, wrong, REPAIR_WEIGHT);
+                    mind.lexicon.reinforce(form, right, REPAIR_WEIGHT);
+                    (Some(right), Some(wrong))
+                };
                 self.lesson_events.push(LessonEvent {
                     agent: watcher.id,
                     at: self.time,
                     form,
-                    strengthened: Some(right),
-                    weakened: Some(wrong),
+                    strengthened,
+                    weakened,
                     use_worked: speaks_it.then_some(false),
                     cause: LessonCause::Correction,
                     signal: Some(id),
@@ -903,15 +911,20 @@ impl Engine {
     }
 
     /// The nearest animal in view `agent` believes is dangerous (if it's close
-    /// enough to worry about), and the nearest it believes is worth hunting.
+    /// enough to worry about), the nearest it believes is worth hunting, and the
+    /// nearest dangerous one at any distance (to keep errands away from it).
     fn animals_of_interest(
         &self,
         agent: AgentId,
         origin: WorldPosition,
         perception: &PhysicalPerception,
-    ) -> (Option<WorldPosition>, Option<WorldPosition>) {
+    ) -> (
+        Option<WorldPosition>,
+        Option<WorldPosition>,
+        Option<WorldPosition>,
+    ) {
         let Some(mind) = self.minds.get(agent) else {
-            return (None, None);
+            return (None, None, None);
         };
         let distance = |position: WorldPosition| {
             origin
@@ -933,6 +946,7 @@ impl Engine {
                 &|species| mind.fauna.prey(species) && !mind.fauna.dangerous(species),
                 u64::MAX,
             ),
+            nearest(&|species| mind.fauna.dangerous(species), u64::MAX),
         )
     }
 

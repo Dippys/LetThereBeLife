@@ -124,7 +124,9 @@ impl Engine {
                             self.death_records.push(record);
                         }
                     }
-                    HealthDiagnosticKind::Deteriorated | HealthDiagnosticKind::StaleEvent => {}
+                    HealthDiagnosticKind::Deteriorated
+                    | HealthDiagnosticKind::StaleEvent
+                    | HealthDiagnosticKind::Recovered => {}
                 }
                 self.health_diagnostics.push(outcome);
                 if outcome.kind == HealthDiagnosticKind::StaleEvent {
@@ -194,6 +196,7 @@ impl Engine {
         let due_backlog = self.scheduler.has_due(self.time);
         self.runtime_counters.due_backlog_ticks += u64::from(due_backlog);
         self.step_wildlife();
+        self.revive_due();
         // Autonomous agents re-schedule constantly; without this, stale events
         // were only pruned on manual commands and piled up during long runs.
         self.compact_scheduler_if_needed();

@@ -5,9 +5,9 @@
 use std::{collections::BTreeSet, fmt};
 
 use sim_core::{
-    AgentActivity, AgentId, DeathCause, Engine, EngineCommand, EngineConfig, PhysicalGoal,
-    PolicyDiagnosticKind, PolicyOptions, PopulationInit, Standability, TickOutcome, WaterSource,
-    WorldConfig, WorldPosition, WorldRect,
+    AgentActivity, AgentId, AgentView, DeathCause, Engine, EngineCommand, EngineConfig,
+    PhysicalGoal, PolicyDiagnosticKind, PolicyOptions, PopulationInit, Standability, TickOutcome,
+    WaterSource, WorldConfig, WorldPosition, WorldRect,
 };
 
 use crate::scenario::ScenarioError;
@@ -106,6 +106,9 @@ struct AgentTrack {
     informed: u64,
     explored_gestures: u64,
     company_samples: u64,
+    /// Samples with someone of another family within 8 cells.
+    mixed_samples: u64,
+    family: u8,
     /// Decisions to head for a place someone pointed out.
     hint_decisions: u64,
     /// Decisions to head for a place the agent saw itself.
@@ -122,6 +125,8 @@ pub struct StudyReport {
     pub config: StudyConfig,
     pub world: StudyWorldSummary,
     pub survivors: u32,
+    /// Survivors lying collapsed at the end (alive, but unable to act).
+    pub collapsed: u32,
     pub deaths: [u32; DeathCause::COUNT],
     /// Death ticks sorted ascending; empty when nobody died.
     pub death_ticks: Vec<u64>,
@@ -168,6 +173,20 @@ pub struct StudyReport {
     pub food: FoodStats,
     /// Hunting, bites, and the animals left.
     pub wildlife: WildlifeStats,
+    pub families: FamilyStats,
+}
+
+/// How much the founding families mix (valley runs).
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct FamilyStats {
+    /// Manhattan distance between the first two families' camps.
+    pub camp_distance: u64,
+    /// Percent of sampled living time with someone of another family within 8 cells.
+    pub mixed_percent: u64,
+    /// Receptions where speaker and listener belong to different families, and
+    /// how many of those were misread.
+    pub cross_receptions: u64,
+    pub cross_misread: u64,
 }
 
 /// What happened between people and animals.
@@ -288,7 +307,7 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     if let Some(founders) = founders {
         engine.set_founders(founders);
     }
-    for (child, parent) in parents {
+    for &(child, parent) in &parents {
         engine.bond(AgentId::new(child as u32), AgentId::new(parent as u32));
     }
     engine
@@ -301,6 +320,18 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     for (track, spawn) in tracks.iter_mut().zip(&spawns) {
         track.spawn = Some(*spawn);
     }
+    // Founders come in family order; children belong to their parent's family.
+    let founder_count = founders.map_or(population, |count| count as usize);
+    let family_size = founder_count.div_ceil(sim_core::VALLEY_FAMILIES).max(1);
+    for (index, track) in tracks.iter_mut().enumerate().take(founder_count) {
+        track.family = (index / family_size) as u8;
+    }
+    for &(child, parent) in &parents {
+        tracks[child].family = tracks[parent].family;
+    }
+    let camp_distance = spawns.get(family_size).map_or(0, |other| {
+        spawns[0].x.abs_diff(other.x) + spawns[0].y.abs_diff(other.y)
+    });
     let mut trace = std::collections::VecDeque::new();
     let mut comms = crate::comms::CommunicationLog::default();
     let mut early_vocabulary = 0;
@@ -383,6 +414,26 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     }
     let mut report = build_report(&engine, config, &spawns, &fresh_water, &tracks, &tiles);
     report.trace = trace.into_iter().collect();
+    let family_of = |agent: AgentId| tracks.get(agent.get() as usize).map(|track| track.family);
+    let mut families = FamilyStats {
+        camp_distance,
+        mixed_percent: percent(
+            tracks.iter().map(|track| track.mixed_samples).sum(),
+            tracks.iter().map(|track| track.alive_samples).sum(),
+        ),
+        ..FamilyStats::default()
+    };
+    for exchange in comms.exchanges() {
+        let speaker = family_of(exchange.signal.signal.sender);
+        for reception in &exchange.receptions {
+            if family_of(reception.interpretation.receiver) != speaker {
+                families.cross_receptions += 1;
+                families.cross_misread +=
+                    u64::from(reception.interpretation.understood != exchange.signal.intent.topic);
+            }
+        }
+    }
+    report.families = families;
     report.comms = comms;
     report.vocabulary_agreement = [early_vocabulary, vocabulary_agreement(&engine, population)];
     report.children_vocabulary = children_vocabulary(&engine, population);
@@ -576,6 +627,29 @@ fn record_trace(engine: &Engine, agent: AgentId, trace: &mut std::collections::V
             ));
         }
     }
+    for event in engine.wildlife_events() {
+        if let sim_core::WildlifeEvent::Bite {
+            agent: bitten,
+            species,
+            damage,
+            position,
+            ..
+        } = *event
+            && bitten == agent
+        {
+            lines.push(format!(
+                "t={now} BITTEN by {species:?} at ({}, {}) damage={damage}",
+                position.x, position.y
+            ));
+        }
+    }
+    for diagnostic in engine.health_diagnostics() {
+        if diagnostic.agent == agent
+            && diagnostic.kind == sim_core::HealthDiagnosticKind::Incapacitated
+        {
+            lines.push(format!("t={now} INCAPACITATED"));
+        }
+    }
     for record in engine.death_records() {
         if record.agent == agent && record.at.ticks() == now {
             lines.push(format!("t={now} DIED {:?}", record.cause));
@@ -595,12 +669,20 @@ fn sample(engine: &Engine, tracks: &mut [AgentTrack], tiles: &mut [BTreeSet<(i64
         .filter(|view| view.activity != AgentActivity::Dead)
         .collect();
     for view in &living {
-        let in_company = living.iter().any(|other| {
+        let family = tracks[view.id.get() as usize].family;
+        let near = |other: &&AgentView| {
             other.id != view.id
                 && other.position.x.abs_diff(view.position.x) <= 8
                 && other.position.y.abs_diff(view.position.y) <= 8
-        });
-        tracks[view.id.get() as usize].company_samples += u64::from(in_company);
+        };
+        let in_company = living.iter().any(|other| near(&other));
+        let mixed = living
+            .iter()
+            .filter(near)
+            .any(|other| tracks[other.id.get() as usize].family != family);
+        let track = &mut tracks[view.id.get() as usize];
+        track.company_samples += u64::from(in_company);
+        track.mixed_samples += u64::from(mixed);
     }
     for view in engine.agent_views(usize::MAX) {
         if matches!(view.activity, AgentActivity::Dead) {
@@ -691,6 +773,10 @@ fn build_report(
         config,
         world: summarize_world(engine, fresh_water),
         survivors: config.population - deaths.iter().sum::<u32>(),
+        collapsed: engine
+            .agent_views(usize::MAX)
+            .filter(|view| view.activity == AgentActivity::Incapacitated)
+            .count() as u32,
         deaths,
         death_ticks,
         mean_moves: tracks.iter().map(|track| track.moves).sum::<u64>() / count,
@@ -735,6 +821,7 @@ fn build_report(
         children_vocabulary: None,
         food: FoodStats::default(),
         wildlife: WildlifeStats::default(),
+        families: FamilyStats::default(),
         minds: (0..tracks.len())
             .map(|index| engine.mental_map(AgentId::new(index as u32)))
             .collect(),
@@ -1134,8 +1221,9 @@ impl fmt::Display for StudyReport {
         )?;
         writeln!(
             formatter,
-            "  survivors={}  deaths dehydration/exposure/starvation/exhaustion/injury={}/{}/{}/{}/{}  median_death_tick={}",
+            "  survivors={} (collapsed {})  deaths dehydration/exposure/starvation/exhaustion/injury={}/{}/{}/{}/{}  median_death_tick={}",
             self.survivors,
+            self.collapsed,
             self.deaths[DeathCause::Dehydration as usize],
             self.deaths[DeathCause::Exposure as usize],
             self.deaths[DeathCause::Starvation as usize],
@@ -1211,6 +1299,17 @@ impl fmt::Display for StudyReport {
                 wild.births,
                 wild.deer,
                 wild.wolves,
+            )?;
+        }
+        if self.config.spawn == StudySpawn::Valley {
+            let families = &self.families;
+            write!(
+                formatter,
+                "\n  families: camps {} cells apart; near the other family {}% of the time; receptions across families {} ({} misread)",
+                families.camp_distance,
+                families.mixed_percent,
+                families.cross_receptions,
+                families.cross_misread
             )?;
         }
         let [founders_fire, children_fire] = self.wildlife.know_fire;

@@ -121,8 +121,8 @@ Compare minds before and after any behavior change. Current numbers are in [STAT
 
 The top bar shows time, speed, and head counts. Hovering shows a one-line tooltip (person, animal,
 bush with what's left, terrain). **Recent events** (bottom left) lists deaths, bites, kills, gifts,
-warnings, and misunderstandings ("Person 16 took "kani" to mean water, but Person 3 meant
-berries"); click one to look. Words appear for 2.5 s as bubbles over the speaker with the gesture
+warnings, collapses and recoveries, corrections, and misunderstandings ("Person 16 mistook
+"kani" for water (meant berries)"); click one to look. Words appear for 2.5 s as bubbles over the speaker with the gesture
 that went with them (uppercase when shouted), and a dotted line shows where the gesture pointed.
 
 For screenshots: `--valley --advance TICKS --select PERSON --smoke-frames N --screenshot out.png`

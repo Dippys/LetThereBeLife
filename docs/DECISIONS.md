@@ -309,3 +309,34 @@ washed every color out. `Esc` closes things instead of quitting; reset needs `Sh
 **Consequences:** The interface records its clickable regions each frame, so input asks the
 renderer what is under the mouse. The feed and bubbles show the sender's private intent (who meant
 what); that is presentation only, and agents still never see it.
+
+## D-082: Misunderstandings that run their course, and a sturdier success test (2026-10-10)
+
+**Decision:**
+- A hint that came with a word names one spot. It is judged only from within 6 cells: whichever of
+  the expected thing and the alternative the listener weighed stands closer to the spot (within 2
+  cells) confirms or refutes it. Inconclusive spots turn it into an ordinary hint. Such hints are
+  no longer dropped because a place of that kind is known nearby.
+- Idle agents sometimes go to look at a place pointed out within 48 cells (curious ones more often).
+- When a correction shows a speaker its own word was taken otherwise, it trusts the word less for
+  what it meant (as after a failed round of a naming game) instead of reinforcing it.
+- Errands that can wait (visits, seeking someone, checking tips) don't lead toward a dangerous
+  animal in view.
+- People knocked down by a wound come round after 5 minutes with health just above collapsing.
+- The success detector also accepts a speaker learning from going where the listener pointed with
+  the word (a consequence lesson tied to the listener's gesture), under the same conditions as
+  before (same word, after the listener's lesson, about the meaning at stake). The success test
+  runs every livable valley among seeds 1-78 (40, in parallel, about a minute in release) and
+  requires 2 episodes in total; 7 were measured.
+- The study reports how many survivors lie collapsed, and how much the families mix.
+
+**Why:** Measurement showed the families already meet (about 25% of the time near the other
+family, 2,000-3,500 cross-family receptions per run), so a shared fire wouldn't help. Misread
+hints were discarded or "confirmed" by any matching bush within 36 cells, corrections never
+changed the speaker's behavior, and the detector could not count a correction at all. A single
+pinned episode broke with every behavior change.
+**Consequences:** Complete episodes rose from about 1 in 30 runs to about 1 in 7. Agents are less
+idle (58-69% instead of 60-75%). Collapsed agents used to stay down for good and were counted as
+survivors (168 of 1,303 in 66 valleys); now 1,238 of 1,320 are standing at the end, against 1,135
+before. Consequence lessons that drop what the speaker meant stay rare (about 1 in 15).
+

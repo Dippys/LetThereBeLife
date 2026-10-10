@@ -44,6 +44,9 @@ pub(crate) struct Temperament {
     pub(crate) visit_chance: u16,
     /// Agents this sociable stay with company instead of wandering off.
     pub(crate) stays_with_company: bool,
+    /// Chance out of 256 that an idle agent goes to look at a place someone
+    /// pointed out nearby.
+    pub(crate) nosy_chance: u16,
 }
 
 impl Temperament {
@@ -65,6 +68,7 @@ impl Temperament {
             work_chance: Personality::scale(diligence, 0, 512).min(256) as u16,
             visit_chance: Personality::scale(sociability, 0, 200) as u16,
             stays_with_company: sociability >= 160,
+            nosy_chance: Personality::scale(curiosity, 24, 120) as u16,
         }
     }
 }
@@ -76,6 +80,8 @@ pub const HOME_RANGE: u64 = 200;
 const HEARTH_FROM_HOME: u64 = 16;
 /// Tiredness (out of 10,000) at which an agent sleeps wherever it can.
 const REST_CRITICAL: u16 = 8_800;
+/// Idle agents go to look at places pointed out within this many cells.
+const NOSY_RANGE: u64 = 48;
 /// Exploration never shrinks the round-trip range below this many cells.
 const MIN_LEASH: u64 = 24;
 
@@ -127,6 +133,8 @@ pub(crate) struct MindInput<'a> {
     pub(crate) food: FoodValues,
     /// The nearest animal in view it believes is dangerous, if close.
     pub(crate) danger: Option<WorldPosition>,
+    /// The nearest animal in view it believes is dangerous, at any distance.
+    pub(crate) wary: Option<WorldPosition>,
     /// The nearest animal in view it believes is worth hunting.
     pub(crate) prey: Option<WorldPosition>,
     /// Where someone called it to come and hunt (when nothing is in view).
@@ -477,7 +485,7 @@ impl Planner<'_> {
         }
         // Someone needs setting straight: go and find them.
         if let Some(person) = self.mind.seek
-            && let Some((waypoint, heading)) = self.waypoint_toward(person)
+            && let Some((waypoint, heading)) = self.errand_toward(person)
         {
             return Deliberation {
                 selection: PolicySelection {
@@ -490,7 +498,7 @@ impl Planner<'_> {
         }
         if let Some(friend) = self.mind.friend_target
             && self.roll(2) < temperament.visit_chance
-            && let Some((waypoint, heading)) = self.waypoint_toward(friend)
+            && let Some((waypoint, heading)) = self.errand_toward(friend)
         {
             return Deliberation {
                 selection: PolicySelection {
@@ -521,7 +529,7 @@ impl Planner<'_> {
             // Curiosity first checks what others have pointed out.
             if let Some(hint) = map.hint_to_check(self.needs.agent.get(), origin)
                 && self.within_leash(hint)
-                && let Some((waypoint, heading)) = self.waypoint_toward(hint)
+                && let Some((waypoint, heading)) = self.errand_toward(hint)
             {
                 return Deliberation {
                     selection: PolicySelection {
@@ -535,6 +543,22 @@ impl Planner<'_> {
             if let Some(explore) = self.explore(PolicyReason::NoUrgentNeed, true) {
                 return explore;
             }
+        }
+        // Nothing to do: go and see what someone pointed out close by.
+        if let Some(hint) = map.hint_to_check(self.needs.agent.get(), origin)
+            && manhattan(origin, hint) <= NOSY_RANGE
+            && self.roll(4) < temperament.nosy_chance
+            && self.within_leash(hint)
+            && let Some((waypoint, heading)) = self.errand_toward(hint)
+        {
+            return Deliberation {
+                selection: PolicySelection {
+                    goal: PhysicalGoal::Explore,
+                    target: Some(waypoint),
+                    reason: PolicyReason::ToldPlace,
+                },
+                heading: Some(heading),
+            };
         }
         Deliberation::wait(origin, PolicyReason::NoUrgentNeed)
     }
@@ -758,6 +782,18 @@ impl Planner<'_> {
 
     /// The reachable cell in view closest to `destination`, or a detour around
     /// whatever blocks the direct line.
+    /// A waypoint for an errand that can wait (a visit, a look at a tip): none
+    /// when it would lead toward a dangerous animal in view.
+    fn errand_toward(
+        &self,
+        destination: WorldPosition,
+    ) -> Option<(WorldPosition, ExplorationHeading)> {
+        let (waypoint, heading) = self.waypoint_toward(destination)?;
+        let closer =
+            |threat: WorldPosition| manhattan(waypoint, threat) < manhattan(self.origin, threat);
+        (!self.mind.wary.is_some_and(closer)).then_some((waypoint, heading))
+    }
+
     fn waypoint_toward(
         &self,
         destination: WorldPosition,

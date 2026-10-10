@@ -77,6 +77,8 @@ pub struct CommunicationSummary {
     pub lessons: [u64; 5],
     /// Corrections made ("you said X, but it was this, not that").
     pub corrections: u64,
+    /// Consequence lessons that dropped the meaning the speaker had in mind.
+    pub false_lessons: u64,
     /// Complete episodes of the project's definition of success (see `success_episodes`).
     pub success_episodes: u64,
     /// See `CommunicationLog::success_funnel`.
@@ -327,8 +329,10 @@ impl CommunicationLog {
                     && about_it
                     && match lesson.cause {
                         LessonCause::Correction => lesson.use_worked == Some(false),
-                        LessonCause::Usage => true,
-                        _ => false,
+                        // Heard the listener use the word, or went where the
+                        // listener pointed with it and saw what was there.
+                        LessonCause::Usage | LessonCause::Consequence => true,
+                        LessonCause::Confirmation | LessonCause::Repair => false,
                     }
             }) else {
                 continue;
@@ -401,7 +405,12 @@ impl CommunicationLog {
         };
         let speaker_step = match episode.speaker_lesson.cause {
             LessonCause::Correction => format!(
-                "saw agent {} correct \"{form}\" (showing {}, not {}) and counted its own use as misheard.",
+                "saw agent {} correct \"{form}\" and now doubts it means {}, since it was taken otherwise.",
+                episode.listener.get(),
+                name(episode.speaker_lesson.weakened)
+            ),
+            LessonCause::Consequence => format!(
+                "went where agent {} pointed with \"{form}\", found {} there, and now doubts it means {}.",
                 episode.listener.get(),
                 name(episode.speaker_lesson.strengthened),
                 name(episode.speaker_lesson.weakened)
@@ -459,6 +468,17 @@ impl CommunicationLog {
                 LessonCause::Usage => 4,
             };
             summary.lessons[slot] += 1;
+            // A consequence lesson that drops what the speaker meant is a false lesson.
+            if lesson.cause == LessonCause::Consequence
+                && let Some(exchange) = lesson.signal.and_then(|id| {
+                    self.exchanges
+                        .iter()
+                        .find(|exchange| exchange.signal.id == id)
+                })
+                && lesson.weakened == Some(exchange.signal.intent.topic.concept())
+            {
+                summary.false_lessons += 1;
+            }
         }
         let (episodes, funnel) = self.trace_episodes();
         summary.success_episodes = episodes.len() as u64;
@@ -564,8 +584,12 @@ impl fmt::Display for CommunicationSummary {
         let [consequence, confirmation, repair, correction, usage] = self.lessons;
         write!(
             formatter,
-            "\n  repair: questions {} (repaired {}), corrections {}; word lessons: consequence {consequence}, confirmation {confirmation}, repair {repair}, correction {correction}, usage {usage}; SUCCESS EPISODES {}",
-            self.questions, self.repaired, self.corrections, self.success_episodes
+            "\n  repair: questions {} (repaired {}), corrections {}; word lessons: consequence {consequence} ({} against what was meant), confirmation {confirmation}, repair {repair}, correction {correction}, usage {usage}; SUCCESS EPISODES {}",
+            self.questions,
+            self.repaired,
+            self.corrections,
+            self.false_lessons,
+            self.success_episodes
         )?;
         let [lessons, informing, misread, about, speaker] = self.success_funnel;
         write!(

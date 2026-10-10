@@ -20,6 +20,8 @@ const STRIKE_CHANCE: u64 = 45;
 const HELPER_CHANCE: u64 = 20;
 /// Each wound slows an animal's hurried step by this many ticks.
 const WOUND_SLOWDOWN_TICKS: u64 = 5;
+/// How long someone knocked down by a wound lies before coming round (5 minutes).
+pub(super) const WOUND_RECOVERY_TICKS: u64 = 18_000;
 
 impl Engine {
     /// Scenario setup: releases `deer` deer in three herds and `wolves` wolves at
@@ -395,6 +397,30 @@ impl Engine {
         }
     }
 
+    /// People knocked down by a wound come round once their time is up, weak but
+    /// on their feet, unless their needs have taken over meanwhile.
+    pub(super) fn revive_due(&mut self) {
+        while let Some(&(due, agent)) = self.recovering.front() {
+            if due > self.time {
+                break;
+            }
+            self.recovering.pop_front();
+            if let Some((before, after)) =
+                self.population
+                    .revive(&mut self.scheduler, self.time, agent)
+            {
+                self.health_diagnostics.push(crate::HealthDiagnostic {
+                    agent,
+                    at: self.time,
+                    cause: None,
+                    before,
+                    after,
+                    kind: HealthDiagnosticKind::Recovered,
+                });
+            }
+        }
+    }
+
     /// A wound from a bite or a fight: health falls at once, and the agent may
     /// be incapacitated or die of it.
     pub(super) fn wound(&mut self, agent: AgentId, amount: u16) {
@@ -405,6 +431,9 @@ impl Engine {
             HealthDiagnosticKind::Incapacitated => {
                 self.cancel_construction(agent);
                 self.population.incapacitate(self.time, agent);
+                if let Some(due) = self.time.checked_add(WOUND_RECOVERY_TICKS) {
+                    self.recovering.push_back((due, agent));
+                }
             }
             HealthDiagnosticKind::Died => {
                 self.cancel_construction(agent);
@@ -444,7 +473,7 @@ impl Engine {
                     });
                 }
             }
-            HealthDiagnosticKind::StaleEvent => {}
+            HealthDiagnosticKind::StaleEvent | HealthDiagnosticKind::Recovered => {}
         }
         self.health_diagnostics.push(outcome);
     }

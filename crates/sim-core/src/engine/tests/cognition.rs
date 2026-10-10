@@ -517,14 +517,21 @@ fn a_correction_teaches_the_speaker_its_word_was_misheard() {
         .expect("the speaker saw the correction");
     assert_eq!(speaker_lesson.cause, crate::LessonCause::Correction);
     assert_eq!(speaker_lesson.use_worked, Some(false));
-    let entry = engine
-        .mental_map(AgentId::new(0))
-        .unwrap()
-        .lexicon
-        .into_iter()
-        .find(|entry| entry.form == form && entry.concept == crate::Concept::Water)
-        .unwrap();
+    // As after a failed naming-game round, it trusts the word less for water.
+    assert_eq!(speaker_lesson.weakened, Some(crate::Concept::Water));
+    assert_eq!(speaker_lesson.strengthened, None);
+    let water_entry = |engine: &Engine| {
+        engine
+            .mental_map(AgentId::new(0))
+            .unwrap()
+            .lexicon
+            .into_iter()
+            .find(|entry| entry.form == form && entry.concept == crate::Concept::Water)
+            .unwrap()
+    };
+    let entry = water_entry(&engine);
     assert_eq!(entry.failures, 1, "the speaker counts that use as misheard");
+    assert!(entry.contradictory > 0, "and doubts the word means water");
 }
 
 #[test]

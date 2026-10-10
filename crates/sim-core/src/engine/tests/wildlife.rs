@@ -1,4 +1,5 @@
 use super::*;
+use crate::engine::wildlife::WOUND_RECOVERY_TICKS;
 use crate::{
     Material, PHYSICAL_POLICY_RADIUS, PhysicalGoal, PolicyOptions, PolicyReason, Species,
     WildlifeEvent,
@@ -170,4 +171,34 @@ fn people_run_from_animals_they_fear_and_go_after_ones_they_hunt() {
         }
     }
     assert!(hunted, "some idle check turns into a hunt");
+}
+
+#[test]
+fn someone_knocked_down_by_bites_comes_round_and_decides_again() {
+    let (mut engine, _, _) = valley_pair();
+    engine
+        .activate_physical_policy_with_options(PolicyOptions::full())
+        .unwrap();
+    let victim = AgentId::new(0);
+    // Bites until it collapses (health 10,000 falls 1,500 a bite).
+    while engine.population.view(victim).unwrap().activity != AgentActivity::Incapacitated {
+        engine.wound(victim, 1_500);
+    }
+    let collapsed = engine.health(victim).unwrap().value;
+    assert!(collapsed <= crate::HEALTH_INCAPACITATION_THRESHOLD);
+    for _ in 0..WOUND_RECOVERY_TICKS + 2 {
+        engine.tick();
+        if engine.population.view(victim).unwrap().activity != AgentActivity::Incapacitated {
+            break;
+        }
+    }
+    let view = engine.population.view(victim).unwrap();
+    assert!(
+        !view.activity.is_terminal(),
+        "still {:?} after the recovery time",
+        view.activity
+    );
+    let health = engine.health(victim).unwrap();
+    assert_eq!(health.status, crate::HealthStatus::Healthy);
+    assert!(health.value > crate::HEALTH_INCAPACITATION_THRESHOLD);
 }

@@ -113,6 +113,34 @@ impl Population {
         self.settle_activity_without_events(now, agent, AgentActivity::Incapacitated);
     }
 
+    /// Gets a wounded, collapsed agent back on its feet (see `HealthState::revive`)
+    /// and lets it decide again. Returns the health change, or `None` if it
+    /// wasn't lying wounded.
+    pub(crate) fn revive(
+        &mut self,
+        scheduler: &mut crate::scheduler::Scheduler,
+        now: SimTime,
+        agent: AgentId,
+    ) -> Option<(u16, u16)> {
+        let index = agent.0 as usize;
+        if self.records.get(index)?.activity != AgentActivity::Incapacitated {
+            return None;
+        }
+        let change = self.health[index].revive()?;
+        self.settle_activity_without_events(now, agent, AgentActivity::Idle);
+        self.active_count += 1;
+        self.policies[index].set_phase(crate::policy::PolicyPhase::Dormant);
+        let _ = self.schedule_policy_decision(
+            scheduler,
+            now,
+            agent,
+            1,
+            crate::PolicyReason::InitialDecision,
+            false,
+        );
+        Some(change)
+    }
+
     pub(crate) fn finalize_death(
         &mut self,
         at: SimTime,

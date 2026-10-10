@@ -3,7 +3,10 @@
 
 use std::collections::VecDeque;
 
-use sim_core::{AgentId, DesiredEffect, Engine, GestureTopic, Mime, WildlifeEvent, WorldPosition};
+use sim_core::{
+    AgentId, DesiredEffect, Engine, GestureTopic, HealthDiagnosticKind, LessonCause, Mime,
+    WildlifeEvent, WorldPosition,
+};
 
 use crate::labels;
 
@@ -86,6 +89,25 @@ impl Feed {
             );
         }
         self.deaths_seen = deaths.len();
+
+        for health in engine.health_diagnostics() {
+            let text = match health.kind {
+                HealthDiagnosticKind::Incapacitated => "collapsed",
+                HealthDiagnosticKind::Recovered => "got back on their feet",
+                _ => continue,
+            };
+            let tone = if health.kind == HealthDiagnosticKind::Recovered {
+                Tone::Good
+            } else {
+                Tone::Bad
+            };
+            self.push(
+                format!("{} {text}", labels::person(health.agent)),
+                tone,
+                Some(health.agent),
+                agent_position(engine, health.agent),
+            );
+        }
 
         for event in engine.wildlife_events() {
             match *event {
@@ -176,7 +198,7 @@ impl Feed {
                 .unwrap_or_default();
             let text = match (signal.intent.effect, signal.signal.mime) {
                 (DesiredEffect::Correct, _) => format!(
-                    "{} corrected someone about {}",
+                    "{} corrected someone:{said} is {}",
                     labels::person(sender),
                     labels::topic(signal.intent.topic)
                 ),
@@ -189,6 +211,21 @@ impl Feed {
                 _ => continue,
             };
             self.push(text, Tone::Talk, Some(sender), signal.signal.origin);
+        }
+
+        for lesson in engine.lesson_events() {
+            if lesson.cause == LessonCause::Correction && lesson.use_worked == Some(false) {
+                self.push(
+                    format!(
+                        "{} realised {} was misunderstood",
+                        labels::person(lesson.agent),
+                        labels::word(lesson.form)
+                    ),
+                    Tone::Talk,
+                    Some(lesson.agent),
+                    agent_position(engine, lesson.agent),
+                );
+            }
         }
 
         for reading in engine.interpretation_events() {
@@ -205,13 +242,12 @@ impl Feed {
             }
             let what = reading
                 .heard
-                .map_or_else(|| "the gesture".to_owned(), labels::word);
+                .map_or_else(|| "a gesture".to_owned(), labels::word);
             self.push(
                 format!(
-                    "{} took {what} to mean {}, but {} meant {}",
+                    "{} mistook {what} for {} (meant {})",
                     labels::person(reading.receiver),
                     labels::topic(reading.understood),
-                    labels::person(signal.signal.sender),
                     labels::topic(meant)
                 ),
                 Tone::Talk,

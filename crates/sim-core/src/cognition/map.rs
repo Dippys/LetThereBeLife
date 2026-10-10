@@ -18,6 +18,11 @@ pub const VISITED_TILE_SLOTS: usize = 24;
 pub const VISIT_TILE_SIZE: i64 = 32;
 /// Same-kind places closer than this (Chebyshev cells) merge into one memory.
 pub const MERGE_RADIUS: u64 = 24;
+/// A worded hint names one spot: what stands this close to it (Chebyshev
+/// cells) is what was pointed at.
+pub const SPOT_RADIUS: u64 = 2;
+/// From this close (Chebyshev cells) an agent can see what stands at a spot.
+const SPOT_VIEW: u64 = 6;
 /// How far ahead (cells) exploration looks when judging whether a direction is new.
 const NOVELTY_LOOKAHEAD: i64 = 48;
 /// Confidence of a first-hand observation.
@@ -266,24 +271,21 @@ pub(crate) fn visible_kinds(
     perceived_nearest(origin, perception).map(|nearest| nearest.is_some())
 }
 
-/// Nearest perceived instance of each landmark kind, in kind order.
-fn perceived_nearest(
-    origin: WorldPosition,
-    perception: &PhysicalPerception,
-) -> [Option<WorldPosition>; LandmarkKind::COUNT] {
-    let nearest = |positions: &mut dyn Iterator<Item = WorldPosition>| {
-        positions.min_by_key(|position| (manhattan(origin, *position), position.y, position.x))
-    };
-    LandmarkKind::ALL.map(|kind| match (kind, kind.material()) {
-        (_, Some(material)) => nearest(
-            &mut perception
+/// Every perceived instance of `kind`.
+fn perceived_instances<'a>(
+    kind: LandmarkKind,
+    perception: &'a PhysicalPerception,
+) -> Box<dyn Iterator<Item = WorldPosition> + 'a> {
+    match (kind, kind.material()) {
+        (_, Some(material)) => Box::new(
+            perception
                 .resources
                 .iter()
                 .filter(move |resource| resource.resource.kind == material)
                 .map(|resource| resource.position),
         ),
-        (LandmarkKind::Water, None) => nearest(
-            &mut perception
+        (LandmarkKind::Water, None) => Box::new(
+            perception
                 .drinkable_water
                 .iter()
                 .map(|water| water.position),
@@ -294,17 +296,41 @@ fn perceived_nearest(
             } else {
                 StructureKind::Shelter
             };
-            nearest(
-                &mut perception
+            Box::new(
+                perception
                     .structures
                     .iter()
-                    .filter(|structure| {
+                    .filter(move |structure| {
                         structure.state == StructureState::Complete && structure.kind == wanted
                     })
                     .map(|structure| structure.position),
             )
         }
+    }
+}
+
+/// Nearest perceived instance of each landmark kind, in kind order.
+fn perceived_nearest(
+    origin: WorldPosition,
+    perception: &PhysicalPerception,
+) -> [Option<WorldPosition>; LandmarkKind::COUNT] {
+    LandmarkKind::ALL.map(|kind| {
+        perceived_instances(kind, perception)
+            .min_by_key(|position| (manhattan(origin, *position), position.y, position.x))
     })
+}
+
+/// How close (Chebyshev cells) the nearest instance of `kind` in view stands to
+/// `spot`, if one stands within `SPOT_RADIUS`.
+fn distance_to_spot(
+    kind: LandmarkKind,
+    spot: WorldPosition,
+    perception: &PhysicalPerception,
+) -> Option<u64> {
+    perceived_instances(kind, perception)
+        .map(|position| chebyshev(position, spot))
+        .filter(|&distance| distance <= SPOT_RADIUS)
+        .min()
 }
 
 impl MentalMap {
@@ -321,6 +347,7 @@ impl MentalMap {
         on_hint: &mut impl FnMut(HintCheck),
     ) {
         let _ = self.record_visit(origin);
+        self.check_spots(origin, perception, on_hint);
         let nearest = perceived_nearest(origin, perception);
         for slot in 0..LANDMARK_SLOTS {
             let landmark = self.landmarks[slot];
@@ -355,6 +382,51 @@ impl MentalMap {
         }
     }
 
+    /// Worded hints whose spot is close enough to see: the expected thing standing
+    /// closest to the spot confirms the hint; the alternative the listener
+    /// weighed, standing closer, shows the word was misread.
+    fn check_spots(
+        &mut self,
+        origin: WorldPosition,
+        perception: &PhysicalPerception,
+        on_hint: &mut impl FnMut(HintCheck),
+    ) {
+        for slot in 0..LANDMARK_SLOTS {
+            let landmark = self.landmarks[slot];
+            if landmark.is_empty() || landmark.is_first_hand() || landmark.form == NONE {
+                continue;
+            }
+            let spot = landmark.position();
+            if chebyshev(origin, spot) > SPOT_VIEW || !contains(perception.area, spot) {
+                continue;
+            }
+            let kind = kind_of_slot(slot);
+            let unconfirmed = landmark.check(kind, false);
+            let alternative = unconfirmed.alternative.and_then(|concept| {
+                match crate::cognition::concept_topic(concept) {
+                    Some(crate::GestureTopic::Place(other)) if other != kind => Some(other),
+                    _ => None,
+                }
+            });
+            // What was pointed at is whichever of the two stands closest to the spot.
+            let expected = distance_to_spot(kind, spot, perception);
+            let other = alternative.and_then(|other| distance_to_spot(other, spot, perception));
+            let check = match (expected, other) {
+                (Some(near), Some(far)) if near <= far => landmark.check(kind, true),
+                (Some(_), None) => landmark.check(kind, true),
+                (_, Some(_)) => unconfirmed,
+                (None, None) => {
+                    // Nothing telling at the spot (the pointing was off, or it's
+                    // gone): from now on it's an ordinary hint, searched as usual.
+                    self.landmarks[slot].form = NONE;
+                    continue;
+                }
+            };
+            on_hint(check);
+            self.landmarks[slot] = Landmark::default();
+        }
+    }
+
     fn remember_seen(
         &mut self,
         kind: LandmarkKind,
@@ -377,8 +449,11 @@ impl MentalMap {
                 landmark.confidence = SEEN_CONFIDENCE;
                 return;
             }
-            // A hint that this sighting explains is now confirmed and replaced below.
+            // A hint that this sighting explains is now confirmed and replaced
+            // below. A worded hint named one spot and is judged only up close
+            // (`check_spots`).
             if !landmark.is_first_hand()
+                && landmark.form == NONE
                 && chebyshev(landmark.position(), position) <= landmark.radius() + MERGE_RADIUS
             {
                 on_hint(landmark.check(kind, true));
@@ -428,6 +503,11 @@ impl MentalMap {
                 continue;
             }
             if landmark.is_first_hand() {
+                // A worded hint names one spot: a known place elsewhere nearby
+                // doesn't make it old news.
+                if source.form.is_some() && chebyshev(landmark.position(), estimate) > SPOT_RADIUS {
+                    continue;
+                }
                 return false;
             }
             landmark.confidence = landmark.confidence.saturating_add(32);
