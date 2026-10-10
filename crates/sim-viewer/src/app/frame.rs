@@ -155,11 +155,7 @@ impl ViewerApp {
                 toast: self.toast.as_ref().map(|(message, _)| message.clone()),
                 help_open: self.help_open,
                 info_open: self.info_open,
-                reached_speed: {
-                    let speed = f64::from(self.engine.snapshot().speed);
-                    (!self.engine.snapshot().paused && self.reached_speed < 0.9 * speed)
-                        .then(|| self.reached_speed.round() as u32)
-                },
+                reached_speed: self.shown_speed.map(|(speed, _)| speed),
                 details_open: self.details_open,
                 build: self.build,
                 feed: self.feed.entries().cloned().collect(),

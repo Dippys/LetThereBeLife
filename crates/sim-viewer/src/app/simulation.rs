@@ -5,6 +5,10 @@ use std::time::{Duration, Instant};
 /// Real time a frame may spend simulating. Past it the rest is dropped, so a
 /// speed the computer can't reach slows the simulation instead of the window.
 const SIMULATION_BUDGET: Duration = Duration::from_millis(30);
+/// How long after running out of time the speed reached stays on screen.
+const BEHIND_HOLD: Duration = Duration::from_secs(1);
+/// How often the speed reached shown may change.
+const LABEL_REFRESH: Duration = Duration::from_millis(500);
 
 use super::{PopulationStatus, ViewerApp};
 use crate::{
@@ -25,6 +29,7 @@ impl ViewerApp {
             while self.accumulator >= tick_seconds {
                 if ticks % 32 == 0 && now.elapsed() > SIMULATION_BUDGET {
                     self.accumulator = 0.0;
+                    self.behind_until = Some(now + BEHIND_HOLD);
                     break;
                 }
                 ticks += 1;
@@ -43,6 +48,16 @@ impl ViewerApp {
                 self.reached_speed = 0.9 * self.reached_speed + 0.1 * reached;
             }
         }
+        // Show the speed reached only while frames run out of time, and change
+        // the number at most twice a second so it reads steadily.
+        let behind = self.behind_until.is_some_and(|until| now < until);
+        self.shown_speed = match self.shown_speed {
+            _ if !behind => None,
+            Some((speed, since)) if now.duration_since(since) < LABEL_REFRESH => {
+                Some((speed, since))
+            }
+            _ => Some((self.reached_speed.round() as u32, now)),
+        };
         self.track_year();
     }
 

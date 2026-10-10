@@ -52,6 +52,10 @@ pub(crate) struct ViewerApp {
     accumulator: f64,
     /// Simulated seconds per real second actually reached lately (smoothed).
     reached_speed: f64,
+    /// Until when frames are known to be running out of time.
+    behind_until: Option<Instant>,
+    /// The speed reached as shown, and when it was last changed.
+    shown_speed: Option<(u32, Instant)>,
     /// The year last seen, and the deaths and births counted when it began.
     year_start: (i64, u32, u32),
     camera: Camera,
@@ -128,6 +132,8 @@ impl ViewerApp {
             archive,
             last_frame: None,
             reached_speed: 1.0,
+            behind_until: None,
+            shown_speed: None,
             year_start: (0, 0, 0),
             accumulator: 0.0,
             camera,
