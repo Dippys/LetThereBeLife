@@ -28,14 +28,14 @@ pub use cognition::{
     InterpretationEvent, LANDMARK_SLOTS, LEXICON_SLOTS, LandmarkKind, LandmarkSource, LandmarkView,
     LessonCause, LessonEvent, LexiconEntryView, MERGE_RADIUS, MentalMapView, Mime, Personality,
     PolicyOptions, PublicSignal, READING_CANDIDATES, REPAIR_WEIGHT, Reading, ReadingReasons,
-    RepairEvent, RepairResponse, SEARCH_SPACING, SHARE_COOLDOWN_SECONDS, SIGNAL_TICKS, SignalEvent,
-    Tone, Understanding, UtteranceIntent, VISIT_TILE_SIZE, VISITED_TILE_SLOTS, VOCAL_FORMS,
-    VocalForm, concept_topic,
+    RepairEvent, RepairResponse, RequestEvent, RequestResponse, SEARCH_SPACING,
+    SHARE_COOLDOWN_SECONDS, SIGNAL_TICKS, SignalEvent, Tone, Understanding, UtteranceIntent,
+    VISIT_TILE_SIZE, VISITED_TILE_SLOTS, VOCAL_FORMS, VocalForm, concept_topic,
 };
 pub use diagnostics::{EngineCapacityMetrics, EngineDiagnostics, EngineWorkMetrics};
 pub use engine::{
     Engine, EngineCommand, EngineCommandOutcome, EngineConfig, MAX_SIMULATION_SPEED,
-    SimulationSnapshot, TickOutcome,
+    SimulationAdvanced, SimulationSnapshot, TickOutcome,
 };
 pub use health::{
     DeathCause, DeathRecord, HEALTH_CONSEQUENCE_INTERVAL_TICKS, HEALTH_INCAPACITATION_THRESHOLD,
@@ -58,17 +58,18 @@ pub use resources::{
 };
 pub use routing::{MAX_ROUTE_EXPANSIONS, RouteRequest, RouteRequestError};
 pub use sim_world::{
-    ArchiveBakeProgress, ArchiveBakeStats, BaseResource, BiomeType, CAMP_RADIUS, CHUNK_SIZE,
-    ChunkCoord, ChunkGenerator, ChunkInspection, ChunkLoadRequest, ChunkLocalPosition,
+    ArchiveBakeProgress, ArchiveBakeStats, BandLayout, BaseResource, BiomeType, CAMP_RADIUS,
+    CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkInspection, ChunkLoadRequest, ChunkLocalPosition,
     ChunkOverview, ChunkPresence, ClimateSample, DEFAULT_INITIAL_WORLD_SIZE, Feature, FeatureKind,
     GenerateAreaError, GeneratedCell, MAX_CHUNKS_PER_GENERATION, MAX_GENERATED_CELLS,
     MAX_GENERATED_CHUNKS, MAX_GENERATED_TERRAIN_BYTES, MAX_INITIAL_CHUNKS,
     MAX_TRAVERSABLE_ELEVATION_DELTA, PrevailingWind, ResourceKind, Standability, SurfaceType,
-    TerrainCell, TerrainClass, TraversalKind, TraversalStep, VALLEY_BAND, VALLEY_FAMILIES,
-    VALLEY_SIDE, Valley, ValleyScore, WORLD_GENERATION_BOUNDS, WORLD_GENERATOR_VERSION,
-    WORLD_HALF_EXTENT, WORLD_SIDE_CELLS, WaterSource, World, WorldArchive, WorldArchiveError,
-    WorldChunk, WorldChunkLoad, WorldConfig, WorldConfigError, WorldOverview, WorldPosition,
-    WorldQueryError, WorldRect, camp_sites, family_camps, find_valley, score_square,
+    TerrainCell, TerrainClass, TraversalKind, TraversalStep, VALLEY_BAND,
+    VALLEY_CHILDREN_PER_FAMILY, VALLEY_FAMILIES, VALLEY_SIDE, Valley, ValleyScore,
+    WORLD_GENERATION_BOUNDS, WORLD_GENERATOR_VERSION, WORLD_HALF_EXTENT, WORLD_SIDE_CELLS,
+    WaterSource, World, WorldArchive, WorldArchiveError, WorldChunk, WorldChunkLoad, WorldConfig,
+    WorldConfigError, WorldOverview, WorldPosition, WorldQueryError, WorldRect, band_layout,
+    camp_sites, family_camps, find_valley, score_square,
 };
 pub use sleep::{
     SleepDiagnostic, SleepDiagnosticKind, SleepInterruptionReason, SleepQuality, SleepRequestError,

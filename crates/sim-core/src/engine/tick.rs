@@ -32,6 +32,7 @@ impl Engine {
         self.hint_outcomes.clear();
         self.lesson_events.clear();
         self.repair_events.clear();
+        self.request_events.clear();
         let mut processed = 0_usize;
         while processed < MAX_DUE_EVENTS_PER_TICK {
             let Some(event) = self.scheduler.pop_due(self.time) else {

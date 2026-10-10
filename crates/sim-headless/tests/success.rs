@@ -4,17 +4,20 @@
 //! > misunderstanding, and both participants update future behavior using only
 //! > observable evidence.
 //!
-//! This runs the vertical-slice valley (two families, 16 agents) and requires at
-//! least one complete episode, traced through gesture ids by the communication
-//! log. Release-only (about 7 s): `cargo test --release -p sim-headless --test success -- --ignored`.
+//! This runs the spec's first slice, two families of 8 adults in the seed 1
+//! valley (without the M7 children, whose readiness to ask repairs most
+//! misunderstandings before they're acted on; see DECISIONS D-077), and requires
+//! at least one complete episode, traced through gesture ids by the
+//! communication log. Release-only (about 7 s):
+//! `cargo test --release -p sim-headless --test success -- --ignored`.
 
 use sim_core::{DesiredEffect, LessonCause};
-use sim_headless::{StudyConfig, StudySpawn, VALLEY_POPULATION, run_study};
+use sim_headless::{StudyConfig, StudySpawn, run_study};
 
 #[test]
 #[ignore = "release-only: run with --release --ignored (part of scripts/validate)"]
 fn an_agent_misunderstands_acts_and_both_sides_learn_from_what_they_observe() {
-    let mut config = StudyConfig::new(1, VALLEY_POPULATION, 1_200_000);
+    let mut config = StudyConfig::new(1, sim_core::VALLEY_BAND as u32, 1_200_000);
     config.spawn = StudySpawn::Valley;
     let report = run_study(config).expect("seed 1 has a valley");
     let episodes = report.comms.success_episodes();

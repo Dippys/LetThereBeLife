@@ -76,6 +76,21 @@ fn mental_map_layout_is_compact() {
 }
 
 #[test]
+fn mind_layout_is_bounded() {
+    assert_eq!(size_of::<super::PendingCorrection>(), 32);
+    assert_eq!(size_of::<super::Dialogue>(), 48);
+    assert_eq!(
+        size_of::<super::Mind>(),
+        size_of::<MentalMap>()
+            + size_of::<super::SocialMemory>()
+            + size_of::<super::Lexicon>()
+            + size_of::<super::Dialogue>()
+            + 16,
+        "the child flag and parent id take one padded 16-byte tail"
+    );
+}
+
+#[test]
 fn seeing_water_remembers_it_and_repeated_sightings_merge() {
     let mut map = MentalMap::default();
     let origin = at(100, 100);

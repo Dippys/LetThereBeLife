@@ -204,6 +204,7 @@ mod tests {
             mime,
             vocal: Some(VocalForm(3)),
             negated: None,
+            addressee: None,
             tone: Tone { urgency },
         }
     }

@@ -228,3 +228,25 @@ updates from observable evidence, not correct ones. `tests/success.rs` (release,
 **Consequences:** The definition is met, but episodes are rare (1 across 12 seeds at 2.4M ticks).
 The test is deterministic but sensitive to behavior changes; if it breaks, find out why before
 retargeting it.
+
+## D-077: M7, children and requests for food (2026-10-10)
+
+**Decision:** The default valley band is 16 founders and 4 children (`band_layout`; ids after the
+founders). Children start with empty lexicons, a close bond to a parent (stored as `Mind::parent`),
+go back to where they last saw that parent, take no excursions, and ask unless 90% sure. A hungry
+agent with no food that knows of none can ask someone in view (`DesiredEffect::Request`; the
+`PublicSignal` gains an `addressee` and an open-hand `reach_toward` gesture with no minimum
+distance). The one asked reads the request like any signal, so it can be misread and repaired, and
+then gives, refuses, or shows empty hands. Parents feed their children unless starving; others keep
+their last meal and weigh trust, familiarity, sociability, urgency, food, and hunger. Requests reuse
+the `Signal` goal: the planned addressee and spot sit in `Dialogue` (compact, 48 B) and are matched
+when the gesture completes. `PolicyOptions::helping`, `--no-help`, and `--food PERCENT`
+(`Engine::strip_food`, scenario setup before the first tick) support the comparison.
+**Why:** The plan's M7 done-when: a child acquires a working subset of the valley's forms purely
+from observation (62–95% across 19 seeds), and helping changes survival in a scarce valley. Asking
+first came before walking to known food and to people with empty hands, which made survival worse.
+Asking only when the asker knows of no food fixed that.
+**Consequences:** Helping carries more agents through the first famine (seed 7: 14 vs 12 alive at
+600k ticks) but doesn't raise mean lifespan, because food doesn't regrow. The success test now pins
+the 16-adult band: the valley with children has had no complete episode in 19 seeds. COME is
+deferred.

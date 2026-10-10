@@ -95,6 +95,7 @@ fn mind_with_words(
         personality,
         landmarks: Vec::new(),
         explored_tiles: 0,
+        child: false,
         acquaintances,
         lexicon,
     })
@@ -522,6 +523,7 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
                 landmark(LandmarkKind::Shelter, LandmarkSource::Told, 3),
             ],
             explored_tiles: 37,
+            child: false,
         })),
     };
     let mut text = String::with_capacity(AGENT_TEXT_CAPACITY);
@@ -598,6 +600,7 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
             .collect(),
         // The mental map caps explored tiles at its fixed visit-tile slots.
         explored_tiles: VISITED_TILE_SLOTS,
+        child: false,
     };
     let budget_inspection = AgentInspection {
         view: budget_view,

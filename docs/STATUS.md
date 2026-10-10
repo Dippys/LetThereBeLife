@@ -21,8 +21,10 @@ lays out phases 0–10, from world → physical agents → cognition → communi
 | 1. World foundation: terrain, climate, rivers/lakes, waterholes, biomes, resources | Done |
 | 2. Physical agents: movement, perception, needs, gathering, sleep, shelter, health, death | Done |
 | 3. Beliefs, memory, relationships | **In progress.** Mental maps, personalities, and sparse relationships with trust are done; episodic memory isn't. Plan: [`plans/MINDS.md`](plans/MINDS.md) |
-| 4. Nonverbal communication | **Started.** Pointing gestures share rough place knowledge |
-| 5–7. Proto-language, children and transmission, invention and diffusion | Not started |
+| 4. Nonverbal communication | **Mostly done (vertical slice).** Pointing, mimes, tone, questions, repairs, corrections, and requests for food |
+| 5. Proto-language | **Started (vertical slice).** Personal lexicons, two founding dialects, competing interpretations, learning from consequences |
+| 6. Children and transmission | **Started (vertical slice).** Children start with no words and pick up most of the band's from observation |
+| 7. Invention and diffusion | Not started |
 | 8–10. Settlements and economy, migration and language divergence, conflict and institutions | Not started |
 
 ## What works today
@@ -39,6 +41,12 @@ lays out phases 0–10, from world → physical agents → cognition → communi
   heading out, never strays farther from known water than it can walk back, and keeps a home
   shelter. It points out places, or ground it has already explored, to agents nearby, who get only
   a rough hint to search.
+- **Communication (vertical slice, `--valley`):** private intent is separate from the public
+  signal (pointing, mime, a word from the speaker's own lexicon, tone). Listeners weigh competing
+  readings, can misunderstand for recorded reasons, ask "this?", get repaired, learn from what
+  they find, and correct the speaker later. Hungry agents ask others for food, who give or refuse.
+  Children start with no words. Every exchange is in the communication log (`--comms`,
+  `--misreads`, `--successes`, `--explain`).
 - **People are different (viewer and study):** four personality traits (curiosity, caution,
   sociability, diligence) and up to six acquaintances with familiarity, trust, and last-seen
   place. Sociable agents seek out friends and stay with company. Hints count for more from people
@@ -97,8 +105,11 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 - **Complete misunderstanding episodes are rare.** Questions repair most misreadings on the spot.
   Water and food co-locate at oases, so many misreadings are accidentally true, and cross-family
-  tips are about faraway places. Children (M7), who know little and ask less, should make
-  consequential misunderstandings more common.
+  tips are about faraway places. The 16-adult seed 1 valley has one; the default valley with
+  children has none in 19 seeds, probably because children ask about nearly everything.
+- **Food doesn't regrow**, so in a scarce valley sharing only moves meals around: it carries more
+  agents through the first famine but doesn't raise mean lifespan.
+- **COME (regroup) requests aren't implemented** (deferred from M7).
 - **Sharing improves survival only where knowledge is scarce.** In most scenarios agents already
   survive on their own knowledge. Sharing should matter more with bigger populations, scarcer
   resources, or children who start out knowing nothing.
@@ -107,9 +118,9 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 - **The canonical 100-agent run is ~35% slower** than before (≈4.2 s vs 3.1 s, ±15% noise).
   It comes mostly from more activity (18% more events, much more gathering near pond shores).
   No single hotspot was found.
-- **Intermittent viewer smoke crash.** `0xc0000409` with no panic message: 1 in 19 runs on
-  2026-10-09, 2 in 14 on 2026-10-10, 0 in 8 since. The smoke spawns no agents. Cause unknown,
-  possibly GPU teardown.
+- **Intermittent viewer smoke crash.** `0xc0000409` with no panic message (WSL shows it as exit
+  code 9): 1 in 19 runs on 2026-10-09, 2 in 14 on 2026-10-10, then 0 in 8, then 2 in 8 `--valley`
+  smokes after M7. It happens with and without agents. Cause unknown, possibly GPU teardown.
 - **No save/load.** Simulation state can't be persisted. The world archive needs regenerating for
   generator v2 (`--pregenerate-world`).
 - **Mental maps are 256 B per agent.** That's fine at viewer scale; the spec's 10M agents would
@@ -117,7 +128,9 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
-- 2026-10-10 (latest): M5, learning and repair from consequences, and M6, the success test
+- 2026-10-10 (latest): M7, children and requests for food (D-077). The vertical slice is
+  complete except COME.
+- 2026-10-10: M5, learning and repair from consequences, and M6, the success test
   (D-075, D-076).
 - 2026-10-10: M4, competing interpretations, two founding dialects, and hints that drive
   decisions (D-074).
@@ -134,10 +147,16 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## What's next
 
-Follow [`plans/VERTICAL_SLICE.md`](plans/VERTICAL_SLICE.md). **M1–M6 are done. The project's
-definition of success has been met:** in the seed 1 valley an agent misreads a gesture for a
-recorded reason, acts on it, and both sides change what they believe about that word from what they
-observed (see the episode in the plan). It's still **rare** (1 complete episode across 12 seeds × 2.4M
-ticks). Next is **M7: requests, helping, and children**, then personal lexicons, interpretation with
-competing meanings, learning and repair, and finally the automated success test. Run the study
-before and after each milestone.
+The vertical slice in [`plans/VERTICAL_SLICE.md`](plans/VERTICAL_SLICE.md) is **done (M1–M7,
+COME deferred). The project's definition of success has been met:** in the 16-adult seed 1
+valley an agent misreads a gesture for a recorded reason, acts on it, and both sides change what
+they believe about that word from what they observed. It's still **rare**. Candidates for the next
+plan:
+
+1. **Make consequential misunderstandings common**, not just possible: more distinct food and
+   water places, children who act on half-understood hints, and words for more than places.
+2. **Renewable food** (regrowth), so helping and sharing can matter over a lifetime.
+3. **COME requests and leaving camp together**, building toward phase 8 (settlements).
+4. **Episodic memory** (phase 3), so agents remember who misled or helped them and when.
+
+Run the study before and after each change.

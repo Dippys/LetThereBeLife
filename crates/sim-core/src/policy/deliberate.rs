@@ -109,6 +109,19 @@ pub(crate) struct MindInput<'a> {
     pub(crate) company: bool,
     /// Where a friend was last seen, offered only when the agent is alone.
     pub(crate) friend_target: Option<WorldPosition>,
+    /// For a child: whether to stay put or go back to where its parent was
+    /// last seen. Children take no excursions.
+    pub(crate) parent: Option<ParentInput>,
+    /// Someone in view worth asking for food (offered only when the agent may ask).
+    pub(crate) beg_target: Option<WorldPosition>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ParentInput {
+    /// The parent is in view, or its whereabouts are unknown: stay near the band.
+    Stay,
+    /// Go back to where the parent was last seen.
+    Return(WorldPosition),
 }
 
 pub(crate) fn deliberate(
@@ -153,6 +166,12 @@ pub(crate) fn deliberate(
                 )
             })
             .or_else(|| planner.travel_to_known(LandmarkKind::Food, PhysicalGoal::SeekFood))
+            .or_else(|| {
+                // Knowing no food anywhere, ask someone nearby before searching blind.
+                mind.beg_target.map(|giver| {
+                    Deliberation::act(PhysicalGoal::Signal, giver, PolicyReason::Begging)
+                })
+            })
             .or_else(|| planner.explore(PolicyReason::HungerThreshold, true))
             .unwrap_or_else(|| Deliberation::wait(origin, PolicyReason::HungerThreshold)),
         Some(NeedKind::Rest) => planner.rest(inventory),
@@ -359,6 +378,18 @@ impl Planner<'_> {
                 return wood.with_reason(PolicyReason::PrepareTrip);
             }
         }
+        if let Some(ParentInput::Return(parent)) = self.mind.parent
+            && let Some((waypoint, heading)) = self.waypoint_toward(parent)
+        {
+            return Deliberation {
+                selection: PolicySelection {
+                    goal: PhysicalGoal::Explore,
+                    target: Some(waypoint),
+                    reason: PolicyReason::Following,
+                },
+                heading: Some(heading),
+            };
+        }
         if let Some(friend) = self.mind.friend_target
             && self.roll(2) < temperament.visit_chance
             && let Some((waypoint, heading)) = self.waypoint_toward(friend)
@@ -378,7 +409,8 @@ impl Planner<'_> {
         // Lounging agents (no mood for work) don't take casual excursions either.
         let excursion = works
             && self.roll(3) < temperament.excursion_chance
-            && !(self.mind.company && temperament.stays_with_company);
+            && !(self.mind.company && temperament.stays_with_company)
+            && self.mind.parent.is_none();
         if curious || excursion {
             // Curiosity first checks what others have pointed out.
             if let Some(hint) = map.hint_to_check(self.needs.agent.get(), origin)

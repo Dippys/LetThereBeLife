@@ -63,6 +63,7 @@ impl Engine {
             memory: options.memory,
             sharing: options.memory && options.sharing,
             social: options.memory && options.social,
+            helping: options.memory && options.social && options.helping,
         };
         Ok(())
     }

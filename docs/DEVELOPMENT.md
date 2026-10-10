@@ -14,7 +14,7 @@
 ```sh
 cargo run -p sim-viewer                                  # interactive (use --release for smooth)
 cargo run -p sim-viewer -- --config path/to/file.toml
-cargo run --release -p sim-viewer -- --valley           # the vertical slice: 16 agents camped in a valley
+cargo run --release -p sim-viewer -- --valley           # the vertical slice: 16 adults and 4 children in a valley
 cargo run -p sim-headless -- --ticks 600 --seed 42 [--agents 20] [--batch-size N]
 cargo run --release -p sim-headless -- --canonical --agents 20 --batch-size 10000
 ```
@@ -47,21 +47,28 @@ Measures how viewer-like agents actually fare. They spawn without supplies and r
 
 ```sh
 cargo run --release -p sim-headless -- --study [--near-water | --groups | --valley] [--seed N]
-    [--agents N] [--ticks N] [--mind legacy|memory|sharing|full] [--verbose] [--trace AGENT]
+    [--agents N] [--ticks N] [--mind legacy|memory|sharing|full] [--no-help] [--food PERCENT]
+    [--verbose] [--trace AGENT]
     [--comms N] [--misreads N] [--lessons N] [--successes N] [--explain AGENT]
 ```
 
 - `--near-water` spawns within 6 cells of fresh water. `--groups` drops agents in groups of 5.
-  `--valley` is the spec's vertical slice: a 768² livable valley (found per seed) with a band of
-  16 camped beside water, and only the valley is simulated. The default spawns on random land.
+  `--valley` is the spec's vertical slice: a 768² livable valley (found per seed) with two
+  families camped at their own water, 8 adults and 2 children each (children start with no words
+  and follow a parent); only the valley is simulated. `--valley --agents 16` is the adults-only
+  band the success test uses. The default spawns on random land.
+- `--food PERCENT` strips all but that share of the food at the start (food doesn't regrow), and
+  `--no-help` turns off asking for food. The `requests for food:` line counts requests, how many
+  were first misread, and the answers. The `children:` line shows how much of the founders'
+  vocabulary the children picked up.
 - The `communication:` line counts gestures by topic and receptions: informed, acted on,
   confirmed, abandoned, and misread. `--comms N` prints the first N exchanges that led
   somewhere, as stories: who pointed where, what they privately meant, how each watcher read it,
   and what each did and found. `--explain AGENT` prints that agent's personality, beliefs,
   acquaintances, and latest exchanges, followed by its decision trace.
 - The `misreadings:` line counts receptions read differently from the sender's private intent,
-  how many were acted on, and their recorded reasons. `--misreads N` prints the first N acted-on
-  misunderstandings as stories, with each listener's competing readings (for example
+  how many were acted on, and their recorded reasons. `--misreads N` prints the first N
+  misunderstandings (acted on or not) as stories, with each listener's competing readings (for example
   `FOOD 50% / WATER 49%`) and why.
 - The `repair:` line counts questions and repairs, corrections, word lessons by cause, and
   complete **SUCCESS EPISODES** (the project's definition of success). `--successes N` prints
@@ -110,7 +117,7 @@ the latest one.
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
-scripts/validate.sh [--quick] [--gpu]       # all of the above + checksum + headless smoke + success test
+scripts/validate.sh [--quick] [--gpu]       # all of the above + checksum + headless smoke + success/slice tests
 ```
 
 Where tests live:

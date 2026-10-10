@@ -3,8 +3,8 @@ use std::{error::Error, fmt};
 use rayon::prelude::*;
 use sim_core::{
     AgentId, AgentSpawnError, Engine, EngineCommand, GenerateAreaError, PolicyActivationError,
-    PolicyOptions, PopulationInit, PopulationInitError, VALLEY_BAND, VALLEY_FAMILIES, VALLEY_SIDE,
-    World, WorldPosition, WorldRect, family_camps, find_valley,
+    PolicyOptions, PopulationInit, PopulationInitError, VALLEY_BAND, VALLEY_CHILDREN_PER_FAMILY,
+    VALLEY_FAMILIES, VALLEY_SIDE, World, WorldPosition, WorldRect, band_layout, find_valley,
 };
 
 pub const VIEWER_AGENT_LIMIT: usize = 4_096;
@@ -115,7 +115,7 @@ impl Error for ValleyStartError {}
 
 /// Finds the seed's valley, generates it synchronously (chunks in parallel,
 /// inserted in request order, so the result is deterministic), and spawns the
-/// `VALLEY_BAND` at its camp with the whole valley as the active area. Requires
+/// band (two families of founders, each with children) at its camps with the whole valley as the active area. Requires
 /// an engine with no population yet.
 pub fn start_valley(engine: &mut Engine) -> Result<ValleyStart, ValleyStartError> {
     let seed = engine.config().seed;
@@ -130,18 +130,23 @@ pub fn start_valley(engine: &mut Engine) -> Result<ValleyStart, ValleyStartError
     engine
         .apply_world_chunk_loads(loads)
         .map_err(ValleyStartError::Generation)?;
-    let sites = family_camps(
+    let layout = band_layout(
         engine.world(),
         valley.bounds,
         VALLEY_FAMILIES,
         VALLEY_BAND / VALLEY_FAMILIES,
+        VALLEY_CHILDREN_PER_FAMILY,
         seed,
     )
     .ok_or(ValleyStartError::NoCamp)?;
-    spawn_band(engine, valley.bounds, &sites).map_err(ValleyStartError::Spawn)?;
+    spawn_band(engine, valley.bounds, &layout.sites).map_err(ValleyStartError::Spawn)?;
+    engine.set_founders(layout.founders as u32);
+    for &(child, parent) in &layout.parents {
+        engine.bond(AgentId::new(child as u32), AgentId::new(parent as u32));
+    }
     Ok(ValleyStart {
         bounds: valley.bounds,
-        camp: sites[0],
+        camp: layout.sites[0],
     })
 }
 
@@ -336,7 +341,10 @@ mod tests {
 
         assert_eq!(start.bounds, valley.bounds);
         assert!(engine.world().area_is_generated(valley.bounds));
-        assert_eq!(engine.snapshot().agent_count as usize, VALLEY_BAND);
+        assert_eq!(
+            engine.snapshot().agent_count as usize,
+            VALLEY_BAND + VALLEY_FAMILIES * VALLEY_CHILDREN_PER_FAMILY
+        );
         assert_eq!(engine.policy_options(), PolicyOptions::full());
         let agents: Vec<_> = engine.agent_views(usize::MAX).collect();
         assert_eq!(agents[0].position, start.camp);

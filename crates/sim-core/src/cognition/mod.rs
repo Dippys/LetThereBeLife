@@ -15,6 +15,7 @@ mod social;
 pub use dialogue::{CONSEQUENCE_WEIGHT, REPAIR_WEIGHT};
 pub(crate) use dialogue::{Dialogue, PendingCorrection};
 pub use gesture::Gesture;
+pub(crate) use gesture::reach_toward;
 pub(crate) use lexicon::Lexicon;
 pub use lexicon::{Concept, FAMILY_SIZE, LEXICON_SLOTS, LexiconEntryView, VOCAL_FORMS, VocalForm};
 pub(crate) use map::{HintCheck, HintSource, MentalMap, spent_kinds, visible_kinds};
@@ -96,6 +97,8 @@ pub struct MentalMapView {
     pub personality: Personality,
     pub landmarks: Vec<LandmarkView>,
     pub explored_tiles: usize,
+    /// A child of the band (started with no words) rather than a founder.
+    pub child: bool,
     pub acquaintances: Vec<AcquaintanceView>,
     /// What the agent believes words mean.
     pub lexicon: Vec<LexiconEntryView>,
@@ -195,6 +198,29 @@ pub enum RepairResponse {
     Repaired(Concept),
 }
 
+/// How someone who was asked for food answered (all of it visible to the asker).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestResponse {
+    /// Handed over food and nodded.
+    Gave,
+    /// Shook its head while holding food.
+    Refused,
+    /// Showed empty hands.
+    NothingToGive,
+}
+
+/// A request for food and its answer (latest tick, for logs and tools only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RequestEvent {
+    pub signal: u64,
+    pub asker: AgentId,
+    pub giver: AgentId,
+    pub at: SimTime,
+    /// What the giver first took the request to be about (before any repair).
+    pub read_as: Concept,
+    pub response: RequestResponse,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RepairEvent {
     pub signal: u64,
@@ -232,6 +258,8 @@ pub struct PolicyOptions {
     /// Individual personalities, relationships, visiting friends, and trust-
     /// weighted hints (requires `memory`). Without it everyone is average.
     pub social: bool,
+    /// Hungry agents ask others for food, who may give some (requires `social`).
+    pub helping: bool,
 }
 
 impl PolicyOptions {
@@ -242,6 +270,7 @@ impl PolicyOptions {
             memory: true,
             sharing: true,
             social: true,
+            helping: true,
         }
     }
 }
@@ -267,6 +296,11 @@ pub(crate) struct Mind {
     pub(crate) social: SocialMemory,
     pub(crate) lexicon: Lexicon,
     pub(crate) dialogue: Dialogue,
+    /// Born into the band rather than founding it: starts with no words, stays
+    /// close to its parent, and asks readily.
+    pub(crate) child: bool,
+    /// The agent a child stays close to.
+    pub(crate) parent: Option<AgentId>,
 }
 
 impl Mind {
@@ -285,20 +319,34 @@ impl Mind {
     }
 }
 
-/// Minds for every agent, indexed by `AgentId`, grown on demand. New minds
-/// belong to founders and inherit the seed's noisy proto-language.
-#[derive(Debug, Default)]
+/// Minds for every agent, indexed by `AgentId`, grown on demand. Agents below
+/// `founders` inherit the seed's noisy proto-language; later ids are children
+/// who start with no words.
+#[derive(Debug)]
 pub(crate) struct Minds {
     seed: u64,
+    founders: u32,
     minds: Vec<Mind>,
+}
+
+impl Default for Minds {
+    fn default() -> Self {
+        Self::new(0)
+    }
 }
 
 impl Minds {
     pub(crate) fn new(seed: u64) -> Self {
         Self {
             seed,
+            founders: u32::MAX,
             minds: Vec::new(),
         }
+    }
+
+    /// Agents with ids at or above `count` are children. Affects minds created later.
+    pub(crate) fn set_founders(&mut self, count: u32) {
+        self.founders = count;
     }
 
     pub(crate) fn get(&self, agent: AgentId) -> Option<&Mind> {
@@ -308,9 +356,15 @@ impl Minds {
     pub(crate) fn get_mut(&mut self, agent: AgentId) -> &mut Mind {
         let index = agent.get() as usize;
         while self.minds.len() <= index {
-            let founder = AgentId::new(self.minds.len() as u32);
+            let id = self.minds.len() as u32;
+            let child = id >= self.founders;
             self.minds.push(Mind {
-                lexicon: Lexicon::founding(self.seed, founder),
+                lexicon: if child {
+                    Lexicon::default()
+                } else {
+                    Lexicon::founding(self.seed, AgentId::new(id))
+                },
+                child,
                 ..Mind::default()
             });
         }

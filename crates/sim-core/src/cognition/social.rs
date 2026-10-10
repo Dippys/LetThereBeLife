@@ -13,6 +13,12 @@ pub const DEFAULT_TRUST: u8 = 128;
 /// Trust gained when one of their hints turns out right, and lost when one doesn't.
 const TRUST_CONFIRMED: u8 = 32;
 const TRUST_REFUTED: u8 = 48;
+/// Trust gained in someone who gave food when asked.
+const TRUST_HELPED: u8 = 24;
+/// Trust lost in someone who refused while holding food.
+const TRUST_REFUSED: u8 = 8;
+/// Trust a child starts with in its parent.
+pub const BOND_TRUST: u8 = 220;
 /// Familiarity needed before an agent counts someone as a friend worth visiting.
 pub const FRIEND_FAMILIARITY: u8 = 24;
 
@@ -135,6 +141,21 @@ impl SocialMemory {
         Some(Noticed { slot, evicted })
     }
 
+    /// Starts a close bond (a child and its parent): high familiarity and trust.
+    pub(crate) fn bond(&mut self, other: AgentId, position: WorldPosition, now: u32) -> Option<u8> {
+        let noticed = self.notice(other, position, now)?;
+        let known = &mut self.slots[usize::from(noticed.slot)];
+        known.familiarity = u8::MAX;
+        known.trust = BOND_TRUST;
+        Some(noticed.slot)
+    }
+
+    /// Where `other` is expected to be, if known.
+    pub(crate) fn whereabouts(&self, other: AgentId) -> Option<WorldPosition> {
+        let known = &self.slots[usize::from(self.slot_of(other)?)];
+        known.position_known.then(|| known.position())
+    }
+
     pub(crate) fn slot_of(&self, other: AgentId) -> Option<u8> {
         self.slots
             .iter()
@@ -159,6 +180,21 @@ impl SocialMemory {
         } else {
             known.trust.saturating_sub(TRUST_REFUTED)
         };
+    }
+
+    /// Adjusts trust in someone who was asked for help: up when they gave, down a
+    /// little when they refused while holding food.
+    pub(crate) fn helped(&mut self, slot: u8, gave: bool) {
+        let known = &mut self.slots[usize::from(slot)];
+        known.trust = if gave {
+            known.trust.saturating_add(TRUST_HELPED)
+        } else {
+            known.trust.saturating_sub(TRUST_REFUSED)
+        };
+    }
+
+    pub(crate) fn familiarity(&self, slot: u8) -> u8 {
+        self.slots[usize::from(slot)].familiarity
     }
 
     /// Forgets where acquaintances were if that spot is in view and they aren't.

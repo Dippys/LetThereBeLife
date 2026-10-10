@@ -22,6 +22,8 @@ pub enum DesiredEffect {
     Inform,
     /// "You said that word, but over there was this, not that."
     Correct,
+    /// "Give me some" (an open hand held out to someone).
+    Request,
 }
 
 /// The sender's private reason for signalling. Never delivered to receivers;
@@ -71,6 +73,8 @@ pub struct PublicSignal {
     pub vocal: Option<VocalForm>,
     /// For corrections: a mime shown and then waved away ("not this").
     pub negated: Option<Mime>,
+    /// For requests: who the open hand is held out to.
+    pub addressee: Option<AgentId>,
     pub tone: Tone,
 }
 
@@ -102,6 +106,7 @@ pub(crate) fn express(
         mime: mime_for(intent.topic),
         vocal,
         negated: None,
+        addressee: None,
         tone: Tone { urgency },
     })
 }

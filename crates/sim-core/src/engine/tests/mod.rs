@@ -30,6 +30,7 @@ mod health_sleep;
 mod lifecycle;
 mod measurements;
 mod movement;
+mod requests;
 mod shelter;
 
 fn resident_engine(size: u32) -> Engine {

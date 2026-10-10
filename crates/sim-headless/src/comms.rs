@@ -7,7 +7,7 @@ use std::fmt;
 use sim_core::{
     AgentId, DesiredEffect, Engine, GestureTopic, InterpretationEvent, LandmarkKind, LessonCause,
     LessonEvent, PhysicalGoal, PolicyDiagnosticKind, PolicyReason, RepairEvent, RepairResponse,
-    SignalEvent,
+    RequestResponse, SignalEvent,
 };
 
 /// One receiver's side of an exchange.
@@ -36,6 +36,8 @@ impl Reception {
 pub struct Exchange {
     pub signal: SignalEvent,
     pub receptions: Vec<Reception>,
+    /// For requests: how the one asked answered.
+    pub answer: Option<RequestResponse>,
 }
 
 /// Totals over the whole log.
@@ -73,6 +75,8 @@ pub struct CommunicationSummary {
     pub corrections: u64,
     /// Complete episodes of the project's definition of success (see `success_episodes`).
     pub success_episodes: u64,
+    /// Requests for food: asked, first misread, given, refused, nothing to give.
+    pub requests: [u64; 5],
 }
 
 /// The project's definition of success, observed: a listener misread a signal
@@ -92,6 +96,7 @@ pub struct SuccessEpisode {
 pub struct CommunicationLog {
     exchanges: Vec<Exchange>,
     lessons: Vec<LessonEvent>,
+    requests: Vec<sim_core::RequestEvent>,
 }
 
 const fn kind_for_goal(goal: PhysicalGoal) -> Option<LandmarkKind> {
@@ -110,6 +115,7 @@ impl CommunicationLog {
             self.exchanges.push(Exchange {
                 signal: *signal,
                 receptions: Vec::new(),
+                answer: None,
             });
         }
         for interpretation in engine.interpretation_events() {
@@ -160,6 +166,17 @@ impl CommunicationLog {
             }
         }
         self.lessons.extend_from_slice(engine.lesson_events());
+        self.requests.extend_from_slice(engine.request_events());
+        for request in engine.request_events() {
+            if let Some(exchange) = self
+                .exchanges
+                .iter_mut()
+                .rev()
+                .find(|exchange| exchange.signal.id == request.signal)
+            {
+                exchange.answer = Some(request.response);
+            }
+        }
         for outcome in engine.hint_outcomes() {
             if let Some(reception) = self.latest_reception(
                 outcome.agent,
@@ -389,6 +406,15 @@ impl CommunicationLog {
             summary.lessons[slot] += 1;
         }
         summary.success_episodes = self.success_episodes().len() as u64;
+        for request in &self.requests {
+            summary.requests[0] += 1;
+            summary.requests[1] += u64::from(request.read_as != sim_core::Concept::Food);
+            summary.requests[match request.response {
+                RequestResponse::Gave => 2,
+                RequestResponse::Refused => 3,
+                RequestResponse::NothingToGive => 4,
+            }] += 1;
+        }
         let half = self.exchanges.len() / 2;
         for (index, exchange) in self.exchanges.iter().enumerate() {
             let period = usize::from(index >= half);
@@ -405,6 +431,7 @@ impl CommunicationLog {
             summary.corrections +=
                 u64::from(exchange.signal.intent.effect == DesiredEffect::Correct);
             match exchange.signal.intent.topic {
+                _ if exchange.signal.intent.effect == DesiredEffect::Request => {}
                 GestureTopic::Place(kind) => summary.place_exchanges[kind as usize] += 1,
                 GestureTopic::Explored => summary.explored_exchanges += 1,
             }
@@ -480,6 +507,11 @@ impl fmt::Display for CommunicationSummary {
             formatter,
             "\n  repair: questions {} (repaired {}), corrections {}; word lessons: consequence {consequence}, confirmation {confirmation}, repair {repair}, correction {correction}, usage {usage}; SUCCESS EPISODES {}",
             self.questions, self.repaired, self.corrections, self.success_episodes
+        )?;
+        let [asked, misread, gave, refused, empty] = self.requests;
+        write!(
+            formatter,
+            "\n  requests for food: {asked} (first misread {misread}); gave {gave}, refused {refused}, nothing to give {empty}"
         )
     }
 }
@@ -496,6 +528,23 @@ impl fmt::Display for Exchange {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let event = self.signal;
         let public = event.signal;
+        if let Some(giver) = public.addressee {
+            write!(
+                formatter,
+                "#{} t={} agent {} holds out a hand to agent {}, mimes {:?}, says \"{}\", urgency {} [privately asking for {}]",
+                event.id,
+                event.at.ticks(),
+                public.sender.get(),
+                giver.get(),
+                public.mime,
+                public
+                    .vocal
+                    .map_or_else(|| "-".to_owned(), |form| form.name()),
+                public.tone.urgency,
+                topic_name(event.intent.topic),
+            )?;
+            return self.write_receptions(formatter);
+        }
         let (dx, dy) = public.pointing.direction();
         write!(
             formatter,
@@ -518,6 +567,13 @@ impl fmt::Display for Exchange {
             event.inferred_position.y,
             event.search_radius
         )?;
+        self.write_receptions(formatter)
+    }
+}
+
+impl Exchange {
+    fn write_receptions(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let event = self.signal;
         for reception in &self.receptions {
             let read = reception.interpretation;
             let reading = read.reading;
@@ -545,7 +601,11 @@ impl fmt::Display for Exchange {
                 read.receiver.get(),
                 topic_name(read.understood),
                 if misread { " (MISREAD)" } else { "" },
-                if read.changed { "" } else { " (already knew)" },
+                if read.changed || self.answer.is_some() {
+                    ""
+                } else {
+                    " (already knew)"
+                },
                 candidates.join(" / "),
                 if reasons.is_empty() {
                     String::new()
@@ -567,6 +627,12 @@ impl fmt::Display for Exchange {
             match reception.outcome {
                 Some((true, at)) => write!(formatter, "; found it at t={at}")?,
                 Some((false, at)) => write!(formatter, "; gave up at t={at}")?,
+                None => {}
+            }
+            match self.answer {
+                Some(RequestResponse::Gave) => write!(formatter, "; handed over food")?,
+                Some(RequestResponse::Refused) => write!(formatter, "; shook its head")?,
+                Some(RequestResponse::NothingToGive) => write!(formatter, "; showed empty hands")?,
                 None => {}
             }
         }

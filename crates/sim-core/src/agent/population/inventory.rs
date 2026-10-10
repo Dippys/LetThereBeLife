@@ -79,6 +79,14 @@ impl Population {
         accepted
     }
 
+    /// Removes up to `amount` food; returns how much was taken.
+    pub(crate) fn take_food(&mut self, agent: AgentId, amount: u8) -> u8 {
+        let inventory = &mut self.inventories[agent.0 as usize];
+        let taken = inventory.food.min(amount);
+        inventory.food -= taken;
+        taken
+    }
+
     pub(crate) fn apply_need_relief(
         &mut self,
         scheduler: &mut Scheduler,

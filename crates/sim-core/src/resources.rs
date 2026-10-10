@@ -129,6 +129,13 @@ impl ResourceDeltas {
         self.remaining.len()
     }
 
+    /// Marks a generated feature as already used up.
+    pub(crate) fn strip(&mut self, position: WorldPosition) {
+        let key = CompactFeaturePosition::checked(position)
+            .expect("resident world positions fit the finite-world compact envelope");
+        self.remaining.insert(key, 0);
+    }
+
     pub(crate) fn views<'a>(
         &'a self,
         world: &'a World,

@@ -8,7 +8,7 @@ mod selection;
 mod state;
 
 pub use deliberate::HOME_RANGE;
-pub(crate) use deliberate::{MindInput, deliberate, heading_toward};
+pub(crate) use deliberate::{MindInput, ParentInput, deliberate, heading_toward};
 #[cfg(test)]
 pub(crate) use selection::select;
 pub(crate) use selection::{PolicyAction, PolicySelection, select_with_exploration};
@@ -88,6 +88,10 @@ pub enum PolicyReason {
     Returning,
     /// Going to where a friend was last seen.
     Visiting,
+    /// A child going back to the parent it lost sight of.
+    Following,
+    /// Asking someone nearby for food.
+    Begging,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

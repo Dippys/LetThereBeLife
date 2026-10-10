@@ -161,6 +161,50 @@ pub const CAMP_RADIUS: i64 = 8;
 
 /// Families in the valley band. Each camps at its own water source.
 pub const VALLEY_FAMILIES: usize = 2;
+/// Children per family (spec: 16 adults and 4 children).
+pub const VALLEY_CHILDREN_PER_FAMILY: usize = 2;
+
+/// Where a band with children starts. Founders come first in family order
+/// (ids `0..founders`), then children in family order; `parents` pairs each
+/// child's index with a founder of its own family.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BandLayout {
+    pub sites: Vec<WorldPosition>,
+    pub founders: usize,
+    pub parents: Vec<(usize, usize)>,
+}
+
+/// Lays out `families` families of `adults` founders and `children` children,
+/// each family around its own camp (see [`family_camps`]).
+pub fn band_layout(
+    world: &World,
+    bounds: WorldRect,
+    families: usize,
+    adults: usize,
+    children: usize,
+    seed: u64,
+) -> Option<BandLayout> {
+    let size = adults + children;
+    if adults == 0 {
+        return None;
+    }
+    let camps = family_camps(world, bounds, families, size, seed)?;
+    let mut sites: Vec<_> = (0..families)
+        .flat_map(|family| camps[family * size..family * size + adults].iter().copied())
+        .collect();
+    let mut parents = Vec::with_capacity(families * children);
+    for family in 0..families {
+        for child in 0..children {
+            parents.push((sites.len(), family * adults + child % adults));
+            sites.push(camps[family * size + adults + child]);
+        }
+    }
+    Some(BandLayout {
+        sites,
+        founders: families * adults,
+        parents,
+    })
+}
 
 /// Standable cells next to drinkable water inside `bounds`, row-major.
 fn water_accesses(world: &World, bounds: WorldRect) -> Vec<WorldPosition> {
@@ -311,6 +355,21 @@ mod tests {
         unique.sort_unstable_by_key(|cell| (cell.y, cell.x));
         unique.dedup();
         assert_eq!(unique.len(), sites.len());
+    }
+
+    #[test]
+    fn children_follow_the_founders_and_belong_to_their_own_family() {
+        let valley = find_valley(1, VALLEY_SIDE).expect("seed 1 has a valley");
+        let mut world = World::new(1, crate::WorldConfig::new(64, 64).unwrap());
+        world.generate_area(valley.bounds).unwrap();
+        let layout = band_layout(&world, valley.bounds, 2, 8, 2, 1).expect("room");
+        assert_eq!(layout.founders, 16);
+        assert_eq!(layout.sites.len(), 20);
+        assert_eq!(layout.parents, vec![(16, 0), (17, 1), (18, 8), (19, 9)]);
+        for &(child, parent) in &layout.parents {
+            let (a, b) = (layout.sites[child], layout.sites[parent]);
+            assert!(a.x.abs_diff(b.x) + a.y.abs_diff(b.y) <= 4 * CAMP_RADIUS as u64);
+        }
     }
 
     #[test]

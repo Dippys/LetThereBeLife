@@ -27,6 +27,8 @@ pub struct StudyConfig {
     pub mind: PolicyOptions,
     /// Agent whose last decisions are kept in `StudyReport::trace`.
     pub trace: Option<u32>,
+    /// Percent of the generated food left at the start (100 = all; lower is scarcer).
+    pub food_percent: u8,
 }
 
 /// Where study agents start.
@@ -45,8 +47,21 @@ pub enum StudySpawn {
     Valley,
 }
 
-/// The spec's first vertical slice has 16 adults.
-pub const VALLEY_POPULATION: u32 = sim_core::VALLEY_BAND as u32;
+/// The spec's first vertical slice: 16 adults and 4 children.
+pub const VALLEY_POPULATION: u32 = (sim_core::VALLEY_BAND
+    + sim_core::VALLEY_FAMILIES * sim_core::VALLEY_CHILDREN_PER_FAMILY)
+    as u32;
+
+/// Who starts where, and (in the valley) which agents are children of whom.
+struct Start {
+    engine: Engine,
+    area: WorldRect,
+    fresh_water: Vec<WorldPosition>,
+    spawns: Vec<WorldPosition>,
+    /// Agents with ids at or above this are children; `None` means all founders.
+    founders: Option<u32>,
+    parents: Vec<(usize, usize)>,
+}
 pub use sim_core::VALLEY_SIDE;
 
 pub const GROUP_SIZE: usize = 5;
@@ -63,6 +78,7 @@ impl StudyConfig {
             spawn: StudySpawn::AnyLand,
             mind: PolicyOptions::full(),
             trace: None,
+            food_percent: 100,
         }
     }
 }
@@ -139,6 +155,8 @@ pub struct StudyReport {
     /// Percent of agents saying each place concept's most common word, averaged
     /// over concepts: `[first sample, end]`.
     pub vocabulary_agreement: [u64; 2],
+    /// Children and the percent of place words where they say what most founders say.
+    pub children_vocabulary: Option<(u64, u64)>,
 }
 
 const TRACE_LINES: usize = 60;
@@ -182,7 +200,14 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     if config.population == 0 {
         return Err(ScenarioError("study population must be positive".into()));
     }
-    let (mut engine, active_area, fresh_water, spawns) = prepare_world(config)?;
+    let Start {
+        mut engine,
+        area: active_area,
+        fresh_water,
+        spawns,
+        founders,
+        parents,
+    } = prepare_world(config)?;
     engine
         .initialize_population(
             PopulationInit {
@@ -192,6 +217,17 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
             &spawns,
         )
         .map_err(|error| ScenarioError(format!("population initialization failed: {error}")))?;
+    if config.food_percent < 100 {
+        engine
+            .strip_food(active_area, config.food_percent)
+            .map_err(|_| ScenarioError("food can only be stripped before the first tick".into()))?;
+    }
+    if let Some(founders) = founders {
+        engine.set_founders(founders);
+    }
+    for (child, parent) in parents {
+        engine.bond(AgentId::new(child as u32), AgentId::new(parent as u32));
+    }
     engine
         .activate_physical_policy_with_options(config.mind)
         .map_err(|error| ScenarioError(format!("policy activation failed: {error}")))?;
@@ -230,13 +266,12 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     report.trace = trace.into_iter().collect();
     report.comms = comms;
     report.vocabulary_agreement = [early_vocabulary, vocabulary_agreement(&engine, population)];
+    report.children_vocabulary = children_vocabulary(&engine, population);
     Ok(report)
 }
 
 /// Builds the engine and chooses where everyone starts.
-fn prepare_world(
-    config: StudyConfig,
-) -> Result<(Engine, WorldRect, Vec<WorldPosition>, Vec<WorldPosition>), ScenarioError> {
+fn prepare_world(config: StudyConfig) -> Result<Start, ScenarioError> {
     let side = if config.spawn == StudySpawn::Valley {
         64
     } else {
@@ -255,7 +290,14 @@ fn prepare_world(
         let fresh_water = fresh_water_cells(&engine);
         let spawns = random_land_spawns(&engine, config, &fresh_water)?;
         let area = engine.world().initial_bounds();
-        return Ok((engine, area, fresh_water, spawns));
+        return Ok(Start {
+            engine,
+            area,
+            fresh_water,
+            spawns,
+            founders: None,
+            parents: Vec::new(),
+        });
     }
     let valley = sim_core::find_valley(config.seed, VALLEY_SIDE).ok_or_else(|| {
         ScenarioError(format!(
@@ -269,6 +311,27 @@ fn prepare_world(
         .filter(|cell| valley.bounds.contains(*cell))
         .collect();
     let families = sim_core::VALLEY_FAMILIES;
+    let no_room = || ScenarioError("valley has no room for the band beside water".into());
+    // The standard band has children; other sizes are founders only.
+    if config.population == VALLEY_POPULATION {
+        let layout = sim_core::band_layout(
+            engine.world(),
+            valley.bounds,
+            families,
+            sim_core::VALLEY_BAND / families,
+            sim_core::VALLEY_CHILDREN_PER_FAMILY,
+            config.seed,
+        )
+        .ok_or_else(no_room)?;
+        return Ok(Start {
+            engine,
+            area: valley.bounds,
+            fresh_water,
+            spawns: layout.sites,
+            founders: Some(layout.founders as u32),
+            parents: layout.parents,
+        });
+    }
     let spawns = sim_core::family_camps(
         engine.world(),
         valley.bounds,
@@ -280,8 +343,15 @@ fn prepare_world(
         sites.truncate(config.population as usize);
         sites
     })
-    .ok_or_else(|| ScenarioError("valley has no room for the band beside water".into()))?;
-    Ok((engine, valley.bounds, fresh_water, spawns))
+    .ok_or_else(no_room)?;
+    Ok(Start {
+        engine,
+        area: valley.bounds,
+        fresh_water,
+        spawns,
+        founders: None,
+        parents: Vec::new(),
+    })
 }
 
 fn collect_tick(engine: &Engine, tracks: &mut [AgentTrack]) {
@@ -514,6 +584,7 @@ fn build_report(
         trace: Vec::new(),
         comms: crate::comms::CommunicationLog::default(),
         vocabulary_agreement: [0, 0],
+        children_vocabulary: None,
         minds: (0..tracks.len())
             .map(|index| engine.mental_map(AgentId::new(index as u32)))
             .collect(),
@@ -648,48 +719,101 @@ fn trait_effects(
 
 /// For each place concept, the share of living agents whose strongest word for
 /// it is the band's most common one; averaged over concepts.
+const PLACE_CONCEPTS: [sim_core::Concept; 6] = [
+    sim_core::Concept::Water,
+    sim_core::Concept::Food,
+    sim_core::Concept::Wood,
+    sim_core::Concept::Stone,
+    sim_core::Concept::Home,
+    sim_core::Concept::Been,
+];
+
+/// The word an agent would say for `concept` (its best-supported form).
+fn top_word(
+    lexicon: &[sim_core::LexiconEntryView],
+    concept: sim_core::Concept,
+) -> Option<sim_core::VocalForm> {
+    lexicon
+        .iter()
+        .filter(|entry| entry.concept == concept)
+        .max_by_key(|entry| {
+            (
+                i32::from(entry.positive) - i32::from(entry.contradictory),
+                entry.form,
+            )
+        })
+        .map(|entry| entry.form)
+}
+
+/// How many of `minds` say each word for `concept`.
+fn word_counts(
+    minds: &[&sim_core::MentalMapView],
+    concept: sim_core::Concept,
+) -> std::collections::BTreeMap<sim_core::VocalForm, u64> {
+    let mut counts = std::collections::BTreeMap::new();
+    for mind in minds {
+        if let Some(word) = top_word(&mind.lexicon, concept) {
+            *counts.entry(word).or_insert(0_u64) += 1;
+        }
+    }
+    counts
+}
+
+/// The most common word for each place concept among `minds`.
+fn modal_words(minds: &[&sim_core::MentalMapView]) -> [Option<sim_core::VocalForm>; 6] {
+    PLACE_CONCEPTS.map(|concept| {
+        word_counts(minds, concept)
+            .into_iter()
+            .max_by_key(|&(word, count)| (count, std::cmp::Reverse(word)))
+            .map(|(word, _)| word)
+    })
+}
+
 fn vocabulary_agreement(engine: &Engine, population: usize) -> u64 {
-    use sim_core::Concept;
-    let concepts = [
-        Concept::Water,
-        Concept::Food,
-        Concept::Wood,
-        Concept::Stone,
-        Concept::Home,
-        Concept::Been,
-    ];
-    let lexicons: Vec<_> = (0..population)
+    let views: Vec<_> = (0..population)
         .filter_map(|index| engine.mental_map(AgentId::new(index as u32)))
-        .map(|map| map.lexicon)
         .collect();
-    if lexicons.is_empty() {
+    let minds: Vec<_> = views.iter().collect();
+    if minds.is_empty() {
         return 0;
     }
-    let mut total = 0;
-    for concept in concepts {
-        let words: Vec<_> = lexicons
-            .iter()
-            .filter_map(|lexicon| {
-                lexicon
-                    .iter()
-                    .filter(|entry| entry.concept == concept)
-                    .max_by_key(|entry| {
-                        (
-                            i32::from(entry.positive) - i32::from(entry.contradictory),
-                            entry.form,
-                        )
-                    })
-                    .map(|entry| entry.form)
-            })
-            .collect();
-        let mut counts = std::collections::BTreeMap::new();
-        for word in &words {
-            *counts.entry(*word).or_insert(0_u64) += 1;
-        }
-        let modal = counts.values().copied().max().unwrap_or(0);
-        total += percent(modal, lexicons.len() as u64);
+    let total: u64 = PLACE_CONCEPTS
+        .into_iter()
+        .map(|concept| {
+            let modal = word_counts(&minds, concept)
+                .into_values()
+                .max()
+                .unwrap_or(0);
+            percent(modal, minds.len() as u64)
+        })
+        .sum();
+    total / PLACE_CONCEPTS.len() as u64
+}
+
+/// For children: how many there are, and the percent of place words where a
+/// child says what most founders say.
+fn children_vocabulary(engine: &Engine, population: usize) -> Option<(u64, u64)> {
+    let minds: Vec<_> = (0..population)
+        .filter_map(|index| engine.mental_map(AgentId::new(index as u32)))
+        .collect();
+    let founders: Vec<_> = minds.iter().filter(|mind| !mind.child).collect();
+    let children: Vec<_> = minds.iter().filter(|mind| mind.child).collect();
+    if children.is_empty() {
+        return None;
     }
-    total / concepts.len() as u64
+    let band = modal_words(&founders);
+    let matching = children
+        .iter()
+        .flat_map(|child| {
+            PLACE_CONCEPTS.iter().zip(band).filter(|&(&concept, word)| {
+                word.is_some() && top_word(&child.lexicon, concept) == word
+            })
+        })
+        .count() as u64;
+    Some((
+        children.len() as u64,
+        percent(matching, (children.len() * PLACE_CONCEPTS.len()) as u64),
+    ))
 }
 
 fn percent(part: u64, whole: u64) -> u64 {
@@ -899,6 +1023,12 @@ impl fmt::Display for StudyReport {
             "\n  vocabulary: band agreement on each place word {}% at start -> {}% at end",
             self.vocabulary_agreement[0], self.vocabulary_agreement[1]
         )?;
+        if let Some((children, matching)) = self.children_vocabulary {
+            write!(
+                formatter,
+                "\n  children: {children} born with no words; they say the founders' word for {matching}% of place words"
+            )?;
+        }
         for (name, metric, low, high) in &self.trait_effects {
             write!(
                 formatter,

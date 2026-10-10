@@ -60,6 +60,24 @@ pub(crate) fn point(from: WorldPosition, to: WorldPosition) -> Option<Gesture> {
     })
 }
 
+/// A hand held out toward someone (for requests): the direction only, at any
+/// distance. Returns `None` only when `to` is where the agent stands.
+pub(crate) fn reach_toward(from: WorldPosition, to: WorldPosition) -> Option<Gesture> {
+    let (dx, dy) = (to.x - from.x, to.y - from.y);
+    let distance = dx.unsigned_abs().max(dy.unsigned_abs());
+    if distance == 0 {
+        return None;
+    }
+    let scale = distance as i64;
+    Some(Gesture {
+        direction: (
+            rounded_div(dx * DIRECTION_SCALE, scale) as i8,
+            rounded_div(dy * DIRECTION_SCALE, scale) as i8,
+        ),
+        emphasis: 0,
+    })
+}
+
 /// What a watcher standing near `sender` concludes: an estimated place and a
 /// search radius in 4-cell units (as stored by the mental map).
 pub(crate) fn interpret(sender: WorldPosition, gesture: Gesture) -> (WorldPosition, u8) {

@@ -81,6 +81,8 @@ pub struct MemoryInspection {
     places: [LandmarkView; LANDMARK_SLOTS],
     len: u8,
     pub explored_tiles: usize,
+    /// Born into the band with no words (rather than a founder).
+    pub child: bool,
     pub personality: Personality,
     acquaintances: [AcquaintanceView; ACQUAINTANCE_SLOTS],
     acquaintance_len: u8,
@@ -127,6 +129,7 @@ impl MemoryInspection {
             places,
             len: len as u8,
             explored_tiles: view.explored_tiles,
+            child: view.child,
             personality: view.personality,
             acquaintances,
             acquaintance_len: acquaintance_len as u8,

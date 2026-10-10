@@ -6,8 +6,10 @@ mod actions;
 mod cognition;
 mod errors;
 mod policy;
+mod requests;
 mod routes;
 mod setup;
+pub use setup::SimulationAdvanced;
 mod shelter;
 mod tick;
 mod views;
@@ -129,6 +131,7 @@ pub struct Engine {
     hint_outcomes: Vec<HintOutcomeEvent>,
     lesson_events: Vec<crate::LessonEvent>,
     repair_events: Vec<crate::RepairEvent>,
+    request_events: Vec<crate::RequestEvent>,
     next_signal_id: u64,
     resource_deltas: ResourceDeltas,
     spawned_objects: SpawnedObjects,
@@ -168,6 +171,7 @@ impl Engine {
             hint_outcomes: Vec::new(),
             lesson_events: Vec::new(),
             repair_events: Vec::new(),
+            request_events: Vec::new(),
             next_signal_id: 0,
             resource_deltas: ResourceDeltas::default(),
             spawned_objects: SpawnedObjects::default(),
@@ -214,6 +218,7 @@ impl Engine {
                 self.hint_outcomes.clear();
                 self.lesson_events.clear();
                 self.repair_events.clear();
+                self.request_events.clear();
                 self.next_signal_id = 0;
                 self.resource_deltas = ResourceDeltas::default();
                 self.spawned_objects = SpawnedObjects::default();

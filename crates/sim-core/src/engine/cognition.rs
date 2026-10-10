@@ -8,7 +8,7 @@ use crate::cognition::{
     RepairResponse, UtteranceIntent, VocalForm, belief_seconds, express, locate, mime_for,
     spent_kinds, told_confidence, understand, unmistakable, visible_kinds,
 };
-use crate::policy::{MindInput, PolicyAction, PolicySelection, deliberate};
+use crate::policy::{MindInput, ParentInput, PolicyAction, PolicySelection, deliberate};
 use crate::{
     AgentActivity, AgentId, Engine, ExplorationHeading, GestureTopic, HintOutcomeEvent,
     InterpretationEvent, InventoryView, LandmarkKind, MentalMapView, PHYSICAL_POLICY_RADIUS,
@@ -41,13 +41,15 @@ pub(super) struct Question {
 const RUNNER_UP_MIN_PROBABILITY: u8 = 64;
 /// Relative need (128 = at threshold) that counts as urgent for that rule.
 const URGENT_NEED: u16 = 112;
+/// Children ask "this?" unless at least this sure (out of 255, about 90%).
+const CHILD_ASKS_BELOW: u8 = 230;
 
 /// Hint confidence: trust in the teller, scaled by how sure the reading is.
 fn scaled_confidence(trust: u8, probability: u8) -> u8 {
     (u16::from(told_confidence(trust)) * u16::from(probability) / 255) as u8
 }
 
-const fn can_watch(activity: AgentActivity) -> bool {
+pub(super) const fn can_watch(activity: AgentActivity) -> bool {
     !matches!(
         activity,
         AgentActivity::Sleeping | AgentActivity::Incapacitated | AgentActivity::Dead
@@ -157,6 +159,7 @@ impl Engine {
         let personality = self.personality_in_use(agent);
         let at = self.time;
         let latest_signal = self.next_signal_id;
+        let beg = self.beg_target(agent, perception);
         let visible = visible_kinds(origin, perception);
         let spent = spent_kinds(perception);
         let hint_outcomes = &mut self.hint_outcomes;
@@ -177,6 +180,8 @@ impl Engine {
             social: people,
             lexicon,
             dialogue,
+            child: _,
+            parent,
         } = mind;
         map.observe(
             agent.get(),
@@ -262,6 +267,15 @@ impl Engine {
                 )
             })
             .flatten();
+        let parent = parent.map(|parent| {
+            if perception.agents.iter().any(|other| other.id == parent) {
+                ParentInput::Stay
+            } else {
+                people
+                    .whereabouts(parent)
+                    .map_or(ParentInput::Stay, ParentInput::Return)
+            }
+        });
         let deliberation = deliberate(
             origin,
             needs,
@@ -275,9 +289,18 @@ impl Engine {
                 personality,
                 company,
                 friend_target,
+                parent,
+                beg_target: beg.map(|(_, position)| position),
             },
         );
-        if deliberation.selection.goal == PhysicalGoal::Signal
+        if deliberation.selection.reason == PolicyReason::Begging
+            && let Some((giver, position)) = beg
+        {
+            self.minds
+                .get_mut(agent)
+                .dialogue
+                .plan_request(giver, position);
+        } else if deliberation.selection.goal == PhysicalGoal::Signal
             && let Some((_, rank)) = share
         {
             self.minds.get_mut(agent).map.mark_shared(now, rank);
@@ -336,6 +359,9 @@ impl Engine {
             .ok_or(PolicyFailureReason::InconsistentState)?
             .position;
         let now = belief_seconds(self.time);
+        if let Some(giver) = self.minds.get_mut(sender).dialogue.take_request(place) {
+            return self.apply_request(sender, from, giver);
+        }
         let correction = self
             .minds
             .get(sender)
@@ -420,6 +446,12 @@ impl Engine {
                 179,
             ) as u8;
             let mind = self.minds.get_mut(watcher.id);
+            // Children ask about almost anything they aren't sure of.
+            let ask_below = if mind.child {
+                CHILD_ASKS_BELOW
+            } else {
+                ask_below
+            };
             let word = public
                 .vocal
                 .and_then(|form| mind.lexicon.recognize_with_strength(form));
@@ -559,7 +591,7 @@ impl Engine {
     }
 
     /// Thirst and hunger relative to their thresholds (128 = at threshold).
-    fn relative_need(&self, agent: AgentId) -> (u16, u16) {
+    pub(super) fn relative_need(&self, agent: AgentId) -> (u16, u16) {
         self.population
             .needs_view(agent, self.time)
             .map_or((0, 0), |needs| {
@@ -747,7 +779,7 @@ impl Engine {
 
     /// How urgent the agent looks: its most pressing need relative to that
     /// need's threshold (128 = at threshold, 255 = twice past it or more).
-    fn visible_urgency(&self, agent: AgentId) -> u8 {
+    pub(super) fn visible_urgency(&self, agent: AgentId) -> u8 {
         self.population
             .needs_view(agent, self.time)
             .map_or(0, |needs| {
@@ -773,9 +805,28 @@ impl Engine {
             personality: self.personality_in_use(agent),
             landmarks: mind.map.views().collect(),
             explored_tiles: mind.map.explored_tile_count(),
+            child: mind.child,
             acquaintances: mind.social.views().collect(),
             lexicon: mind.lexicon.views().collect(),
         })
+    }
+
+    /// Agents with ids at or above `count` are children: they start with no words,
+    /// stay close to whoever they are bonded with, and ask readily. Call before
+    /// the first tick (minds are created on first use); reset restores "all founders".
+    pub fn set_founders(&mut self, count: u32) {
+        self.minds.set_founders(count);
+    }
+
+    /// Bonds a child to a parent: the child knows and trusts the parent from the start.
+    pub fn bond(&mut self, child: AgentId, parent: AgentId) -> bool {
+        let Some(position) = self.population.view(parent).map(|view| view.position) else {
+            return false;
+        };
+        let now = belief_seconds(self.time);
+        let mind = self.minds.get_mut(child);
+        mind.parent = Some(parent);
+        mind.social.bond(parent, position, now).is_some()
     }
 
     /// The agent's innate personality (independent of whether the policy uses it).
@@ -786,7 +837,7 @@ impl Engine {
     }
 
     /// The personality the policy acts on: innate with `social`, else average.
-    fn personality_in_use(&self, agent: AgentId) -> Personality {
+    pub(super) fn personality_in_use(&self, agent: AgentId) -> Personality {
         if self.policy_options.social {
             Personality::of(self.config.seed, agent)
         } else {

@@ -10,8 +10,21 @@ use crate::{
     AgentId, AgentSpawnError, Engine, EngineConfig, GenerateAreaError, InitialInventoryError,
     InventoryView, PolicyOptions, PopulationInit, PopulationInitError, PopulationInitOutcome,
     SimTime, SpawnKind, SpawnObjectError, Standability, World, WorldChunk, WorldChunkLoad,
-    WorldPosition, WorldQueryError,
+    WorldPosition, WorldQueryError, WorldRect,
 };
+
+/// Returned when setup that must precede the first tick is attempted later.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SimulationAdvanced;
+
+/// A deterministic 0..100 roll per seed and position.
+fn scarcity_roll(seed: u64, position: WorldPosition) -> u64 {
+    let mut key =
+        seed ^ 0x5343_4152_4345 ^ ((position.x as u64) << 32) ^ (position.y as u64 & 0xFFFF_FFFF);
+    key = (key ^ (key >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    key = (key ^ (key >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    (key ^ (key >> 31)) % 100
+}
 
 impl Engine {
     pub fn config(&self) -> EngineConfig {
@@ -122,6 +135,35 @@ impl Engine {
             position,
             self.policy_active,
         )
+    }
+
+    /// Scenario setup for scarcity: leaves about `keep_percent` of the generated
+    /// food in `area` (chosen deterministically from the seed and position) and
+    /// marks the rest as already stripped. Returns how many were stripped.
+    /// Rejected once the simulation has advanced.
+    pub fn strip_food(
+        &mut self,
+        area: WorldRect,
+        keep_percent: u8,
+    ) -> Result<usize, SimulationAdvanced> {
+        if self.time != SimTime::ZERO {
+            return Err(SimulationAdvanced);
+        }
+        let mut stripped = 0;
+        for y in area.min.y..area.max.y {
+            for x in area.min.x..area.max.x {
+                let position = WorldPosition { x, y };
+                let Some(resource) = self.world.base_resource_at(position) else {
+                    continue;
+                };
+                let roll = scarcity_roll(self.config.seed, position);
+                if resource.kind == crate::ResourceKind::Food && roll >= u64::from(keep_percent) {
+                    self.resource_deltas.strip(position);
+                    stripped += 1;
+                }
+            }
+        }
+        Ok(stripped)
     }
 
     /// Records explicit starting supplies before autonomous simulation begins.

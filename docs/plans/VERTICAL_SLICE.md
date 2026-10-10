@@ -182,7 +182,7 @@ Also: usage lessons (hearing someone use a word for something else), and two fou
 **camped apart** at their own water sources. Lexicons now converge through use and repair (seed 1
 single camp: 81% → 94%; two camps: 75–90% by the end), and survival rose slightly (251/300).
 
-### M6 — The success test ✅ (2026-10-10, with a caveat)
+### M6 — The success test ✅ (2026-10-10, with caveats)
 
 **Result:** `CommunicationLog::success_episodes` follows each episode through gesture ids:
 misread (with recorded reasons) → acted on → the listener learned from what it found there → the
@@ -204,6 +204,12 @@ those acted on are hard to discover: water and food co-locate at oases, and cros
 about faraway places. The test is deterministic but sensitive to behavior changes. If a change
 removes the episode, investigate why with `--misreads` and `--lessons` rather than picking a new
 seed.
+
+**Since M7:** the test runs the 16-adult band (`--valley --agents 16`), which still produces the
+exact episode above. The default valley now includes 4 children and has produced no complete
+episode in 19 seeds × 2.4M ticks. The likely cause is that children ask about almost everything,
+so misunderstandings get repaired before anyone acts on them, but this isn't proven: adding 4
+agents also changes the whole deterministic run.
 
 
 - The sender keeps a `PendingCommunication` with an expected outcome and checks it later: did the
@@ -231,7 +237,36 @@ who don't, measured as overlap over time in the study.
 
 **Done when:** that test passes. That is the project's definition of success.
 
-### M7 — Requests, helping, and children (the rest of the vertical slice)
+### M7 — Requests, helping, and children ✅ (2026-10-10, COME deferred)
+
+**Result:**
+- **Children:** the valley band is now 16 founders plus 4 children (2 per family), who start
+  with **no words**, begin with a close bond to a parent (familiarity 255, trust 220), go back to
+  where they last saw that parent when it's out of view, take no excursions, and ask "this?"
+  unless at least 90% sure. They learn only from what they observe. Across 19 seeds at 2.4M ticks
+  they end up saying the founders' word for **62–95%** of place words (about 80% on average; seed 1
+  reaches 79% by 600k ticks).
+- **Requests (GIVE) and answers:** a hungry agent who carries no food and knows of none holds out
+  a hand to someone in view (its parent first, then the most trusted and familiar), mimes eating,
+  and says its word for food. The one asked reads that with its own words and needs, so a
+  thirsty parent can take it as a request for water; the asker then repeats it with an
+  exaggerated mime, and both learn. Answers are visible: food handed over (with a nod), a head
+  shake, or empty hands. Parents feed their children unless starving themselves. Others keep
+  their last meal and weigh trust, familiarity, sociability, the asker's urgency, their own food,
+  and their own hunger. Being helped raises trust (+24); a refusal lowers it (−8).
+- **Effect on survival** (`--food 5`, food doesn't regrow): helping carries more of the band
+  through the first famine (seed 7: 14 vs 12 alive at 600k ticks; lower-quartile lifespan 185k →
+  558k ticks; seed 13: 997k → 1,159k). Over longer runs it mostly evens out who starves: mean
+  lifespan is about the same (seed 7: 1,475k vs 1,465k) or a bit lower (seed 1: 3,237k vs
+  3,487k), because the best-supplied agents give food away. With food that doesn't regrow, sharing
+  can only move meals around.
+- **COME (regroup) is deferred.** Children following parents covers the slice's need to stay
+  together; a spoken COME request is still to do.
+
+Tests: `engine/tests/requests.rs` (asking, giving, refusing, empty hands, a parent feeding its
+child after repairing a misread request) and the release-only `sim-headless/tests/slice.rs`.
+
+**Plan as written:**
 
 - **Requests:** COME (regroup), GIVE (help a struggling friend with food or water), and YES/NO
   replies, with refusal depending on personality, trust, and the giver's own needs.

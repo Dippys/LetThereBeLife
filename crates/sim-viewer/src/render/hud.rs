@@ -305,6 +305,9 @@ fn write_memory(output: &mut String, memory: &MemoryInspection) {
         memory.explored_tiles
     )
     .unwrap();
+    if memory.child {
+        writeln!(output, "CHILD, BORN WITH NO WORDS").unwrap();
+    }
     write_personality(output, memory.personality);
     write_friends(output, memory.acquaintances());
     write_words(output, memory);
@@ -528,6 +531,8 @@ const fn policy_reason_label(reason: PolicyReason) -> &'static str {
         PolicyReason::Sharing => "SHARING A PLACE",
         PolicyReason::Returning => "RETURNING TO WATER",
         PolicyReason::Visiting => "VISITING A FRIEND",
+        PolicyReason::Following => "FOLLOWING A PARENT",
+        PolicyReason::Begging => "ASKING FOR FOOD",
     }
 }
 
