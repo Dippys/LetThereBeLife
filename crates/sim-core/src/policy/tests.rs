@@ -225,10 +225,18 @@ fn carried_food_turns_hunger_into_eating_and_idle_agents_gather_capacity() {
     let full = InventoryView {
         items: [crate::INVENTORY_CAPACITY_PER_KIND; Material::COUNT],
     };
-    assert_eq!(
+    // The only free neighbour, (1, 0), is on the lake shore: nobody builds there.
+    assert_ne!(
         select(origin, needs(0, 0, 0, 0), full, &facts).goal,
         PhysicalGoal::BuildShelter
     );
+    let mut inland = facts;
+    let north = WorldPosition { x: 0, y: -1 };
+    inland.reachable_cells.insert(0, north);
+    inland.traversable_cells.insert(0, north);
+    let build = select(origin, needs(0, 0, 0, 0), full, &inland);
+    assert_eq!(build.goal, PhysicalGoal::BuildShelter);
+    assert_eq!(build.target, Some(north));
 }
 
 #[test]

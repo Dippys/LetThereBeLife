@@ -211,9 +211,18 @@ pub(super) fn nearest_build_site(
     origin: WorldPosition,
     perception: &PhysicalPerception,
 ) -> Option<WorldPosition> {
+    // Never build on a shore cell: a structure there can wall off the only way
+    // to a small pond's water.
+    let shore = |cell: WorldPosition| {
+        perception
+            .drinkable_water
+            .iter()
+            .any(|water| cell.x.abs_diff(water.position.x) + cell.y.abs_diff(water.position.y) <= 1)
+    };
     cardinal_neighbors(origin)
         .filter(|candidate| {
             candidate_available(origin, perception, *candidate)
+                && !shore(*candidate)
                 && perception
                     .reserved_cells
                     .binary_search_by_key(&(candidate.y, candidate.x), |cell| (cell.y, cell.x))

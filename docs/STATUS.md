@@ -138,11 +138,13 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
   No single hotspot was found.
 - **Intermittent viewer smoke crash.** `0xc0000409` with no panic message (WSL shows it as exit
   code 9): 1 in 19 runs on 2026-10-09, 2 in 14 on 2026-10-10, then 0 in 8, then 2 in 8 `--valley`
-  smokes after M7. It happens with and without agents. Cause unknown, possibly GPU teardown.
+  smokes after M7, then 1 in 12 smokes after the living world. It happens with and without agents. Cause unknown, possibly GPU teardown.
 - **No save/load.** Simulation state can't be persisted. The world archive needs regenerating for
   generator v2 (`--pregenerate-world`).
 - **Minds are 808 B per agent** (mental map 372 B). That's fine at viewer scale; the spec's 10M
   agents would need ~8 GB, so compaction comes later.
+- **Structures could wall off ponds:** shelters and hearths are no longer built on shore cells,
+  but agents can still occasionally start or end up in a pocket with no way to water.
 - **Greedy waypoints can pace around obstacles.** Agents no longer step straight back to where they
   were and collapse into sleep when exhausted, but longer cycles are possible.
 
