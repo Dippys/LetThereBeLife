@@ -197,6 +197,7 @@ impl Engine {
         self.runtime_counters.due_backlog_ticks += u64::from(due_backlog);
         self.step_wildlife();
         self.revive_due();
+        self.age_people();
         // Autonomous agents re-schedule constantly; without this, stale events
         // were only pruned on manual commands and piled up during long runs.
         self.compact_scheduler_if_needed();

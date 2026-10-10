@@ -14,12 +14,12 @@ several generations fit in a headless run of a few minutes.
 
 ## Steps
 
-### G1. Fixes that matter more with a growing population
+### G1. Fixes that matter more with a growing population ✅ (D-083)
 
 - Deer herds recover in proportion to what's left, so hunting doesn't empty the valley.
 - People who know wolves are dangerous prefer company while wolves are about.
 
-### G2. Age and sex
+### G2. Age and sex ✅ (D-084; slower walking for elders not yet)
 
 - Every person has a sex and a birth time. Founders start at varied adult ages.
 - Life stages: carried baby (to ~3), child (to ~15), adult, elder (from ~50).

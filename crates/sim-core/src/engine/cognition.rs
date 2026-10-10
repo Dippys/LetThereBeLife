@@ -182,6 +182,8 @@ impl Engine {
         let food = self.food_values(agent);
         self.check_leads(agent, perception, now);
         let (seen_danger, seen_prey, wary) = self.animals_of_interest(agent, origin, perception);
+        // Young children don't hunt.
+        let hunts = self.age_of(agent) >= crate::HUNTING_AGE;
         let (alarm, quarry) = self.minds.get_mut(agent).dialogue.current_leads(now);
         let near = |place: WorldPosition, within: u64| {
             origin.x.abs_diff(place.x).max(origin.y.abs_diff(place.y)) <= within
@@ -339,10 +341,10 @@ impl Engine {
                 food,
                 danger,
                 wary,
-                prey: seen_prey,
-                quarry: quarry_place,
+                prey: seen_prey.filter(|_| hunts),
+                quarry: quarry_place.filter(|_| hunts),
                 warn: warn.map(|(_, position)| position),
-                recruit: recruit.map(|(_, position)| position),
+                recruit: recruit.map(|(_, position)| position).filter(|_| hunts),
                 knows_hearths: crafts.knows_hearths(),
                 came_from: map.came_from(origin),
             },

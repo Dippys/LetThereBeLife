@@ -353,3 +353,17 @@ each time they came round.
 **Consequences:** 8-15 kills a run, more meat eaten, herds near their cap, wolves taking deer, bites
 13-26 a run instead of 30-130. In 66 valleys, 1,311 of 1,320 people are standing at the end
 (1,238 before). The planned "prefer company near wolves" change wasn't needed.
+
+## D-084: Age and sex (2026-10-10)
+
+**Decision:** Every person has a sex and a birth time (`life.rs`; one simulated hour is one year).
+People present at the start get them from the seed: founders are adults of 18-39, children of the
+band 4-10. Life stages: baby (to 3), child (to 15), adult, elder (from 50). Once a year the old may
+die of old age (about 4% a year at 60, 16% at 70, 36% at 80). Men strike a little better than
+average and women a little worse (plus or minus 5 in 100), children and elders worse; children
+under 12 don't hunt; elders heal less in sleep. Sex and birth are kept by the engine (derived for
+the starting band, stored for people born later), not in the per-agent hot records.
+**Why:** Plan G2: the groundwork for couples, births, and generations, with realistic constraints
+and no built-in roles.
+**Consequences:** A 30-year valley run loses 3 people to old age and none to anything else. New
+death cause `OldAge`. Slower walking and faster tiring for elders aren't modelled yet.

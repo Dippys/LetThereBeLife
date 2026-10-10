@@ -427,6 +427,11 @@ impl Minds {
     }
 
     /// Agents with ids at or above `count` are children. Affects minds created later.
+    /// A founder (present from the start with the band's lore) rather than a child.
+    pub(crate) const fn is_founder(&self, agent: AgentId) -> bool {
+        agent.get() < self.founders
+    }
+
     pub(crate) fn set_founders(&mut self, count: u32) {
         self.founders = count;
     }

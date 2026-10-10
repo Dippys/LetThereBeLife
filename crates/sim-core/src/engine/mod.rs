@@ -10,6 +10,7 @@ mod requests;
 mod routes;
 mod setup;
 pub use setup::SimulationAdvanced;
+mod life;
 mod shelter;
 mod tick;
 mod views;
@@ -135,6 +136,8 @@ pub struct Engine {
     lead_events: Vec<crate::LeadFollowedEvent>,
     wildlife: crate::wildlife::Wildlife,
     wildlife_events: Vec<crate::WildlifeEvent>,
+    /// Sex and birth of people born during the run (others are derived from the seed).
+    lives: Vec<Option<crate::life::Life>>,
     /// People knocked down by a wound, and when they come round (in time order).
     recovering: std::collections::VecDeque<(SimTime, AgentId)>,
     lesson_events: Vec<crate::LessonEvent>,
@@ -181,6 +184,7 @@ impl Engine {
             lead_events: Vec::new(),
             wildlife: crate::wildlife::Wildlife::default(),
             wildlife_events: Vec::new(),
+            lives: Vec::new(),
             recovering: std::collections::VecDeque::new(),
             lesson_events: Vec::new(),
             repair_events: Vec::new(),
@@ -233,6 +237,7 @@ impl Engine {
                 self.lead_events.clear();
                 self.wildlife = crate::wildlife::Wildlife::default();
                 self.wildlife_events.clear();
+                self.lives.clear();
                 self.recovering.clear();
                 self.lesson_events.clear();
                 self.repair_events.clear();

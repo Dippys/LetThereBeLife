@@ -33,7 +33,8 @@ impl Engine {
     pub fn release_wildlife(&mut self, area: WorldRect, deer: u16, wolves: u16) -> usize {
         self.wildlife = Wildlife {
             area: Some(area),
-            next_birth: Species::ALL.map(|species| species.traits().birth_ticks / MIN_BREEDERS as u64),
+            next_birth: Species::ALL
+                .map(|species| species.traits().birth_ticks / MIN_BREEDERS as u64),
             ..Wildlife::default()
         };
         let seed = self.config.seed;
@@ -524,7 +525,9 @@ impl Engine {
                     && chebyshev(view.position, at) <= STRIKE_RANGE
             })
             .count() as u64;
-        let chance = (STRIKE_CHANCE + HELPER_CHANCE * helpers).min(95);
+        let chance = (STRIKE_CHANCE + HELPER_CHANCE * helpers)
+            .saturating_add_signed(self.strength(hunter))
+            .clamp(5, 95);
         let roll = mix(self.config.seed
             ^ 0x4855_4e54
             ^ (u64::from(hunter.get()) << 40)

@@ -90,7 +90,8 @@ impl Engine {
             PhysicalGoal::Eat => self.apply_eat(event.agent),
             PhysicalGoal::GatherMaterial => self.apply_gather(event.agent, reason),
             PhysicalGoal::Sleep => {
-                let sleep = self.population.finish_sleep(event.agent);
+                let healing = self.sleep_healing(event.agent);
+                let sleep = self.population.finish_sleep(event.agent, healing);
                 if let Some(sleep) = sleep {
                     self.sleep_diagnostics.push(SleepDiagnostic {
                         sleep,

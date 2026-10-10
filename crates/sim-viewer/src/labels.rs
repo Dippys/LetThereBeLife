@@ -3,9 +3,22 @@
 
 use sim_core::{
     AgentActivity, AgentId, AnimalMode, BiomeType, Concept, DeathCause, FeatureKind, GestureTopic,
-    LandmarkKind, Material, Mime, Personality, PhysicalGoal, PolicyReason, SleepQuality, SpawnKind,
-    Species, StructureKind, SurfaceType, VocalForm,
+    LandmarkKind, LifeStage, LifeView, Material, Mime, Personality, PhysicalGoal, PolicyReason,
+    Sex, SleepQuality, SpawnKind, Species, StructureKind, SurfaceType, VocalForm,
 };
+
+/// "Woman, 34", "Boy, 9", "Baby girl, 1".
+pub fn who(life: LifeView) -> String {
+    let noun = match (life.stage, life.sex) {
+        (LifeStage::Baby, Sex::Female) => "Baby girl",
+        (LifeStage::Baby, Sex::Male) => "Baby boy",
+        (LifeStage::Child, Sex::Female) => "Girl",
+        (LifeStage::Child, Sex::Male) => "Boy",
+        (LifeStage::Adult | LifeStage::Elder, Sex::Female) => "Woman",
+        (LifeStage::Adult | LifeStage::Elder, Sex::Male) => "Man",
+    };
+    format!("{noun}, {}", life.age)
+}
 
 pub fn person(agent: AgentId) -> String {
     format!("Person {}", agent.get())
@@ -107,6 +120,7 @@ pub const fn death(cause: DeathCause) -> &'static str {
         DeathCause::Starvation => "starved",
         DeathCause::Exhaustion => "died of exhaustion",
         DeathCause::Injury => "died of injuries",
+        DeathCause::OldAge => "died of old age",
     }
 }
 
@@ -316,6 +330,19 @@ mod tests {
         assert_eq!(duration(12.7), "12s");
         assert_eq!(duration(65.0), "1m 05s");
         assert_eq!(duration(3_600.0 * 2.0 + 60.0 * 7.0 + 9.0), "2h 07m");
+    }
+
+    #[test]
+    fn people_are_described_by_sex_and_age() {
+        let life = |sex, age| LifeView {
+            sex,
+            age,
+            stage: LifeStage::of(age),
+        };
+        assert_eq!(who(life(Sex::Female, 34)), "Woman, 34");
+        assert_eq!(who(life(Sex::Male, 9)), "Boy, 9");
+        assert_eq!(who(life(Sex::Female, 1)), "Baby girl, 1");
+        assert_eq!(who(life(Sex::Male, 70)), "Man, 70");
     }
 
     #[test]

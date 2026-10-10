@@ -63,6 +63,7 @@ impl ViewerApp {
                 .mental_map(view.id)
                 .as_ref()
                 .map(render::MemoryInspection::from_view),
+            life: self.engine.life(view.id),
         })
     }
 

@@ -5,6 +5,7 @@ mod cognition;
 mod diagnostics;
 mod engine;
 mod health;
+mod life;
 mod needs;
 mod placements;
 mod policy;
@@ -42,6 +43,9 @@ pub use engine::{
 pub use health::{
     DeathCause, DeathRecord, HEALTH_CONSEQUENCE_INTERVAL_TICKS, HEALTH_INCAPACITATION_THRESHOLD,
     HEALTH_MAX, HealthDiagnostic, HealthDiagnosticKind, HealthStatus, HealthView, SLEEP_HEALING,
+};
+pub use life::{
+    ADULT_AGE, ELDER_AGE, HUNTING_AGE, LifeStage, LifeView, SECONDS_PER_YEAR, Sex, WEANING_AGE,
 };
 pub use needs::{
     NEED_MAX, NEED_RATE_PERIOD_TICKS, NeedKind, NeedLevelView, NeedQueryError, NeedThreshold,

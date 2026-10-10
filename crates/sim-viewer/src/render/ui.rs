@@ -391,12 +391,15 @@ pub(super) enum Row {
 /// What the person panel says about one agent, top to bottom.
 pub(super) fn person_rows(agent: &AgentInspection) -> Vec<Row> {
     let mut rows = vec![Row::Title(labels::person(agent.view.id))];
+    let mut about: Vec<String> = Vec::new();
+    if let Some(life) = agent.life {
+        about.push(labels::who(life));
+    }
     if let Some(memory) = &agent.memory {
-        let role = if memory.child { "Child" } else { "Founder" };
-        rows.push(Row::Text(
-            format!("{role} · {}", labels::personality(memory.personality)),
-            colors::UI_DIM,
-        ));
+        about.push(labels::personality(memory.personality).to_owned());
+    }
+    if !about.is_empty() {
+        rows.push(Row::Text(about.join(" · "), colors::UI_DIM));
     }
     rows.push(Row::Gap);
 

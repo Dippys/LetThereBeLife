@@ -1221,7 +1221,7 @@ impl fmt::Display for StudyReport {
         )?;
         writeln!(
             formatter,
-            "  survivors={} (collapsed {})  deaths dehydration/exposure/starvation/exhaustion/injury={}/{}/{}/{}/{}  median_death_tick={}",
+            "  survivors={} (collapsed {})  deaths dehydration/exposure/starvation/exhaustion/injury/old age={}/{}/{}/{}/{}/{}  median_death_tick={}",
             self.survivors,
             self.collapsed,
             self.deaths[DeathCause::Dehydration as usize],
@@ -1229,6 +1229,7 @@ impl fmt::Display for StudyReport {
             self.deaths[DeathCause::Starvation as usize],
             self.deaths[DeathCause::Exhaustion as usize],
             self.deaths[DeathCause::Injury as usize],
+            self.deaths[DeathCause::OldAge as usize],
             median_death
         )?;
         writeln!(

@@ -131,6 +131,11 @@ fn person() -> AgentInspection {
         }),
         sleep: None,
         death: None,
+        life: Some(sim_core::LifeView {
+            sex: sim_core::Sex::Female,
+            age: 9,
+            stage: sim_core::LifeStage::Child,
+        }),
         memory: Some(MemoryInspection::from_view(&mind(
             vec![
                 word(1, Concept::Water, 9, 1),
@@ -160,7 +165,7 @@ fn the_person_panel_says_what_they_do_feel_and_believe_in_plain_words() {
     let lines: Vec<String> = rows.iter().filter_map(text).collect();
     for expected in [
         "Person 7",
-        "Child · curious",
+        "Girl, 9 · curious",
         "Looking for food",
         "Going where someone pointed",
         "Carrying: 2 berries, 3 wood",

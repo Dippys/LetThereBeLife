@@ -25,10 +25,11 @@ pub enum DeathCause {
     Exhaustion = 3,
     /// Bitten or wounded.
     Injury = 4,
+    OldAge = 5,
 }
 
 impl DeathCause {
-    pub const COUNT: usize = 5;
+    pub const COUNT: usize = 6;
 
     /// Causes that come from a need staying severe, in tie-break order.
     pub(crate) const NEEDS: [Self; 4] = [
@@ -43,7 +44,7 @@ impl DeathCause {
             Self::Dehydration => NeedKind::Thirst,
             Self::Exposure => NeedKind::Exposure,
             Self::Starvation => NeedKind::Hunger,
-            Self::Exhaustion | Self::Injury => NeedKind::Rest,
+            Self::Exhaustion | Self::Injury | Self::OldAge => NeedKind::Rest,
         }
     }
 
@@ -53,7 +54,7 @@ impl DeathCause {
             Self::Exposure => 8_500,
             Self::Starvation => 9_000,
             Self::Exhaustion => 9_500,
-            Self::Injury => u16::MAX,
+            Self::Injury | Self::OldAge => u16::MAX,
         }
     }
 
@@ -62,7 +63,7 @@ impl DeathCause {
             Self::Dehydration => 2_500,
             Self::Exposure => 2_000,
             Self::Starvation | Self::Exhaustion => 1_000,
-            Self::Injury => 0,
+            Self::Injury | Self::OldAge => 0,
         }
     }
 }

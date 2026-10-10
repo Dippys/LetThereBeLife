@@ -142,11 +142,11 @@ impl Population {
         })
     }
 
-    /// Ends a completed sleep. Sleeping through heals some health.
-    pub(crate) fn finish_sleep(&mut self, agent: AgentId) -> Option<SleepView> {
+    /// Ends a completed sleep. Sleeping through heals `healing` health.
+    pub(crate) fn finish_sleep(&mut self, agent: AgentId, healing: u16) -> Option<SleepView> {
         let view = self.sleep_view(agent)?;
         self.sleeps[agent.0 as usize] = SleepState::default();
-        self.health[agent.0 as usize].heal(crate::SLEEP_HEALING);
+        self.health[agent.0 as usize].heal(healing);
         Some(view)
     }
 }
