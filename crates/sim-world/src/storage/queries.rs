@@ -75,7 +75,9 @@ impl World {
         let source = self.resident_cell(from)?;
         let target = self.resident_cell(to)?;
         let elevation_delta = i32::from(target.elevation) - i32::from(source.elevation);
-        let kind = if water_source(source).is_some() || water_source(target).is_some() {
+        // Lakes and rivers can be waded or swum; the sea can't.
+        let sea = |cell: TerrainCell| water_source(cell) == Some(WaterSource::Ocean);
+        let kind = if sea(source) || sea(target) {
             TraversalKind::BlockedByWater
         } else if elevation_delta.unsigned_abs() > u32::from(MAX_TRAVERSABLE_ELEVATION_DELTA) {
             TraversalKind::BlockedBySlope

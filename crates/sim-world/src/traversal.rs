@@ -41,6 +41,15 @@ impl TraversalStep {
         }
     }
 
+    /// A passable step into shallow water.
+    pub const fn wading(elevation_delta: i32) -> Self {
+        Self {
+            elevation_delta,
+            cost: 6 * MIN_TRAVERSAL_COST,
+            kind: TraversalKind::Passable,
+        }
+    }
+
     pub const fn kind(self) -> TraversalKind {
         self.kind
     }
@@ -100,6 +109,8 @@ pub(crate) fn surface_traversal_cost(surface: SurfaceType) -> u16 {
         SurfaceType::Hill => 18,
         SurfaceType::Rock => 22,
         SurfaceType::SnowIce => 20,
-        SurfaceType::DeepWater | SurfaceType::ShallowWater => 0,
+        // Wading and swimming: slow, and slower where it's deep.
+        SurfaceType::ShallowWater => 6 * MIN_TRAVERSAL_COST,
+        SurfaceType::DeepWater => 12 * MIN_TRAVERSAL_COST,
     }
 }

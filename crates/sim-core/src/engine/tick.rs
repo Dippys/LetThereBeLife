@@ -166,6 +166,9 @@ impl Engine {
             self.movement_outcomes.push(outcome);
             match kind {
                 MovementOutcomeKind::Moved | MovementOutcomeKind::Occupied(_) => {
+                    if kind == MovementOutcomeKind::Moved {
+                        self.feel_the_water(agent);
+                    }
                     self.continue_route(agent);
                 }
                 MovementOutcomeKind::StaleEvent

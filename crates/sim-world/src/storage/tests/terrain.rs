@@ -165,20 +165,20 @@ fn physical_world_queries_are_explicit_and_derived_from_resident_base_data() {
             .kind(),
         TraversalKind::BlockedBySlope
     );
-    assert_eq!(
-        world
-            .traversal_step(WorldPosition { x: 0, y: 0 }, WorldPosition { x: 1, y: 0 })
-            .unwrap()
-            .kind(),
-        TraversalKind::BlockedByWater
-    );
-    assert_eq!(
-        world
-            .traversal_step(WorldPosition { x: 2, y: 1 }, WorldPosition { x: 2, y: 0 })
-            .unwrap()
-            .kind(),
-        TraversalKind::BlockedByWater
-    );
+    // Lakes and rivers can be waded or swum, slowly; the sea can't be entered.
+    for (from, to) in [((0, 0), (1, 0)), ((2, 1), (2, 0))] {
+        let step = world
+            .traversal_step(
+                WorldPosition {
+                    x: from.0,
+                    y: from.1,
+                },
+                WorldPosition { x: to.0, y: to.1 },
+            )
+            .unwrap();
+        assert_eq!(step.kind(), TraversalKind::Passable, "{from:?} -> {to:?}");
+        assert!(step.cost() > Some(crate::MIN_TRAVERSAL_COST), "slow");
+    }
     assert_eq!(
         world
             .traversal_step(WorldPosition { x: 3, y: 1 }, WorldPosition { x: 3, y: 0 })

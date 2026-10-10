@@ -1,8 +1,8 @@
 use std::{collections::BTreeMap, error::Error, fmt};
 
 use crate::{
-    BaseResource, FeatureKind, Material, Standability, TraversalKind, TraversalStep, WaterSource,
-    World, WorldPosition, WorldQueryError,
+    BaseResource, FeatureKind, Material, Standability, TraversalStep, WaterSource, World,
+    WorldPosition, WorldQueryError,
 };
 
 /// Object kinds that an explicit simulation command can place into resident terrain.
@@ -157,13 +157,11 @@ impl SpawnedObjects {
         if !step.is_passable() {
             return Ok(step);
         }
-        let kind = match self.at(to).map(|object| object.kind) {
-            Some(SpawnKind::Water) => TraversalKind::BlockedByWater,
-            Some(SpawnKind::Tree | SpawnKind::BerryBush | SpawnKind::Rock) | None => {
-                return Ok(step);
-            }
-        };
-        Ok(TraversalStep::blocked(step.elevation_delta(), kind))
+        match self.at(to).map(|object| object.kind) {
+            // A placed pond is shallow: it can be waded, slowly.
+            Some(SpawnKind::Water) => Ok(TraversalStep::wading(step.elevation_delta())),
+            Some(SpawnKind::Tree | SpawnKind::BerryBush | SpawnKind::Rock) | None => Ok(step),
+        }
     }
 
     pub(crate) fn water_at(

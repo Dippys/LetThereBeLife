@@ -11,6 +11,10 @@ use crate::{
     WorldQueryError,
 };
 
+/// Cold and tiredness one step through water adds (more where it's deep).
+const SWIM_CHILL: u16 = 120;
+const SWIM_EFFORT: u16 = 60;
+
 /// One use in this many wears a blade out.
 const BLADE_WEAR_ODDS: u64 = 6;
 
@@ -246,6 +250,37 @@ impl Engine {
             }
         }
         Ok(())
+    }
+
+    /// A step into a lake or river chills and tires: twice as much where it's
+    /// deep enough to swim.
+    pub(super) fn feel_the_water(&mut self, agent: AgentId) {
+        let Some(position) = self.population.view(agent).map(|view| view.position) else {
+            return;
+        };
+        let Some(cell) = self.world.cell(position) else {
+            return;
+        };
+        let depth = match cell.surface() {
+            crate::SurfaceType::ShallowWater => 1,
+            crate::SurfaceType::DeepWater => 2,
+            _ if self
+                .spawned_objects
+                .at(position)
+                .is_some_and(|object| object.kind == crate::SpawnKind::Water) =>
+            {
+                1
+            }
+            _ => return,
+        };
+        for (need, amount) in [
+            (NeedKind::Exposure, SWIM_CHILL * depth),
+            (NeedKind::Rest, SWIM_EFFORT * depth),
+        ] {
+            let _ =
+                self.population
+                    .worsen_need(&mut self.scheduler, self.time, agent, need, amount);
+        }
     }
 
     /// Puts one unit of something that burns on the fire beside the agent,

@@ -2,8 +2,7 @@
 
 use sim_core::{
     AgentId, Engine, EngineConfig, PopulationInit, RouteOutcomeKind, RouteRequest,
-    RouteRequestError, SpawnKind, Standability, TraversalStep, WorldConfig, WorldPosition,
-    WorldRect,
+    RouteRequestError, Standability, TraversalStep, WorldConfig, WorldPosition, WorldRect,
 };
 
 fn resident_engine() -> Engine {
@@ -124,7 +123,7 @@ fn equal_time_routes_can_share_a_destination_and_preserve_both_agents() {
 }
 
 #[test]
-fn bounded_routes_distinguish_budget_exhaustion_no_path_and_arrival() {
+fn bounded_routes_distinguish_budget_exhaustion_and_arrival() {
     let base = resident_engine();
     let corridor = passable_corridor(&base);
     let active_area = WorldRect {
@@ -175,38 +174,6 @@ fn bounded_routes_distinguish_budget_exhaustion_no_path_and_arrival() {
         corridor[2]
     );
     assert_eq!(route_outcomes, [RouteOutcomeKind::Arrived]);
-
-    let mut blocked = resident_engine();
-    blocked
-        .initialize_population(
-            PopulationInit {
-                active_area,
-                population: 1,
-            },
-            &[corridor[0]],
-        )
-        .unwrap();
-    blocked.spawn_object(SpawnKind::Water, corridor[1]).unwrap();
-    assert_eq!(
-        blocked.request_route(
-            AgentId::new(0),
-            RouteRequest {
-                destination: corridor[2],
-                max_expansions: 1,
-            },
-        ),
-        Err(RouteRequestError::NoPath { expansions: 1 })
-    );
-    assert_eq!(
-        blocked.request_route(
-            AgentId::new(0),
-            RouteRequest {
-                destination: corridor[2],
-                max_expansions: 16,
-            },
-        ),
-        Err(RouteRequestError::NoPath { expansions: 1 })
-    );
 }
 
 #[test]

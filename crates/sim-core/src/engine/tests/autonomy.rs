@@ -151,7 +151,7 @@ fn crowded_water_seekers_claim_distinct_access_and_both_drink() {
 }
 
 #[test]
-fn perception_excludes_terrain_disconnected_cells_from_autonomous_targets() {
+fn a_ring_of_water_can_be_waded_out_of() {
     let mut engine = resident_engine(128);
     let bounds = engine.world().initial_bounds();
     let center = (bounds.min.y + 3..bounds.max.y - 3)
@@ -219,20 +219,22 @@ fn perception_excludes_terrain_disconnected_cells_from_autonomous_targets() {
 
     let perception = engine.perceive_physical(AgentId::new(0), 2).unwrap();
     assert!(perception.traversable_cells.len() > 1);
-    assert_eq!(perception.reachable_cells, [center]);
-    let (_, needs, inventory) = engine
-        .population
-        .policy_context(AgentId::new(0), SimTime::ZERO)
-        .unwrap();
-    let (selection, _) = select_with_exploration(
-        center,
-        needs,
-        inventory,
-        &perception,
-        Some(ExplorationHeading::North),
+    assert_eq!(
+        perception.reachable_cells, perception.traversable_cells,
+        "everything beyond the ring is in reach by wading"
     );
-    assert_eq!(selection.goal, PhysicalGoal::Wait);
-    assert_eq!(selection.target, Some(center));
+    let east = WorldPosition {
+        x: center.x + 1,
+        y: center.y,
+    };
+    let step = engine
+        .spawned_objects
+        .traversal_step(engine.world(), center, east)
+        .unwrap();
+    assert!(
+        step.cost().is_some_and(|cost| cost > 10),
+        "wading is passable but slow"
+    );
 }
 
 #[test]

@@ -305,10 +305,13 @@ impl Population {
     }
 }
 
+/// Standable cells in `area` that `origin` can get to, walking or swimming
+/// through `swimmable_cells` (lakes and rivers) on the way.
 pub(super) fn reachable_cells(
     area: WorldRect,
     origin: WorldPosition,
     traversable_cells: &[WorldPosition],
+    swimmable_cells: &[WorldPosition],
     elevations: &[u16],
 ) -> Result<Vec<WorldPosition>, PerceptionError> {
     let width =
@@ -329,12 +332,15 @@ pub(super) fn reachable_cells(
         .try_reserve_exact(cell_count)
         .map_err(|_| PerceptionError::AllocationFailed)?;
     reachability.resize(cell_count, 0_u8);
-    for &position in traversable_cells {
-        reachability[cell_index(position)] = 1;
+    // 1: open, 2: reached; water only carries the search across.
+    for &position in traversable_cells.iter().chain(swimmable_cells) {
+        if area.contains(position) {
+            reachability[cell_index(position)] = 1;
+        }
     }
     let mut queue = Vec::new();
     queue
-        .try_reserve(traversable_cells.len())
+        .try_reserve(traversable_cells.len() + swimmable_cells.len())
         .map_err(|_| PerceptionError::AllocationFailed)?;
     if reachability[cell_index(origin)] == 1 {
         reachability[cell_index(origin)] = 2;

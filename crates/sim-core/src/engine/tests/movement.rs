@@ -96,7 +96,6 @@ fn movement_rejections_are_typed_and_do_not_mutate_agent_or_world() {
             &[from],
         )
         .unwrap();
-    engine.spawn_object(SpawnKind::Water, target).unwrap();
     let revision = engine.world().revision();
     assert_eq!(
         engine.request_move(AgentId::new(0), from),
@@ -105,10 +104,6 @@ fn movement_rejections_are_typed_and_do_not_mutate_agent_or_world() {
     assert_eq!(
         engine.request_move(AgentId::new(99), target),
         Err(MoveRequestError::MissingAgent)
-    );
-    assert_eq!(
-        engine.request_move(AgentId::new(0), target),
-        Err(MoveRequestError::Blocked(TraversalKind::BlockedByWater))
     );
     assert_eq!(
         engine.request_move(
@@ -282,4 +277,62 @@ fn simulation_time_exhaustion_is_typed_and_does_not_repeat_due_work() {
     };
     assert_eq!(engine.tick(), TickOutcome::TimeExhausted);
     assert_eq!(engine.snapshot().tick, u64::MAX);
+}
+
+/// Water can be waded now; a hut across a one-cell corridor still leaves no way through.
+#[test]
+fn a_structure_across_a_corridor_leaves_no_path() {
+    let mut engine = resident_engine(64);
+    let bounds = engine.world().initial_bounds();
+    let corridor = (bounds.min.y..bounds.max.y)
+        .flat_map(|y| (bounds.min.x..bounds.max.x - 2).map(move |x| (x, y)))
+        .map(|(x, y)| [0, 1, 2].map(|dx| WorldPosition { x: x + dx, y }))
+        .find(|cells| {
+            cells
+                .iter()
+                .all(|cell| engine.world().standability_at(*cell) == Ok(Standability::Standable))
+                && cells.windows(2).all(|pair| {
+                    engine
+                        .world()
+                        .traversal_step(pair[0], pair[1])
+                        .is_ok_and(TraversalStep::is_passable)
+                })
+        })
+        .expect("a walkable three-cell corridor");
+    let active_area = WorldRect {
+        min: corridor[0],
+        max: WorldPosition {
+            x: corridor[2].x + 1,
+            y: corridor[2].y + 1,
+        },
+    };
+    engine
+        .initialize_population(
+            PopulationInit {
+                active_area,
+                population: 1,
+            },
+            &[corridor[0]],
+        )
+        .unwrap();
+    engine
+        .structures
+        .start(
+            AgentId::new(1),
+            corridor[1],
+            crate::StructureKind::Shelter,
+            SimTime::ZERO,
+            SimTime::from_ticks(1),
+        )
+        .unwrap();
+    assert!(matches!(
+        engine.request_route(
+            AgentId::new(0),
+            RouteRequest {
+                destination: corridor[2],
+                max_expansions: 16,
+            },
+        ),
+        Err(RouteRequestError::NoPath { .. })
+    ));
 }

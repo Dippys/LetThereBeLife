@@ -193,8 +193,17 @@ impl Population {
                 }
             }
         }
-        let reachable_cells =
-            reachable_cells(area, view.position, &traversable_cells, &elevations)?;
+        let reachable_cells = {
+            let swimmable: Vec<WorldPosition> =
+                drinkable_water.iter().map(|water| water.position).collect();
+            reachable_cells(
+                area,
+                view.position,
+                &traversable_cells,
+                &swimmable,
+                &elevations,
+            )?
+        };
         Ok(PhysicalPerception {
             area,
             agents,

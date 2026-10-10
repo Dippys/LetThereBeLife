@@ -3,23 +3,22 @@
 use std::{mem::size_of, time::Instant};
 
 use super::errors::{move_failure, perception_failure, request_failure, route_failure};
-use crate::policy::{PolicyAction, select_with_exploration};
+use crate::policy::PolicyAction;
 use crate::resources::ResourceDeltas;
 use crate::routing::RouteEnvironment;
 use crate::scheduler::{self, MAX_DUE_EVENTS_PER_TICK, Scheduler};
 use crate::structures::StructureStore;
 use crate::{
     AgentActivity, AgentId, AgentView, ChunkCoord, ChunkPresence, DeathCause, EAT_HUNGER_RELIEF,
-    Engine, EngineCommand, EngineCommandOutcome, EngineConfig, ExplorationHeading,
-    HEALTH_INCAPACITATION_THRESHOLD, HealthDiagnosticKind, INVENTORY_CAPACITY_PER_KIND,
-    InventoryView, MAX_ROUTE_EXPANSIONS, MAX_SIMULATION_SPEED, Material, MoveRequestError,
-    MovementEventOutcome, MovementOutcomeKind, NeedKind, NeedThreshold, PerceptionError,
-    PhysicalGoal, PolicyDiagnosticKind, PolicyFailureReason, PolicyReason, PopulationInit,
-    PopulationInitError, RouteOutcomeKind, RouteRequest, RouteRequestError, SHELTER_BUILD_TICKS,
-    SHELTER_STONE_COST, SHELTER_WOOD_COST, SimTime, SleepQuality, SleepRequestError,
-    SpawnInvalidReason, SpawnKind, Standability, StructureDiagnosticKind, StructureId,
-    StructureState, TickOutcome, TraversalKind, TraversalStep, WORLD_HALF_EXTENT, WaterSource,
-    World, WorldConfig, WorldPosition, WorldRect,
+    Engine, EngineCommand, EngineCommandOutcome, EngineConfig, HEALTH_INCAPACITATION_THRESHOLD,
+    HealthDiagnosticKind, INVENTORY_CAPACITY_PER_KIND, InventoryView, MAX_ROUTE_EXPANSIONS,
+    MAX_SIMULATION_SPEED, Material, MoveRequestError, MovementEventOutcome, MovementOutcomeKind,
+    NeedKind, NeedThreshold, PerceptionError, PhysicalGoal, PolicyDiagnosticKind,
+    PolicyFailureReason, PolicyReason, PopulationInit, PopulationInitError, RouteOutcomeKind,
+    RouteRequest, RouteRequestError, SHELTER_BUILD_TICKS, SHELTER_STONE_COST, SHELTER_WOOD_COST,
+    SimTime, SleepQuality, SleepRequestError, SpawnInvalidReason, SpawnKind, Standability,
+    StructureDiagnosticKind, StructureId, StructureState, TickOutcome, TraversalKind,
+    TraversalStep, WORLD_HALF_EXTENT, WaterSource, World, WorldConfig, WorldPosition, WorldRect,
 };
 use crate::{agent, needs, policy, resources, sleep, spatial, structures};
 
