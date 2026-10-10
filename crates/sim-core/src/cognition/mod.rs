@@ -431,6 +431,8 @@ impl Mind {
 pub(crate) struct Minds {
     seed: u64,
     founders: u32,
+    /// Later arrivals who bring their own family's lore and words (sorted).
+    newcomers: Vec<u32>,
     minds: Vec<Mind>,
 }
 
@@ -445,14 +447,22 @@ impl Minds {
         Self {
             seed,
             founders: u32::MAX,
+            newcomers: Vec::new(),
             minds: Vec::new(),
         }
     }
 
     /// Agents with ids at or above `count` are children. Affects minds created later.
     /// A founder (present from the start with the band's lore) rather than a child.
-    pub(crate) const fn is_founder(&self, agent: AgentId) -> bool {
-        agent.get() < self.founders
+    pub(crate) fn is_founder(&self, agent: AgentId) -> bool {
+        agent.get() < self.founders || self.newcomers.binary_search(&agent.get()).is_ok()
+    }
+
+    /// `agent` arrived from elsewhere with its own family's lore and words.
+    pub(crate) fn add_newcomer(&mut self, agent: AgentId) {
+        if let Err(index) = self.newcomers.binary_search(&agent.get()) {
+            self.newcomers.insert(index, agent.get());
+        }
     }
 
     pub(crate) fn set_founders(&mut self, count: u32) {
@@ -482,7 +492,7 @@ impl Minds {
     /// The mind `agent` starts with: a founder inherits the seed's proto-language
     /// and its family's food culture; a child starts with neither.
     fn newborn(&self, agent: AgentId) -> Mind {
-        let child = agent.get() >= self.founders;
+        let child = !self.is_founder(agent);
         Mind {
             lexicon: if child {
                 Lexicon::default()

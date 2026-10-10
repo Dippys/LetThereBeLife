@@ -233,3 +233,40 @@ fn a_couple_has_a_baby_who_later_walks_and_knows_its_family() {
     assert_eq!(mother.tie_with(child), Some(crate::Tie::Child));
     assert!(engine.motherhood(AgentId::new(0)).is_none());
 }
+
+#[test]
+fn a_dwindling_band_is_joined_by_newcomers_with_their_own_words() {
+    let mut engine = two_people();
+    engine.policy_options = crate::PolicyOptions::full();
+    engine.set_founders(2);
+    engine.time = SimTime::from_ticks(TICKS_PER_YEAR);
+    engine.age_people();
+    let arrived = engine
+        .family_events()
+        .iter()
+        .find_map(|event| match *event {
+            crate::FamilyEvent::Arrived { woman, man } => Some((woman, man)),
+            _ => None,
+        });
+    let (woman, man) = arrived.expect("newcomers arrived");
+    assert_eq!(engine.life(woman).unwrap().sex, Sex::Female);
+    assert_eq!(engine.life(man).unwrap().sex, Sex::Male);
+    assert!(engine.life(man).unwrap().age >= crate::ADULT_AGE);
+    assert_eq!(engine.partner_of(woman), Some(man));
+    assert!(engine.minds.is_founder(woman), "they bring their own lore");
+    assert!(
+        engine
+            .minds
+            .get_mut(woman)
+            .lexicon
+            .produce(crate::Concept::Water)
+            .is_some(),
+        "and their own words"
+    );
+
+    // Not again for a few years.
+    engine.family_events.clear();
+    engine.time = SimTime::from_ticks(2 * TICKS_PER_YEAR);
+    engine.age_people();
+    assert!(engine.family_events().is_empty());
+}

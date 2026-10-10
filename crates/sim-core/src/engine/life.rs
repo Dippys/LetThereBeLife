@@ -71,6 +71,7 @@ impl Engine {
             return;
         }
         let year = now / TICKS_PER_YEAR;
+        self.welcome_newcomers(year);
         let living: Vec<AgentId> = self
             .population
             .views(usize::MAX)

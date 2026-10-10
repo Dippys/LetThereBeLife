@@ -406,3 +406,17 @@ death record's place and time.
 walking, the band grows from 20 to 28. Babies aren't agents until weaning, so carrying needs no
 special movement. Late pregnancy doesn't slow anyone yet. Newcomers (when a band dwindles) are not
 in yet.
+
+## D-087: Newcomers, wider social circles, and fertility (2026-10-10)
+
+**Decision:** If fewer than 4 adults remain, a couple from elsewhere arrives at the edge of the area
+(at most every 5 years), as partners with their own family's lore and words (a new dialect).
+People remember 12 acquaintances instead of 6 (minds are 912 bytes). "Raised together" now needs
+children under 7 who already know each other well (familiarity 60), not any meeting between
+children under 10. Conception odds rose to 1 in 150 decisions a couple spends together.
+**Why:** In a 60-year run the second generation never paired: with family never forgotten, a child
+with two parents and three siblings had one slot left for everyone else, and brief meetings between
+the families' children ruled them out as partners. About 2 children per woman let the band shrink.
+**Consequences:** Over 60 years, valley 1 grew from 20 to 62 (64 births, 41 couples, 19 across
+families; the families spend 68% of their time near each other) and valley 4 from 20 to 26. The
+success test found 18 episodes in 7 valleys (5 in 3 before).

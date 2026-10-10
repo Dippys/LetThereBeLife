@@ -4,9 +4,10 @@ use crate::cognition::belief_seconds;
 use crate::life::{ADULT_AGE, SECONDS_PER_YEAR};
 use crate::{AgentActivity, AgentId, CoupleEvent, Engine, PhysicalPerception, Tie};
 
-/// Children younger than this who spend time together grow up feeling like
-/// siblings: neither will want the other as a partner.
-const CHILDHOOD_AGE: u32 = 10;
+/// Children younger than this who grow up close together (they know each
+/// other this well) feel like siblings: neither will want the other as a partner.
+const CHILDHOOD_AGE: u32 = 7;
+const CHILDHOOD_FAMILIARITY: u8 = 60;
 /// How well two people must know (familiarity) and trust each other to pair.
 const COUPLE_FAMILIARITY: u8 = 100;
 const COUPLE_TRUST: u8 = crate::DEFAULT_TRUST;
@@ -36,7 +37,9 @@ impl Engine {
             for &other in &others {
                 if self.age_of(other) < CHILDHOOD_AGE {
                     let social = &mut self.minds.get_mut(agent).social;
-                    if let Some(slot) = social.slot_of(other) {
+                    if let Some(slot) = social.slot_of(other)
+                        && social.familiarity(slot) >= CHILDHOOD_FAMILIARITY
+                    {
                         social.mark_raised_together(slot);
                     }
                 }

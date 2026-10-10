@@ -5,7 +5,7 @@
 use crate::{AgentId, WorldPosition, WorldRect};
 
 /// Acquaintances remembered per agent.
-pub const ACQUAINTANCE_SLOTS: usize = 6;
+pub const ACQUAINTANCE_SLOTS: usize = 12;
 /// Familiarity gained each time the agent decides with the other in view.
 const FAMILIARITY_PER_SIGHTING: u8 = 2;
 /// Trust before any hint from this person has been checked.

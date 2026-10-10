@@ -341,6 +341,7 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     let mut couples: Vec<(AgentId, AgentId)> = Vec::new();
     // Pregnancies, births, children walking, and losses.
     let mut families_born = [0_u64; 4];
+    let mut arrivals = 0_u8;
     let mut early_vocabulary = 0;
     let mut food = FoodStats::default();
     let mut wildlife = WildlifeStats::default();
@@ -366,6 +367,23 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                         sim_core::FamilyEvent::Born { .. } => families_born[1] += 1,
                         sim_core::FamilyEvent::Conceived { .. } => families_born[0] += 1,
                         sim_core::FamilyEvent::Lost { .. } => families_born[3] += 1,
+                        sim_core::FamilyEvent::Arrived { woman, man } => {
+                            // Newcomers are a family of their own.
+                            let family = 2 + arrivals;
+                            arrivals += 1;
+                            for agent in [woman, man] {
+                                let index = agent.get() as usize;
+                                if tracks.len() <= index {
+                                    tracks.resize(index + 1, AgentTrack::default());
+                                    tiles.resize(index + 1, BTreeSet::new());
+                                }
+                                tracks[index].family = family;
+                                tracks[index].spawn = engine
+                                    .agent_views(usize::MAX)
+                                    .nth(index)
+                                    .map(|view| view.position);
+                            }
+                        }
                     }
                 }
                 collect_tick(&engine, &mut tracks);

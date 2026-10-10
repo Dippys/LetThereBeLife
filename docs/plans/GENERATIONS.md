@@ -36,7 +36,7 @@ several generations fit in a headless run of a few minutes.
 - Reciprocity: people remember favours and are more likely to return them.
 - Grief: when someone close dies, those left behind stay near home and seek company for a while.
 
-### G4. Couples and births (couples and births ✅ D-086; newcomers next)
+### G4. Couples and births ✅ (D-086, D-087)
 
 - Pair bonds form between adults who have spent a lot of time together and trust each other; they
   fade if the pair drifts apart. Partners stay near each other and share food.

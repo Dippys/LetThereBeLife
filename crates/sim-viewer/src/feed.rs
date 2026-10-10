@@ -137,6 +137,15 @@ impl Feed {
                     Tone::Bad,
                     mother,
                 ),
+                FamilyEvent::Arrived { woman, man } => (
+                    format!(
+                        "Newcomers {} and {} arrived, speaking their own way",
+                        labels::person(woman),
+                        labels::person(man)
+                    ),
+                    Tone::Talk,
+                    woman,
+                ),
                 FamilyEvent::Conceived { .. } => continue,
             };
             self.push(text, tone, Some(agent), agent_position(engine, agent));
