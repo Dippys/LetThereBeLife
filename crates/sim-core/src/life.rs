@@ -1,9 +1,14 @@
-//! Sex, age, and life stages. One simulated hour is one year of life.
+//! Sex, age, and life stages. A year is one full turn of the seasons (four
+//! simulated hours), starting each spring.
 
 use crate::{AgentId, wildlife::mix};
 
-/// Simulated seconds in one year of life.
-pub const SECONDS_PER_YEAR: i64 = 3_600;
+/// Simulated seconds in one year: four seasons.
+pub const SECONDS_PER_YEAR: i64 = 4 * crate::SEASON_SECONDS as i64;
+/// Ticks in one year.
+pub const TICKS_PER_YEAR: u64 = SECONDS_PER_YEAR as u64 * 60;
+/// A month is a twelfth of a year (three to a season).
+pub const MONTH_SECONDS: i64 = SECONDS_PER_YEAR / 12;
 /// Up to this age a child is carried and nursed.
 pub const WEANING_AGE: u32 = 3;
 /// Adulthood begins at this age.

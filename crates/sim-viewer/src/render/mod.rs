@@ -185,6 +185,7 @@ pub struct MemoryInspection {
     /// Per species: (believed worth hunting, believed dangerous), if it has a belief.
     pub fauna: [Option<(bool, bool)>; Species::COUNT],
     pub knows_hearths: bool,
+    pub knows_knapping: bool,
 }
 
 impl MemoryInspection {
@@ -252,6 +253,7 @@ impl MemoryInspection {
                     })
             }),
             knows_hearths: view.knows_hearths,
+            knows_knapping: view.knows_knapping,
         }
     }
 

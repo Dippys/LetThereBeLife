@@ -1,11 +1,9 @@
 //! Engine side of life: who is how old, growing old, and dying of old age.
 
-use crate::life::{ADULT_AGE, ELDER_AGE, Life, LifeView, SECONDS_PER_YEAR, Sex, old_age_risk};
+pub(super) use crate::life::TICKS_PER_YEAR;
+use crate::life::{ADULT_AGE, ELDER_AGE, Life, LifeView, Sex, old_age_risk};
 use crate::wildlife::mix;
 use crate::{AgentActivity, AgentId, DeathCause, Engine, SLEEP_HEALING};
-
-/// Ticks in one year of life (one simulated hour).
-pub(super) const TICKS_PER_YEAR: u64 = SECONDS_PER_YEAR as u64 * 60;
 
 impl Engine {
     /// Sex, age, and life stage of `agent`, if it exists.

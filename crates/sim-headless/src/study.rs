@@ -1607,7 +1607,7 @@ impl fmt::Display for StudyReport {
                 write!(
                     formatter,
                     "; first heard each other in year {:.1}",
-                    first as f64 / (sim_core::SECONDS_PER_YEAR * 60) as f64
+                    first as f64 / sim_core::TICKS_PER_YEAR as f64
                 )?;
             }
             let [conceived, born, walking, lost] = families.births;

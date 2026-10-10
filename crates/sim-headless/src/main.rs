@@ -70,7 +70,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--ticks" => ticks = Some(parse_next(&mut args, "--ticks")),
             // One simulated hour is one year of life.
-            "--years" => ticks = Some(parse_next::<u64>(&mut args, "--years") * 216_000),
+            "--years" => {
+                ticks = Some(parse_next::<u64>(&mut args, "--years") * sim_core::TICKS_PER_YEAR)
+            }
             "--seed" => seed = Some(parse_next(&mut args, "--seed")),
             "--agents" => agent_count = Some(parse_next(&mut args, "--agents")),
             "--batch-size" => batch_size = parse_next(&mut args, "--batch-size"),

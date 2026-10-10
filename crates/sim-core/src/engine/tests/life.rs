@@ -216,7 +216,10 @@ fn a_couple_has_a_baby_who_later_walks_and_knows_its_family() {
                 _ => None,
             });
         engine.family_events.clear();
-        assert!(step < 3_000, "the child never walked");
+        assert!(
+            step < 5 * TICKS_PER_YEAR / check,
+            "the child never walked within five years"
+        );
     }
     let child = walking.unwrap();
     assert_eq!(child, AgentId::new(2));

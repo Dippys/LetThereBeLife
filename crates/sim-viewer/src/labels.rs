@@ -63,7 +63,7 @@ pub const fn material(material: Material) -> &'static str {
         Material::Wood => "wood",
         Material::Stone => "stone",
         Material::Meat => "meat",
-        Material::Blade => "stone blades",
+        Material::Blade => "blades",
     }
 }
 
@@ -310,11 +310,17 @@ pub fn personality(personality: Personality) -> &'static str {
 }
 
 /// Simulated time as `1h 05m` (or `45s` in the first minute).
-/// The year of the run (from 1) at `seconds` of simulated time: people age a
-/// year every simulated hour.
+/// The year of the run (from 1) at `seconds` of simulated time. A year is one
+/// turn of the seasons, starting in spring.
 pub fn year(seconds: f64) -> String {
     let year = seconds.max(0.0) as i64 / sim_core::SECONDS_PER_YEAR + 1;
     format!("Year {year}")
+}
+
+/// How far through the year `seconds` is, in months (0 up to 12).
+pub fn months_into_year(seconds: f64) -> f32 {
+    let year = sim_core::SECONDS_PER_YEAR as f64;
+    (seconds.max(0.0) % year / sim_core::MONTH_SECONDS as f64) as f32
 }
 
 pub fn duration(seconds: f64) -> String {
@@ -331,10 +337,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_year_counts_from_one_and_turns_every_simulated_hour() {
+    fn the_year_counts_from_one_and_turns_with_the_seasons() {
+        let year_seconds = sim_core::SECONDS_PER_YEAR as f64;
         assert_eq!(year(0.0), "Year 1");
-        assert_eq!(year(3_599.0), "Year 1");
-        assert_eq!(year(3_600.0), "Year 2");
+        assert_eq!(year(year_seconds - 1.0), "Year 1");
+        assert_eq!(year(year_seconds), "Year 2");
+        assert_eq!(months_into_year(0.0), 0.0);
+        // Three months to a season: winter starts at month 9.
+        let winter = 3.0 * sim_core::SEASON_SECONDS as f64;
+        assert_eq!(months_into_year(winter), 9.0);
+        assert_eq!(months_into_year(year_seconds), 0.0);
     }
 
     #[test]

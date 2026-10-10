@@ -18,8 +18,9 @@ const LAST_FATHER_AGE: u32 = 65;
 const PREGNANCY_SECONDS: i32 = (SECONDS_PER_YEAR * 3 / 4) as i32;
 /// After a child starts walking, its mother waits about this long before the next.
 const BIRTH_GAP_SECONDS: i32 = SECONDS_PER_YEAR as i32;
-/// One in this many decisions a fertile couple spends together brings a pregnancy.
-const CONCEPTION_ODDS: u64 = 150;
+/// One in this many family checks a fertile couple spends together brings a
+/// pregnancy (scaled with the length of a year, so births per year stay put).
+const CONCEPTION_ODDS: u64 = 150 * (SECONDS_PER_YEAR as u64 / 3_600);
 /// How often pregnancies and babies are looked after.
 pub(crate) const FAMILY_CHECK_TICKS: u64 = 600;
 /// Extra hunger a nursing mother takes on per check.

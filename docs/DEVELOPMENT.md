@@ -89,7 +89,7 @@ cargo run --release -p sim-headless -- --study [--near-water | --groups | --vall
 - The `words:` line counts heard words in the first and second half of the run, and how often the
   listener already read the word the way the sender meant it. The `vocabulary:` line is the
   band's agreement on each place word at the start and at the end.
-- `--years N` runs N years of life (one simulated hour each, 216,000 ticks). Over decades the
+- `--years N` runs N years (one turn of the seasons, four simulated hours, 864,000 ticks each). Over decades the
   `families:` line counts couples within and across families, `births:` counts pregnancies,
   babies, children who started walking, and losses, `names:` counts names known (and how many
   differ from the given name) and names misheard, and `words passed down` shows, per generation,

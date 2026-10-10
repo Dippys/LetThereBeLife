@@ -69,7 +69,7 @@ lays out phases 0–10, from world → physical agents → cognition → communi
   they find, and correct the speaker later. Hungry agents ask others for food, who give or refuse.
   Children start with no words. Every exchange is in the communication log (`--comms`,
   `--misreads`, `--successes`, `--explain`).
-- **Generations (viewer and study):** everyone has a sex, an age (one simulated hour is a year),
+- **Generations (viewer and study):** everyone has a sex, an age (a year is the four-hour turn of the seasons),
   and a name. Couples form from closeness (not between people raised together, unless long alone)
   and fade when apart; well-fed couples have babies, who are carried and nursed until 3 and then
   walk, knowing their family, with personalities blended from both parents. Elders grow frail and

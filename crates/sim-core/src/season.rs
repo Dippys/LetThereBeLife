@@ -1,6 +1,5 @@
-//! Seasons. Each lasts one simulated hour, so a full cycle takes four (people
-//! age a year an hour: lives are compressed more than seasons, so that winter
-//! lasts longer than a hunger cycle and actually matters).
+//! Seasons. Each lasts one simulated hour, so a year takes four. A winter that
+//! long outlasts a hunger cycle, so cold and bare bushes actually matter.
 
 use crate::SimTime;
 

@@ -592,3 +592,17 @@ the thing near their guess, saw the alternative somewhere in view, and "correcte
 **Consequences:** On seed 1, corrections fell from 38 to 7 and word lessons against what the speaker
 meant from 31 to 5 (0-1 on seeds 4, 9, 13). Episodes 86 in 23 of the success test's valleys (79 in
 24 before); survivors 839 vs 848 over those 40 valleys.
+
+## D-099: A year is one turn of the seasons (2026-10-11)
+
+**Decision:** `SECONDS_PER_YEAR` is four seasons (four simulated hours, was one), starting each
+spring; a month is a twelfth of that. Conception odds per family check scale with the year so births
+per year stay put; everything else in life was already counted in years. The viewer's top bar shows
+"Year N", a twelve-month strip colored by season, and the season; the raw clock is in F3. The
+person panel's "doing / why" block is a fixed three lines so the panel doesn't jump.
+**Why:** With one-hour years each year held a single season ("Year 4 · Winter", then "Year 5 ·
+Spring"), which made no sense on screen. Shortening seasons instead would make winter shorter than a
+hunger cycle and undo D-093/D-094.
+**Consequences:** Lives and generations take four times as long in simulated time. Seed 1 over 30
+years (now 120 hours): 26 survivors, 15 babies, 239 episodes (before, at one-hour years: 34-43
+survivors and 19-26 babies on seeds 1, 4, 5). Short runs see far fewer births.

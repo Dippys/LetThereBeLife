@@ -31,6 +31,19 @@ pub(super) const UI_BUTTON: u32 = rgba(44, 52, 64, 255);
 pub(super) const UI_BUTTON_HOVER: u32 = rgba(62, 74, 90, 255);
 pub(super) const UI_BUTTON_ACTIVE: u32 = rgba(40, 104, 150, 255);
 pub(super) const UI_TRACK: u32 = rgba(48, 56, 68, 255);
+/// The year strip: each season's months, gone by and still to come.
+pub(super) const SEASON_PAST: [u32; 4] = [
+    rgba(110, 190, 90, 255),
+    rgba(220, 196, 70, 255),
+    rgba(214, 120, 50, 255),
+    rgba(170, 200, 230, 255),
+];
+pub(super) const SEASON_AHEAD: [u32; 4] = [
+    rgba(52, 76, 56, 255),
+    rgba(80, 76, 50, 255),
+    rgba(80, 60, 48, 255),
+    rgba(62, 72, 86, 255),
+];
 pub(super) const UI_TITLE: u32 = rgba(255, 255, 255, 255);
 pub(super) const UI_TEXT: u32 = rgba(226, 230, 236, 255);
 pub(super) const UI_DIM: u32 = rgba(140, 150, 164, 255);

@@ -13,7 +13,7 @@ use super::test_render_state;
 use crate::feed::{FeedEntry, Tone};
 use crate::render::colors;
 use crate::render::details::write_details;
-use crate::render::ui::{Hit, Row, build_interface, hover_lines, person_rows};
+use crate::render::ui::{Hit, Row, build_interface, hover_lines, person_rows, status_lines};
 use crate::render::{
     AgentInspection, BuildTool, GenerationStatus, Hover, MemoryInspection, UiAction,
 };
@@ -91,7 +91,7 @@ fn mind(lexicon: Vec<LexiconEntryView>, acquaintances: Vec<AcquaintanceView>) ->
             },
         ],
         knows_hearths: true,
-        knows_knapping: false,
+        knows_knapping: true,
         acquaintances,
         lexicon,
     }
@@ -170,11 +170,12 @@ fn person() -> AgentInspection {
 fn the_person_panel_says_what_they_do_feel_and_believe_in_plain_words() {
     let rows = person_rows(&person());
     let text = |row: &Row| match row {
-        Row::Title(text) | Row::Text(text, _) => Some(text.clone()),
-        Row::Pair(label, value) => Some(format!("{label}: {value}")),
-        _ => None,
+        Row::Title(text) | Row::Text(text, _) => vec![text.clone()],
+        Row::Pair(label, value) => vec![format!("{label}: {value}")],
+        Row::Status { doing, why } => std::iter::once(doing.clone()).chain(why.clone()).collect(),
+        _ => Vec::new(),
     };
-    let lines: Vec<String> = rows.iter().filter_map(text).collect();
+    let lines: Vec<String> = rows.iter().flat_map(text).collect();
     for expected in [
         "Kata",
         "Girl, 9 · curious · Person 7",
@@ -186,6 +187,7 @@ fn the_person_panel_says_what_they_do_feel_and_believe_in_plain_words() {
         "Hunts: deer",
         "Fears: wolves",
         "Knows how to make fire",
+        "Knows how to knap stone blades",
         "Family: Mata (parent)",
         "Friends: Person 9, Person 3",
         "Distrusts: Person 5",
@@ -251,7 +253,10 @@ fn the_dead_get_a_cause_and_nothing_else_and_the_unknowing_say_so() {
     let rows = person_rows(&dead);
     assert_eq!(
         rows.last(),
-        Some(&Row::Text("Died of thirst".to_owned(), colors::UI_TEXT))
+        Some(&Row::Status {
+            doing: "Died of thirst".to_owned(),
+            why: None
+        })
     );
     assert!(!rows.iter().any(|row| matches!(row, Row::Bar { .. })));
 
@@ -260,6 +265,7 @@ fn the_dead_get_a_cause_and_nothing_else_and_the_unknowing_say_so() {
     view.affordances.clear();
     view.fauna.clear();
     view.knows_hearths = false;
+    view.knows_knapping = false;
     blank.memory = Some(MemoryInspection::from_view(&view));
     let rows = person_rows(&blank);
     assert!(rows.contains(&Row::Text("Nothing yet".to_owned(), colors::UI_DIM)));
@@ -438,4 +444,17 @@ fn details_report_simulation_and_cursor_cell_values() {
     write_details(&mut text, &unloaded, &state);
     assert!(text.contains("PARTIAL INITIAL UNLOADED"));
     assert!(text.contains("CELL UNLOADED"));
+}
+
+#[test]
+fn the_status_block_keeps_its_height_whatever_it_says() {
+    assert_eq!(status_lines("Sleeping", None, 30).len(), 3);
+    let long = status_lines(
+        "Going to where a friend was last seen",
+        Some("Heading for a place someone pointed out, a long way off past the river"),
+        20,
+    );
+    assert_eq!(long.len(), 3);
+    assert!(long[2].0.ends_with("..."), "{long:?}");
+    assert!(long.iter().all(|(line, _)| line.chars().count() <= 20));
 }

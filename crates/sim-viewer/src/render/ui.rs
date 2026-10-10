@@ -202,6 +202,26 @@ fn banner(painter: &mut Painter, text: &str, width: f32, y: f32, color: u32) {
 pub const SPEEDS: [f32; 9] = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0];
 
 /// Draws the top bar and returns its height.
+/// Twelve month notches colored by season, lit up to `months` (0-12) into the
+/// year. Returns the x after it.
+fn year_strip(painter: &mut Painter, months: f32, x: f32, text_y: f32) -> f32 {
+    let px = painter.px;
+    let notch = painter.chars(1);
+    let height = 5.0 * px;
+    let y = text_y + 2.0 * px;
+    for month in 0..12_usize {
+        let season = month / 3;
+        let left = x + month as f32 * notch;
+        let width = notch - px;
+        painter.rect(left, y, width, height, colors::SEASON_AHEAD[season]);
+        let lit = (months - month as f32).clamp(0.0, 1.0);
+        if lit > 0.0 {
+            painter.rect(left, y, width * lit, height, colors::SEASON_PAST[season]);
+        }
+    }
+    x + 12.0 * notch
+}
+
 fn top_bar(painter: &mut Painter, state: &RenderState, width: f32) -> f32 {
     let px = painter.px;
     let height = painter.line() + 6.0 * px;
@@ -240,8 +260,15 @@ fn top_bar(painter: &mut Painter, state: &RenderState, width: f32) -> f32 {
         text_y,
         colors::UI_TEXT,
     );
+    x += gap * 2.0;
+    x = year_strip(
+        painter,
+        labels::months_into_year(state.snapshot.simulated_seconds),
+        x,
+        text_y,
+    );
     x = painter.text(
-        &format!(" · {}", labels::season(state.season)),
+        &format!(" {}", labels::season(state.season)),
         x,
         text_y,
         colors::UI_DIM,
@@ -400,6 +427,12 @@ pub(super) enum Row {
         color: u32,
     },
     Heading(&'static str),
+    /// What they're doing and why: always `STATUS_LINES` tall, so the rows
+    /// below stay put as it changes.
+    Status {
+        doing: String,
+        why: Option<String>,
+    },
     /// Short dim labels with values, laid out two to a line.
     Grid(Vec<(&'static str, String)>),
     Gap,
@@ -428,10 +461,7 @@ pub(super) fn person_rows(agent: &AgentInspection) -> Vec<Row> {
     rows.push(Row::Gap);
 
     let (doing, why) = doing(agent);
-    rows.push(Row::Text(doing, colors::UI_TEXT));
-    if let Some(why) = why {
-        rows.push(Row::Text(why, colors::UI_DIM));
-    }
+    rows.push(Row::Status { doing, why });
     if agent.death.is_some() {
         return rows;
     }
@@ -529,6 +559,12 @@ pub(super) fn person_rows(agent: &AgentInspection) -> Vec<Row> {
     if memory.knows_hearths {
         rows.push(Row::Text(
             "Knows how to make fire".to_owned(),
+            colors::UI_TEXT,
+        ));
+    }
+    if memory.knows_knapping {
+        rows.push(Row::Text(
+            "Knows how to knap stone blades".to_owned(),
             colors::UI_TEXT,
         ));
     }
@@ -656,9 +692,38 @@ fn capitalized(text: &str) -> String {
     })
 }
 
+/// Lines the status block always takes.
+const STATUS_LINES: usize = 3;
+
+/// The status block's lines and colors: what they're doing, then why (dim),
+/// padded or cut to `STATUS_LINES`.
+pub(super) fn status_lines(doing: &str, why: Option<&str>, chars: usize) -> Vec<(String, u32)> {
+    let mut lines: Vec<(String, u32)> = wrap(doing, chars)
+        .into_iter()
+        .map(|line| (line, colors::UI_TEXT))
+        .chain(
+            why.into_iter()
+                .flat_map(|why| wrap(why, chars))
+                .map(|line| (line, colors::UI_DIM)),
+        )
+        .collect();
+    if lines.len() > STATUS_LINES {
+        lines.truncate(STATUS_LINES);
+        let last = &mut lines[STATUS_LINES - 1].0;
+        let keep = last.chars().count().min(chars.saturating_sub(3));
+        *last = last.chars().take(keep).collect::<String>() + "...";
+    }
+    lines.resize(STATUS_LINES, (String::new(), colors::UI_TEXT));
+    lines
+}
+
 /// Lines a row takes at `chars` characters wide.
 fn row_lines(row: &Row, chars: usize) -> Vec<String> {
     match row {
+        Row::Status { doing, why } => status_lines(doing, why.as_deref(), chars)
+            .into_iter()
+            .map(|(line, _)| line)
+            .collect(),
         Row::Title(text) | Row::Text(text, _) => wrap(text, chars),
         Row::Pair(_, value) => wrap(value, chars - LABEL_CHARS),
         Row::Heading(text) => vec![(*text).to_owned()],
@@ -723,6 +788,14 @@ fn draw_row(painter: &mut Painter, row: &Row, x: f32, y: f32, chars: usize) -> f
             }
             return cell_y;
         }
+        Row::Status { doing, why } => {
+            let mut line_y = y;
+            for (text, color) in status_lines(doing, why.as_deref(), chars) {
+                painter.text(&text, x, line_y, color);
+                line_y += line;
+            }
+            return line_y;
+        }
         _ => {}
     }
     let (text_x, color) = match row {
@@ -733,7 +806,9 @@ fn draw_row(painter: &mut Painter, row: &Row, x: f32, y: f32, chars: usize) -> f
             (x + painter.chars(LABEL_CHARS), colors::UI_TEXT)
         }
         Row::Heading(_) => (x, colors::UI_ACCENT),
-        Row::Bar { .. } | Row::Grid(_) | Row::Gap => unreachable!("handled above"),
+        Row::Bar { .. } | Row::Grid(_) | Row::Status { .. } | Row::Gap => {
+            unreachable!("handled above")
+        }
     };
     let mut line_y = y;
     for text in row_lines(row, chars) {

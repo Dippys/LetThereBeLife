@@ -9,8 +9,8 @@ down and drift over generations. Like the rest of the project, the rules are phy
 constraints; who pairs with whom, who does what, where couples live, and what people are called
 should emerge.
 
-Time scale: **one simulated hour is one year of life.** Adulthood comes at about 15 hours, so
-several generations fit in a headless run of a few minutes.
+Time scale (since D-099): **a year is one turn of the seasons, four simulated hours.** (Originally one hour.) Adulthood comes at about 60 hours, so
+several generations fit in a headless run of under an hour.
 
 ## Steps
 

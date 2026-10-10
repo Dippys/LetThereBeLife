@@ -47,8 +47,8 @@ pub use health::{
     HEALTH_MAX, HealthDiagnostic, HealthDiagnosticKind, HealthStatus, HealthView, SLEEP_HEALING,
 };
 pub use life::{
-    ADULT_AGE, ELDER_AGE, HUNTING_AGE, LifeStage, LifeView, Name, SECONDS_PER_YEAR, Sex,
-    WEANING_AGE,
+    ADULT_AGE, ELDER_AGE, HUNTING_AGE, LifeStage, LifeView, MONTH_SECONDS, Name, SECONDS_PER_YEAR,
+    Sex, TICKS_PER_YEAR, WEANING_AGE,
 };
 pub use needs::{
     NEED_MAX, NEED_RATE_PERIOD_TICKS, NeedKind, NeedLevelView, NeedQueryError, NeedThreshold,
