@@ -36,6 +36,8 @@ pub struct MaterialProperties {
     pub toxicity: u16,
     /// Usable as building material (wind-blocking structure).
     pub builds: bool,
+    /// Seconds for its source to grow back one unit (0 = never).
+    pub regrow_seconds: u32,
 }
 
 impl Material {
@@ -54,26 +56,31 @@ impl Material {
                 nutrition: 4_000,
                 toxicity: 0,
                 builds: false,
+                regrow_seconds: 600,
             },
             Self::Bitterberries => MaterialProperties {
                 nutrition: 1_200,
                 toxicity: 2_500,
                 builds: false,
+                regrow_seconds: 600,
             },
             Self::Wood => MaterialProperties {
                 nutrition: 0,
                 toxicity: 0,
                 builds: true,
+                regrow_seconds: 3_600,
             },
             Self::Stone => MaterialProperties {
                 nutrition: 0,
                 toxicity: 0,
                 builds: false,
+                regrow_seconds: 0,
             },
             Self::Meat => MaterialProperties {
                 nutrition: 6_000,
                 toxicity: 0,
                 builds: false,
+                regrow_seconds: 0,
             },
         }
     }

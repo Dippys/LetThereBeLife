@@ -20,6 +20,7 @@ impl Engine {
             return TickOutcome::TimeExhausted;
         };
         self.time = next_time;
+        self.resource_deltas.advance(self.time);
         self.movement_outcomes.clear();
         self.route_outcomes.clear();
         self.need_outcomes.clear();

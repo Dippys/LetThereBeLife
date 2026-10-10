@@ -14,7 +14,7 @@
 ```sh
 cargo run -p sim-viewer                                  # interactive (use --release for smooth)
 cargo run -p sim-viewer -- --config path/to/file.toml
-cargo run --release -p sim-viewer -- --valley           # the vertical slice: 16 adults and 4 children in a valley
+cargo run --release -p sim-viewer -- --valley           # the valley: 16 adults, 4 children, 24 deer, 2 wolves
 cargo run -p sim-headless -- --ticks 600 --seed 42 [--agents 20] [--batch-size N]
 cargo run --release -p sim-headless -- --canonical --agents 20 --batch-size 10000
 ```
@@ -48,6 +48,7 @@ Measures how viewer-like agents actually fare. They spawn without supplies and r
 ```sh
 cargo run --release -p sim-headless -- --study [--near-water | --groups | --valley] [--seed N]
     [--agents N] [--ticks N] [--mind legacy|memory|sharing|full] [--no-help] [--food PERCENT]
+    [--no-wildlife] [--no-regrowth]
     [--verbose] [--trace AGENT]
     [--comms N] [--misreads N] [--lessons N] [--successes N] [--explain AGENT]
 ```
@@ -57,8 +58,17 @@ cargo run --release -p sim-headless -- --study [--near-water | --groups | --vall
   families camped at their own water, 8 adults and 2 children each (children start with no words
   and follow a parent); only the valley is simulated. `--valley --agents 16` is the adults-only
   band the success test uses. The default spawns on random land.
-- `--food PERCENT` strips all but that share of the food at the start (food doesn't regrow), and
-  `--no-help` turns off asking for food. The `requests for food:` line counts requests, how many
+- The valley also releases 24 deer and 2 wolves (`--no-wildlife` to leave them out).
+  `--food PERCENT` strips all but that share of the berries at the start, `--no-regrowth` stops
+  picked bushes and trees from growing back (a famine valley), and `--no-help` turns off asking
+  for food.
+- The `food:` line counts meals by material, sickness, first tastes, and watched meals, and what
+  founders and children ended up believing about bitter berries. The `wildlife:` line counts hunt
+  and flee decisions, warnings and calls to hunt, strikes and kills (alone and together), bites,
+  births, the animals left, and who fears wolves. The `animals:` line counts shouted calls and how
+  many listeners acted on them. The `episode funnel:` line shows how far candidate success episodes
+  got (consequence lesson → from a gesture → misread → acted on and about the misreading → speaker
+  learned). The `requests for food:` line counts requests, how many
   were first misread, and the answers. The `children:` line shows how much of the founders'
   vocabulary the children picked up.
 - The `communication:` line counts gestures by topic and receptions: informed, acted on,

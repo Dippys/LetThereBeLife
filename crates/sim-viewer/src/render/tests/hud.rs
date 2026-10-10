@@ -723,3 +723,56 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
         "the regression layout must exercise the former undersized budget"
     );
 }
+
+#[test]
+fn the_card_shows_what_an_agent_believes_about_food_and_animals() {
+    let memory = MemoryInspection::from_view(&MentalMapView {
+        agent: sim_core::AgentId::new(1),
+        personality: Personality::AVERAGE,
+        landmarks: Vec::new(),
+        explored_tiles: 0,
+        child: false,
+        affordances: vec![
+            sim_core::AffordanceView {
+                material: sim_core::Material::Berries,
+                feeds: 3_800,
+                sickens: 0,
+                evidence: 4,
+            },
+            sim_core::AffordanceView {
+                material: sim_core::Material::Bitterberries,
+                feeds: 800,
+                sickens: 2_400,
+                evidence: 8,
+            },
+        ],
+        fauna: vec![
+            sim_core::FaunaView {
+                species: sim_core::Species::Deer,
+                prey: 200,
+                danger: 0,
+                evidence: 4,
+            },
+            sim_core::FaunaView {
+                species: sim_core::Species::Wolf,
+                prey: 0,
+                danger: 220,
+                evidence: 8,
+            },
+        ],
+        acquaintances: Vec::new(),
+        lexicon: Vec::new(),
+    });
+    let lines = card_lines(memory);
+    assert!(
+        lines
+            .iter()
+            .any(|line| line == "EATS BERRIES  SHUNS BITTER"),
+        "{lines:?}"
+    );
+    assert!(
+        lines.iter().any(|line| line == "HUNTS DEER  FEARS WOLF"),
+        "{lines:?}"
+    );
+    assert!(lines.iter().all(|line| line.len() <= AGENT_CARD_LINE_WIDTH));
+}

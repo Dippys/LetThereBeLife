@@ -112,6 +112,8 @@ pub(crate) struct MindInput<'a> {
     pub(crate) company: bool,
     /// Where a friend was last seen, offered only when the agent is alone.
     pub(crate) friend_target: Option<WorldPosition>,
+    /// Where someone it has something to tell (a correction) was last seen.
+    pub(crate) seek: Option<WorldPosition>,
     /// For a child: whether to stay put or go back to where its parent was
     /// last seen. Children take no excursions.
     pub(crate) parent: Option<ParentInput>,
@@ -431,6 +433,19 @@ impl Planner<'_> {
                 heading: Some(heading),
             };
         }
+        // Someone needs setting straight: go and find them.
+        if let Some(person) = self.mind.seek
+            && let Some((waypoint, heading)) = self.waypoint_toward(person)
+        {
+            return Deliberation {
+                selection: PolicySelection {
+                    goal: PhysicalGoal::Explore,
+                    target: Some(waypoint),
+                    reason: PolicyReason::Visiting,
+                },
+                heading: Some(heading),
+            };
+        }
         if let Some(friend) = self.mind.friend_target
             && self.roll(2) < temperament.visit_chance
             && let Some((waypoint, heading)) = self.waypoint_toward(friend)
@@ -508,7 +523,17 @@ impl Planner<'_> {
     /// chases beyond the range it could walk back to water from, nor while thirsty.
     fn hunt(&self) -> Option<Deliberation> {
         let prey = self.mind.prey.or(self.mind.quarry)?;
-        if self.needs.thirst.value >= self.temperament.top_up_thirst || !self.within_leash(prey) {
+        // A chase is hard work: not while thirsty, worn out, or cold, and never
+        // beyond the range it could walk back to water from.
+        let needs = self.needs;
+        let worn = |level: crate::NeedLevelView| {
+            u32::from(level.value) * 4 >= u32::from(level.threshold) * 3
+        };
+        if self.needs.thirst.value >= self.temperament.top_up_thirst
+            || worn(needs.rest)
+            || worn(needs.exposure)
+            || !self.within_leash(prey)
+        {
             return None;
         }
         // Hunting goes better together: call the others first.

@@ -250,3 +250,32 @@ Asking only when the asker knows of no food fixed that.
 600k ticks) but doesn't raise mean lifespan, because food doesn't regrow. The success test now pins
 the 16-adult band: the valley with children has had no complete episode in 19 seeds. COME is
 deferred.
+
+## D-078: Materials with properties and learned food beliefs (2026-10-10)
+
+**Decision:** Resource kinds became `Material`s with `MaterialProperties` (nutrition, toxicity,
+builds, regrowth). Physical rules read properties; agents don't. Each mind holds `Affordances`
+(3 B per material) changed only by evidence: eating (felt), watching someone eat and retch, being
+handed food, and family culture. Founding families disagree about the new bitter berries (30% of
+bushes, world generator v3); children start with nothing and taste what they've never tried when
+hungry. Policy decides from `FoodValues`; mimes and readings depend on beliefs (new Retch mime).
+Minds that haven't been created yet are read as their newborn state (`Minds::affordances`).
+**Why:** The user asked for things abstract enough to progress without hand-coding per item; new
+content should be a row of properties, not new behavior code.
+**Consequences:** Survival is unchanged (253/300). Knowledge now transmits: children learn food by
+watching. Valley livability counts 8+ edible bush samples (was 12) to match fewer edible bushes.
+
+## D-079: Wildlife, warnings, and regrowth (2026-10-10)
+
+**Decision:** Deer and wolves are species traits run by one rule set on per-animal schedules; people
+hunt (range 2, helpers raise the odds), wolves bite (new `Injury` cause), sleep heals. `Fauna`
+beliefs per species come from bites, witnessed bites and kills, warnings, and lore. A new `Animal`
+gesture topic with Snarl and Spear mimes is shouted to 16 cells; listeners keep tips and check them
+within 6 cells, relearning the word, learning danger, and correcting the speaker when they find
+another animal. Urgent needs prefer places seen first-hand. Bushes grow back lazily
+(`--no-regrowth` for famine scenarios).
+**Why:** Plan L3: a livelier world where danger and hunting give communication real stakes.
+**Consequences:** Valley runs stay survivable (19–20 of 20) with 15–45 kills and 10–55 bites. The
+M7 helping test now needs a famine valley (no regrowth, no wildlife): with food renewing, nobody
+asks. The success detector now requires the listener to have acted before it learned better (it used
+to fall back to the lesson time).

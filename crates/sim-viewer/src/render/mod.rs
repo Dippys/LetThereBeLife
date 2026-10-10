@@ -15,9 +15,9 @@ use std::{borrow::Cow, sync::Arc, time::Instant};
 use sim_core::{
     ACQUAINTANCE_SLOTS, AcquaintanceView, AgentId, AgentView, ChunkInspection, Concept,
     DeathRecord, Engine, HealthView, InventoryView, LANDMARK_SLOTS, LEXICON_SLOTS, LandmarkKind,
-    LandmarkSource, LandmarkView, LexiconEntryView, MentalMapView, Personality, PhysicalNeedsView,
-    PhysicalPolicyView, SimulationSnapshot, SleepView, SpawnKind, SpawnedObjectView, VocalForm,
-    World, WorldOverview, WorldPosition, WorldRect,
+    LandmarkSource, LandmarkView, LexiconEntryView, Material, MentalMapView, Personality,
+    PhysicalNeedsView, PhysicalPolicyView, SimulationSnapshot, SleepView, SpawnKind,
+    SpawnedObjectView, Species, VocalForm, World, WorldOverview, WorldPosition, WorldRect,
 };
 use winit::window::Window;
 
@@ -88,6 +88,10 @@ pub struct MemoryInspection {
     acquaintance_len: u8,
     lexicon: [LexiconEntryView; LEXICON_SLOTS],
     lexicon_len: u8,
+    /// Believed food value per material (feeds minus twice sickens; `None` = no idea).
+    pub food: [Option<i32>; Material::COUNT],
+    /// Per species: (believed worth hunting, believed dangerous), if it has a belief.
+    pub fauna: [Option<(bool, bool)>; Species::COUNT],
 }
 
 impl MemoryInspection {
@@ -135,6 +139,23 @@ impl MemoryInspection {
             acquaintance_len: acquaintance_len as u8,
             lexicon,
             lexicon_len: lexicon_len as u8,
+            food: Material::ALL.map(|material| {
+                view.affordances
+                    .iter()
+                    .find(|belief| belief.material == material)
+                    .map(|belief| i32::from(belief.feeds) - 2 * i32::from(belief.sickens))
+            }),
+            fauna: Species::ALL.map(|species| {
+                view.fauna
+                    .iter()
+                    .find(|belief| belief.species == species)
+                    .map(|belief| {
+                        (
+                            belief.prey > 64 && belief.prey > belief.danger,
+                            belief.danger > 64,
+                        )
+                    })
+            }),
         }
     }
 

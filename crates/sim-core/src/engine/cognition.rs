@@ -287,6 +287,11 @@ impl Engine {
                     .iter()
                     .any(|other| other.id == correction.speaker && can_watch(other.activity))
             });
+        // A correction for someone out of sight: go to where they were last seen.
+        let seek = (self.policy_options.sharing && correction.is_none())
+            .then(|| dialogue.correction(now))
+            .flatten()
+            .and_then(|pending| people.whereabouts(pending.speaker));
         let share = correction
             .map(|correction| (correction.place, u8::MAX))
             .or_else(|| {
@@ -325,6 +330,7 @@ impl Engine {
                 personality,
                 company,
                 friend_target,
+                seek,
                 parent,
                 beg_target: beg.map(|(_, position)| position),
                 food,

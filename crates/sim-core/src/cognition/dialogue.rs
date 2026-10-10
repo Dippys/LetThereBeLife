@@ -15,7 +15,7 @@ pub const CONSEQUENCE_WEIGHT: u16 = 3;
 /// Evidence a confirmation or repair adds to (or takes from) a word.
 pub const REPAIR_WEIGHT: u16 = 2;
 /// Corrections older than this (simulated seconds) are dropped.
-const CORRECTION_PATIENCE_SECONDS: u32 = 3_600;
+const CORRECTION_PATIENCE_SECONDS: u32 = 6 * 3_600;
 /// A tip about an animal is worth acting on for this many seconds.
 pub const LEAD_SECONDS: u32 = 90;
 /// Seconds between warnings, and between calls to hunt.
@@ -182,6 +182,7 @@ mod tests {
             since: 100,
         });
         assert!(dialogue.correction(200).is_some());
-        assert!(dialogue.correction(100 + 3_601).is_none());
+        assert!(dialogue.correction(100 + 6 * 3_600).is_some());
+        assert!(dialogue.correction(100 + 6 * 3_600 + 1).is_none());
     }
 }

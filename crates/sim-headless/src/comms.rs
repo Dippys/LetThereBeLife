@@ -258,7 +258,8 @@ impl CommunicationLog {
 
     /// How far candidate episodes get: listener consequence lessons, of those
     /// tied to an informing gesture, with a misread reception of that word, about
-    /// the misreading, and with a speaker lesson caused by that listener.
+    /// the misreading (and acted on first), and with a speaker lesson caused by
+    /// that listener.
     pub fn success_funnel(&self) -> [u64; 5] {
         self.trace_episodes().1
     }
@@ -303,6 +304,13 @@ impl CommunicationLog {
                 continue;
             }
             funnel[3] += 1;
+            // It must have acted on its reading before it learned better.
+            let Some(acted_at) = reception
+                .acted_on()
+                .filter(|&acted| acted <= listener_lesson.at.ticks())
+            else {
+                continue;
+            };
             let speaker = exchange.signal.signal.sender;
             let Some(speaker_lesson) = self.lessons.iter().find(|lesson| {
                 let by_listener = lesson.signal.and_then(exchange_by_id).is_some_and(|other| {
@@ -324,7 +332,7 @@ impl CommunicationLog {
             episodes.push(SuccessEpisode {
                 exchange: index,
                 listener: listener_lesson.agent,
-                acted_at: reception.acted_on().unwrap_or(listener_lesson.at.ticks()),
+                acted_at,
                 listener_lesson: *listener_lesson,
                 speaker_lesson: *speaker_lesson,
             });

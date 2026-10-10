@@ -70,12 +70,14 @@ impl InventoryView {
     }
 }
 
+/// The layout of one stored depletion entry (key and value), for size checks.
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub(crate) struct ResourceDelta {
     position: CompactFeaturePosition,
     remaining: u16,
+    since: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -94,12 +96,50 @@ impl CompactFeaturePosition {
     }
 }
 
+/// What's left of one modified feature, and when that was last true.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Delta {
+    remaining: u16,
+    /// Simulated second it was last gathered (regrowth counts from here).
+    since: u32,
+}
+
+/// Sparse depletion of generated features. Sources grow back lazily: what's
+/// left is computed from the last gathering and the material's regrowth time
+/// whenever someone looks, so nothing scans every bush every tick.
 #[derive(Debug, Default)]
 pub(crate) struct ResourceDeltas {
-    remaining: BTreeMap<CompactFeaturePosition, u16>,
+    remaining: BTreeMap<CompactFeaturePosition, Delta>,
+    /// The engine's current time in seconds, advanced every tick.
+    now: u32,
+    /// Scenario switch: nothing grows back (a famine valley).
+    barren: bool,
+}
+
+/// `delta` grown back to `now`, capped at the generated capacity.
+fn regrown(delta: Delta, base: BaseResource, now: u32) -> u16 {
+    let period = base.kind.properties().regrow_seconds;
+    if period == 0 {
+        return delta.remaining;
+    }
+    let grown = now.saturating_sub(delta.since) / period;
+    let grown = u16::try_from(grown).unwrap_or(u16::MAX);
+    delta.remaining.saturating_add(grown).min(base.capacity)
 }
 
 impl ResourceDeltas {
+    /// Moves the clock regrowth is measured against. A barren world's clock
+    /// never moves, so nothing grows back.
+    pub(crate) fn advance(&mut self, now: crate::SimTime) {
+        if !self.barren {
+            self.now = (now.ticks() / 60) as u32;
+        }
+    }
+
+    pub(crate) fn make_barren(&mut self) {
+        self.barren = true;
+    }
+
     pub(crate) fn resource_at(
         &self,
         world: &World,
@@ -110,7 +150,10 @@ impl ResourceDeltas {
         };
         let key = CompactFeaturePosition::checked(position)
             .expect("resident world positions fit the finite-world compact envelope");
-        let remaining = self.remaining.get(&key).copied().unwrap_or(base.capacity);
+        let remaining = self
+            .remaining
+            .get(&key)
+            .map_or(base.capacity, |delta| regrown(*delta, base, self.now));
         Ok((remaining > 0).then_some(BaseResource {
             capacity: remaining,
             kind: base.kind,
@@ -132,8 +175,13 @@ impl ResourceDeltas {
         }
         let key = CompactFeaturePosition::checked(position)
             .expect("resident world positions fit the finite-world compact envelope");
-        self.remaining
-            .insert(key, current.capacity - u16::from(gathered));
+        self.remaining.insert(
+            key,
+            Delta {
+                remaining: current.capacity - u16::from(gathered),
+                since: self.now,
+            },
+        );
         Ok(Some((current.kind, gathered)))
     }
 
@@ -145,14 +193,20 @@ impl ResourceDeltas {
     pub(crate) fn strip(&mut self, position: WorldPosition) {
         let key = CompactFeaturePosition::checked(position)
             .expect("resident world positions fit the finite-world compact envelope");
-        self.remaining.insert(key, 0);
+        self.remaining.insert(
+            key,
+            Delta {
+                remaining: 0,
+                since: self.now,
+            },
+        );
     }
 
     pub(crate) fn views<'a>(
         &'a self,
         world: &'a World,
     ) -> impl Iterator<Item = ResourceDeltaView> + 'a {
-        self.remaining.iter().map(|(position, &remaining)| {
+        self.remaining.iter().map(|(position, &delta)| {
             let position = WorldPosition {
                 x: i64::from(position.x),
                 y: i64::from(position.y),
@@ -163,7 +217,7 @@ impl ResourceDeltas {
             ResourceDeltaView {
                 position,
                 kind: resource.kind,
-                remaining,
+                remaining: regrown(delta, resource, self.now),
             }
         })
     }
@@ -179,8 +233,9 @@ mod tests {
     fn compact_inventory_and_delta_layouts_are_fixed() {
         assert_eq!(size_of::<InventoryView>(), Material::COUNT);
         assert_eq!(align_of::<InventoryView>(), 1);
-        assert_eq!(size_of::<ResourceDelta>(), 6);
-        assert_eq!(align_of::<ResourceDelta>(), 2);
+        assert_eq!(size_of::<ResourceDelta>(), 12);
+        assert_eq!(align_of::<ResourceDelta>(), 4);
+        assert_eq!(size_of::<Delta>(), 8);
     }
 
     #[test]

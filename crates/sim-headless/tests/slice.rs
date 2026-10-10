@@ -23,31 +23,36 @@ fn children_pick_up_most_of_the_band_s_words_from_observation() {
     );
 }
 
-/// In a valley stripped to 5% of its food, being able to ask for food keeps
-/// more of the band alive through the first starvation wave (seed 7: 14 vs 12
-/// survivors at 600k ticks). Food doesn't regrow, so over longer runs helping
-/// mostly evens out who starves rather than adding meals (see DECISIONS D-077).
+/// In a famine valley (5% of the food, nothing grows back, no game to hunt),
+/// being able to ask for food keeps more of the band alive through the first
+/// starvation wave: one more survivor at 600k ticks on each of seeds 7, 10, and
+/// 12 (D-077, D-079). With regrowth or wildlife there's no famine, and nobody asks.
 #[test]
 #[ignore = "release-only: run with --release --ignored (part of scripts/validate)"]
-fn asking_for_food_carries_more_of_a_scarce_valley_through_the_first_famine() {
-    let run = |helping: bool| {
-        let mut config = valley(7, 600_000);
+fn asking_for_food_carries_more_of_a_famine_valley_through_the_first_starvation_wave() {
+    let run = |seed: u64, helping: bool| {
+        let mut config = valley(seed, 600_000);
         config.food_percent = 5;
+        config.wildlife = false;
+        config.regrowth = false;
         config.mind = PolicyOptions {
             helping,
             ..PolicyOptions::full()
         };
-        run_study(config).expect("seed 7 has a valley")
+        run_study(config).expect("the seed has a valley")
     };
-    let helped = run(true);
-    let alone = run(false);
-    let [asked, _, gave, _, _] = helped.comms.summary().requests;
-    assert!(asked > 0 && gave > 0, "asked {asked}, gave {gave}");
-    assert_eq!(alone.comms.summary().requests[0], 0);
+    let (mut helped, mut alone, mut gifts) = (0, 0, 0);
+    for seed in [7, 10, 12] {
+        let with_help = run(seed, true);
+        let without = run(seed, false);
+        assert_eq!(without.comms.summary().requests[0], 0);
+        gifts += with_help.comms.summary().requests[2];
+        helped += with_help.survivors;
+        alone += without.survivors;
+    }
+    assert!(gifts > 0, "food changed hands");
     assert!(
-        helped.survivors > alone.survivors,
-        "survivors with helping {} vs without {}",
-        helped.survivors,
-        alone.survivors
+        helped > alone,
+        "survivors with helping {helped} vs without {alone}"
     );
 }

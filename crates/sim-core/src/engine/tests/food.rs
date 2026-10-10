@@ -129,3 +129,37 @@ fn legacy_agents_without_minds_eat_by_real_properties() {
         "no minds, nothing to learn or log"
     );
 }
+
+#[test]
+fn picked_bushes_grow_back_over_time_and_stone_does_not() {
+    let engine = resident_engine(64);
+    let mut deltas = crate::resources::ResourceDeltas::default();
+    let mut regrowth = |material: Material| {
+        let position = engine
+            .world()
+            .all_features()
+            .find(|feature| feature.base_resource().kind == material)
+            .map(|feature| feature.position)?;
+        while deltas
+            .gather(engine.world(), position, 255)
+            .unwrap()
+            .is_some()
+        {}
+        let period = material.properties().regrow_seconds;
+        deltas.advance(crate::SimTime::from_ticks(
+            u64::from(period.max(1)) * 60 * 2,
+        ));
+        let left = deltas
+            .resource_at(engine.world(), position)
+            .unwrap()
+            .map_or(0, |resource| resource.capacity);
+        deltas.advance(crate::SimTime::ZERO);
+        Some(left)
+    };
+    if let Some(berries) = regrowth(Material::Berries) {
+        assert_eq!(berries, 2, "two regrowth periods, two berries");
+    }
+    if let Some(stone) = regrowth(Material::Stone) {
+        assert_eq!(stone, 0);
+    }
+}

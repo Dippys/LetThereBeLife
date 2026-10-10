@@ -31,6 +31,8 @@ pub struct StudyConfig {
     pub food_percent: u8,
     /// Release deer and wolves into the valley.
     pub wildlife: bool,
+    /// Picked bushes and trees grow back.
+    pub regrowth: bool,
 }
 
 /// Where study agents start.
@@ -83,6 +85,7 @@ impl StudyConfig {
             trace: None,
             food_percent: 100,
             wildlife: true,
+            regrowth: true,
         }
     }
 }
@@ -270,6 +273,9 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
         engine
             .strip_food(active_area, config.food_percent)
             .map_err(|_| ScenarioError("food can only be stripped before the first tick".into()))?;
+    }
+    if !config.regrowth {
+        engine.disable_regrowth();
     }
     if config.wildlife && config.spawn == StudySpawn::Valley {
         engine.release_wildlife(active_area, VALLEY_DEER, VALLEY_WOLVES);

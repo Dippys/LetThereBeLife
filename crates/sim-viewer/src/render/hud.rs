@@ -6,8 +6,8 @@ use sim_core::{
     ACQUAINTANCE_SLOTS, AcquaintanceView, AgentActivity, BiomeType, ChunkPresence, Concept,
     DeathCause, ExplorationHeading, FRIEND_FAMILIARITY, FeatureKind, GenerateAreaError,
     HealthStatus, LandmarkKind, LandmarkSource, Material, Mime, NeedKind, Personality,
-    PhysicalGoal, PhysicalPolicyView, PolicyReason, PrevailingWind, SleepQuality, SurfaceType,
-    VocalForm, World,
+    PhysicalGoal, PhysicalPolicyView, PolicyReason, PrevailingWind, SleepQuality, Species,
+    SurfaceType, VocalForm, World,
 };
 
 use super::{
@@ -311,6 +311,7 @@ fn write_memory(output: &mut String, memory: &MemoryInspection) {
         writeln!(output, "CHILD, BORN WITH NO WORDS").unwrap();
     }
     write_personality(output, memory.personality);
+    write_knowledge(output, memory);
     write_friends(output, memory.acquaintances());
     write_words(output, memory);
 }
@@ -327,6 +328,59 @@ const PLACE_CONCEPTS: [(Concept, &str); 5] = [
 /// `WORDS <CONCEPT> <FORM>  ...` for each place concept the agent has a word
 /// for, wrapping onto an indented continuation line rather than exceeding
 /// `AGENT_CARD_LINE_WIDTH`. Writes nothing when the agent has no place words.
+/// What it believes about food and animals, e.g. "EATS BERRIES MEAT  SHUNS
+/// BITTER" and "HUNTS DEER  FEARS WOLF". Lines are left out when empty.
+fn write_knowledge(output: &mut String, memory: &MemoryInspection) {
+    const MATERIAL_LABELS: [&str; Material::COUNT] = ["BERRIES", "BITTER", "WOOD", "STONE", "MEAT"];
+    const SPECIES_LABELS: [&str; Species::COUNT] = ["DEER", "WOLF"];
+    let eats: Vec<&str> = MATERIAL_LABELS
+        .iter()
+        .zip(memory.food)
+        .filter_map(|(label, value)| value.is_some_and(|value| value > 0).then_some(*label))
+        .collect();
+    let shuns: Vec<&str> = MATERIAL_LABELS
+        .iter()
+        .zip(memory.food)
+        .filter_map(|(label, value)| value.is_some_and(|value| value < 0).then_some(*label))
+        .collect();
+    if !eats.is_empty() || !shuns.is_empty() {
+        let mut line = String::new();
+        if !eats.is_empty() {
+            line.push_str("EATS ");
+            line.push_str(&eats.join(" "));
+        }
+        if !shuns.is_empty() {
+            if !line.is_empty() {
+                line.push_str("  ");
+            }
+            line.push_str("SHUNS ");
+            line.push_str(&shuns.join(" "));
+        }
+        line.truncate(AGENT_CARD_LINE_WIDTH);
+        writeln!(output, "{line}").unwrap();
+    }
+    let hunts: Vec<&str> = SPECIES_LABELS
+        .iter()
+        .zip(memory.fauna)
+        .filter_map(|(label, belief)| belief.is_some_and(|(prey, _)| prey).then_some(*label))
+        .collect();
+    let fears: Vec<&str> = SPECIES_LABELS
+        .iter()
+        .zip(memory.fauna)
+        .filter_map(|(label, belief)| belief.is_some_and(|(_, danger)| danger).then_some(*label))
+        .collect();
+    if !hunts.is_empty() || !fears.is_empty() {
+        let mut parts = Vec::new();
+        if !hunts.is_empty() {
+            parts.push(format!("HUNTS {}", hunts.join(" ")));
+        }
+        if !fears.is_empty() {
+            parts.push(format!("FEARS {}", fears.join(" ")));
+        }
+        writeln!(output, "{}", parts.join("  ")).unwrap();
+    }
+}
+
 fn write_words(output: &mut String, memory: &MemoryInspection) {
     const PREFIX: &str = "WORDS";
     let mut line_start = None;

@@ -166,6 +166,11 @@ impl Engine {
         Ok(stripped)
     }
 
+    /// Scenario setup: nothing that's picked grows back (a famine valley).
+    pub fn disable_regrowth(&mut self) {
+        self.resource_deltas.make_barren();
+    }
+
     /// Records explicit starting supplies before autonomous simulation begins.
     pub fn set_initial_inventory(
         &mut self,
