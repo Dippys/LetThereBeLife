@@ -141,9 +141,6 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Known problems and limitations
 
-- **Listeners often mislearn at the place:** a listener that understood a word but can't find the
-  thing near where it guessed, and sees the alternative instead, decides the word meant that and
-  "corrects" the speaker. Most corrections are of this kind.
 - **Wolves are hard on loners.** Agents who wander off alone get bitten; wounded people now come
   round after 5 minutes, but some die of thirst while down or soon after.
 - **Helping matters only in famines.** With regrowth and game, nobody needs to ask for food; the M7
@@ -171,7 +168,8 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
-- 2026-10-11 (latest): listeners report back, holding up what they found (D-097).
+- 2026-10-11 (latest): only a look at the spot can refute a word (D-098).
+- 2026-10-11: listeners report back, holding up what they found (D-097).
 - 2026-10-10: two-valley start, `--apart` (D-096).
 - 2026-10-10: fuel (D-094) and stone blades (D-095); misunderstanding episodes are
   rarer than the pinned seeds suggested (about 1 per 20-40 valleys).

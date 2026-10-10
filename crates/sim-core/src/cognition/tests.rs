@@ -491,15 +491,32 @@ fn a_worded_hint_is_judged_by_what_stands_at_the_spot() {
     map.observe(1, far, &view, 2, &mut |check| checks.push(check));
     assert!(checks.is_empty(), "{checks:?}");
 
-    // Up close, the bitter bush stands closest to the spot: the word was misread.
+    // Up close, berries a few cells off and the bitter bush at the spot: pointing
+    // is too rough to say the word was misread.
     let near = at(3, 0);
+    let mut both = MentalMap::default();
+    worded_berries_hint(&mut both, spot);
     let mut view = view_around(near);
     view.resources = vec![
         bush(at(3, 1), Material::Berries),
         bush(at(1, 0), Material::Bitterberries),
     ];
+    both.observe(1, near, &view, 3, &mut |check| checks.push(check));
+    assert!(
+        checks.iter().all(|check| check.form.is_none()),
+        "inconclusive: the word isn't judged: {checks:?}"
+    );
+    checks.clear();
+
+    // The bitter bush at the spot and no berries anywhere near it: misread.
+    let mut view = view_around(near);
+    view.resources = vec![
+        bush(at(10, 0), Material::Berries),
+        bush(at(1, 0), Material::Bitterberries),
+    ];
     map.observe(1, near, &view, 3, &mut |check| checks.push(check));
     assert_eq!(checks.len(), 1);
+    assert!(checks[0].up_close);
     assert!(!checks[0].confirmed);
     assert_eq!(checks[0].alternative, Some(Concept::BITTERBERRIES));
     assert_eq!(checks[0].form, Some(VocalForm(4)));

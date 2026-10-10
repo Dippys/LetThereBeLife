@@ -148,6 +148,11 @@ fn learn_from_consequence(
         });
         return;
     }
+    // Giving up after searching teaches nothing about the word: pointing is
+    // rough, and the thing may just be elsewhere. Only a look at the spot can.
+    if !check.up_close {
+        return;
+    }
     // Only an alternative the listener had actually weighed counts: a stale tip
     // (the berries were eaten) teaches nothing about the word.
     let Some(actual) = check.alternative.filter(|alternative| {

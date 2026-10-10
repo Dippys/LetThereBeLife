@@ -579,3 +579,16 @@ Reporting back with the object is ordinary human behavior and gives the speaker 
 and from 1 to 141 in 37 of 49 fresh valleys (seeds 79-160). Survivors 848 vs 879 and 1,011 vs
 1,001 (about 1% fewer overall, within noise). The success test now requires 40 episodes in 12
 valleys (was 2).
+
+## D-098: Only a look at the spot can refute a word (2026-10-11)
+
+**Decision:** A listener who gives up on a worded tip after searching learns nothing about the word
+(pointing is rough; the thing may just be elsewhere). Up close, the word counts as misread only when
+the alternative stands at the spot (within 2 cells) and nothing of the expected kind is within view
+of it (6 cells); with both around, the tip becomes an ordinary hint. `HintCheck::up_close` marks
+judgements made at the spot.
+**Why:** Most corrections came from listeners who had understood but mislearned: they couldn't find
+the thing near their guess, saw the alternative somewhere in view, and "corrected" the speaker.
+**Consequences:** On seed 1, corrections fell from 38 to 7 and word lessons against what the speaker
+meant from 31 to 5 (0-1 on seeds 4, 9, 13). Episodes 86 in 23 of the success test's valleys (79 in
+24 before); survivors 839 vs 848 over those 40 valleys.

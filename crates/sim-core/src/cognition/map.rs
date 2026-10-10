@@ -115,6 +115,8 @@ pub(crate) struct HintCheck {
     pub(crate) signal: u16,
     /// Where the hint said to look.
     pub(crate) place: WorldPosition,
+    /// Judged by looking at the spot itself (not given up after searching).
+    pub(crate) up_close: bool,
 }
 
 impl Landmark {
@@ -142,6 +144,7 @@ impl Landmark {
             }),
             signal: self.signal,
             place: self.position(),
+            up_close: false,
         }
     }
 }
@@ -412,15 +415,26 @@ impl MentalMap {
             let check = match (expected, other) {
                 (Some(near), Some(far)) if near <= far => landmark.check(kind, true),
                 (Some(_), None) => landmark.check(kind, true),
-                (_, Some(_)) => unconfirmed,
-                (None, None) => {
+                // The alternative at the spot and nothing of the expected kind
+                // anywhere near it: the word must have meant that.
+                (None, Some(_))
+                    if !perceived_instances(kind, perception)
+                        .any(|position| chebyshev(position, spot) <= SPOT_VIEW) =>
+                {
+                    unconfirmed
+                }
+                // Both around: pointing is too rough to tell which was meant.
+                (_, Some(_)) | (None, None) => {
                     // Nothing telling at the spot (the pointing was off, or it's
                     // gone): from now on it's an ordinary hint, searched as usual.
                     self.landmarks[slot].form = NONE;
                     continue;
                 }
             };
-            on_hint(check);
+            on_hint(HintCheck {
+                up_close: true,
+                ..check
+            });
             self.landmarks[slot] = Landmark::default();
         }
     }
