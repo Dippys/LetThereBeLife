@@ -205,8 +205,12 @@ about faraway places. The test is deterministic but sensitive to behavior change
 removes the episode, investigate why with `--misreads` and `--lessons` rather than picking a new
 seed.
 
-**Since M7:** the test runs the 16-adult band (`--valley --agents 16`), which still produces the
-exact episode above. The default valley now includes 4 children and has produced no complete
+**Since the living world (D-080):** the world was regenerated (bitter berries) and the detector
+got stricter (the listener must act first; the speaker's lesson must concern the meaning at
+stake). The test now runs the 16-adult seed 13 valley for 200k ticks, where agent 10 points out
+bitter berries as food, agent 14 reads it as berries, goes, finds berries too, and agent 10 later
+doubts its word after hearing agent 14 use it. **Before that, at M7:** the test ran the 16-adult
+band, which still produced the episode above. The default valley now includes 4 children and has produced no complete
 episode in 19 seeds × 2.4M ticks. The likely cause is that children ask about almost everything,
 so misunderstandings get repaired before anyone acts on them, but this isn't proven: adding 4
 agents also changes the whole deterministic run.

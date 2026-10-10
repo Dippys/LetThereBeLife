@@ -118,12 +118,13 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Known problems and limitations
 
-- **The release success test currently fails** (on the `living-world` branch; `main` is unchanged).
-  The regenerated world (bitter bushes) no longer contains the seed 1 episode, and the detector now
-  requires the listener to act before it learns better. Across 20 seeds × 2 band sizes × 4.8M ticks
-  no complete episode emerges naturally. The mechanism works end to end in a constructed test (a
-  wolf warning misread as deer, hunted, found out, and corrected), but cross-family misreadings
-  rarely reach the speaker again because the families live apart. Deciding how to gate this is open.
+- **Complete misunderstanding episodes are still rare.** The success test now pins a natural
+  episode in the 16-adult seed 13 valley (bitter berries pointed out as food, read as berries,
+  visited, and the speaker later doubting its word). Under the stricter detector (the listener must
+  act before it learns better; the speaker's lesson must concern the meaning at stake), it was the
+  only one in the first 32 runs of a 40-seed × 2-band × 4.8M-tick scan. Misreadings are mostly
+  between the two families, who live apart, so the speaker rarely learns. A constructed test covers
+  the animal-call version end to end (a wolf warning misread as deer, hunted, found out, corrected).
 - **Helping matters only in famines.** With regrowth and game, nobody needs to ask for food; the M7
   helping test runs famine valleys (`--no-regrowth --no-wildlife --food 5`).
 - **COME (regroup) requests aren't implemented** (deferred from M7).
@@ -147,7 +148,7 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
-- 2026-10-10 (latest, `living-world` branch): living world L1–L4: materials with properties,
+- 2026-10-10 (latest): living world L1–L4: materials with properties,
   bitter berries, learned food beliefs, regrowth, deer and wolves, hunting and bites, warnings and
   calls to hunt, hearths, and fixes for agents pacing, chasing, or sleeping through bites
   (D-078–D-080).
@@ -170,10 +171,8 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## What's next
 
-1. **Decide the success gate** (see Known problems): pin a natural episode if one turns up, or gate
-   on the constructed end-to-end test and report natural emergence as a measure.
-2. **Make cross-family contact common**: shared hunts, a shared hearth, visiting, so misreadings
+1. **Make cross-family contact common**: shared hunts, a shared hearth, visiting, so misreadings
    between dialects get noticed and repaired by the people involved.
-3. **Construction by properties (L4, continued)**: structures whose use comes from what they're
+2. **Construction by properties (L4, continued)**: structures whose use comes from what they're
    made of (wind-blocking, warmth, storage), hearths that need fuel, cooking.
-4. **Episodic memory** (phase 3), so agents remember who misled, helped, or warned them.
+3. **Episodic memory** (phase 3), so agents remember who misled, helped, or warned them.

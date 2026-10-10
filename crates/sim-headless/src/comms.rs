@@ -316,10 +316,15 @@ impl CommunicationLog {
                 let by_listener = lesson.signal.and_then(exchange_by_id).is_some_and(|other| {
                     self.exchanges[other].signal.signal.sender == listener_lesson.agent
                 });
+                // About the meaning at stake: it now doubts what it meant, or
+                // takes up the meaning the listener gave the word.
+                let about_it =
+                    lesson.weakened == Some(meant) || lesson.strengthened == Some(misread);
                 lesson.agent == speaker
                     && lesson.form == listener_lesson.form
                     && lesson.at >= listener_lesson.at
                     && by_listener
+                    && about_it
                     && match lesson.cause {
                         LessonCause::Correction => lesson.use_worked == Some(false),
                         LessonCause::Usage => true,

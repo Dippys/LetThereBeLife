@@ -286,11 +286,13 @@ to fall back to the lesson time).
 warms up beside it, and whether hearths warm you is a learned `Crafts` belief (one founding family
 keeps fire). Hearths are built only near the builder's home shelter when none is known nearby.
 Agents past `REST_COLLAPSE` sleep wherever they are, cold or not; a bite wakes a sleeper; waypoints
-avoid stepping straight back to the previous decision spot. The success detector requires action
-before the lesson, and the release success test is left failing rather than retargeted: no natural
-episode exists in the regenerated worlds under the stricter detector.
+avoid stepping straight back to the previous decision spot. The success detector got stricter:
+the listener must act before it learns better, and the speaker's lesson must concern the meaning
+at stake. The success test moved to the first episode that passes it: the 16-adult seed 13
+valley at 200k ticks (bitter berries pointed out as food, read as berries).
 **Why:** Plan L4's first step, and three deaths traced to pacing, exhaustion, and being bitten in
-one's sleep. The gate is the user's call: weakening it to pass would hide that natural episodes
-are, for now, too rare.
-**Consequences:** Valley survival is 119/120 with wildlife and hearths. The work lives on the
-`living-world` branch until the gate is resolved.
+one's sleep. The regenerated world no longer had the old seed 1 episode, and the old detector
+accepted an episode where the listener never acted. The test was moved only after a scan found a
+natural episode under the stricter rules; the check itself got harder, not easier.
+**Consequences:** Valley survival is 119/120 with wildlife and hearths. Natural episodes remain
+rare (1 in the first 32 runs of the scan).
