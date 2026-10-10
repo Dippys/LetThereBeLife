@@ -336,11 +336,11 @@ fn top_bar(painter: &mut Painter, state: &RenderState, width: f32) -> f32 {
             .iter()
             .map(|item| item_width(painter, item))
             .sum::<f32>()
-            > help_x
+            > info_x
     {
         items.pop();
     }
-    let mut right = help_x - painter.chars(1);
+    let mut right = info_x - painter.chars(1);
     for item in items.iter().rev() {
         right -= item_width(painter, item) - painter.chars(1);
         let mut item_x = right;
