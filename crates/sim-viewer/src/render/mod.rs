@@ -198,6 +198,8 @@ impl MemoryInspection {
             trust: 0,
             last_seen_position: None,
             last_seen_second: 0,
+            tie: None,
+            owed: 0,
         };
         const UNHEARD: LexiconEntryView = LexiconEntryView {
             form: VocalForm(0),

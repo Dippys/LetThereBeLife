@@ -34,7 +34,9 @@ pub use reading::{READING_CANDIDATES, Reading, ReadingReasons, concept_topic};
 pub use signal::{DesiredEffect, Mime, PublicSignal, Tone, Understanding, UtteranceIntent};
 pub(crate) use signal::{express, locate, mime_for, understand, unmistakable};
 pub(crate) use social::SocialMemory;
-pub use social::{ACQUAINTANCE_SLOTS, AcquaintanceView, DEFAULT_TRUST, FRIEND_FAMILIARITY};
+pub use social::{
+    ACQUAINTANCE_SLOTS, AcquaintanceView, DEFAULT_TRUST, DISTRUST, FRIEND_FAMILIARITY, Tie,
+};
 
 use crate::{AgentId, SimTime, WorldPosition};
 
@@ -291,6 +293,15 @@ pub struct LeadFollowedEvent {
     pub fled: bool,
 }
 
+/// Someone saw the body of a person close to them and is mourning (latest
+/// tick, for logs and tools).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GriefEvent {
+    pub agent: AgentId,
+    pub lost: AgentId,
+    pub at: crate::SimTime,
+}
+
 /// Someone ate something (latest tick, for logs and tools only). Eating and
 /// retching are visible, so `watchers` saw it and learned from it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -383,6 +394,8 @@ pub(crate) struct Mind {
     pub(crate) child: bool,
     /// The agent a child stays close to.
     pub(crate) parent: Option<AgentId>,
+    /// Mourning someone close until this simulated second.
+    pub(crate) grief_until: u32,
 }
 
 impl Mind {

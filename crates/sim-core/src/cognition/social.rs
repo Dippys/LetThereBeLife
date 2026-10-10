@@ -21,6 +21,37 @@ const TRUST_REFUSED: u8 = 8;
 pub const BOND_TRUST: u8 = 220;
 /// Familiarity needed before an agent counts someone as a friend worth visiting.
 pub const FRIEND_FAMILIARITY: u8 = 24;
+/// Below this trust someone is held in contempt: avoided, refused, not believed.
+pub const DISTRUST: u8 = 64;
+/// Most favours one remembers owing someone.
+const MAX_OWED: u8 = 15;
+
+/// How someone is related to the agent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Tie {
+    Parent = 1,
+    Child = 2,
+    Sibling = 3,
+    Partner = 4,
+}
+
+impl Tie {
+    const fn from_bits(bits: u8) -> Option<Self> {
+        match bits {
+            1 => Some(Self::Parent),
+            2 => Some(Self::Child),
+            3 => Some(Self::Sibling),
+            4 => Some(Self::Partner),
+            _ => None,
+        }
+    }
+
+    /// Family by blood (partners are family by choice).
+    pub const fn is_kin(self) -> bool {
+        !matches!(self, Self::Partner)
+    }
+}
 
 const EMPTY: u32 = u32::MAX;
 
@@ -37,7 +68,9 @@ struct Acquaintance {
     trust: u8,
     /// Whether `x, y` is still where the agent expects to find them.
     position_known: bool,
-    _reserved: u8,
+    /// Low 4 bits: how they're related (`Tie`, 0 = not); high 4 bits: favours
+    /// the agent owes them.
+    ties: u8,
 }
 
 impl Default for Acquaintance {
@@ -50,12 +83,20 @@ impl Default for Acquaintance {
             familiarity: 0,
             trust: DEFAULT_TRUST,
             position_known: false,
-            _reserved: 0,
+            ties: 0,
         }
     }
 }
 
 impl Acquaintance {
+    const fn tie(self) -> Option<Tie> {
+        Tie::from_bits(self.ties & 0x0F)
+    }
+
+    const fn owed(self) -> u8 {
+        self.ties >> 4
+    }
+
     fn position(self) -> WorldPosition {
         WorldPosition {
             x: i64::from(self.x),
@@ -73,6 +114,9 @@ pub struct AcquaintanceView {
     /// Where they were last seen, if the agent hasn't since found that spot empty.
     pub last_seen_position: Option<WorldPosition>,
     pub last_seen_second: u32,
+    pub tie: Option<Tie>,
+    /// Favours the agent owes them.
+    pub owed: u8,
 }
 
 /// What `notice` did to the slots.
@@ -118,6 +162,8 @@ impl SocialMemory {
                         let known = self.slots[slot];
                         (
                             known.agent != EMPTY,
+                            // Family is never forgotten to make room.
+                            known.tie().is_some(),
                             known.familiarity,
                             known.last_seen,
                             slot,
@@ -193,6 +239,51 @@ impl SocialMemory {
         };
     }
 
+    /// Records how `slot` is related to the agent.
+    pub(crate) fn set_tie(&mut self, slot: u8, tie: Tie) {
+        let known = &mut self.slots[usize::from(slot)];
+        known.ties = (known.ties & 0xF0) | tie as u8;
+    }
+
+    pub(crate) fn tie(&self, slot: u8) -> Option<Tie> {
+        self.slots[usize::from(slot)].tie()
+    }
+
+    /// How `other` is related to the agent, if it knows them.
+    pub(crate) fn tie_with(&self, other: AgentId) -> Option<Tie> {
+        self.slot_of(other).and_then(|slot| self.tie(slot))
+    }
+
+    /// The agent received a favour from `slot` and owes them one more.
+    pub(crate) fn owe(&mut self, slot: u8) {
+        let known = &mut self.slots[usize::from(slot)];
+        let owed = (known.owed() + 1).min(MAX_OWED);
+        known.ties = (known.ties & 0x0F) | owed << 4;
+    }
+
+    /// The agent did `slot` a favour back: one fewer owed.
+    pub(crate) fn repay(&mut self, slot: u8) {
+        let known = &mut self.slots[usize::from(slot)];
+        let owed = known.owed().saturating_sub(1);
+        known.ties = (known.ties & 0x0F) | owed << 4;
+    }
+
+    pub(crate) fn owed(&self, slot: u8) -> u8 {
+        self.slots[usize::from(slot)].owed()
+    }
+
+    /// Whether the agent holds `slot` in contempt.
+    pub(crate) fn distrusts(&self, slot: u8) -> bool {
+        self.slots[usize::from(slot)].trust < DISTRUST
+    }
+
+    /// Forgets `other` (after mourning them).
+    pub(crate) fn forget(&mut self, other: AgentId) {
+        if let Some(slot) = self.slot_of(other) {
+            self.slots[usize::from(slot)] = Acquaintance::default();
+        }
+    }
+
     pub(crate) fn familiarity(&self, slot: u8) -> u8 {
         self.slots[usize::from(slot)].familiarity
     }
@@ -219,6 +310,7 @@ impl SocialMemory {
                 known.agent != EMPTY
                     && known.position_known
                     && known.familiarity >= FRIEND_FAMILIARITY
+                    && known.trust >= DISTRUST
                     && now.saturating_sub(known.last_seen) <= max_age
             })
             .max_by_key(|known| (known.familiarity, known.last_seen, u32::MAX - known.agent))
@@ -235,6 +327,8 @@ impl SocialMemory {
                 trust: known.trust,
                 last_seen_position: known.position_known.then(|| known.position()),
                 last_seen_second: known.last_seen,
+                tie: known.tie(),
+                owed: known.owed(),
             })
     }
 }
@@ -300,6 +394,28 @@ mod tests {
         social.hint_checked(slot, false);
         social.hint_checked(slot, false);
         assert_eq!(social.trust(slot), DEFAULT_TRUST + 32 - 96);
+    }
+
+    #[test]
+    fn family_is_never_forgotten_and_favours_are_counted() {
+        let mut social = SocialMemory::default();
+        let parent = social.notice(AgentId::new(50), at(0, 0), 0).unwrap().slot;
+        social.set_tie(parent, Tie::Parent);
+        for id in 0..ACQUAINTANCE_SLOTS as u32 * 2 {
+            for _ in 0..5 {
+                social.notice(AgentId::new(id), at(0, 0), 1);
+            }
+        }
+        assert_eq!(social.tie_with(AgentId::new(50)), Some(Tie::Parent));
+        social.owe(parent);
+        social.owe(parent);
+        social.repay(parent);
+        assert_eq!(social.owed(parent), 1);
+        assert_eq!(social.tie(parent), Some(Tie::Parent), "owing keeps the tie");
+        for _ in 0..3 {
+            social.hint_checked(parent, false);
+        }
+        assert!(social.distrusts(parent));
     }
 
     #[test]

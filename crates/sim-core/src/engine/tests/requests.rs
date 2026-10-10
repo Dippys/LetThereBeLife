@@ -163,3 +163,37 @@ fn without_helping_nobody_asks() {
         .unwrap();
     assert_eq!(engine.beg_target(AgentId::new(0), &perception), None);
 }
+
+#[test]
+fn a_gift_is_owed_back_and_nobody_feeds_someone_they_hold_in_contempt() {
+    let mut engine = hungry_and_holding(8);
+    assert_eq!(ask(&mut engine).response, RequestResponse::Gave);
+    let asker_social = &engine.minds.get(AgentId::new(0)).unwrap().social;
+    let slot = asker_social.slot_of(AgentId::new(1)).unwrap();
+    assert_eq!(
+        asker_social.owed(slot),
+        1,
+        "the asker owes the giver a favour"
+    );
+
+    let mut engine = hungry_and_holding(8);
+    let giver = AgentId::new(1);
+    let position = engine.population.view(AgentId::new(0)).unwrap().position;
+    let social = &mut engine.minds.get_mut(giver).social;
+    let slot = social.notice(AgentId::new(0), position, 0).unwrap().slot;
+    for _ in 0..3 {
+        social.hint_checked(slot, false);
+    }
+    assert!(social.distrusts(slot));
+    assert_eq!(ask(&mut engine).response, RequestResponse::Refused);
+}
+
+#[test]
+fn siblings_know_each_other_and_share() {
+    let mut engine = hungry_and_holding(8);
+    engine.bond(AgentId::new(0), AgentId::new(1));
+    let giver = &engine.minds.get(AgentId::new(1)).unwrap().social;
+    assert_eq!(giver.tie_with(AgentId::new(0)), Some(crate::Tie::Child));
+    let asker = &engine.minds.get(AgentId::new(0)).unwrap().social;
+    assert_eq!(asker.tie_with(AgentId::new(1)), Some(crate::Tie::Parent));
+}

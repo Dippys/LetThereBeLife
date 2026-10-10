@@ -215,6 +215,8 @@ fn relationship_markers_dot_a_line_to_each_last_seen_position() {
         trust: DEFAULT_TRUST,
         last_seen_position: Some(WorldPosition { x: 10, y: 0 }),
         last_seen_second: 40,
+        tie: None,
+        owed: 0,
     };
     let acquaintance = AcquaintanceView {
         agent: sim_core::AgentId::new(4),

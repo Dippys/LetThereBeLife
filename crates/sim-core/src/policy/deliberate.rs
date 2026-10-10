@@ -147,6 +147,8 @@ pub(crate) struct MindInput<'a> {
     pub(crate) knows_hearths: bool,
     /// Where it stood at its previous decision (it won't step straight back).
     pub(crate) came_from: Option<WorldPosition>,
+    /// Mourning someone close: stays near others, takes on no work or trips.
+    pub(crate) grieving: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -421,7 +423,8 @@ impl Planner<'_> {
         if let Some(place) = self.mind.share_target {
             return Deliberation::act(PhysicalGoal::Signal, place, PolicyReason::Sharing);
         }
-        let works = self.roll(1) < temperament.work_chance;
+        let grieving = self.mind.grieving;
+        let works = !grieving && self.roll(1) < temperament.work_chance;
         // A bit chilly with a fire in view: warm up while it's easy.
         if self.mind.knows_hearths
             && self.needs.exposure.value >= temperament.prepare_exposure / 3
@@ -497,7 +500,7 @@ impl Planner<'_> {
             };
         }
         if let Some(friend) = self.mind.friend_target
-            && self.roll(2) < temperament.visit_chance
+            && (grieving || self.roll(2) < temperament.visit_chance)
             && let Some((waypoint, heading)) = self.errand_toward(friend)
         {
             return Deliberation {
@@ -545,7 +548,8 @@ impl Planner<'_> {
             }
         }
         // Nothing to do: go and see what someone pointed out close by.
-        if let Some(hint) = map.hint_to_check(self.needs.agent.get(), origin)
+        if !grieving
+            && let Some(hint) = map.hint_to_check(self.needs.agent.get(), origin)
             && manhattan(origin, hint) <= NOSY_RANGE
             && self.roll(4) < temperament.nosy_chance
             && self.within_leash(hint)

@@ -6,7 +6,7 @@ use crate::agent::CompactPosition;
 use crate::cognition::{
     CONSEQUENCE_WEIGHT, Concept, DesiredEffect, HintCheck, HintSource, LEAD_SECONDS, Lead,
     LessonCause, LessonEvent, ListenerContext, PendingCorrection, Personality, PublicSignal,
-    REPAIR_WEIGHT, RepairEvent, RepairResponse, UtteranceIntent, VocalForm, belief_seconds,
+    REPAIR_WEIGHT, RepairEvent, RepairResponse, Tie, UtteranceIntent, VocalForm, belief_seconds,
     express, locate, mime_for, spent_kinds, told_confidence, understand, unmistakable,
     visible_kinds,
 };
@@ -54,6 +54,10 @@ type SightedAnimal = (crate::Species, WorldPosition);
 const IDENTIFY_DISTANCE: u64 = 6;
 /// A warned-about spot this close (cells) is worth running from.
 const ALARM_DISTANCE: u64 = 20;
+/// A body lies where someone died this long (three simulated hours).
+const BODY_TICKS: u64 = 3 * 60 * 60 * 60;
+/// How long someone mourns a person close to them (30 simulated minutes).
+const GRIEF_SECONDS: u32 = 30 * 60;
 /// Ticks spent warming up by a hearth.
 const WARM_UP_TICKS: u64 = 120;
 /// Ticks a warning takes.
@@ -200,13 +204,40 @@ impl Engine {
         let (warn, recruit) = self.signals_worth_making(agent, perception, now);
         let visible = visible_kinds(origin, perception);
         let spent = spent_kinds(perception);
+        // Bodies lie where people died for a while; anyone passing sees them.
+        let bodies: Vec<AgentId> = self
+            .death_records
+            .iter()
+            .filter(|record| {
+                self.time.ticks().saturating_sub(record.at.ticks()) <= BODY_TICKS
+                    && perception.area.contains(record.position)
+            })
+            .map(|record| record.agent)
+            .collect();
         let hint_outcomes = &mut self.hint_outcomes;
         let lessons = &mut self.lesson_events;
+        let griefs = &mut self.grief_events;
         let mind = self.minds.get_mut(agent);
         if social {
             for other in &perception.agents {
                 if other.id != agent && other.activity != AgentActivity::Dead {
                     mind.notice(other.id, other.position, now);
+                }
+            }
+            // The body of someone close: mourn them, then let them go.
+            for body in bodies {
+                let close = mind.social.slot_of(body).is_some_and(|slot| {
+                    mind.social.tie(slot).is_some()
+                        || mind.social.familiarity(slot) >= crate::FRIEND_FAMILIARITY
+                });
+                if close {
+                    mind.grief_until = now.saturating_add(GRIEF_SECONDS);
+                    mind.social.forget(body);
+                    griefs.push(crate::GriefEvent {
+                        agent,
+                        lost: body,
+                        at,
+                    });
                 }
             }
             mind.social.update_whereabouts(perception.area, |id| {
@@ -223,7 +254,9 @@ impl Engine {
             crafts,
             child: _,
             parent,
+            grief_until,
         } = mind;
+        let grief_until = *grief_until;
         map.observe(
             agent.get(),
             origin,
@@ -347,6 +380,7 @@ impl Engine {
                 recruit: recruit.map(|(_, position)| position).filter(|_| hunts),
                 knows_hearths: crafts.knows_hearths(),
                 came_from: map.came_from(origin),
+                grieving: now < grief_until,
             },
         );
         self.minds.get_mut(agent).map.mark_decision(origin);
@@ -1145,6 +1179,11 @@ impl Engine {
         Ok(())
     }
 
+    /// People who began mourning during the latest tick (for logs and tools).
+    pub fn grief_events(&self) -> &[crate::GriefEvent] {
+        &self.grief_events
+    }
+
     /// Word lessons from the latest tick (for logs and tools).
     pub fn lesson_events(&self) -> &[LessonEvent] {
         &self.lesson_events
@@ -1199,15 +1238,46 @@ impl Engine {
         self.minds.set_founders(count);
     }
 
-    /// Bonds a child to a parent: the child knows and trusts the parent from the start.
+    /// Bonds a child to a parent: they know each other as family from the start,
+    /// and the child knows the parent's other children as siblings.
     pub fn bond(&mut self, child: AgentId, parent: AgentId) -> bool {
-        let Some(position) = self.population.view(parent).map(|view| view.position) else {
+        let (Some(parent_at), Some(child_at)) = (
+            self.population.view(parent).map(|view| view.position),
+            self.population.view(child).map(|view| view.position),
+        ) else {
             return false;
         };
         let now = belief_seconds(self.time);
         let mind = self.minds.get_mut(child);
         mind.parent = Some(parent);
-        mind.social.bond(parent, position, now).is_some()
+        let Some(slot) = mind.social.bond(parent, parent_at, now) else {
+            return false;
+        };
+        mind.social.set_tie(slot, Tie::Parent);
+        if let Some(slot) = self.minds.get_mut(parent).social.bond(child, child_at, now) {
+            self.minds.get_mut(parent).social.set_tie(slot, Tie::Child);
+        }
+        let siblings: Vec<(AgentId, WorldPosition)> = self
+            .population
+            .views(usize::MAX)
+            .filter(|view| {
+                view.id != child
+                    && self
+                        .minds
+                        .get(view.id)
+                        .is_some_and(|other| other.parent == Some(parent))
+            })
+            .map(|view| (view.id, view.position))
+            .collect();
+        for (sibling, sibling_at) in siblings {
+            for (from, to, at) in [(child, sibling, sibling_at), (sibling, child, child_at)] {
+                let social = &mut self.minds.get_mut(from).social;
+                if let Some(slot) = social.bond(to, at, now) {
+                    social.set_tie(slot, Tie::Sibling);
+                }
+            }
+        }
+        true
     }
 
     /// The agent's innate personality (independent of whether the policy uses it).

@@ -367,3 +367,19 @@ the starting band, stored for people born later), not in the per-agent hot recor
 and no built-in roles.
 **Consequences:** A 30-year valley run loses 3 people to old age and none to anything else. New
 death cause `OldAge`. Slower walking and faster tiring for elders aren't modelled yet.
+
+## D-085: Kin, grudges, favours, and grief (2026-10-10)
+
+**Decision:** Each acquaintance's spare byte now holds how the person is related (parent, child,
+sibling, partner) and how many favours the agent owes them, so relationships stay 16 bytes.
+Parents and children know each other from the start, and a parent's children know each other as
+siblings; family is never forgotten to make room. Trust below 64 (of 255) is contempt: the agent
+doesn't visit, ask, or feed that person. A gift makes the asker owe the giver; givers are more
+willing toward family (+96) and toward people they owe (+32 a favour), and a gift squares one
+favour owed. Anyone who comes within view of where someone close (family or a friend) died, within
+three hours of the death, mourns them for 30 minutes (no work, trips, or nosy errands; looks for
+company) and then lets them go.
+**Why:** Plan G3, ahead of couples and births, which need kin, trust, and loss to matter.
+**Consequences:** Behavior in the valleys is unchanged within noise (no one asks for food there
+while food is plentiful). Bodies aren't in the spatial index, so seeing one is based on the
+death record's place and time.

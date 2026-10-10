@@ -516,9 +516,24 @@ pub(super) fn person_rows(agent: &AgentInspection) -> Vec<Row> {
 
     rows.push(Row::Gap);
     let known = memory.acquaintances();
+    let family: Vec<String> = known
+        .iter()
+        .filter_map(|other| {
+            other
+                .tie
+                .map(|tie| format!("{} ({})", labels::person(other.agent), labels::tie(tie)))
+        })
+        .collect();
+    if !family.is_empty() {
+        rows.push(Row::Pair("Family", family.join(", ")));
+    }
     let mut friends: Vec<_> = known
         .iter()
-        .filter(|acquaintance| acquaintance.familiarity >= sim_core::FRIEND_FAMILIARITY)
+        .filter(|other| {
+            other.tie.is_none()
+                && other.familiarity >= sim_core::FRIEND_FAMILIARITY
+                && other.trust >= sim_core::DISTRUST
+        })
         .collect();
     friends.sort_by_key(|friend| {
         (
@@ -540,6 +555,14 @@ pub(super) fn person_rows(agent: &AgentInspection) -> Vec<Row> {
             friends.join(", ")
         },
     ));
+    let distrusted: Vec<String> = known
+        .iter()
+        .filter(|other| other.trust < sim_core::DISTRUST)
+        .map(|other| labels::person(other.agent))
+        .collect();
+    if !distrusted.is_empty() {
+        rows.push(Row::Pair("Distrusts", distrusted.join(", ")));
+    }
     rows.push(Row::Pair("Knows", format!("{} people", known.len())));
     rows
 }

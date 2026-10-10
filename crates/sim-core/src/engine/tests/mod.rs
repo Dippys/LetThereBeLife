@@ -30,12 +30,12 @@ mod cognition;
 mod food;
 mod health_sleep;
 mod hearth;
+mod life;
 mod lifecycle;
 mod measurements;
 mod movement;
 mod requests;
 mod shelter;
-mod life;
 mod wildlife;
 
 fn resident_engine(size: u32) -> Engine {

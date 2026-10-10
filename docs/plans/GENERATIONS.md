@@ -28,7 +28,7 @@ several generations fit in a headless run of a few minutes.
 - Gradual frailty from ~50: slower, tire faster, heal less; death from old age becomes likelier
   each year, so lifespans vary.
 
-### G3. Relationships
+### G3. Relationships ✅ (D-085)
 
 - Known kin: parents, children, and siblings are recognized; help and learning go to kin first.
 - Trust can go negative: someone whose tips led nowhere, who refused help, or took your food

@@ -27,6 +27,10 @@ const GIVE_THRESHOLD: i32 = 260;
 /// Relative hunger (128 = at threshold) above which even a parent keeps its food.
 const PARENT_KEEPS_FOOD_ABOVE: u16 = 200;
 
+/// Extra willingness to share with family, and per favour owed.
+const FAMILY_WILLINGNESS: i32 = 96;
+const OWED_WILLINGNESS: i32 = 32;
+
 impl Engine {
     /// Someone in view worth asking for food, offered when `agent` is hungry,
     /// carries none, and hasn't asked too recently. Prefers its parent, then the
@@ -52,16 +56,32 @@ impl Engine {
             .agents
             .iter()
             .filter(|other| other.id != agent && can_watch(other.activity))
+            // Nobody asks someone it holds in contempt.
+            .filter(|other| {
+                mind.is_none_or(|mind| {
+                    mind.social
+                        .slot_of(other.id)
+                        .is_none_or(|slot| !mind.social.distrusts(slot))
+                })
+            })
             .max_by_key(|other| {
-                let (parent, trust, familiarity) = mind.map_or((false, 0, 0), |mind| {
-                    let slot = mind.social.slot_of(other.id);
-                    (
-                        mind.parent == Some(other.id),
-                        slot.map_or(0, |slot| mind.social.trust(slot)),
-                        slot.map_or(0, |slot| mind.social.familiarity(slot)),
-                    )
-                });
-                (parent, trust, familiarity, u32::MAX - other.id.get())
+                let (parent, family, trust, familiarity) =
+                    mind.map_or((false, false, 0, 0), |mind| {
+                        let slot = mind.social.slot_of(other.id);
+                        (
+                            mind.parent == Some(other.id),
+                            slot.and_then(|slot| mind.social.tie(slot)).is_some(),
+                            slot.map_or(0, |slot| mind.social.trust(slot)),
+                            slot.map_or(0, |slot| mind.social.familiarity(slot)),
+                        )
+                    });
+                (
+                    parent,
+                    family,
+                    trust,
+                    familiarity,
+                    u32::MAX - other.id.get(),
+                )
             })
             .map(|other| (other.id, other.position))
     }
@@ -179,6 +199,16 @@ impl Engine {
             asker_mind
                 .social
                 .helped(slot, response == RequestResponse::Gave);
+            if response == RequestResponse::Gave {
+                asker_mind.social.owe(slot);
+            }
+        }
+        // A gift squares one favour the giver owed the asker.
+        if response == RequestResponse::Gave {
+            let social = &mut self.minds.get_mut(giver).social;
+            if let Some(slot) = social.slot_of(asker) {
+                social.repay(slot);
+            }
         }
         self.request_events.push(RequestEvent {
             signal: id,
@@ -261,10 +291,15 @@ impl Engine {
             return RequestResponse::NothingToGive;
         }
         let (_, hunger) = self.relative_need(giver);
-        let own_child = self
+        let tie = self
             .minds
-            .get(asker)
-            .is_some_and(|mind| mind.parent == Some(giver));
+            .get(giver)
+            .and_then(|mind| mind.social.tie_with(asker));
+        let own_child = tie == Some(crate::Tie::Child)
+            || self
+                .minds
+                .get(asker)
+                .is_some_and(|mind| mind.parent == Some(giver));
         if own_child {
             return if hunger <= PARENT_KEEPS_FOOD_ABOVE {
                 RequestResponse::Gave
@@ -278,13 +313,24 @@ impl Engine {
         }
         let sociability = self.personality_in_use(giver).sociability;
         let mind = self.minds.get_mut(giver);
-        let (trust, familiarity) = mind
-            .social
-            .slot_of(asker)
-            .map_or((DEFAULT_TRUST, 0), |slot| {
-                (mind.social.trust(slot), mind.social.familiarity(slot))
-            });
+        let (trust, familiarity, owed) =
+            mind.social
+                .slot_of(asker)
+                .map_or((DEFAULT_TRUST, 0, 0), |slot| {
+                    (
+                        mind.social.trust(slot),
+                        mind.social.familiarity(slot),
+                        mind.social.owed(slot),
+                    )
+                });
+        // Nobody feeds someone it holds in contempt; family and those it owes
+        // a favour come first.
+        if trust < crate::DISTRUST && tie.is_none() {
+            return RequestResponse::Refused;
+        }
         let willingness = i32::from(trust)
+            + if tie.is_some() { FAMILY_WILLINGNESS } else { 0 }
+            + i32::from(owed) * OWED_WILLINGNESS
             + i32::from(familiarity) / 4
             + i32::from(sociability) / 2
             + i32::from(urgency) / 4

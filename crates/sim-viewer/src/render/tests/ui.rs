@@ -37,6 +37,8 @@ fn friend(id: u32, familiarity: u8, trust: u8) -> AcquaintanceView {
         trust,
         last_seen_position: None,
         last_seen_second: 0,
+        tie: None,
+        owed: 0,
     }
 }
 
@@ -147,8 +149,13 @@ fn person() -> AgentInspection {
             ],
             vec![
                 friend(3, sim_core::FRIEND_FAMILIARITY, 100),
-                friend(9, u8::MAX, 50),
+                friend(9, u8::MAX, 150),
                 friend(4, 1, 200),
+                friend(5, 30, 20),
+                AcquaintanceView {
+                    tie: Some(sim_core::Tie::Parent),
+                    ..friend(2, u8::MAX, 220)
+                },
             ],
         ))),
     }
@@ -174,8 +181,10 @@ fn the_person_panel_says_what_they_do_feel_and_believe_in_plain_words() {
         "Hunts: deer",
         "Fears: wolves",
         "Knows how to make fire",
+        "Family: Person 2 (parent)",
         "Friends: Person 9, Person 3",
-        "Knows: 3 people",
+        "Distrusts: Person 5",
+        "Knows: 5 people",
     ] {
         assert!(
             lines.iter().any(|line| line == expected),

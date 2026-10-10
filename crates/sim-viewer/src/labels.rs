@@ -4,7 +4,7 @@
 use sim_core::{
     AgentActivity, AgentId, AnimalMode, BiomeType, Concept, DeathCause, FeatureKind, GestureTopic,
     LandmarkKind, LifeStage, LifeView, Material, Mime, Personality, PhysicalGoal, PolicyReason,
-    Sex, SleepQuality, SpawnKind, Species, StructureKind, SurfaceType, VocalForm,
+    Sex, SleepQuality, SpawnKind, Species, StructureKind, SurfaceType, Tie, VocalForm,
 };
 
 /// "Woman, 34", "Boy, 9", "Baby girl, 1".
@@ -18,6 +18,15 @@ pub fn who(life: LifeView) -> String {
         (LifeStage::Adult | LifeStage::Elder, Sex::Male) => "Man",
     };
     format!("{noun}, {}", life.age)
+}
+
+pub const fn tie(tie: Tie) -> &'static str {
+    match tie {
+        Tie::Parent => "parent",
+        Tie::Child => "child",
+        Tie::Sibling => "sibling",
+        Tie::Partner => "partner",
+    }
 }
 
 pub fn person(agent: AgentId) -> String {

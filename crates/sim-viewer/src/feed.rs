@@ -109,6 +109,19 @@ impl Feed {
             );
         }
 
+        for grief in engine.grief_events() {
+            self.push(
+                format!(
+                    "{} mourns {}",
+                    labels::person(grief.agent),
+                    labels::person(grief.lost)
+                ),
+                Tone::Bad,
+                Some(grief.agent),
+                agent_position(engine, grief.agent),
+            );
+        }
+
         for event in engine.wildlife_events() {
             match *event {
                 WildlifeEvent::Bite {
