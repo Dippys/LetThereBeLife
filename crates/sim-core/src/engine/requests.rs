@@ -120,6 +120,7 @@ impl Engine {
             mime: Mime::PickAndChew,
             vocal,
             negated: None,
+            shown: None,
             addressee: Some(giver),
             loud: false,
             tone: Tone { urgency },

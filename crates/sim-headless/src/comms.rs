@@ -353,6 +353,12 @@ impl CommunicationLog {
         (episodes, funnel)
     }
 
+    /// What was held up with the gesture `id`, if anything.
+    fn shown_in(&self, id: Option<u64>) -> Option<sim_core::Material> {
+        let index = self.exchange_index(id?)?;
+        self.exchanges[index].signal.signal.shown
+    }
+
     /// A step-by-step account of one success episode.
     pub fn describe_episode(&self, episode: SuccessEpisode) -> String {
         let exchange = &self.exchanges[episode.exchange];
@@ -415,6 +421,12 @@ impl CommunicationLog {
             ),
             LessonCause::Consequence => format!(
                 "went where agent {} pointed with \"{form}\", found {} there, and now doubts it means {}.",
+                episode.listener.get(),
+                name(episode.speaker_lesson.strengthened),
+                name(episode.speaker_lesson.weakened)
+            ),
+            _ if self.shown_in(episode.speaker_lesson.signal).is_some() => format!(
+                "saw agent {} come back holding up {} and saying \"{form}\", and now doubts it means {}.",
                 episode.listener.get(),
                 name(episode.speaker_lesson.strengthened),
                 name(episode.speaker_lesson.weakened)

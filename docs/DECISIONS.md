@@ -564,3 +564,18 @@ kept) there were 1 in 35 apart and 3 in 42 together, though cross-family misread
 episode funnel shows why: the speaker almost never learns afterwards (0-1 per run), because it
 would have to hear the listener use the word the old way, which the listener just unlearned. Next
 is giving speakers observable feedback, not more separation.
+
+## D-097: Listeners report back, holding up what they found (2026-10-11)
+
+**Decision:** A listener who follows up a tip and finds what it expected plans a report to whoever
+told it (same slot as corrections, which come first; 6-hour patience). When it next sees them it
+points at the place, says the word, and holds up the thing if it carries some. Signals gain a public
+`shown` material; a held-up thing is read as itself whatever the word or mime.
+**Why:** The episode funnel showed every genuine misreading ended with the listener "confirmed" by
+coincidence (both kinds of berries grow together), so nobody found out and speakers never learned
+(D-096). Most corrections came from listeners who had understood but then mislearned at the place.
+Reporting back with the object is ordinary human behavior and gives the speaker observable evidence.
+**Consequences:** Complete episodes went from 3 in 2 of the success test's 40 valleys to 79 in 24,
+and from 1 to 141 in 37 of 49 fresh valleys (seeds 79-160). Survivors 848 vs 879 and 1,011 vs
+1,001 (about 1% fewer overall, within noise). The success test now requires 40 episodes in 12
+valleys (was 2).

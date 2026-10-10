@@ -7,7 +7,7 @@
 //! signal to a belief, and it takes the public signal alone, so no receiver can
 //! read the sender's intent even by accident.
 
-use crate::{AgentId, WorldPosition};
+use crate::{AgentId, Material, WorldPosition};
 
 use super::{
     Concept, GestureTopic, LandmarkKind, VocalForm,
@@ -81,6 +81,8 @@ pub struct PublicSignal {
     pub vocal: Option<VocalForm>,
     /// For corrections: a mime shown and then waved away ("not this").
     pub negated: Option<Mime>,
+    /// Something held up for everyone to see (what the sender found there).
+    pub shown: Option<Material>,
     /// For requests: who the open hand is held out to.
     pub addressee: Option<AgentId>,
     /// Shouted (warnings and calls to hunt carry farther than a quiet gesture).
@@ -179,6 +181,7 @@ pub(crate) fn express(
         mime,
         vocal,
         negated: None,
+        shown: None,
         addressee: None,
         loud: matches!(intent.topic, GestureTopic::Animal(_)),
         tone: Tone { urgency },

@@ -122,6 +122,20 @@ fn learn_from_consequence(
     let signal = Some(full_signal_id(check.signal, context.latest_signal));
     if check.confirmed {
         lexicon.reinforce(form, believed, CONSEQUENCE_WEIGHT);
+        // Found it: tell whoever pointed it out, showing what was there.
+        if let Some(speaker) = context.teller {
+            dialogue.plan_report(
+                PendingCorrection {
+                    speaker,
+                    form,
+                    misread: believed,
+                    actual: believed,
+                    place: check.place,
+                    since: context.now,
+                },
+                context.now,
+            );
+        }
         lessons.push(LessonEvent {
             agent: context.agent,
             at: context.at,
@@ -1218,8 +1232,13 @@ impl Engine {
         ) else {
             return Err(PolicyFailureReason::TargetUnavailable);
         };
+        let report = correction.is_report();
         let intent = UtteranceIntent {
-            effect: DesiredEffect::Correct,
+            effect: if report {
+                DesiredEffect::Inform
+            } else {
+                DesiredEffect::Correct
+            },
             topic: actual,
             place: correction.place,
         };
@@ -1227,7 +1246,18 @@ impl Engine {
         let mime = self.mime_of(sender, actual);
         let mut public = express(sender, from, intent, mime, Some(correction.form), urgency)
             .ok_or(PolicyFailureReason::TargetUnavailable)?;
-        public.negated = Some(self.mime_of(sender, misread));
+        if !report {
+            public.negated = Some(self.mime_of(sender, misread));
+        }
+        // Holds up the thing itself if it has some on it.
+        public.shown = match correction.actual {
+            Concept::Material(material) => self
+                .population
+                .inventory(sender)
+                .filter(|inventory| inventory.amount(material) > 0)
+                .map(|_| material),
+            _ => None,
+        };
         let id = self.next_signal_id;
         self.next_signal_id += 1;
         let delivery = self.deliver(id, &public)?;

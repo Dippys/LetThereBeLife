@@ -202,6 +202,16 @@ fn believed_food(listener: &ListenerContext) -> Vec<Concept> {
 
 /// Scores the candidates. Deterministic: ties break by concept order.
 pub(crate) fn read(signal: &PublicSignal, listener: ListenerContext) -> Reading {
+    // A thing held up is plain to see, whatever the word or mime.
+    if let Some(material) = signal.shown {
+        let mut candidates = [(Concept::Water, 0); READING_CANDIDATES];
+        candidates[0] = (Concept::Material(material), u8::MAX);
+        return Reading {
+            candidates,
+            candidate_count: 1,
+            reasons: ReadingReasons::default(),
+        };
+    }
     let mut scores = [0_i32; Concept::COUNT];
     let mime = mime_evidence(signal.mime, &listener);
     for (concept, weight) in mime {
@@ -306,6 +316,7 @@ mod tests {
             mime,
             vocal: Some(VocalForm(3)),
             negated: None,
+            shown: None,
             addressee: None,
             loud: false,
             tone: Tone { urgency },
@@ -350,6 +361,15 @@ mod tests {
         assert!(reading.reasons.unknown_word);
         assert!(reading.reasons.need_bias);
         assert!(reading.reasons.ambiguous_mime);
+    }
+
+    #[test]
+    fn a_thing_held_up_outweighs_any_word_or_mime() {
+        let mut shown = signal(Mime::PickAndChew, 0);
+        shown.shown = Some(Material::Berries);
+        let reading = read(&shown, listener(Some((Concept::BITTERBERRIES, 30)), 0, 0));
+        assert_eq!(reading.best(), (Concept::BERRIES, u8::MAX));
+        assert_eq!(reading.candidate_count, 1);
     }
 
     #[test]

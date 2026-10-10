@@ -53,6 +53,9 @@ lays out phases 0–10, from world → physical agents → cognition → communi
   watching others, family lore). The two founding families start with different lore.
 - **Seasons:** four seasons of an hour each. Winter is cold and bare (fruit doesn't regrow,
   animals don't breed), summer is mild; the viewer shows the season and tints the land.
+- **Complete misunderstanding episodes are common** (D-097): listeners report back holding up
+  what they found, so speakers see when their word was taken otherwise (79 episodes in 24 of the
+  success test's 40 valleys).
 - **Things to talk about come from the world's tables:** every material, species, and kind of
   structure is something people can point at, remember, and name, with gestures from properties.
 - **Fires need fuel:** a hearth burns out after an hour unless someone feeds it wood.
@@ -138,12 +141,9 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Known problems and limitations
 
-- **Complete misunderstanding episodes are rare: about 1 per 20-40 valleys** (D-095, D-096).
-  The chain breaks at the last step: listeners misread and learn from what they find, but the
-  speaker almost never gets evidence it was misunderstood (it would have to hear the listener
-  use the word the old way, and the listener just learned not to). Separating the families, or
-  even giving them entirely different words, doesn't change the count. A constructed test covers
-  the animal-call version end to end (a wolf warning misread as deer, hunted, found out, corrected).
+- **Listeners often mislearn at the place:** a listener that understood a word but can't find the
+  thing near where it guessed, and sees the alternative instead, decides the word meant that and
+  "corrects" the speaker. Most corrections are of this kind.
 - **Wolves are hard on loners.** Agents who wander off alone get bitten; wounded people now come
   round after 5 minutes, but some die of thirst while down or soon after.
 - **Helping matters only in famines.** With regrowth and game, nobody needs to ask for food; the M7
@@ -171,7 +171,8 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
-- 2026-10-10 (latest): two-valley start, `--apart` (D-096).
+- 2026-10-11 (latest): listeners report back, holding up what they found (D-097).
+- 2026-10-10: two-valley start, `--apart` (D-096).
 - 2026-10-10: fuel (D-094) and stone blades (D-095); misunderstanding episodes are
   rarer than the pinned seeds suggested (about 1 per 20-40 valleys).
 - 2026-10-10: concepts from the world's tables (D-092) and seasons (D-093).
@@ -205,9 +206,8 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## What's next
 
-1. **Speakers seeing they were misunderstood**: the bottleneck for the north star (see Known
-   problems). Speakers need observable feedback: watching where a listener goes or what it eats
-   after a gesture, or a listener coming back and showing what it found.
+1. **More speaker feedback** (D-097 added reporting back): speakers watching how listeners react
+   (approaching an animal they warned about), and overhearing others use their words differently.
 2. **Separated groups (continued)**: `--apart` starts each family in its own valley, but people
    roam about a thousand cells within weeks, so the groups still meet early and converge. Real
    divergence needs a lasting barrier or much longer isolation.

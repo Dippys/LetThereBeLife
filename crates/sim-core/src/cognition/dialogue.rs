@@ -48,7 +48,9 @@ const REQUEST_COOLDOWN_SECONDS: u32 = 120;
 /// Seconds before asking again after a refusal.
 const REFUSED_COOLDOWN_SECONDS: u32 = 600;
 
-/// What a listener plans to tell a speaker after a misunderstanding.
+/// What a listener plans to tell a speaker about a tip it followed up: after a
+/// misunderstanding, "not that, this" (`misread` differs from `actual`); after
+/// finding what it expected, a report of what it found (`misread == actual`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PendingCorrection {
     pub(crate) speaker: AgentId,
@@ -59,6 +61,13 @@ pub(crate) struct PendingCorrection {
     pub(crate) actual: Concept,
     pub(crate) place: WorldPosition,
     pub(crate) since: u32,
+}
+
+impl PendingCorrection {
+    /// A report of what it found rather than a correction.
+    pub(crate) fn is_report(self) -> bool {
+        self.misread == self.actual
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -150,6 +159,14 @@ impl Dialogue {
         self.correction = Some(correction);
     }
 
+    /// Plans to report back what it found, unless it already has something to
+    /// tell someone (corrections come first).
+    pub(crate) fn plan_report(&mut self, report: PendingCorrection, now: u32) {
+        if self.correction(now).is_none() {
+            self.correction = Some(report);
+        }
+    }
+
     /// The correction still worth making, if any.
     pub(crate) fn correction(&self, now: u32) -> Option<PendingCorrection> {
         self.correction.filter(|correction| {
@@ -184,5 +201,30 @@ mod tests {
         assert!(dialogue.correction(200).is_some());
         assert!(dialogue.correction(100 + 6 * 3_600).is_some());
         assert!(dialogue.correction(100 + 6 * 3_600 + 1).is_none());
+    }
+
+    #[test]
+    fn a_report_never_displaces_a_correction() {
+        let correction = PendingCorrection {
+            speaker: AgentId::new(1),
+            form: VocalForm(2),
+            misread: Concept::BERRIES,
+            actual: Concept::BITTERBERRIES,
+            place: at(0, 0),
+            since: 100,
+        };
+        let report = PendingCorrection {
+            misread: Concept::WOOD,
+            actual: Concept::WOOD,
+            ..correction
+        };
+        assert!(report.is_report() && !correction.is_report());
+        let mut dialogue = Dialogue::default();
+        dialogue.plan_correction(correction);
+        dialogue.plan_report(report, 200);
+        assert_eq!(dialogue.correction(200), Some(correction));
+        dialogue.clear_correction();
+        dialogue.plan_report(report, 200);
+        assert_eq!(dialogue.correction(200), Some(report));
     }
 }
