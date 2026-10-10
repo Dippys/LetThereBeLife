@@ -317,8 +317,8 @@ const fn generation_note(status: super::GenerationStatus) -> Option<&'static str
 /// The tooltip's lines for what is under the cursor.
 pub(super) fn hover_lines(hover: &Hover) -> (String, Option<String>) {
     match *hover {
-        Hover::Person { id, activity } => (
-            labels::person(id),
+        Hover::Person { id, name, activity } => (
+            name.map_or_else(|| labels::person(id), |name| name.spoken()),
             Some(format!(
                 "{} · click to follow their story",
                 labels::activity(activity)
@@ -390,13 +390,20 @@ pub(super) enum Row {
 
 /// What the person panel says about one agent, top to bottom.
 pub(super) fn person_rows(agent: &AgentInspection) -> Vec<Row> {
-    let mut rows = vec![Row::Title(labels::person(agent.view.id))];
+    let mut rows = vec![Row::Title(
+        agent
+            .life
+            .map_or_else(|| labels::person(agent.view.id), |life| life.name.spoken()),
+    )];
     let mut about: Vec<String> = Vec::new();
     if let Some(life) = agent.life {
         about.push(labels::who(life));
     }
     if let Some(memory) = &agent.memory {
         about.push(labels::personality(memory.personality).to_owned());
+    }
+    if agent.life.is_some() {
+        about.push(labels::person(agent.view.id));
     }
     if !about.is_empty() {
         rows.push(Row::Text(about.join(" · "), colors::UI_DIM));
@@ -534,7 +541,7 @@ pub(super) fn person_rows(agent: &AgentInspection) -> Vec<Row> {
         .filter_map(|other| {
             other
                 .tie
-                .map(|tie| format!("{} ({})", labels::person(other.agent), labels::tie(tie)))
+                .map(|tie| format!("{} ({})", labels::called(other), labels::tie(tie)))
         })
         .collect();
     if !family.is_empty() {
@@ -558,7 +565,7 @@ pub(super) fn person_rows(agent: &AgentInspection) -> Vec<Row> {
     let friends: Vec<String> = friends
         .iter()
         .take(4)
-        .map(|friend| labels::person(friend.agent))
+        .map(|friend| labels::called(friend))
         .collect();
     rows.push(Row::Pair(
         "Friends",
@@ -571,7 +578,7 @@ pub(super) fn person_rows(agent: &AgentInspection) -> Vec<Row> {
     let distrusted: Vec<String> = known
         .iter()
         .filter(|other| other.trust < sim_core::DISTRUST)
-        .map(|other| labels::person(other.agent))
+        .map(labels::called)
         .collect();
     if !distrusted.is_empty() {
         rows.push(Row::Pair("Distrusts", distrusted.join(", ")));

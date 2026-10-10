@@ -420,3 +420,20 @@ the families' children ruled them out as partners. About 2 children per woman le
 **Consequences:** Over 60 years, valley 1 grew from 20 to 62 (64 births, 41 couples, 19 across
 families; the families spend 68% of their time near each other) and valley 4 from 20 to 26. The
 success test found 18 episodes in 7 valleys (5 in 3 before).
+
+## D-088: Names (2026-10-10)
+
+**Decision:** Names are their own sounds (`Name`, 1,024 two-syllable names such as "Tavo"), separate
+from the 32 word sounds. Everyone has a given name: from the seed for people present at the start,
+chosen by the mother (one she doesn't already use) for children. Each acquaintance records what the
+agent calls them (records grow to 20 bytes; minds to 960). Founders know their own family's
+founders' names; newcomers know each other's. A mother calls out her child's name when it starts
+walking, and people call out a name when they meet someone they haven't seen for 10 minutes;
+everyone awake within 12 cells learns it, but one in four bystanders standing next to someone else
+pins it on that person instead. Hearing a person called another name twice running replaces one's
+own name for them.
+**Why:** Plan G5: names that spread by use and can be misheard, like the rest of the language.
+**Consequences:** In a 30-year valley run people know the names of 318 of their 441 acquaintances;
+104 of those differ from the given name, partly from mishearing and partly because a name that
+catches on spreads (a nickname). The viewer shows given names, and in the person panel what that
+person calls the people they know. Names aren't used in requests or corrections yet.

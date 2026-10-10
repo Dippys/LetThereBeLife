@@ -20,6 +20,34 @@ pub enum Sex {
     Male = 1,
 }
 
+/// What someone is called: a two-syllable sound (1,024 of them), separate
+/// from the sounds used as words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(transparent)]
+pub struct Name(pub u16);
+
+impl Name {
+    pub const COUNT: u16 = 1_024;
+
+    /// A pronounceable rendering, such as "Tavo".
+    pub fn spoken(self) -> String {
+        const CONSONANTS: [char; 8] = ['T', 'M', 'R', 'S', 'N', 'K', 'L', 'D'];
+        const LATER: [char; 8] = ['t', 'm', 'r', 's', 'n', 'k', 'l', 'd'];
+        const VOWELS: [char; 4] = ['a', 'i', 'o', 'e'];
+        let id = usize::from(self.0 % Self::COUNT);
+        let mut name = String::with_capacity(4);
+        name.push(CONSONANTS[id & 7]);
+        name.push(VOWELS[(id >> 3) & 3]);
+        name.push(LATER[(id >> 5) & 7]);
+        name.push(VOWELS[(id >> 8) & 3]);
+        name
+    }
+
+    pub(crate) fn from_roll(roll: u64) -> Self {
+        Self((roll % u64::from(Self::COUNT)) as u16)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum LifeStage {
@@ -54,6 +82,8 @@ pub(crate) struct Life {
     /// For someone born during the run: the personality they got from their
     /// parents (others' come from the seed).
     pub(crate) inherited: Option<crate::Personality>,
+    /// What their mother (or, for those present from the start, their family) named them.
+    pub(crate) name: Name,
 }
 
 const _: () = assert!(size_of::<Life>() == 12);
@@ -78,6 +108,7 @@ impl Life {
             born: -((age as i64 * SECONDS_PER_YEAR + offset as i64) as i32),
             sex,
             inherited: None,
+            name: Name::from_roll(roll >> 28),
         }
     }
 
@@ -89,6 +120,7 @@ impl Life {
     pub(crate) fn view(self, now: i64) -> LifeView {
         let age = self.age(now);
         LifeView {
+            name: self.name,
             sex: self.sex,
             age,
             stage: LifeStage::of(age),
@@ -98,6 +130,7 @@ impl Life {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LifeView {
+    pub name: Name,
     pub sex: Sex,
     /// Whole years.
     pub age: u32,
@@ -144,11 +177,20 @@ mod tests {
             born: 0,
             sex: Sex::Male,
             inherited: None,
+            name: Name(0),
         };
         assert_eq!(life.age(SECONDS_PER_YEAR * 2 - 1), 1);
         assert_eq!(life.view(SECONDS_PER_YEAR * 2).stage, LifeStage::Baby);
         assert_eq!(life.view(SECONDS_PER_YEAR * 15).stage, LifeStage::Adult);
         assert_eq!(life.view(SECONDS_PER_YEAR * 50).stage, LifeStage::Elder);
+    }
+
+    #[test]
+    fn names_are_pronounceable_and_varied() {
+        assert_eq!(Name(0).spoken(), "Tata");
+        let names: std::collections::BTreeSet<String> =
+            (0..Name::COUNT).map(|id| Name(id).spoken()).collect();
+        assert_eq!(names.len(), usize::from(Name::COUNT));
     }
 
     #[test]

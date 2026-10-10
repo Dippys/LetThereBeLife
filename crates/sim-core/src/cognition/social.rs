@@ -57,7 +57,7 @@ impl Tie {
 
 const EMPTY: u32 = u32::MAX;
 
-/// One remembered person. Exactly 16 bytes.
+/// One remembered person. Exactly 20 bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 struct Acquaintance {
@@ -73,7 +73,16 @@ struct Acquaintance {
     /// Bits 0-2: how they're related (`Tie`, 0 = not); bit 3: they were
     /// children together; bits 4-7: favours the agent owes them.
     ties: u8,
+    /// What the agent calls them (`NO_NAME` if it doesn't know).
+    name: u16,
+    /// How many times in a row it has heard them called something else.
+    name_doubt: u8,
+    _reserved: u8,
 }
+
+const NO_NAME: u16 = u16::MAX;
+/// Hearing someone called another name this many times running changes one's mind.
+const NAME_DOUBTS: u8 = 2;
 
 impl Default for Acquaintance {
     fn default() -> Self {
@@ -86,6 +95,9 @@ impl Default for Acquaintance {
             trust: DEFAULT_TRUST,
             position_known: false,
             ties: 0,
+            name: NO_NAME,
+            name_doubt: 0,
+            _reserved: 0,
         }
     }
 }
@@ -119,6 +131,8 @@ pub struct AcquaintanceView {
     pub tie: Option<Tie>,
     /// Favours the agent owes them.
     pub owed: u8,
+    /// What the agent calls them, if it knows.
+    pub name: Option<crate::Name>,
 }
 
 /// What `notice` did to the slots.
@@ -272,6 +286,35 @@ impl SocialMemory {
         self.slots[usize::from(slot)].ties & RAISED_TOGETHER != 0
     }
 
+    /// Hears `slot` called `name`: learns it if it knew no name, keeps its own
+    /// if it hears the same, and switches after hearing another name twice
+    /// running (so a misheard name gets set right).
+    pub(crate) fn learn_name(&mut self, slot: u8, name: crate::Name) {
+        let known = &mut self.slots[usize::from(slot)];
+        if known.name == NO_NAME || known.name == name.0 {
+            known.name = name.0;
+            known.name_doubt = 0;
+            return;
+        }
+        known.name_doubt += 1;
+        if known.name_doubt >= NAME_DOUBTS {
+            known.name = name.0;
+            known.name_doubt = 0;
+        }
+    }
+
+    pub(crate) fn name(&self, slot: u8) -> Option<crate::Name> {
+        let name = self.slots[usize::from(slot)].name;
+        (name != NO_NAME).then_some(crate::Name(name))
+    }
+
+    /// Whether the agent already calls anyone `name`.
+    pub(crate) fn knows_name(&self, name: crate::Name) -> bool {
+        self.slots
+            .iter()
+            .any(|known| known.agent != EMPTY && known.name == name.0)
+    }
+
     pub(crate) fn last_seen(&self, slot: u8) -> u32 {
         self.slots[usize::from(slot)].last_seen
     }
@@ -368,6 +411,7 @@ impl SocialMemory {
                 last_seen_second: known.last_seen,
                 tie: known.tie(),
                 owed: known.owed(),
+                name: (known.name != NO_NAME).then_some(crate::Name(known.name)),
             })
     }
 }
@@ -389,8 +433,8 @@ mod tests {
 
     #[test]
     fn relationship_layout_is_compact() {
-        assert_eq!(size_of::<Acquaintance>(), 16);
-        assert_eq!(size_of::<SocialMemory>(), 16 * ACQUAINTANCE_SLOTS);
+        assert_eq!(size_of::<Acquaintance>(), 20);
+        assert_eq!(size_of::<SocialMemory>(), 20 * ACQUAINTANCE_SLOTS);
     }
 
     #[test]
@@ -455,6 +499,20 @@ mod tests {
             social.hint_checked(parent, false);
         }
         assert!(social.distrusts(parent));
+    }
+
+    #[test]
+    fn a_misheard_name_is_set_right_by_hearing_the_real_one_again() {
+        let mut social = SocialMemory::default();
+        let slot = social.notice(AgentId::new(3), at(0, 0), 0).unwrap().slot;
+        social.learn_name(slot, crate::Name(10));
+        social.learn_name(slot, crate::Name(20));
+        assert_eq!(social.name(slot), Some(crate::Name(10)), "once is not enough");
+        social.learn_name(slot, crate::Name(10));
+        social.learn_name(slot, crate::Name(20));
+        assert_eq!(social.name(slot), Some(crate::Name(10)), "the doubt was reset");
+        social.learn_name(slot, crate::Name(20));
+        assert_eq!(social.name(slot), Some(crate::Name(20)));
     }
 
     #[test]

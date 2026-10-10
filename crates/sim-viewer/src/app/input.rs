@@ -94,6 +94,7 @@ impl ViewerApp {
         if let Some(agent) = self.person_near(position) {
             return Some(Hover::Person {
                 id: agent.id,
+                name: self.engine.life(agent.id).map(|life| life.name),
                 activity: agent.activity,
             });
         }

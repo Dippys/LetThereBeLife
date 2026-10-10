@@ -458,6 +458,10 @@ impl Minds {
         agent.get() < self.founders || self.newcomers.binary_search(&agent.get()).is_ok()
     }
 
+    pub(crate) fn is_newcomer(&self, agent: AgentId) -> bool {
+        self.newcomers.binary_search(&agent.get()).is_ok()
+    }
+
     /// `agent` arrived from elsewhere with its own family's lore and words.
     pub(crate) fn add_newcomer(&mut self, agent: AgentId) {
         if let Err(index) = self.newcomers.binary_search(&agent.get()) {

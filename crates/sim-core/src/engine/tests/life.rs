@@ -25,6 +25,7 @@ fn the_very_old_die_of_old_age_and_young_adults_do_not() {
             born: -((age * SECONDS_PER_YEAR) as i32),
             sex: Sex::Female,
             inherited: None,
+            name: crate::Name(7),
         })
     };
     engine.lives = vec![born(95), born(20)];
@@ -65,6 +66,7 @@ fn seeing_the_body_of_family_brings_grief() {
             born: -((120 * SECONDS_PER_YEAR) as i32),
             sex: Sex::Male,
             inherited: None,
+            name: crate::Name(7),
         }),
         None,
     ];
@@ -100,6 +102,7 @@ fn acquainted(familiarity_sightings: u32, raised_together: bool) -> Engine {
             born: -((25 * SECONDS_PER_YEAR) as i32),
             sex,
             inherited: None,
+            name: crate::Name(7),
         })
     };
     engine.lives = vec![adult(Sex::Female), adult(Sex::Male)];
@@ -232,6 +235,25 @@ fn a_couple_has_a_baby_who_later_walks_and_knows_its_family() {
     let mother = &engine.minds.get(AgentId::new(0)).unwrap().social;
     assert_eq!(mother.tie_with(child), Some(crate::Tie::Child));
     assert!(engine.motherhood(AgentId::new(0)).is_none());
+    // She named the child and called it out; the father, beside her, heard.
+    let given = engine.life(child).unwrap().name;
+    assert_eq!(engine.name_known(AgentId::new(0), child), Some(given));
+    assert_eq!(engine.name_known(AgentId::new(1), child), Some(given));
+}
+
+#[test]
+fn a_greeting_teaches_bystanders_a_name() {
+    let mut engine = acquainted(10, false);
+    let (caller, called) = (AgentId::new(0), AgentId::new(1));
+    let name = crate::Name(321);
+    let social = &mut engine.minds.get_mut(caller).social;
+    let slot = social.slot_of(called).unwrap();
+    social.learn_name(slot, name);
+    assert_eq!(engine.name_known(called, caller), None);
+    engine.call_out(caller, called);
+    // Nobody else is near, so the only listener would be a third person: none.
+    assert!(engine.name_events().is_empty());
+    assert_eq!(engine.name_known(caller, called), Some(name));
 }
 
 #[test]

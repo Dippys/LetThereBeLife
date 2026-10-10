@@ -38,15 +38,16 @@ pub use cognition::{
 pub use diagnostics::{EngineCapacityMetrics, EngineDiagnostics, EngineWorkMetrics};
 pub use engine::{
     Engine, EngineCommand, EngineCommandOutcome, EngineConfig, FamilyEvent, HUNT_TICKS,
-    MAX_SIMULATION_SPEED, MotherhoodView, STRIKE_RANGE, SimulationAdvanced, SimulationSnapshot,
-    TickOutcome,
+    MAX_SIMULATION_SPEED, MotherhoodView, NameEvent, STRIKE_RANGE, SimulationAdvanced,
+    SimulationSnapshot, TickOutcome,
 };
 pub use health::{
     DeathCause, DeathRecord, HEALTH_CONSEQUENCE_INTERVAL_TICKS, HEALTH_INCAPACITATION_THRESHOLD,
     HEALTH_MAX, HealthDiagnostic, HealthDiagnosticKind, HealthStatus, HealthView, SLEEP_HEALING,
 };
 pub use life::{
-    ADULT_AGE, ELDER_AGE, HUNTING_AGE, LifeStage, LifeView, SECONDS_PER_YEAR, Sex, WEANING_AGE,
+    ADULT_AGE, ELDER_AGE, HUNTING_AGE, LifeStage, LifeView, Name, SECONDS_PER_YEAR, Sex,
+    WEANING_AGE,
 };
 pub use needs::{
     NEED_MAX, NEED_RATE_PERIOD_TICKS, NeedKind, NeedLevelView, NeedQueryError, NeedThreshold,

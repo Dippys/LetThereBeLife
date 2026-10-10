@@ -43,6 +43,8 @@ pub(crate) struct Baby {
     sex: Sex,
     father: AgentId,
     personality: Personality,
+    /// What the mother named it.
+    name: crate::Name,
 }
 
 /// Mothers' pregnancies and carried babies, and when each last weaned a child.
@@ -177,6 +179,7 @@ impl Engine {
                 self.innate_personality(pregnancy.father),
                 roll >> 1,
             );
+            let name = self.choose_name(mother, roll >> 40);
             self.families.babies.insert(
                 mother,
                 Baby {
@@ -184,6 +187,7 @@ impl Engine {
                     sex,
                     father: pregnancy.father,
                     personality,
+                    name,
                 },
             );
             self.family_events.push(FamilyEvent::Born {
@@ -255,6 +259,7 @@ impl Engine {
             born: baby.born,
             sex: baby.sex,
             inherited: Some(baby.personality),
+            name: baby.name,
         });
         // Bonded to the father first, so the mother is the parent it follows.
         if self
@@ -265,7 +270,22 @@ impl Engine {
             self.bond(child, baby.father);
         }
         self.bond(child, mother);
+        // The mother calls the child by its name for all to hear.
+        let social = &mut self.minds.get_mut(mother).social;
+        if let Some(slot) = social.slot_of(child) {
+            social.learn_name(slot, baby.name);
+        }
+        self.call_out(mother, child);
         Some(child)
+    }
+
+    /// A name the mother doesn't already use for anyone she knows.
+    fn choose_name(&self, mother: AgentId, roll: u64) -> crate::Name {
+        let social = self.minds.get(mother).map(|mind| &mind.social);
+        (0..16_u64)
+            .map(|attempt| crate::Name::from_roll(mix(roll ^ attempt)))
+            .find(|name| social.is_none_or(|social| !social.knows_name(*name)))
+            .unwrap_or_else(|| crate::Name::from_roll(roll))
     }
 
     /// Once a year: if the band has dwindled, a couple from elsewhere wanders
@@ -368,9 +388,11 @@ impl Engine {
             let Some(at) = self.population.view(to).map(|view| view.position) else {
                 continue;
             };
+            let name = self.life_of(to).name;
             let social = &mut self.minds.get_mut(from).social;
             if let Some(slot) = social.bond(to, at, now) {
                 social.set_tie(slot, crate::Tie::Partner);
+                social.learn_name(slot, name);
             }
         }
     }

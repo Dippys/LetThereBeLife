@@ -50,7 +50,7 @@ several generations fit in a headless run of a few minutes.
 - Where couples live is not a rule.
 - If the band dwindles, newcomers wander in.
 
-### G5. Names
+### G5. Names ✅ (D-088; not yet used in requests or corrections)
 
 - After a birth, the mother picks a sound she doesn't use for anything and says it while holding
   or pointing at the baby; whoever watches learns it like any word. Founders know each other's

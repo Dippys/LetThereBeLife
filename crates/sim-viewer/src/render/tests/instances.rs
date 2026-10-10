@@ -217,6 +217,7 @@ fn relationship_markers_dot_a_line_to_each_last_seen_position() {
         last_seen_second: 40,
         tie: None,
         owed: 0,
+        name: None,
     };
     let acquaintance = AcquaintanceView {
         agent: sim_core::AgentId::new(4),

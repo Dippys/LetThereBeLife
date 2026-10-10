@@ -81,6 +81,7 @@ pub struct Census {
 pub enum Hover {
     Person {
         id: AgentId,
+        name: Option<sim_core::Name>,
         activity: AgentActivity,
     },
     Animal {
@@ -201,6 +202,7 @@ impl MemoryInspection {
             last_seen_second: 0,
             tie: None,
             owed: 0,
+            name: None,
         };
         const UNHEARD: LexiconEntryView = LexiconEntryView {
             form: VocalForm(0),

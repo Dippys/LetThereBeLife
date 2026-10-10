@@ -191,6 +191,11 @@ pub struct FamilyStats {
     pub couples: [u64; 2],
     /// Pregnancies, babies born, children who started walking, and losses.
     pub births: [u64; 4],
+    /// At the end, over living people's acquaintances: names known, of how
+    /// many, and how many of those are wrong.
+    pub names: [u64; 3],
+    /// Names heard called, and how many were pinned on the wrong person.
+    pub calls: [u64; 2],
 }
 
 /// What happened between people and animals.
@@ -342,6 +347,7 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     // Pregnancies, births, children walking, and losses.
     let mut families_born = [0_u64; 4];
     let mut arrivals = 0_u8;
+    let mut name_calls = [0_u64; 2];
     let mut early_vocabulary = 0;
     let mut food = FoodStats::default();
     let mut wildlife = WildlifeStats::default();
@@ -441,6 +447,10 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                     food.first_tastes += u64::from(meal.first_taste);
                     food.watched += u64::from(meal.watchers);
                 }
+                for call in engine.name_events() {
+                    name_calls[0] += 1;
+                    name_calls[1] += u64::from(call.heard_as != call.called);
+                }
                 for couple in engine.couple_events() {
                     couples.push((couple.first, couple.second));
                 }
@@ -486,6 +496,23 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
         }
     }
     families.births = families_born;
+    families.calls = name_calls;
+    for view in engine.agent_views(usize::MAX) {
+        if view.activity == AgentActivity::Dead {
+            continue;
+        }
+        let Some(map) = engine.mental_map(view.id) else {
+            continue;
+        };
+        for known in &map.acquaintances {
+            families.names[1] += 1;
+            if let Some(name) = known.name {
+                families.names[0] += 1;
+                families.names[2] +=
+                    u64::from(engine.life(known.agent).is_some_and(|life| life.name != name));
+            }
+        }
+    }
     report.families = families;
     report.comms = comms;
     let everyone = engine.snapshot().agent_count as usize;
@@ -1376,6 +1403,12 @@ impl fmt::Display for StudyReport {
             write!(
                 formatter,
                 "\n  births: pregnancies {conceived}, babies born {born}, children walking {walking}, lost with their mother {lost}"
+            )?;
+            let [known, acquaintances, wrong] = families.names;
+            let [heard, misheard] = families.calls;
+            write!(
+                formatter,
+                "\n  names: known for {known} of {acquaintances} acquaintances ({wrong} wrong); names heard called {heard} ({misheard} pinned on the wrong person)"
             )?;
         }
         let [founders_fire, children_fire] = self.wildlife.know_fire;

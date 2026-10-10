@@ -2,9 +2,10 @@
 //! goals, reasons, and words. Presentation only.
 
 use sim_core::{
-    AgentActivity, AgentId, AnimalMode, BiomeType, Concept, DeathCause, FeatureKind, GestureTopic,
-    LandmarkKind, LifeStage, LifeView, Material, Mime, Personality, PhysicalGoal, PolicyReason,
-    Sex, SleepQuality, SpawnKind, Species, StructureKind, SurfaceType, Tie, VocalForm,
+    AcquaintanceView, AgentActivity, AgentId, AnimalMode, BiomeType, Concept, DeathCause,
+    FeatureKind, GestureTopic, LandmarkKind, LifeStage, LifeView, Material, Mime, Personality,
+    PhysicalGoal, PolicyReason, Sex, SleepQuality, SpawnKind, Species, StructureKind, SurfaceType,
+    Tie, VocalForm,
 };
 
 /// "Woman, 34", "Boy, 9", "Baby girl, 1".
@@ -27,6 +28,14 @@ pub const fn tie(tie: Tie) -> &'static str {
         Tie::Sibling => "sibling",
         Tie::Partner => "partner",
     }
+}
+
+/// What someone calls an acquaintance: the name they know them by, or
+/// "Person N" when they haven't learned it.
+pub fn called(other: &AcquaintanceView) -> String {
+    other
+        .name
+        .map_or_else(|| person(other.agent), |name| name.spoken())
 }
 
 pub fn person(agent: AgentId) -> String {
@@ -344,6 +353,7 @@ mod tests {
     #[test]
     fn people_are_described_by_sex_and_age() {
         let life = |sex, age| LifeView {
+            name: sim_core::Name(0),
             sex,
             age,
             stage: LifeStage::of(age),

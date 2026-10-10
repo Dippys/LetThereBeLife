@@ -36,6 +36,7 @@ impl Engine {
         self.grief_events.clear();
         self.couple_events.clear();
         self.family_events.clear();
+        self.name_events.clear();
         self.wildlife_events.clear();
         self.lesson_events.clear();
         self.repair_events.clear();

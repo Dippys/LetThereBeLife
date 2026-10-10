@@ -39,6 +39,7 @@ fn friend(id: u32, familiarity: u8, trust: u8) -> AcquaintanceView {
         last_seen_second: 0,
         tie: None,
         owed: 0,
+        name: None,
     }
 }
 
@@ -134,6 +135,7 @@ fn person() -> AgentInspection {
         sleep: None,
         death: None,
         life: Some(sim_core::LifeView {
+            name: sim_core::Name(5),
             sex: sim_core::Sex::Female,
             age: 9,
             stage: sim_core::LifeStage::Child,
@@ -155,6 +157,7 @@ fn person() -> AgentInspection {
                 friend(5, 30, 20),
                 AcquaintanceView {
                     tie: Some(sim_core::Tie::Parent),
+                    name: Some(sim_core::Name(1)),
                     ..friend(2, u8::MAX, 220)
                 },
             ],
@@ -172,8 +175,8 @@ fn the_person_panel_says_what_they_do_feel_and_believe_in_plain_words() {
     };
     let lines: Vec<String> = rows.iter().filter_map(text).collect();
     for expected in [
-        "Person 7",
-        "Girl, 9 · curious",
+        "Kata",
+        "Girl, 9 · curious · Person 7",
         "Looking for food",
         "Going where someone pointed",
         "Carrying: 2 berries, 3 wood",
@@ -182,7 +185,7 @@ fn the_person_panel_says_what_they_do_feel_and_believe_in_plain_words() {
         "Hunts: deer",
         "Fears: wolves",
         "Knows how to make fire",
-        "Family: Person 2 (parent)",
+        "Family: Mata (parent)",
         "Friends: Person 9, Person 3",
         "Distrusts: Person 5",
         "Knows: 5 people",
@@ -311,6 +314,7 @@ fn tooltips_name_what_is_under_the_mouse() {
     assert_eq!(
         hover_lines(&Hover::Person {
             id: AgentId::new(2),
+            name: None,
             activity: AgentActivity::Sleeping
         })
         .0,

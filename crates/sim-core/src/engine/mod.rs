@@ -13,11 +13,13 @@ pub use setup::SimulationAdvanced;
 pub(crate) mod births;
 mod family;
 mod life;
+mod names;
 mod shelter;
 mod tick;
 mod views;
 mod wildlife;
 pub use births::{FamilyEvent, MotherhoodView};
+pub use names::NameEvent;
 pub use wildlife::{HUNT_TICKS, STRIKE_RANGE};
 
 use std::time::Duration;
@@ -141,6 +143,7 @@ pub struct Engine {
     couple_events: Vec<crate::CoupleEvent>,
     families: births::Families,
     family_events: Vec<FamilyEvent>,
+    name_events: Vec<NameEvent>,
     wildlife: crate::wildlife::Wildlife,
     wildlife_events: Vec<crate::WildlifeEvent>,
     /// Sex and birth of people born during the run (others are derived from the seed).
@@ -193,6 +196,7 @@ impl Engine {
             couple_events: Vec::new(),
             families: births::Families::default(),
             family_events: Vec::new(),
+            name_events: Vec::new(),
             wildlife: crate::wildlife::Wildlife::default(),
             wildlife_events: Vec::new(),
             lives: Vec::new(),
@@ -250,6 +254,7 @@ impl Engine {
                 self.couple_events.clear();
                 self.families = births::Families::default();
                 self.family_events.clear();
+                self.name_events.clear();
                 self.wildlife = crate::wildlife::Wildlife::default();
                 self.wildlife_events.clear();
                 self.lives.clear();

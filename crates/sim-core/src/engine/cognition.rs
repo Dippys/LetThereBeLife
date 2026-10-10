@@ -205,6 +205,23 @@ impl Engine {
         let (warn, recruit) = self.signals_worth_making(agent, perception, now);
         let visible = visible_kinds(origin, perception);
         let spent = spent_kinds(perception);
+        let mut greetings: Vec<AgentId> = Vec::new();
+        let founder_names: Vec<(AgentId, crate::Name)> = if self.minds.is_founder(agent) {
+            let family = agent.get() / crate::FAMILY_SIZE;
+            perception
+                .agents
+                .iter()
+                .filter(|other| {
+                    other.id.get() / crate::FAMILY_SIZE == family
+                        && self.minds.is_founder(other.id)
+                        && !self.minds.is_newcomer(other.id)
+                        && !self.minds.is_newcomer(agent)
+                })
+                .map(|other| (other.id, self.life_of(other.id).name))
+                .collect()
+        } else {
+            Vec::new()
+        };
         // Bodies lie where people died for a while; anyone passing sees them.
         let bodies: Vec<AgentId> = self
             .death_records
@@ -222,7 +239,25 @@ impl Engine {
         if social {
             for other in &perception.agents {
                 if other.id != agent && other.activity != AgentActivity::Dead {
-                    mind.notice(other.id, other.position, now);
+                    // Meeting someone again after a while: call out their name.
+                    let reunion = mind.social.slot_of(other.id).is_some_and(|slot| {
+                        mind.social.name(slot).is_some()
+                            && now.saturating_sub(mind.social.last_seen(slot))
+                                >= super::names::GREETING_GAP_SECONDS
+                    });
+                    if reunion && can_watch(other.activity) {
+                        greetings.push(other.id);
+                    }
+                    if let Some(slot) = mind.notice(other.id, other.position, now) {
+                        // Founders know the names of their own family's founders.
+                        if let Some(name) = founder_names
+                            .iter()
+                            .find(|(id, _)| *id == other.id)
+                            .map(|(_, name)| *name)
+                        {
+                            mind.social.learn_name(slot, name);
+                        }
+                    }
                 }
             }
             // The body of someone close: mourn them, then let them go.
@@ -411,6 +446,9 @@ impl Engine {
                 }
             }
             _ => {}
+        }
+        for other in greetings {
+            self.call_out(agent, other);
         }
         if deliberation.selection.reason == PolicyReason::Begging
             && let Some((giver, position)) = beg

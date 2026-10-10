@@ -80,7 +80,7 @@ impl Feed {
             self.push(
                 format!(
                     "{} {}",
-                    labels::person(death.agent),
+                    name(engine, death.agent),
                     labels::death(death.cause)
                 ),
                 Tone::Bad,
@@ -102,7 +102,7 @@ impl Feed {
                 Tone::Bad
             };
             self.push(
-                format!("{} {text}", labels::person(health.agent)),
+                format!("{} {text}", name(engine, health.agent)),
                 tone,
                 Some(health.agent),
                 agent_position(engine, health.agent),
@@ -114,7 +114,7 @@ impl Feed {
                 FamilyEvent::Born { mother, sex, .. } => (
                     format!(
                         "{} gave birth to a {}",
-                        labels::person(mother),
+                        name(engine, mother),
                         match sex {
                             Sex::Female => "girl",
                             Sex::Male => "boy",
@@ -126,22 +126,22 @@ impl Feed {
                 FamilyEvent::Walking { mother, child } => (
                     format!(
                         "{}, {}'s child, took their first steps",
-                        labels::person(child),
-                        labels::person(mother)
+                        name(engine, child),
+                        name(engine, mother)
                     ),
                     Tone::Good,
                     child,
                 ),
                 FamilyEvent::Lost { mother } => (
-                    format!("{}'s baby was lost with her", labels::person(mother)),
+                    format!("{}'s baby was lost with her", name(engine, mother)),
                     Tone::Bad,
                     mother,
                 ),
                 FamilyEvent::Arrived { woman, man } => (
                     format!(
                         "Newcomers {} and {} arrived, speaking their own way",
-                        labels::person(woman),
-                        labels::person(man)
+                        name(engine, woman),
+                        name(engine, man)
                     ),
                     Tone::Talk,
                     woman,
@@ -155,8 +155,8 @@ impl Feed {
             self.push(
                 format!(
                     "{} and {} became a couple",
-                    labels::person(couple.first),
-                    labels::person(couple.second)
+                    name(engine, couple.first),
+                    name(engine, couple.second)
                 ),
                 Tone::Good,
                 Some(couple.first),
@@ -168,8 +168,8 @@ impl Feed {
             self.push(
                 format!(
                     "{} mourns {}",
-                    labels::person(grief.agent),
-                    labels::person(grief.lost)
+                    name(engine, grief.agent),
+                    name(engine, grief.lost)
                 ),
                 Tone::Bad,
                 Some(grief.agent),
@@ -185,11 +185,7 @@ impl Feed {
                     position,
                     ..
                 } => self.push(
-                    format!(
-                        "A {} bit {}",
-                        labels::species(species),
-                        labels::person(agent)
-                    ),
+                    format!("A {} bit {}", labels::species(species), name(engine, agent)),
                     Tone::Bad,
                     Some(agent),
                     position,
@@ -203,9 +199,9 @@ impl Feed {
                     ..
                 } => {
                     let who = match helpers {
-                        0 => labels::person(hunter),
-                        1 => format!("{} and a helper", labels::person(hunter)),
-                        _ => format!("{} and {helpers} helpers", labels::person(hunter)),
+                        0 => name(engine, hunter),
+                        1 => format!("{} and a helper", name(engine, hunter)),
+                        _ => format!("{} and {helpers} helpers", name(engine, hunter)),
                     };
                     self.push(
                         format!("{who} killed a {}", labels::species(species)),
@@ -231,7 +227,7 @@ impl Feed {
             self.push(
                 format!(
                     "{} ate {} and got sick",
-                    labels::person(meal.agent),
+                    name(engine, meal.agent),
                     labels::material(meal.material)
                 ),
                 Tone::Bad,
@@ -245,9 +241,9 @@ impl Feed {
                 self.push(
                     format!(
                         "{} gave {} to {}",
-                        labels::person(request.giver),
+                        name(engine, request.giver),
                         labels::material(material),
-                        labels::person(request.asker)
+                        name(engine, request.asker)
                     ),
                     Tone::Good,
                     Some(request.asker),
@@ -267,14 +263,14 @@ impl Feed {
             let text = match (signal.intent.effect, signal.signal.mime) {
                 (DesiredEffect::Correct, _) => format!(
                     "{} corrected someone:{said} is {}",
-                    labels::person(sender),
+                    name(engine, sender),
                     labels::topic(signal.intent.topic)
                 ),
                 (DesiredEffect::Inform, Mime::Snarl) if signal.signal.loud => {
-                    format!("{} shouted a warning{said}", labels::person(sender))
+                    format!("{} shouted a warning{said}", name(engine, sender))
                 }
                 (DesiredEffect::Inform, Mime::Spear) if signal.signal.loud => {
-                    format!("{} called others to hunt{said}", labels::person(sender))
+                    format!("{} called others to hunt{said}", name(engine, sender))
                 }
                 _ => continue,
             };
@@ -286,7 +282,7 @@ impl Feed {
                 self.push(
                     format!(
                         "{} realised {} was misunderstood",
-                        labels::person(lesson.agent),
+                        name(engine, lesson.agent),
                         labels::word(lesson.form)
                     ),
                     Tone::Talk,
@@ -314,7 +310,7 @@ impl Feed {
             self.push(
                 format!(
                     "{} mistook {what} for {} (meant {})",
-                    labels::person(reading.receiver),
+                    name(engine, reading.receiver),
                     labels::topic(reading.understood),
                     labels::topic(meant)
                 ),
@@ -324,6 +320,13 @@ impl Feed {
             );
         }
     }
+}
+
+/// What everyone calls `agent` (its given name), or "Person N".
+fn name(engine: &Engine, agent: AgentId) -> String {
+    engine
+        .life(agent)
+        .map_or_else(|| labels::person(agent), |life| life.name.spoken())
 }
 
 fn agent_position(engine: &Engine, agent: AgentId) -> WorldPosition {
