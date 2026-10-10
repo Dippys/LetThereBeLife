@@ -268,12 +268,18 @@ fn prepare_world(
         .into_iter()
         .filter(|cell| valley.bounds.contains(*cell))
         .collect();
-    let spawns = sim_core::camp_sites(
+    let families = sim_core::VALLEY_FAMILIES;
+    let spawns = sim_core::family_camps(
         engine.world(),
         valley.bounds,
-        config.population as usize,
+        families,
+        (config.population as usize).div_ceil(families),
         config.seed,
     )
+    .map(|mut sites| {
+        sites.truncate(config.population as usize);
+        sites
+    })
     .ok_or_else(|| ScenarioError("valley has no room for the band beside water".into()))?;
     Ok((engine, valley.bounds, fresh_water, spawns))
 }

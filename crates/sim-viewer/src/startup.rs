@@ -3,8 +3,8 @@ use std::{error::Error, fmt};
 use rayon::prelude::*;
 use sim_core::{
     AgentId, AgentSpawnError, Engine, EngineCommand, GenerateAreaError, PolicyActivationError,
-    PolicyOptions, PopulationInit, PopulationInitError, VALLEY_BAND, VALLEY_SIDE, World,
-    WorldPosition, WorldRect, camp_sites, find_valley,
+    PolicyOptions, PopulationInit, PopulationInitError, VALLEY_BAND, VALLEY_FAMILIES, VALLEY_SIDE,
+    World, WorldPosition, WorldRect, family_camps, find_valley,
 };
 
 pub const VIEWER_AGENT_LIMIT: usize = 4_096;
@@ -130,8 +130,14 @@ pub fn start_valley(engine: &mut Engine) -> Result<ValleyStart, ValleyStartError
     engine
         .apply_world_chunk_loads(loads)
         .map_err(ValleyStartError::Generation)?;
-    let sites = camp_sites(engine.world(), valley.bounds, VALLEY_BAND, seed)
-        .ok_or(ValleyStartError::NoCamp)?;
+    let sites = family_camps(
+        engine.world(),
+        valley.bounds,
+        VALLEY_FAMILIES,
+        VALLEY_BAND / VALLEY_FAMILIES,
+        seed,
+    )
+    .ok_or(ValleyStartError::NoCamp)?;
     spawn_band(engine, valley.bounds, &sites).map_err(ValleyStartError::Spawn)?;
     Ok(ValleyStart {
         bounds: valley.bounds,

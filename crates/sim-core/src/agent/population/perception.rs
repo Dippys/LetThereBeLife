@@ -3,7 +3,7 @@
 use super::Population;
 use super::init::reachable_cells;
 use crate::{
-    Standability, World, WorldPosition, WorldQueryError, WorldRect,
+    BaseResource, Standability, World, WorldPosition, WorldQueryError, WorldRect,
     agent::{
         AgentId, MAX_PERCEPTION_CELLS, MAX_PERCEPTION_RADIUS, PerceivedResource, PerceivedWater,
         PerceptionError, PhysicalPerception,
@@ -126,6 +126,7 @@ impl Population {
         let mut drinkable_water = Vec::new();
         let mut resources = Vec::new();
         let mut reserved_cells = Vec::new();
+        let mut spent_resources = Vec::new();
         let mut perceived_structures = Vec::new();
         perceived_structures
             .try_reserve(structures.len().min(cell_count))
@@ -177,6 +178,18 @@ impl Population {
                 };
                 if let Some(resource) = resource {
                     try_push(&mut resources, PerceivedResource { position, resource })?;
+                } else if let Some(base) = world.base_resource_at(position) {
+                    let spent = BaseResource {
+                        capacity: 0,
+                        kind: base.kind,
+                    };
+                    try_push(
+                        &mut spent_resources,
+                        PerceivedResource {
+                            position,
+                            resource: spent,
+                        },
+                    )?;
                 }
             }
         }
@@ -192,6 +205,7 @@ impl Population {
             traversable_cells,
             reachable_cells,
             reserved_cells,
+            spent_resources,
         })
     }
 }

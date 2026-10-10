@@ -10,7 +10,7 @@
 use crate::{AgentId, WorldPosition};
 
 use super::{
-    GestureTopic, LandmarkKind, VocalForm,
+    Concept, GestureTopic, LandmarkKind, VocalForm,
     gesture::{Gesture, interpret, point},
     reading::{ListenerContext, Reading, concept_topic, read},
 };
@@ -20,6 +20,8 @@ use super::{
 pub enum DesiredEffect {
     /// "There is something over there."
     Inform,
+    /// "You said that word, but over there was this, not that."
+    Correct,
 }
 
 /// The sender's private reason for signalling. Never delivered to receivers;
@@ -67,6 +69,8 @@ pub struct PublicSignal {
     pub mime: Mime,
     /// The word the sender says, if it has one for the concept.
     pub vocal: Option<VocalForm>,
+    /// For corrections: a mime shown and then waved away ("not this").
+    pub negated: Option<Mime>,
     pub tone: Tone,
 }
 
@@ -97,6 +101,7 @@ pub(crate) fn express(
         pointing: point(origin, intent.place)?,
         mime: mime_for(intent.topic),
         vocal,
+        negated: None,
         tone: Tone { urgency },
     })
 }
@@ -124,6 +129,18 @@ pub(crate) fn understand(signal: &PublicSignal, listener: ListenerContext) -> Un
         topic,
         estimate,
         uncertainty,
+    }
+}
+
+/// What an exaggerated (or explicitly negated) mime unmistakably shows.
+pub(crate) const fn unmistakable(mime: Mime) -> Concept {
+    match mime {
+        Mime::Scoop => Concept::Water,
+        Mime::PickAndChew => Concept::Food,
+        Mime::Chop => Concept::Wood,
+        Mime::Strike => Concept::Stone,
+        Mime::RestHead => Concept::Home,
+        Mime::Sweep => Concept::Been,
     }
 }
 

@@ -160,7 +160,51 @@ about a closer place should beat an old sighting far away (M1 found hints were n
 chaos), each with a recorded reason (ambiguous form, ambiguous context, need bias, low trust), and
 `hint-decisions` is well above zero in the valley.
 
-### M5 — Consequences, learning, and repair
+### M5 — Consequences, learning, and repair ✅ (2026-10-10)
+
+**Result:** three observable-only learning paths.
+- **Ask and repair:** a listener less sure than its threshold (cautious or sociable: up to 70%;
+  bold or reserved: down to 45%; average about 58%) mimes its guess back with its own word for
+  it. The speaker, who knows what it meant, nods or repeats with an exaggerated mime. Both
+  update: the listener corrects the word, and the speaker records whether its word worked and
+  learns the listener's word.
+- **Consequences:** every hint carries the word it came with, the runner-up meaning the listener
+  weighed, the pointing bearing, and the gesture id (places grew to 16 B). When a hint is checked,
+  a confirmation strengthens the word. An abandoned hint relearns it only if the alternative the
+  listener had weighed is in view, and stripped bushes in view explain an empty spot as stale
+  (no lesson, no trust penalty). Searches follow the pointed line.
+- **Corrections:** a listener who learned it had misunderstood later points back, says the
+  speaker's word, and mimes "this, not that". Anyone who says that word for the real thing counts
+  it as a failed use (a speaker can then drift to another word). If the speaker isn't watching,
+  the correction waits.
+
+Also: usage lessons (hearing someone use a word for something else), and two founding families
+**camped apart** at their own water sources. Lexicons now converge through use and repair (seed 1
+single camp: 81% → 94%; two camps: 75–90% by the end), and survival rose slightly (251/300).
+
+### M6 — The success test ✅ (2026-10-10, with a caveat)
+
+**Result:** `CommunicationLog::success_episodes` follows each episode through gesture ids:
+misread (with recorded reasons) → acted on → the listener learned from what it found there → the
+speaker changed its belief about that word because of what that listener visibly did (a
+correction or a use). `sim-headless/tests/success.rs` runs the seed 1 valley for 1.2M ticks and
+requires at least one episode. It's a gate stage in `scripts/validate`. The first episode:
+
+```text
+1. t=232771 agent 5 pointed, mimed PickAndChew and said "kani", privately meaning FOOD.
+2. Agent 12 read it as WATER because the mime looked ambiguous and the word meant something else to it.
+3. At t=555343 it acted on that reading at the place.
+4. At t=591816 it happened to find WATER there too, which convinced it "kani" means WATER.
+5. At t=662294 agent 5 heard agent 12 use "kani" for WATER and now doubts it means FOOD.
+```
+
+**Caveat, measured honestly:** complete episodes are **rare**. There was 1 across 12 valley seeds at
+2.4M ticks, and only seed 1 produces one. Most misunderstandings are repaired on the spot, and
+those acted on are hard to discover: water and food co-locate at oases, and cross-family tips are
+about faraway places. The test is deterministic but sensitive to behavior changes. If a change
+removes the episode, investigate why with `--misreads` and `--lessons` rather than picking a new
+seed.
+
 
 - The sender keeps a `PendingCommunication` with an expected outcome and checks it later: did the
   listener go there, come over, hand something over? Its estimate of success can itself be wrong.

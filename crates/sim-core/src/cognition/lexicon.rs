@@ -125,6 +125,9 @@ pub struct LexiconEntryView {
     pub positive: u16,
     pub contradictory: u16,
     pub heard: u16,
+    /// Times this agent said it for the concept and it seemed to work / fail.
+    pub successes: u16,
+    pub failures: u16,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -284,6 +287,47 @@ impl Lexicon {
         }
     }
 
+    /// Adds `weight` evidence that `form` means `concept` (from a consequence,
+    /// a confirmation, or a repair).
+    pub(crate) fn reinforce(&mut self, form: VocalForm, concept: Concept, weight: u16) {
+        match self.find(form, concept) {
+            Some(slot) => {
+                let entry = &mut self.entries[slot];
+                entry.positive = entry.positive.saturating_add(weight);
+            }
+            None => {
+                if let Some(slot) = self.free_slot() {
+                    self.entries[slot] = LexicalEntry {
+                        form: form.0,
+                        concept: concept as u8,
+                        positive: weight,
+                        ..LexicalEntry::default()
+                    };
+                }
+            }
+        }
+    }
+
+    /// Adds `weight` evidence that `form` does *not* mean `concept`.
+    pub(crate) fn contradict(&mut self, form: VocalForm, concept: Concept, weight: u16) {
+        if let Some(slot) = self.find(form, concept) {
+            let entry = &mut self.entries[slot];
+            entry.contradictory = entry.contradictory.saturating_add(weight);
+        }
+    }
+
+    /// Records whether saying `form` for `concept` seemed to work.
+    pub(crate) fn record_use(&mut self, form: VocalForm, concept: Concept, worked: bool) {
+        if let Some(slot) = self.find(form, concept) {
+            let entry = &mut self.entries[slot];
+            if worked {
+                entry.successes = entry.successes.saturating_add(1);
+            } else {
+                entry.failures = entry.failures.saturating_add(1);
+            }
+        }
+    }
+
     pub(crate) fn views(&self) -> impl Iterator<Item = LexiconEntryView> + '_ {
         self.entries
             .iter()
@@ -294,6 +338,8 @@ impl Lexicon {
                 positive: entry.positive,
                 contradictory: entry.contradictory,
                 heard: entry.heard,
+                successes: entry.successes,
+                failures: entry.failures,
             })
     }
 }
@@ -364,6 +410,31 @@ mod tests {
             lexicon.hear_with_evidence(form, Concept::Food);
         }
         assert_eq!(lexicon.recognize(form), Some(Concept::Food));
+    }
+
+    #[test]
+    fn failed_uses_steer_production_toward_another_word() {
+        let mut lexicon = Lexicon::default();
+        lexicon.reinforce(VocalForm(1), Concept::Food, 6);
+        lexicon.reinforce(VocalForm(2), Concept::Food, 3);
+        assert_eq!(lexicon.produce(Concept::Food), Some(VocalForm(1)));
+        for _ in 0..2 {
+            lexicon.record_use(VocalForm(1), Concept::Food, false);
+        }
+        assert_eq!(
+            lexicon.produce(Concept::Food),
+            Some(VocalForm(2)),
+            "switches to the word that works"
+        );
+    }
+
+    #[test]
+    fn consequences_can_relearn_a_word() {
+        let mut lexicon = Lexicon::default();
+        lexicon.reinforce(VocalForm(4), Concept::Water, 6);
+        lexicon.contradict(VocalForm(4), Concept::Water, 8);
+        lexicon.reinforce(VocalForm(4), Concept::Food, 4);
+        assert_eq!(lexicon.recognize(VocalForm(4)), Some(Concept::Food));
     }
 
     #[test]

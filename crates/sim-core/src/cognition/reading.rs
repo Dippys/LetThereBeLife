@@ -203,6 +203,7 @@ mod tests {
             pointing: point(WorldPosition { x: 0, y: 0 }, WorldPosition { x: 60, y: 0 }).unwrap(),
             mime,
             vocal: Some(VocalForm(3)),
+            negated: None,
             tone: Tone { urgency },
         }
     }

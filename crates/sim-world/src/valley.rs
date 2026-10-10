@@ -159,23 +159,15 @@ pub const VALLEY_BAND: usize = 16;
 /// Band members start within this many cells of the camp's water access.
 pub const CAMP_RADIUS: i64 = 8;
 
-/// Where a band of `count` starts in a resident valley: the water access closest
-/// to its center, then distinct standable cells around it. Deterministic per seed.
-/// `None` if the valley has no reachable fresh water or too little room.
-pub fn camp_sites(
-    world: &World,
-    bounds: WorldRect,
-    count: usize,
-    seed: u64,
-) -> Option<Vec<WorldPosition>> {
-    let center = WorldPosition {
-        x: (bounds.min.x + bounds.max.x) / 2,
-        y: (bounds.min.y + bounds.max.y) / 2,
-    };
+/// Families in the valley band. Each camps at its own water source.
+pub const VALLEY_FAMILIES: usize = 2;
+
+/// Standable cells next to drinkable water inside `bounds`, row-major.
+fn water_accesses(world: &World, bounds: WorldRect) -> Vec<WorldPosition> {
     let standable = |position: WorldPosition| {
         bounds.contains(position) && world.standability_at(position) == Ok(Standability::Standable)
     };
-    let camp = world
+    let mut accesses: Vec<_> = world
         .cells()
         .map(|(position, _)| position)
         .filter(|position| {
@@ -191,20 +183,34 @@ pub fn camp_sites(
             })
         })
         .filter(|cell| standable(*cell))
-        .min_by_key(|cell| {
-            (
-                cell.x.abs_diff(center.x) + cell.y.abs_diff(center.y),
-                cell.y,
-                cell.x,
-            )
-        })?;
-    let mut chosen = vec![camp];
+        .collect();
+    accesses.sort_unstable_by_key(|cell| (cell.y, cell.x));
+    accesses.dedup();
+    accesses
+}
+
+/// Up to `count` distinct standable cells within `CAMP_RADIUS` of `camp`, the camp first.
+fn members_around(
+    world: &World,
+    bounds: WorldRect,
+    camp: WorldPosition,
+    count: usize,
+    seed: u64,
+    taken: &[WorldPosition],
+) -> Vec<WorldPosition> {
+    let standable = |position: WorldPosition| {
+        bounds.contains(position) && world.standability_at(position) == Ok(Standability::Standable)
+    };
+    let mut chosen = Vec::with_capacity(count);
+    if !taken.contains(&camp) {
+        chosen.push(camp);
+    }
     let span = (CAMP_RADIUS * 2 + 1) as u64;
     for attempt in 0..100_000_u64 {
         if chosen.len() >= count {
             break;
         }
-        let mut key = seed ^ 0xca4d_u64.wrapping_mul(attempt + 1);
+        let mut key = seed ^ 0xca4d_u64.wrapping_mul(attempt + 1) ^ (camp.x as u64).rotate_left(21);
         key = (key ^ (key >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
         key = (key ^ (key >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
         key ^= key >> 31;
@@ -212,14 +218,67 @@ pub fn camp_sites(
             x: camp.x + (key % span) as i64 - CAMP_RADIUS,
             y: camp.y + ((key >> 32) % span) as i64 - CAMP_RADIUS,
         };
-        if standable(cell) && !chosen.contains(&cell) {
+        if standable(cell) && !chosen.contains(&cell) && !taken.contains(&cell) {
             chosen.push(cell);
         }
     }
-    (chosen.len() >= count).then(|| {
-        chosen.truncate(count);
-        chosen
-    })
+    chosen
+}
+
+/// Where a band of `count` starts in a resident valley: the water access closest
+/// to its center, then distinct standable cells around it. Deterministic per seed.
+/// `None` if the valley has no reachable fresh water or too little room.
+pub fn camp_sites(
+    world: &World,
+    bounds: WorldRect,
+    count: usize,
+    seed: u64,
+) -> Option<Vec<WorldPosition>> {
+    family_camps(world, bounds, 1, count, seed)
+}
+
+/// Where a band of `families × family_size` starts: the first family at the water
+/// access closest to the valley's center, each later family at the access farthest
+/// from the camps already chosen, members around their family's camp. Returned in
+/// family order, so agent ids `0..family_size` are the first family, and so on.
+pub fn family_camps(
+    world: &World,
+    bounds: WorldRect,
+    families: usize,
+    family_size: usize,
+    seed: u64,
+) -> Option<Vec<WorldPosition>> {
+    let center = WorldPosition {
+        x: (bounds.min.x + bounds.max.x) / 2,
+        y: (bounds.min.y + bounds.max.y) / 2,
+    };
+    let accesses = water_accesses(world, bounds);
+    let distance = |a: WorldPosition, b: WorldPosition| a.x.abs_diff(b.x) + a.y.abs_diff(b.y);
+    let mut camps = vec![
+        *accesses
+            .iter()
+            .min_by_key(|cell| (distance(**cell, center), cell.y, cell.x))?,
+    ];
+    while camps.len() < families {
+        let next = *accesses.iter().max_by_key(|cell| {
+            let nearest_camp = camps
+                .iter()
+                .map(|camp| distance(**cell, *camp))
+                .min()
+                .unwrap_or(0);
+            (nearest_camp, std::cmp::Reverse((cell.y, cell.x)))
+        })?;
+        camps.push(next);
+    }
+    let mut sites = Vec::with_capacity(families * family_size);
+    for camp in camps {
+        let members = members_around(world, bounds, camp, family_size, seed, &sites);
+        if members.len() < family_size {
+            return None;
+        }
+        sites.extend(members);
+    }
+    Some(sites)
 }
 
 #[cfg(test)]
@@ -234,6 +293,24 @@ mod tests {
         assert_eq!(valley.bounds.min.x.rem_euclid(CHUNK_SIZE), 0);
         assert_eq!(valley.bounds.max.x - valley.bounds.min.x, 768);
         assert_eq!(score_square(1, valley.bounds), valley.score);
+    }
+
+    #[test]
+    fn families_camp_apart_at_their_own_water() {
+        let valley = find_valley(1, VALLEY_SIDE).expect("seed 1 has a valley");
+        let mut world = World::new(1, crate::WorldConfig::new(64, 64).unwrap());
+        world.generate_area(valley.bounds).unwrap();
+        let sites = family_camps(&world, valley.bounds, VALLEY_FAMILIES, 8, 1).expect("room");
+        assert_eq!(sites.len(), VALLEY_FAMILIES * 8);
+        let (first, second) = (sites[0], sites[8]);
+        assert!(
+            first.x.abs_diff(second.x) + first.y.abs_diff(second.y) > 4 * CAMP_RADIUS as u64,
+            "the families start apart: {first:?} vs {second:?}"
+        );
+        let mut unique = sites.clone();
+        unique.sort_unstable_by_key(|cell| (cell.y, cell.x));
+        unique.dedup();
+        assert_eq!(unique.len(), sites.len());
     }
 
     #[test]

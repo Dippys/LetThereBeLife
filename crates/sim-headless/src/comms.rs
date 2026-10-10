@@ -5,8 +5,9 @@
 use std::fmt;
 
 use sim_core::{
-    AgentId, Engine, GestureTopic, InterpretationEvent, LandmarkKind, PhysicalGoal,
-    PolicyDiagnosticKind, PolicyReason, SignalEvent,
+    AgentId, DesiredEffect, Engine, GestureTopic, InterpretationEvent, LandmarkKind, LessonCause,
+    LessonEvent, PhysicalGoal, PolicyDiagnosticKind, PolicyReason, RepairEvent, RepairResponse,
+    SignalEvent,
 };
 
 /// One receiver's side of an exchange.
@@ -19,6 +20,16 @@ pub struct Reception {
     pub acted_at: Option<u64>,
     /// `(confirmed, tick)`: found what the hint promised, or searched and gave up.
     pub outcome: Option<(bool, u64)>,
+    /// If the listener asked "this?": the speaker's answer.
+    pub repair: Option<RepairEvent>,
+}
+
+impl Reception {
+    /// When the receiver acted on what it understood: it headed for the place
+    /// because of it, or went to the spot and searched it (the hint's outcome).
+    pub fn acted_on(&self) -> Option<u64> {
+        self.acted_at.or(self.outcome.map(|(_, at)| at))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,11 +64,34 @@ pub struct CommunicationSummary {
     pub misread_reasons: [u64; 5],
     /// Misreadings the receiver acted on.
     pub misread_acted: u64,
+    /// "This?" questions, and how many the speaker answered with a repair.
+    pub questions: u64,
+    pub repaired: u64,
+    /// Word lessons by cause: consequence, confirmation, repair, correction, usage.
+    pub lessons: [u64; 5],
+    /// Corrections made ("you said X, but it was this, not that").
+    pub corrections: u64,
+    /// Complete episodes of the project's definition of success (see `success_episodes`).
+    pub success_episodes: u64,
+}
+
+/// The project's definition of success, observed: a listener misread a signal
+/// for a recorded reason, acted on it, learned from what it found, and the
+/// speaker then learned its word was misheard, each from observable evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SuccessEpisode {
+    /// Index into `exchanges()`.
+    pub exchange: usize,
+    pub listener: AgentId,
+    pub acted_at: u64,
+    pub listener_lesson: LessonEvent,
+    pub speaker_lesson: LessonEvent,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct CommunicationLog {
     exchanges: Vec<Exchange>,
+    lessons: Vec<LessonEvent>,
 }
 
 const fn kind_for_goal(goal: PhysicalGoal) -> Option<LandmarkKind> {
@@ -89,6 +123,7 @@ impl CommunicationLog {
                     interpretation: *interpretation,
                     acted_at: None,
                     outcome: None,
+                    repair: None,
                 });
             }
         }
@@ -108,6 +143,23 @@ impl CommunicationLog {
                 reception.acted_at = Some(decision.at.ticks());
             }
         }
+        for repair in engine.repair_events() {
+            if let Some(reception) = self
+                .exchanges
+                .iter_mut()
+                .rev()
+                .find(|exchange| exchange.signal.id == repair.signal)
+                .and_then(|exchange| {
+                    exchange
+                        .receptions
+                        .iter_mut()
+                        .find(|reception| reception.interpretation.receiver == repair.listener)
+                })
+            {
+                reception.repair = Some(*repair);
+            }
+        }
+        self.lessons.extend_from_slice(engine.lesson_events());
         for outcome in engine.hint_outcomes() {
             if let Some(reception) = self.latest_reception(
                 outcome.agent,
@@ -148,6 +200,171 @@ impl CommunicationLog {
         &self.exchanges
     }
 
+    pub fn lessons(&self) -> &[LessonEvent] {
+        &self.lessons
+    }
+
+    /// Every complete success episode, followed exactly through gesture ids:
+    /// a listener misread a gesture (for a recorded reason), went to the place it
+    /// had in mind, and learned from what it found there (relearning the word, or
+    /// wrongly confirming its misreading); then the speaker changed what it
+    /// believes about that word because of something that same listener visibly
+    /// did (corrected it, or used it in the other sense).
+    pub fn success_episodes(&self) -> Vec<SuccessEpisode> {
+        let exchange_by_id = |id: u64| {
+            self.exchanges
+                .iter()
+                .position(|exchange| exchange.signal.id == id)
+        };
+        let mut episodes = Vec::new();
+        for listener_lesson in &self.lessons {
+            let (LessonCause::Consequence, Some(id)) =
+                (listener_lesson.cause, listener_lesson.signal)
+            else {
+                continue;
+            };
+            let Some(index) = exchange_by_id(id) else {
+                continue;
+            };
+            let exchange = &self.exchanges[index];
+            let meant = exchange.signal.intent.topic.concept();
+            if exchange.signal.intent.effect != DesiredEffect::Inform {
+                continue;
+            }
+            let Some(reception) = exchange.receptions.iter().find(|reception| {
+                reception.interpretation.receiver == listener_lesson.agent
+                    && reception.interpretation.heard == Some(listener_lesson.form)
+                    && reception.interpretation.understood.concept() != meant
+            }) else {
+                continue;
+            };
+            let misread = reception.interpretation.understood.concept();
+            // The lesson must be about the misreading: dropping it or confirming it.
+            if listener_lesson.weakened != Some(misread)
+                && listener_lesson.strengthened != Some(misread)
+            {
+                continue;
+            }
+            let speaker = exchange.signal.signal.sender;
+            let Some(speaker_lesson) = self.lessons.iter().find(|lesson| {
+                let by_listener = lesson.signal.and_then(exchange_by_id).is_some_and(|other| {
+                    self.exchanges[other].signal.signal.sender == listener_lesson.agent
+                });
+                lesson.agent == speaker
+                    && lesson.form == listener_lesson.form
+                    && lesson.at >= listener_lesson.at
+                    && by_listener
+                    && match lesson.cause {
+                        LessonCause::Correction => lesson.use_worked == Some(false),
+                        LessonCause::Usage => true,
+                        _ => false,
+                    }
+            }) else {
+                continue;
+            };
+            episodes.push(SuccessEpisode {
+                exchange: index,
+                listener: listener_lesson.agent,
+                acted_at: reception.acted_on().unwrap_or(listener_lesson.at.ticks()),
+                listener_lesson: *listener_lesson,
+                speaker_lesson: *speaker_lesson,
+            });
+        }
+        episodes
+    }
+
+    /// A step-by-step account of one success episode.
+    pub fn describe_episode(&self, episode: SuccessEpisode) -> String {
+        let exchange = &self.exchanges[episode.exchange];
+        let signal = exchange.signal;
+        let reception = exchange
+            .receptions
+            .iter()
+            .find(|reception| reception.interpretation.receiver == episode.listener)
+            .expect("episode refers to a reception");
+        let read = reception.interpretation;
+        let form = read
+            .heard
+            .map_or_else(|| "-".to_owned(), |form| form.name());
+        let reasons: Vec<&str> = [
+            (
+                read.reading.reasons.ambiguous_mime,
+                "the mime looked ambiguous",
+            ),
+            (
+                read.reading.reasons.unknown_word,
+                "the word was unknown to it",
+            ),
+            (
+                read.reading.reasons.word_disagrees,
+                "the word meant something else to it",
+            ),
+            (read.reading.reasons.need_bias, "its own need"),
+            (
+                read.reading.reasons.memory_bias,
+                "what it remembered near there",
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(applies, why)| applies.then_some(why))
+        .collect();
+        let name = |concept: Option<sim_core::Concept>| {
+            concept.map_or_else(
+                || "?".to_owned(),
+                |concept| format!("{concept:?}").to_uppercase(),
+            )
+        };
+        let listener_step = if episode.listener_lesson.weakened.is_some() {
+            format!(
+                "it found {} there instead, and now takes \"{form}\" to mean that rather than {}.",
+                name(episode.listener_lesson.strengthened),
+                name(episode.listener_lesson.weakened)
+            )
+        } else {
+            format!(
+                "it happened to find {} there too, which convinced it \"{form}\" means {}.",
+                name(episode.listener_lesson.strengthened),
+                name(episode.listener_lesson.strengthened)
+            )
+        };
+        let speaker_step = match episode.speaker_lesson.cause {
+            LessonCause::Correction => format!(
+                "saw agent {} correct \"{form}\" (showing {}, not {}) and counted its own use as misheard.",
+                episode.listener.get(),
+                name(episode.speaker_lesson.strengthened),
+                name(episode.speaker_lesson.weakened)
+            ),
+            _ => format!(
+                "heard agent {} use \"{form}\" for {} and now doubts it means {}.",
+                episode.listener.get(),
+                name(episode.speaker_lesson.strengthened),
+                name(episode.speaker_lesson.weakened)
+            ),
+        };
+        format!(
+            "1. t={} agent {} pointed, mimed {:?} and said \"{form}\", privately meaning {}.\n\
+             2. Agent {} read it as {} because {}.\n\
+             3. At t={} it acted on that reading at the place.\n\
+             4. At t={} {listener_step}\n\
+             5. At t={} agent {} {speaker_step}",
+            signal.at.ticks(),
+            signal.signal.sender.get(),
+            signal.signal.mime,
+            topic_name(signal.intent.topic),
+            read.receiver.get(),
+            topic_name(read.understood),
+            if reasons.is_empty() {
+                "of the evidence it weighed".to_owned()
+            } else {
+                reasons.join(" and ")
+            },
+            episode.acted_at,
+            episode.listener_lesson.at.ticks(),
+            episode.speaker_lesson.at.ticks(),
+            signal.signal.sender.get(),
+        )
+    }
+
     /// Exchanges where `agent` was the sender or a receiver.
     pub fn involving(&self, agent: AgentId) -> impl Iterator<Item = &Exchange> + '_ {
         self.exchanges.iter().filter(move |exchange| {
@@ -161,6 +378,17 @@ impl CommunicationLog {
 
     pub fn summary(&self) -> CommunicationSummary {
         let mut summary = CommunicationSummary::default();
+        for lesson in &self.lessons {
+            let slot = match lesson.cause {
+                LessonCause::Consequence => 0,
+                LessonCause::Confirmation => 1,
+                LessonCause::Repair => 2,
+                LessonCause::Correction => 3,
+                LessonCause::Usage => 4,
+            };
+            summary.lessons[slot] += 1;
+        }
+        summary.success_episodes = self.success_episodes().len() as u64;
         let half = self.exchanges.len() / 2;
         for (index, exchange) in self.exchanges.iter().enumerate() {
             let period = usize::from(index >= half);
@@ -174,6 +402,8 @@ impl CommunicationLog {
                 }
             }
             summary.exchanges += 1;
+            summary.corrections +=
+                u64::from(exchange.signal.intent.effect == DesiredEffect::Correct);
             match exchange.signal.intent.topic {
                 GestureTopic::Place(kind) => summary.place_exchanges[kind as usize] += 1,
                 GestureTopic::Explored => summary.explored_exchanges += 1,
@@ -181,10 +411,15 @@ impl CommunicationLog {
             for reception in &exchange.receptions {
                 summary.receptions += 1;
                 summary.informed += u64::from(reception.interpretation.changed);
-                summary.acted += u64::from(reception.acted_at.is_some());
+                if let Some(repair) = reception.repair {
+                    summary.questions += 1;
+                    summary.repaired +=
+                        u64::from(matches!(repair.response, RepairResponse::Repaired(_)));
+                }
+                summary.acted += u64::from(reception.acted_on().is_some());
                 if reception.interpretation.understood != exchange.signal.intent.topic {
                     summary.misread += 1;
-                    summary.misread_acted += u64::from(reception.acted_at.is_some());
+                    summary.misread_acted += u64::from(reception.acted_on().is_some());
                     let reasons = reception.interpretation.reading.reasons;
                     for (slot, applies) in [
                         reasons.ambiguous_mime,
@@ -239,6 +474,12 @@ impl fmt::Display for CommunicationSummary {
             formatter,
             "\n  misreadings: {} of {} receptions ({} acted on); reasons: ambiguous mime {ambiguous}, unknown word {unknown}, word disagrees {disagrees}, need bias {need}, memory bias {memory}",
             self.misread, self.receptions, self.misread_acted
+        )?;
+        let [consequence, confirmation, repair, correction, usage] = self.lessons;
+        write!(
+            formatter,
+            "\n  repair: questions {} (repaired {}), corrections {}; word lessons: consequence {consequence}, confirmation {confirmation}, repair {repair}, correction {correction}, usage {usage}; SUCCESS EPISODES {}",
+            self.questions, self.repaired, self.corrections, self.success_episodes
         )
     }
 }
@@ -258,7 +499,8 @@ impl fmt::Display for Exchange {
         let (dx, dy) = public.pointing.direction();
         write!(
             formatter,
-            "t={} agent {} at ({},{}) points dir ({dx},{dy}) emphasis {}, mimes {:?}, says \"{}\", urgency {} [privately meant {} at ({},{})] -> watchers infer ({},{}) +/-{}",
+            "#{} t={} agent {} at ({},{}) points dir ({dx},{dy}) emphasis {}, mimes {:?}, says \"{}\", urgency {} [privately meant {} at ({},{})] -> watchers infer ({},{}) +/-{}",
+            event.id,
             event.at.ticks(),
             public.sender.get(),
             public.origin.x,

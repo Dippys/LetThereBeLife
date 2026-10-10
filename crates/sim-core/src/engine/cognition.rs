@@ -3,8 +3,10 @@
 
 use super::errors::{move_failure, perception_failure};
 use crate::cognition::{
-    DesiredEffect, ListenerContext, Personality, PublicSignal, UtteranceIntent, belief_seconds,
-    express, locate, told_confidence, understand,
+    CONSEQUENCE_WEIGHT, Concept, DesiredEffect, HintCheck, HintSource, LessonCause, LessonEvent,
+    ListenerContext, PendingCorrection, Personality, PublicSignal, REPAIR_WEIGHT, RepairEvent,
+    RepairResponse, UtteranceIntent, VocalForm, belief_seconds, express, locate, mime_for,
+    spent_kinds, told_confidence, understand, unmistakable, visible_kinds,
 };
 use crate::policy::{MindInput, PolicyAction, PolicySelection, deliberate};
 use crate::{
@@ -20,6 +22,18 @@ pub(super) struct Delivery {
     pub(super) uncertainty: u8,
     pub(super) informed: u16,
     pub(super) watchers: u16,
+    /// Unsure listeners who mimed their guess back ("this?").
+    pub(super) questions: Vec<Question>,
+}
+
+/// A listener's visible "this?": its guess mimed back with its own word for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Question {
+    pub(super) listener: AgentId,
+    pub(super) guess: Concept,
+    pub(super) listener_word: Option<VocalForm>,
+    pub(super) estimate: WorldPosition,
+    pub(super) uncertainty: u8,
 }
 
 /// A runner-up reading at least this likely (out of 255) is kept when the
@@ -40,6 +54,90 @@ const fn can_watch(activity: AgentActivity) -> bool {
     )
 }
 
+/// Who learns from a consequence and what it can see.
+struct ConsequenceContext {
+    agent: AgentId,
+    at: crate::SimTime,
+    now: u32,
+    visible: [bool; 5],
+    teller: Option<AgentId>,
+    /// The next gesture id, to recover full ids from a hint's low 16 bits.
+    latest_signal: u64,
+}
+
+/// Recovers the full id of a recent gesture from its low 16 bits.
+fn full_signal_id(low: u16, next: u64) -> u64 {
+    let candidate = (next & !0xFFFF) | u64::from(low);
+    if candidate >= next {
+        candidate.saturating_sub(0x1_0000)
+    } else {
+        candidate
+    }
+}
+
+/// A checked hint tests the word it came with. Confirmed: the word meant what the
+/// listener thought. Abandoned while the alternative it had weighed is in view:
+/// the word probably meant that, and the speaker should hear about it.
+fn learn_from_consequence(
+    context: ConsequenceContext,
+    check: HintCheck,
+    lexicon: &mut crate::cognition::Lexicon,
+    dialogue: &mut crate::cognition::Dialogue,
+    lessons: &mut Vec<LessonEvent>,
+) {
+    let Some(form) = check.form else {
+        return;
+    };
+    let believed = GestureTopic::Place(check.kind).concept();
+    let signal = Some(full_signal_id(check.signal, context.latest_signal));
+    if check.confirmed {
+        lexicon.reinforce(form, believed, CONSEQUENCE_WEIGHT);
+        lessons.push(LessonEvent {
+            agent: context.agent,
+            at: context.at,
+            form,
+            strengthened: Some(believed),
+            weakened: None,
+            use_worked: None,
+            cause: LessonCause::Consequence,
+            signal,
+        });
+        return;
+    }
+    // Only an alternative the listener had actually weighed counts: a stale tip
+    // (the berries were eaten) teaches nothing about the word.
+    let Some(actual) = check.alternative.filter(|alternative| {
+        crate::cognition::concept_topic(*alternative).is_some_and(|topic| match topic {
+            GestureTopic::Place(kind) => context.visible[kind as usize],
+            GestureTopic::Explored => false,
+        })
+    }) else {
+        return;
+    };
+    lexicon.contradict(form, believed, CONSEQUENCE_WEIGHT);
+    lexicon.reinforce(form, actual, CONSEQUENCE_WEIGHT);
+    if let Some(speaker) = context.teller {
+        dialogue.plan_correction(PendingCorrection {
+            speaker,
+            form,
+            misread: believed,
+            actual,
+            place: check.place,
+            since: context.now,
+        });
+    }
+    lessons.push(LessonEvent {
+        agent: context.agent,
+        at: context.at,
+        form,
+        strengthened: Some(actual),
+        weakened: Some(believed),
+        use_worked: None,
+        cause: LessonCause::Consequence,
+        signal,
+    });
+}
+
 impl Engine {
     /// Remembers what `agent` currently sees, then chooses using its mental map.
     pub(super) fn deliberate_with_memory(
@@ -58,7 +156,11 @@ impl Engine {
         let social = self.policy_options.social;
         let personality = self.personality_in_use(agent);
         let at = self.time;
+        let latest_signal = self.next_signal_id;
+        let visible = visible_kinds(origin, perception);
+        let spent = spent_kinds(perception);
         let hint_outcomes = &mut self.hint_outcomes;
+        let lessons = &mut self.lesson_events;
         let mind = self.minds.get_mut(agent);
         if social {
             for other in &perception.agents {
@@ -73,24 +175,52 @@ impl Engine {
         let crate::cognition::Mind {
             map,
             social: people,
-            ..
+            lexicon,
+            dialogue,
         } = mind;
         map.observe(
             agent.get(),
             origin,
             perception,
             now,
-            &mut |teller, confirmed, kind| {
+            &mut |check: HintCheck| {
+                let teller = check.teller.and_then(|slot| people.agent_in(slot));
+                // Stripped bushes in view explain an empty spot: the tip was right
+                // but stale, which says nothing about the teller or the word.
+                if !check.confirmed && spent[check.kind as usize] {
+                    hint_outcomes.push(HintOutcomeEvent {
+                        agent,
+                        teller,
+                        kind: check.kind,
+                        confirmed: false,
+                        at,
+                    });
+                    return;
+                }
                 hint_outcomes.push(HintOutcomeEvent {
                     agent,
-                    teller: people.agent_in(teller),
-                    kind,
-                    confirmed,
+                    teller,
+                    kind: check.kind,
+                    confirmed: check.confirmed,
                     at,
                 });
-                if social {
-                    people.hint_checked(teller, confirmed);
+                if social && let Some(slot) = check.teller {
+                    people.hint_checked(slot, check.confirmed);
                 }
+                learn_from_consequence(
+                    ConsequenceContext {
+                        agent,
+                        at,
+                        now,
+                        visible,
+                        teller,
+                        latest_signal,
+                    },
+                    check,
+                    lexicon,
+                    dialogue,
+                    lessons,
+                );
             },
         );
         let search_target = if map.seen_count(LandmarkKind::Water) == 0 {
@@ -104,9 +234,25 @@ impl Engine {
             .iter()
             .any(|other| other.id != agent && can_watch(other.activity));
         let cooldown = Personality::scale(personality.sociability, 110, 10) as u32;
-        let share = (self.policy_options.sharing && company && map.share_ready(now, cooldown))
-            .then(|| map.shareable(perception.area))
-            .flatten();
+        // Setting the record straight with a speaker in view comes before sharing.
+        let correction = self
+            .policy_options
+            .sharing
+            .then(|| dialogue.correction(now))
+            .flatten()
+            .filter(|correction| {
+                perception
+                    .agents
+                    .iter()
+                    .any(|other| other.id == correction.speaker && can_watch(other.activity))
+            });
+        let share = correction
+            .map(|correction| (correction.place, u8::MAX))
+            .or_else(|| {
+                (self.policy_options.sharing && company && map.share_ready(now, cooldown))
+                    .then(|| map.shareable(perception.area))
+                    .flatten()
+            });
         // Visit friends only when alone; sociable people remember them for longer.
         let friend_target = (social && !company)
             .then(|| {
@@ -189,6 +335,15 @@ impl Engine {
             .view(sender)
             .ok_or(PolicyFailureReason::InconsistentState)?
             .position;
+        let now = belief_seconds(self.time);
+        let correction = self
+            .minds
+            .get(sender)
+            .and_then(|mind| mind.dialogue.correction(now))
+            .filter(|correction| correction.place == place);
+        if let Some(correction) = correction {
+            return self.apply_correction(sender, from, correction);
+        }
         let topic = self
             .minds
             .get(sender)
@@ -218,6 +373,9 @@ impl Engine {
         let id = self.next_signal_id;
         self.next_signal_id += 1;
         let delivery = self.deliver(id, &public)?;
+        for question in &delivery.questions {
+            self.answer_question(id, &public, intent, *question, now);
+        }
         self.signal_events.push(SignalEvent {
             id,
             at: self.time,
@@ -239,6 +397,8 @@ impl Engine {
         public: &PublicSignal,
     ) -> Result<Delivery, PolicyFailureReason> {
         let (estimate, uncertainty) = locate(public);
+        let bearing = crate::policy::heading_toward(public.origin, estimate);
+        let mut questions = Vec::new();
         let perception = self
             .perceive_physical(public.sender, PHYSICAL_POLICY_RADIUS)
             .map_err(perception_failure)?;
@@ -251,6 +411,14 @@ impl Engine {
             }
             watchers = watchers.saturating_add(1);
             let (thirst, hunger) = self.relative_need(watcher.id);
+            // Cautious or sociable listeners ask "this?" sooner; bold, reserved ones
+            // just go. Average traits ask below about 58% (147 of 255); the range is 45–70%.
+            let personality = self.personality_in_use(watcher.id);
+            let ask_below = Personality::scale(
+                ((u16::from(personality.caution) + u16::from(personality.sociability)) / 2) as u8,
+                115,
+                179,
+            ) as u8;
             let mind = self.minds.get_mut(watcher.id);
             let word = public
                 .vocal
@@ -267,8 +435,22 @@ impl Engine {
             let understanding = understand(public, listener);
             // Words are learned from the listener's own reading, right or wrong.
             if let Some(form) = public.vocal {
-                mind.lexicon
-                    .hear_with_evidence(form, understanding.topic.concept());
+                let heard_as = understanding.topic.concept();
+                mind.lexicon.hear_with_evidence(form, heard_as);
+                if let Some((prior, _)) = word
+                    && prior != heard_as
+                {
+                    self.lesson_events.push(LessonEvent {
+                        agent: watcher.id,
+                        at: self.time,
+                        form,
+                        strengthened: Some(heard_as),
+                        weakened: Some(prior),
+                        use_worked: None,
+                        cause: LessonCause::Usage,
+                        signal: Some(id),
+                    });
+                }
             }
             let teller = match (social, understanding.topic) {
                 (true, GestureTopic::Place(_)) => mind.notice(public.sender, public.origin, now),
@@ -281,8 +463,18 @@ impl Engine {
                 GestureTopic::Explored => mind.map.record_visit(estimate),
                 GestureTopic::Place(kind) => {
                     confidence = scaled_confidence(trust, best_probability);
+                    let source = HintSource {
+                        teller,
+                        form: public.vocal,
+                        alternative: understanding
+                            .reading
+                            .runner_up()
+                            .map(|(concept, _)| concept),
+                        signal: id,
+                        bearing: Some(bearing),
+                    };
                     mind.map
-                        .remember_told(kind, estimate, uncertainty, now, teller, confidence)
+                        .remember_told(kind, estimate, uncertainty, now, source, confidence)
                 }
             };
             // Stakes: a likely-enough reading of something urgently needed is kept too.
@@ -293,14 +485,52 @@ impl Engine {
                 && ((kind == LandmarkKind::Water && thirst >= URGENT_NEED)
                     || (kind == LandmarkKind::Food && hunger >= URGENT_NEED))
             {
+                let source = HintSource {
+                    teller,
+                    form: public.vocal,
+                    alternative: Some(best),
+                    signal: id,
+                    bearing: Some(bearing),
+                };
                 changed |= mind.map.remember_told(
                     kind,
                     estimate,
                     uncertainty,
                     now,
-                    teller,
+                    source,
                     scaled_confidence(trust, probability),
                 );
+            }
+            if let (Some(negated), Some(form)) = (public.negated, public.vocal) {
+                let wrong = unmistakable(negated);
+                let right = unmistakable(public.mime);
+                let speaks_it = mind.lexicon.produce(right) == Some(form);
+                mind.lexicon.contradict(form, wrong, REPAIR_WEIGHT);
+                mind.lexicon.reinforce(form, right, REPAIR_WEIGHT);
+                if speaks_it {
+                    mind.lexicon.record_use(form, right, false);
+                }
+                self.lesson_events.push(LessonEvent {
+                    agent: watcher.id,
+                    at: self.time,
+                    form,
+                    strengthened: Some(right),
+                    weakened: Some(wrong),
+                    use_worked: speaks_it.then_some(false),
+                    cause: LessonCause::Correction,
+                    signal: Some(id),
+                });
+            } else if matches!(understanding.topic, GestureTopic::Place(_))
+                && best_probability < ask_below
+            {
+                // Unsure listeners mime their guess back with their own word for it.
+                questions.push(Question {
+                    listener: watcher.id,
+                    guess: best,
+                    listener_word: mind.lexicon.produce(best),
+                    estimate,
+                    uncertainty,
+                });
             }
             if changed {
                 informed = informed.saturating_add(1);
@@ -324,6 +554,7 @@ impl Engine {
             uncertainty,
             informed,
             watchers,
+            questions,
         })
     }
 
@@ -338,6 +569,180 @@ impl Engine {
                 };
                 (relative(needs.thirst), relative(needs.hunger))
             })
+    }
+
+    /// The sender sees a listener's "this?" and, knowing what it meant, nods or
+    /// repeats with an exaggerated mime. The listener only sees that answer.
+    fn answer_question(
+        &mut self,
+        id: u64,
+        public: &PublicSignal,
+        intent: UtteranceIntent,
+        question: Question,
+        now: u32,
+    ) {
+        let meant = intent.topic.concept();
+        let response = if question.guess == meant {
+            RepairResponse::Confirmed
+        } else {
+            RepairResponse::Repaired(unmistakable(mime_for(intent.topic)))
+        };
+        // Sender side: did its word work, and what does the listener call it?
+        let sender = self.minds.get_mut(public.sender);
+        if let Some(form) = public.vocal {
+            sender
+                .lexicon
+                .record_use(form, meant, response == RepairResponse::Confirmed);
+            self.lesson_events.push(LessonEvent {
+                agent: public.sender,
+                at: self.time,
+                form,
+                strengthened: None,
+                weakened: None,
+                use_worked: Some(response == RepairResponse::Confirmed),
+                cause: if response == RepairResponse::Confirmed {
+                    LessonCause::Confirmation
+                } else {
+                    LessonCause::Repair
+                },
+                signal: Some(id),
+            });
+        }
+        if let Some(listener_word) = question.listener_word
+            && response != RepairResponse::Confirmed
+        {
+            sender
+                .lexicon
+                .hear_with_evidence(listener_word, question.guess);
+        }
+        // Listener side: only the public nod or exaggerated mime.
+        let listener = self.minds.get_mut(question.listener);
+        let (strengthened, weakened) = match response {
+            RepairResponse::Confirmed => (question.guess, None),
+            RepairResponse::Repaired(shown) => {
+                if let Some(GestureTopic::Place(wrong)) =
+                    crate::cognition::concept_topic(question.guess)
+                {
+                    listener.map.forget_hint(wrong, question.estimate);
+                }
+                if let Some(GestureTopic::Place(right)) = crate::cognition::concept_topic(shown) {
+                    let teller = listener.social.slot_of(public.sender);
+                    let trust =
+                        teller.map_or(crate::DEFAULT_TRUST, |slot| listener.social.trust(slot));
+                    let source = HintSource {
+                        teller,
+                        form: public.vocal,
+                        alternative: None,
+                        signal: id,
+                        bearing: Some(crate::policy::heading_toward(
+                            public.origin,
+                            question.estimate,
+                        )),
+                    };
+                    listener.map.remember_told(
+                        right,
+                        question.estimate,
+                        question.uncertainty,
+                        now,
+                        source,
+                        told_confidence(trust),
+                    );
+                }
+                (shown, Some(question.guess))
+            }
+        };
+        if let Some(form) = public.vocal {
+            listener
+                .lexicon
+                .reinforce(form, strengthened, REPAIR_WEIGHT);
+            if let Some(wrong) = weakened {
+                listener.lexicon.contradict(form, wrong, REPAIR_WEIGHT);
+            }
+            self.lesson_events.push(LessonEvent {
+                agent: question.listener,
+                at: self.time,
+                form,
+                strengthened: Some(strengthened),
+                weakened,
+                use_worked: None,
+                cause: if weakened.is_some() {
+                    LessonCause::Repair
+                } else {
+                    LessonCause::Confirmation
+                },
+                signal: Some(id),
+            });
+        }
+        self.repair_events.push(RepairEvent {
+            signal: id,
+            listener: question.listener,
+            at: self.time,
+            guess: question.guess,
+            listener_word: question.listener_word,
+            response,
+        });
+    }
+
+    /// "You said that word, but over there was this, not that": points back at
+    /// the place, says the word, shows what was really there, and waves away
+    /// what it was taken to mean.
+    fn apply_correction(
+        &mut self,
+        sender: AgentId,
+        from: WorldPosition,
+        correction: PendingCorrection,
+    ) -> Result<(), PolicyFailureReason> {
+        // The speaker may have walked off while this was being prepared: keep the
+        // correction in mind for the next meeting instead of telling no one.
+        let speaker_watching = self
+            .perceive_physical(sender, PHYSICAL_POLICY_RADIUS)
+            .map_err(perception_failure)?
+            .agents
+            .iter()
+            .any(|other| other.id == correction.speaker && can_watch(other.activity));
+        if !speaker_watching {
+            return Err(PolicyFailureReason::TargetUnavailable);
+        }
+        self.minds.get_mut(sender).dialogue.clear_correction();
+        let (Some(actual), Some(misread)) = (
+            crate::cognition::concept_topic(correction.actual),
+            crate::cognition::concept_topic(correction.misread),
+        ) else {
+            return Err(PolicyFailureReason::TargetUnavailable);
+        };
+        let intent = UtteranceIntent {
+            effect: DesiredEffect::Correct,
+            topic: actual,
+            place: correction.place,
+        };
+        let urgency = self.visible_urgency(sender);
+        let mut public = express(sender, from, intent, Some(correction.form), urgency)
+            .ok_or(PolicyFailureReason::TargetUnavailable)?;
+        public.negated = Some(mime_for(misread));
+        let id = self.next_signal_id;
+        self.next_signal_id += 1;
+        let delivery = self.deliver(id, &public)?;
+        self.signal_events.push(SignalEvent {
+            id,
+            at: self.time,
+            intent,
+            signal: public,
+            inferred_position: delivery.estimate,
+            search_radius: u16::from(delivery.uncertainty) * 4,
+            informed: delivery.informed,
+            watchers: delivery.watchers,
+        });
+        Ok(())
+    }
+
+    /// Word lessons from the latest tick (for logs and tools).
+    pub fn lesson_events(&self) -> &[LessonEvent] {
+        &self.lesson_events
+    }
+
+    /// "This?" questions and their answers from the latest tick (for logs and tools).
+    pub fn repair_events(&self) -> &[RepairEvent] {
+        &self.repair_events
     }
 
     /// How urgent the agent looks: its most pressing need relative to that

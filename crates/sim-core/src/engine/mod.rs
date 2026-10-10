@@ -127,6 +127,8 @@ pub struct Engine {
     signal_events: Vec<SignalEvent>,
     interpretation_events: Vec<InterpretationEvent>,
     hint_outcomes: Vec<HintOutcomeEvent>,
+    lesson_events: Vec<crate::LessonEvent>,
+    repair_events: Vec<crate::RepairEvent>,
     next_signal_id: u64,
     resource_deltas: ResourceDeltas,
     spawned_objects: SpawnedObjects,
@@ -164,6 +166,8 @@ impl Engine {
             signal_events: Vec::new(),
             interpretation_events: Vec::new(),
             hint_outcomes: Vec::new(),
+            lesson_events: Vec::new(),
+            repair_events: Vec::new(),
             next_signal_id: 0,
             resource_deltas: ResourceDeltas::default(),
             spawned_objects: SpawnedObjects::default(),
@@ -208,6 +212,8 @@ impl Engine {
                 self.signal_events.clear();
                 self.interpretation_events.clear();
                 self.hint_outcomes.clear();
+                self.lesson_events.clear();
+                self.repair_events.clear();
                 self.next_signal_id = 0;
                 self.resource_deltas = ResourceDeltas::default();
                 self.spawned_objects = SpawnedObjects::default();

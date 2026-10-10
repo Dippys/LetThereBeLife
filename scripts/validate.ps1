@@ -1,6 +1,6 @@
 # Full quality gate. Run from anywhere:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/validate.ps1 [-Quick] [-Gpu]
-# -Quick skips the headless/viewer smoke runs. -Gpu adds the hidden-window viewer smoke.
+# -Quick skips the headless smoke run and the release success test. -Gpu adds the hidden-window viewer smoke.
 
 param(
     [switch]$Quick,
@@ -33,6 +33,7 @@ Invoke-Checked 'cargo clippy' { cargo clippy --workspace --all-targets -- -D war
 
 if (-not $Quick) {
     Invoke-Checked 'Headless smoke' { cargo run -p sim-headless -- --ticks 600 --seed 42 }
+    Invoke-Checked 'Definition of success (release)' { cargo test --release -p sim-headless --test success -- --ignored }
 }
 if ($Gpu) {
     Invoke-Checked 'Viewer GPU smoke' { cargo run -p sim-viewer -- --smoke-frames 2 }

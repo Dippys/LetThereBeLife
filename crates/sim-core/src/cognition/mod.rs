@@ -3,6 +3,7 @@
 //! knowledge to each other through observable behavior. Beliefs live here;
 //! physical truth stays in the world, population, and resource stores.
 
+mod dialogue;
 mod gesture;
 mod lexicon;
 mod map;
@@ -11,16 +12,18 @@ mod reading;
 mod signal;
 mod social;
 
+pub use dialogue::{CONSEQUENCE_WEIGHT, REPAIR_WEIGHT};
+pub(crate) use dialogue::{Dialogue, PendingCorrection};
 pub use gesture::Gesture;
 pub(crate) use lexicon::Lexicon;
 pub use lexicon::{Concept, FAMILY_SIZE, LEXICON_SLOTS, LexiconEntryView, VOCAL_FORMS, VocalForm};
-pub(crate) use map::MentalMap;
+pub(crate) use map::{HintCheck, HintSource, MentalMap, spent_kinds, visible_kinds};
 pub use map::{LANDMARK_SLOTS, MERGE_RADIUS, SEARCH_SPACING, VISIT_TILE_SIZE, VISITED_TILE_SLOTS};
 pub use personality::Personality;
 pub(crate) use reading::ListenerContext;
 pub use reading::{READING_CANDIDATES, Reading, ReadingReasons, concept_topic};
 pub use signal::{DesiredEffect, Mime, PublicSignal, Tone, Understanding, UtteranceIntent};
-pub(crate) use signal::{express, locate, understand};
+pub(crate) use signal::{express, locate, mime_for, understand, unmistakable};
 pub(crate) use social::SocialMemory;
 pub use social::{ACQUAINTANCE_SLOTS, AcquaintanceView, DEFAULT_TRUST, FRIEND_FAMILIARITY};
 
@@ -150,6 +153,60 @@ pub struct InterpretationEvent {
     pub reading: Reading,
 }
 
+/// Why an agent changed what it believes a word means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LessonCause {
+    /// It went to a place it was told about and saw what was (or wasn't) there.
+    Consequence,
+    /// It asked "this?" and the speaker nodded.
+    Confirmation,
+    /// It asked "this?" and the speaker repeated with a clearer mime.
+    Repair,
+    /// Someone pointed back at a place, said a word, and mimed "not this, that".
+    Correction,
+    /// It heard someone use a word for something other than what it thought the
+    /// word meant (learning from ordinary use).
+    Usage,
+}
+
+/// One change to an agent's lexicon or word habits (latest tick, for logs only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LessonEvent {
+    pub agent: AgentId,
+    pub at: SimTime,
+    pub form: VocalForm,
+    /// The meaning the agent now favors more, if any.
+    pub strengthened: Option<Concept>,
+    /// The meaning the agent now doubts, if any.
+    pub weakened: Option<Concept>,
+    /// For speakers: whether its use of the word was judged to have worked.
+    pub use_worked: Option<bool>,
+    pub cause: LessonCause,
+    /// The gesture this lesson traces back to (the tip, the question, or the correction).
+    pub signal: Option<u64>,
+}
+
+/// How a speaker answered a listener's "this?" (latest tick, for logs only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepairResponse {
+    /// A nod: the guess was right.
+    Confirmed,
+    /// A clearer, exaggerated mime of what was meant.
+    Repaired(Concept),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RepairEvent {
+    pub signal: u64,
+    pub listener: AgentId,
+    pub at: SimTime,
+    /// What the listener mimed back.
+    pub guess: Concept,
+    /// The listener's own word for its guess, said with the question.
+    pub listener_word: Option<VocalForm>,
+    pub response: RepairResponse,
+}
+
 /// A hint that was checked by looking (latest tick, for logs and tools only).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HintOutcomeEvent {
@@ -209,6 +266,7 @@ pub(crate) struct Mind {
     pub(crate) map: MentalMap,
     pub(crate) social: SocialMemory,
     pub(crate) lexicon: Lexicon,
+    pub(crate) dialogue: Dialogue,
 }
 
 impl Mind {

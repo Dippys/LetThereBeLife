@@ -35,8 +35,8 @@ pub use traversal::{
 };
 pub use validation::GenerateAreaError;
 pub use valley::{
-    CAMP_RADIUS, VALLEY_BAND, VALLEY_SIDE, Valley, ValleyScore, camp_sites, find_valley,
-    score_square,
+    CAMP_RADIUS, VALLEY_BAND, VALLEY_FAMILIES, VALLEY_SIDE, Valley, ValleyScore, camp_sites,
+    family_camps, find_valley, score_square,
 };
 
 use worldgen::REGION_SIZE;

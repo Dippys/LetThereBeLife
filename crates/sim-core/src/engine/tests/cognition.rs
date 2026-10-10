@@ -43,12 +43,13 @@ fn remember_water(engine: &mut Engine, agent: AgentId, place: WorldPosition) {
         traversable_cells: Vec::new(),
         reachable_cells: Vec::new(),
         reserved_cells: Vec::new(),
+        spent_resources: Vec::new(),
     };
     engine
         .minds
         .get_mut(agent)
         .map
-        .observe(agent.get(), place, &perception, 0, &mut |_, _, _| {});
+        .observe(agent.get(), place, &perception, 0, &mut |_| {});
 }
 
 #[test]
@@ -207,7 +208,7 @@ fn explored_gestures_mark_ground_for_watchers() {
         .minds
         .get_mut(AgentId::new(0))
         .map
-        .observe(0, far, &far_view, 0, &mut |_, _, _| {});
+        .observe(0, far, &far_view, 0, &mut |_| {});
     let (marker, _) = engine
         .minds
         .get(AgentId::new(0))
@@ -401,5 +402,158 @@ fn a_word_the_listener_holds_differently_causes_a_believable_misreading() {
     assert_eq!(
         reading.reading.runner_up().map(|(c, _)| c),
         Some(crate::Concept::Water)
+    );
+}
+
+/// The word this agent firmly links to `concept`.
+fn word_for(engine: &Engine, agent: AgentId, concept: crate::Concept) -> crate::VocalForm {
+    engine
+        .mental_map(agent)
+        .unwrap()
+        .lexicon
+        .into_iter()
+        .filter(|entry| entry.concept == concept)
+        .max_by_key(|entry| i32::from(entry.positive) - i32::from(entry.contradictory))
+        .expect("founders have a word for it")
+        .form
+}
+
+#[test]
+fn an_unsure_listener_asks_and_the_speaker_repairs() {
+    let (mut engine, sender, _) = two_neighbours();
+    let lake = WorldPosition {
+        x: sender.x + 70,
+        y: sender.y,
+    };
+    remember_water(&mut engine, AgentId::new(0), lake);
+    engine.minds.get_mut(AgentId::new(1));
+    // The speaker says, for water, the word the listener firmly reads as food.
+    let confusing = word_for(&engine, AgentId::new(1), crate::Concept::Food);
+    engine
+        .minds
+        .get_mut(AgentId::new(0))
+        .lexicon
+        .reinforce(confusing, crate::Concept::Water, 60);
+    // A thirsty listener weighs water too, so it ends up unsure (the word says
+    // food; the mime and its thirst lean water) and asks.
+    engine.population.set_need_value_for_test(
+        AgentId::new(1),
+        crate::NeedKind::Thirst,
+        6_000,
+        engine.time,
+    );
+    engine.apply_signal(AgentId::new(0), lake).unwrap();
+
+    let repair = engine
+        .repair_events()
+        .first()
+        .copied()
+        .expect("the listener asked");
+    assert_eq!(repair.listener, AgentId::new(1));
+    assert_eq!(repair.guess, crate::Concept::Food);
+    assert_eq!(
+        repair.response,
+        crate::RepairResponse::Repaired(crate::Concept::Water)
+    );
+    let listener = engine.mental_map(AgentId::new(1)).unwrap();
+    assert!(
+        listener
+            .landmarks
+            .iter()
+            .any(|place| place.kind == LandmarkKind::Water && place.source == LandmarkSource::Told),
+        "after the repair the listener believes there is water there"
+    );
+    assert!(
+        !listener
+            .landmarks
+            .iter()
+            .any(|place| place.kind == LandmarkKind::Food),
+        "and dropped the misread food hint"
+    );
+    let causes: Vec<_> = engine
+        .lesson_events()
+        .iter()
+        .map(|lesson| lesson.cause)
+        .collect();
+    assert!(causes.contains(&crate::LessonCause::Repair));
+}
+
+#[test]
+fn a_correction_teaches_the_speaker_its_word_was_misheard() {
+    let (mut engine, sender, _) = two_neighbours();
+    let pond = WorldPosition {
+        x: sender.x + 50,
+        y: sender.y + 10,
+    };
+    engine.minds.get_mut(AgentId::new(0));
+    let form = word_for(&engine, AgentId::new(0), crate::Concept::Water);
+    // Agent 1 misread agent 0's word for water as food and found water instead.
+    engine
+        .minds
+        .get_mut(AgentId::new(1))
+        .dialogue
+        .plan_correction(crate::cognition::PendingCorrection {
+            speaker: AgentId::new(0),
+            form,
+            misread: crate::Concept::Food,
+            actual: crate::Concept::Water,
+            place: pond,
+            since: 0,
+        });
+    engine.apply_signal(AgentId::new(1), pond).unwrap();
+
+    let event = engine.signal_events()[0];
+    assert_eq!(event.intent.effect, crate::DesiredEffect::Correct);
+    assert_eq!(event.signal.vocal, Some(form));
+    assert_eq!(event.signal.negated, Some(crate::Mime::PickAndChew));
+    let speaker_lesson = engine
+        .lesson_events()
+        .iter()
+        .find(|lesson| lesson.agent == AgentId::new(0))
+        .expect("the speaker saw the correction");
+    assert_eq!(speaker_lesson.cause, crate::LessonCause::Correction);
+    assert_eq!(speaker_lesson.use_worked, Some(false));
+    let entry = engine
+        .mental_map(AgentId::new(0))
+        .unwrap()
+        .lexicon
+        .into_iter()
+        .find(|entry| entry.form == form && entry.concept == crate::Concept::Water)
+        .unwrap();
+    assert_eq!(entry.failures, 1, "the speaker counts that use as misheard");
+}
+
+#[test]
+fn a_correction_waits_while_the_speaker_is_away() {
+    let (mut engine, sender, _) = two_neighbours();
+    let pond = WorldPosition {
+        x: sender.x + 50,
+        y: sender.y,
+    };
+    engine
+        .minds
+        .get_mut(AgentId::new(1))
+        .dialogue
+        .plan_correction(crate::cognition::PendingCorrection {
+            speaker: AgentId::new(7),
+            form: crate::VocalForm(3),
+            misread: crate::Concept::Food,
+            actual: crate::Concept::Water,
+            place: pond,
+            since: 0,
+        });
+    assert_eq!(
+        engine.apply_signal(AgentId::new(1), pond),
+        Err(PolicyFailureReason::TargetUnavailable)
+    );
+    assert!(
+        engine
+            .minds
+            .get(AgentId::new(1))
+            .unwrap()
+            .dialogue
+            .correction(1)
+            .is_some(),
+        "kept for the next meeting"
     );
 }

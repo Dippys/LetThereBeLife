@@ -202,3 +202,29 @@ source of misunderstanding and seed the spec's multiple languages.
 on, while survival stays at 249/300. Because learning still follows the listener's own reading,
 confusions self-reinforce until M5. The "acted" link in the log matches hint checks to the
 receiver's latest place hint, which is approximate.
+
+## D-075: M5, learning and repair from observable consequences (2026-10-10)
+
+**Decision:** Unsure listeners ask "this?" (the threshold depends on caution and sociability), and
+speakers nod or repair with an exaggerated mime. Hints carry their word, runner-up meaning,
+bearing, and gesture id (landmarks are 16 B, the mental map 304 B), so checking a hint later can
+teach about the word. Stale spots (stripped bushes in view) are explained away. Misled listeners
+later correct the speaker, and corrections wait until the speaker is watching. Usage contradictions
+are logged. The two valley families camp apart.
+**Why:** The plan's M5, following spec 05: success is inferred later, and repair is strong learning
+evidence. The first version taught false lessons (eaten berries were read as "the word must mean
+water"), and a 4-tip memory lost the word before hints were checked. Both were found through the log
+and fixed.
+**Consequences:** Vocabularies converge through use (81% → 94% in the single-camp seed 1 valley).
+Speakers can drift to words the other family understands. Survival is 251/300.
+
+## D-076: M6, the definition-of-success test (2026-10-10)
+
+**Decision:** `CommunicationLog::success_episodes` links misread → acted → listener lesson → speaker
+lesson through gesture ids, accepting corrected and entrenched episodes alike: the spec requires
+updates from observable evidence, not correct ones. `tests/success.rs` (release, seed 1 valley,
+1.2M ticks) requires at least one episode and is part of `scripts/validate`.
+**Why:** The plan's M6 and the spec's success definition.
+**Consequences:** The definition is met, but episodes are rare (1 across 12 seeds at 2.4M ticks).
+The test is deterministic but sensitive to behavior changes; if it breaks, find out why before
+retargeting it.

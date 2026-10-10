@@ -91,6 +91,7 @@ fn perception() -> PhysicalPerception {
             WorldPosition { x: 0, y: 2 },
         ],
         reserved_cells: Vec::new(),
+        spent_resources: Vec::new(),
     }
 }
 

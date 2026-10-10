@@ -8,7 +8,7 @@ mod selection;
 mod state;
 
 pub use deliberate::HOME_RANGE;
-pub(crate) use deliberate::{MindInput, deliberate};
+pub(crate) use deliberate::{MindInput, deliberate, heading_toward};
 #[cfg(test)]
 pub(crate) use selection::select;
 pub(crate) use selection::{PolicyAction, PolicySelection, select_with_exploration};

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Full quality gate for bash/WSL. Usage: scripts/validate.sh [--quick] [--gpu]
-# --quick skips the headless smoke run. --gpu adds the hidden-window viewer smoke.
+# --quick skips the headless smoke run and the release success test. --gpu adds the hidden-window viewer smoke.
 # Under WSL without a Linux toolchain, falls back to the Windows cargo.exe.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -39,6 +39,8 @@ echo "==> cargo test";         "$cargo" test --workspace
 echo "==> cargo clippy";       "$cargo" clippy --workspace --all-targets -- -D warnings
 if [ "$quick" -eq 0 ]; then
     echo "==> Headless smoke"; "$cargo" run -p sim-headless -- --ticks 600 --seed 42
+    echo "==> Definition of success (release)"
+    "$cargo" test --release -p sim-headless --test success -- --ignored
 fi
 if [ "$gpu" -eq 1 ]; then
     echo "==> Viewer GPU smoke"; "$cargo" run -p sim-viewer -- --smoke-frames 2

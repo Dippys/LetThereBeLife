@@ -41,6 +41,9 @@ pub struct PhysicalPerception {
     /// Cells a tree or rock stands on, depleted or not: walkable, but nobody
     /// can sleep or build there. Row-major.
     pub reserved_cells: Vec<WorldPosition>,
+    /// Trees, bushes, and rocks in view that have been picked clean (capacity 0):
+    /// visible evidence that someone got there first. Row-major.
+    pub spent_resources: Vec<PerceivedResource>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

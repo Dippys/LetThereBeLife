@@ -111,6 +111,8 @@ impl MemoryInspection {
             positive: 0,
             contradictory: 0,
             heard: 0,
+            successes: 0,
+            failures: 0,
         };
         let mut places = [EMPTY; LANDMARK_SLOTS];
         let len = view.landmarks.len().min(LANDMARK_SLOTS);

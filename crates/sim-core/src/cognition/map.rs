@@ -38,7 +38,7 @@ const SEARCH_LEG_DECISIONS: u8 = 24;
 const NO_SEARCH: u16 = u16::MAX;
 
 /// One remembered place. Its kind is implied by its slot; `confidence == 0`
-/// marks an empty slot. Exactly 12 bytes.
+/// marks an empty slot. Exactly 16 bytes.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub(crate) struct Landmark {
@@ -49,9 +49,95 @@ pub(crate) struct Landmark {
     confidence: u8,
     /// Search radius in 4-cell units; zero for first-hand observations.
     uncertainty: u8,
+    /// Low 4 bits: searches made so far. High 4 bits: pointing bearing + 1
+    /// (an 8-way heading; 0 = unknown), so searches follow the pointed line.
     probes: u8,
     /// For hints: acquaintance slot + 1 of whoever pointed it out (0 = unknown).
     teller: u8,
+    /// For hints: the word it came with (`NONE` = no word).
+    form: u8,
+    /// For hints: the runner-up meaning the listener also weighed (`NONE` = none).
+    alternative: u8,
+    /// For hints: low 16 bits of the gesture id it came from, for logs.
+    signal: u16,
+}
+
+const NONE: u8 = u8::MAX;
+
+/// Where a hint came from. Kept with the hint so that checking it later can
+/// teach the listener about the word and the teller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct HintSource {
+    pub(crate) teller: Option<u8>,
+    pub(crate) form: Option<crate::VocalForm>,
+    pub(crate) alternative: Option<crate::Concept>,
+    pub(crate) signal: u64,
+    /// The direction the teller pointed, if known.
+    pub(crate) bearing: Option<ExplorationHeading>,
+}
+
+impl HintSource {
+    #[cfg(test)]
+    pub(crate) const fn anonymous() -> Self {
+        Self {
+            teller: None,
+            form: None,
+            alternative: None,
+            signal: 0,
+            bearing: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn from_teller(slot: u8) -> Self {
+        Self {
+            teller: Some(slot),
+            ..Self::anonymous()
+        }
+    }
+}
+
+/// A hint the agent just checked by looking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct HintCheck {
+    pub(crate) kind: LandmarkKind,
+    pub(crate) confirmed: bool,
+    pub(crate) teller: Option<u8>,
+    pub(crate) form: Option<crate::VocalForm>,
+    pub(crate) alternative: Option<crate::Concept>,
+    /// Low 16 bits of the gesture id.
+    pub(crate) signal: u16,
+    /// Where the hint said to look.
+    pub(crate) place: WorldPosition,
+}
+
+impl Landmark {
+    const fn probe_count(self) -> u8 {
+        self.probes & 0x0F
+    }
+
+    fn bearing(self) -> Option<ExplorationHeading> {
+        let packed = self.probes >> 4;
+        (packed != 0).then(|| ExplorationHeading::North.rotated((packed - 1) as i8))
+    }
+
+    fn add_probe(&mut self) {
+        self.probes = (self.probes & 0xF0) | (self.probe_count() + 1).min(0x0F);
+    }
+
+    fn check(self, kind: LandmarkKind, confirmed: bool) -> HintCheck {
+        HintCheck {
+            kind,
+            confirmed,
+            teller: (self.teller != 0).then(|| self.teller - 1),
+            form: (self.form != NONE).then_some(crate::VocalForm(self.form)),
+            alternative: (self.alternative != NONE).then(|| {
+                crate::Concept::ALL[usize::from(self.alternative) % crate::Concept::COUNT]
+            }),
+            signal: self.signal,
+            place: self.position(),
+        }
+    }
 }
 
 impl Landmark {
@@ -150,6 +236,25 @@ fn tile_of(position: WorldPosition) -> (i16, i16) {
     )
 }
 
+/// Which resource kinds have picked-clean instances in view, in kind order.
+pub(crate) fn spent_kinds(perception: &PhysicalPerception) -> [bool; 5] {
+    let mut spent = [false; 5];
+    for resource in &perception.spent_resources {
+        let kind = match resource.resource.kind {
+            ResourceKind::Food => LandmarkKind::Food,
+            ResourceKind::Wood => LandmarkKind::Wood,
+            ResourceKind::Stone => LandmarkKind::Stone,
+        };
+        spent[kind as usize] = true;
+    }
+    spent
+}
+
+/// Which landmark kinds are in view right now, in kind order.
+pub(crate) fn visible_kinds(origin: WorldPosition, perception: &PhysicalPerception) -> [bool; 5] {
+    perceived_nearest(origin, perception).map(|nearest| nearest.is_some())
+}
+
 /// Nearest perceived instance of each landmark kind, in kind order.
 fn perceived_nearest(
     origin: WorldPosition,
@@ -190,7 +295,7 @@ fn perceived_nearest(
 impl MentalMap {
     /// Updates beliefs from one perception: forgets places that turned out empty,
     /// remembers the nearest visible place of each kind, and marks the tile explored.
-    /// `on_hint(teller_slot, confirmed, kind)` reports hints that were confirmed by
+    /// `on_hint` reports hints that were confirmed by
     /// seeing the place or abandoned after failed searches.
     pub(crate) fn observe(
         &mut self,
@@ -198,7 +303,7 @@ impl MentalMap {
         origin: WorldPosition,
         perception: &PhysicalPerception,
         now: u32,
-        on_hint: &mut impl FnMut(u8, bool, LandmarkKind),
+        on_hint: &mut impl FnMut(HintCheck),
     ) {
         let _ = self.record_visit(origin);
         let nearest = perceived_nearest(origin, perception);
@@ -220,12 +325,10 @@ impl MentalMap {
             if slot_ref.is_first_hand() {
                 *slot_ref = Landmark::default();
             } else {
-                slot_ref.probes = slot_ref.probes.saturating_add(1);
+                slot_ref.add_probe();
                 slot_ref.confidence = slot_ref.confidence.saturating_sub(FAILED_PROBE_PENALTY);
-                if slot_ref.confidence < FORGET_CONFIDENCE || slot_ref.probes >= MAX_PROBES {
-                    if slot_ref.teller != 0 {
-                        on_hint(slot_ref.teller - 1, false, kind_of_slot(slot));
-                    }
+                if slot_ref.confidence < FORGET_CONFIDENCE || slot_ref.probe_count() >= MAX_PROBES {
+                    on_hint(slot_ref.check(kind_of_slot(slot), false));
                     *slot_ref = Landmark::default();
                 }
             }
@@ -242,7 +345,7 @@ impl MentalMap {
         kind: LandmarkKind,
         position: WorldPosition,
         now: u32,
-        on_hint: &mut impl FnMut(u8, bool, LandmarkKind),
+        on_hint: &mut impl FnMut(HintCheck),
     ) {
         let Some((x, y)) = compact(position) else {
             return;
@@ -263,9 +366,7 @@ impl MentalMap {
             if !landmark.is_first_hand()
                 && chebyshev(landmark.position(), position) <= landmark.radius() + MERGE_RADIUS
             {
-                if landmark.teller != 0 {
-                    on_hint(landmark.teller - 1, true, kind);
-                }
+                on_hint(landmark.check(kind, true));
                 *landmark = Landmark::default();
             }
         }
@@ -279,6 +380,9 @@ impl MentalMap {
                 uncertainty: 0,
                 probes: 0,
                 teller: 0,
+                form: NONE,
+                alternative: NONE,
+                signal: 0,
             };
         }
     }
@@ -292,7 +396,7 @@ impl MentalMap {
         estimate: WorldPosition,
         uncertainty: u8,
         now: u32,
-        teller_slot: Option<u8>,
+        source: HintSource,
         confidence: u8,
     ) -> bool {
         let Some((x, y)) = compact(estimate) else {
@@ -333,8 +437,11 @@ impl MentalMap {
             seen: now,
             confidence: confidence.max(FORGET_CONFIDENCE),
             uncertainty: uncertainty.max(1),
-            probes: 0,
-            teller: teller_slot.map_or(0, |slot| slot + 1),
+            probes: source.bearing.map_or(0, |bearing| (bearing as u8 + 1) << 4),
+            teller: source.teller.map_or(0, |slot| slot + 1),
+            form: source.form.map_or(NONE, |form| form.0),
+            alternative: source.alternative.map_or(NONE, |concept| concept as u8),
+            signal: source.signal as u16,
         };
         true
     }
@@ -398,7 +505,7 @@ impl MentalMap {
         (0..LANDMARK_SLOTS)
             .filter(|&slot| {
                 let landmark = self.landmarks[slot];
-                !landmark.is_empty() && !landmark.is_first_hand() && landmark.probes == 0
+                !landmark.is_empty() && !landmark.is_first_hand() && landmark.probe_count() == 0
             })
             .map(|slot| {
                 let landmark = self.landmarks[slot];
@@ -409,6 +516,19 @@ impl MentalMap {
             })
             .min()
             .map(|(_, _, destination)| destination)
+    }
+
+    /// Drops hints of `kind` around `position` (after learning they were misread).
+    pub(crate) fn forget_hint(&mut self, kind: LandmarkKind, position: WorldPosition) {
+        for slot in slot_range(kind) {
+            let landmark = self.landmarks[slot];
+            if !landmark.is_empty()
+                && !landmark.is_first_hand()
+                && chebyshev(landmark.position(), position) <= landmark.radius() + MERGE_RADIUS
+            {
+                self.landmarks[slot] = Landmark::default();
+            }
+        }
     }
 
     /// Whether the agent remembers any place of `kind` near `position`.
@@ -656,18 +776,31 @@ fn compact(position: WorldPosition) -> Option<(i16, i16)> {
     ))
 }
 
-/// Where to look next for a hint: its estimate first, then deterministic points
-/// spread inside its search radius.
+/// Where to look next for a hint: its estimate first, then points spread along
+/// the pointed line (distance was the vague part) with a little sideways
+/// jitter, or anywhere inside the search radius if the bearing is unknown.
 fn probe_point(landmark: Landmark, agent: u32, slot: usize) -> WorldPosition {
     let center = landmark.position();
-    if landmark.probes == 0 {
+    let count = landmark.probe_count();
+    if count == 0 {
         return center;
     }
     let radius = landmark.radius().max(1) as i64;
-    let mut key = u64::from(agent) << 32 | (slot as u64) << 8 | u64::from(landmark.probes);
+    let mut key = u64::from(agent) << 32 | (slot as u64) << 8 | u64::from(count);
     key = (key ^ (key >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
     key = (key ^ (key >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
     key ^= key >> 31;
+    if let Some(bearing) = landmark.bearing() {
+        const ALONG: [i64; 8] = [0, 1, -1, 2, -2, 3, -3, 0];
+        let (dx, dy) = bearing.delta();
+        let step = (radius / 3).max(4);
+        let along = ALONG[usize::from(count).min(7)] * step;
+        let sideways = (key % 9) as i64 - 4;
+        return WorldPosition {
+            x: center.x + dx * along - dy * sideways,
+            y: center.y + dy * along + dx * sideways,
+        };
+    }
     let span = (radius * 2 + 1) as u64;
     WorldPosition {
         x: center.x + (key % span) as i64 - radius,

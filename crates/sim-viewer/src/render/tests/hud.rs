@@ -52,6 +52,8 @@ fn word(form: u8, concept: Concept, positive: u16, contradictory: u16) -> Lexico
         positive,
         contradictory,
         heard: positive + contradictory,
+        successes: 0,
+        failures: 0,
     }
 }
 

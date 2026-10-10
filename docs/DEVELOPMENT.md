@@ -48,7 +48,7 @@ Measures how viewer-like agents actually fare. They spawn without supplies and r
 ```sh
 cargo run --release -p sim-headless -- --study [--near-water | --groups | --valley] [--seed N]
     [--agents N] [--ticks N] [--mind legacy|memory|sharing|full] [--verbose] [--trace AGENT]
-    [--comms N] [--misreads N] [--explain AGENT]
+    [--comms N] [--misreads N] [--lessons N] [--successes N] [--explain AGENT]
 ```
 
 - `--near-water` spawns within 6 cells of fresh water. `--groups` drops agents in groups of 5.
@@ -63,6 +63,9 @@ cargo run --release -p sim-headless -- --study [--near-water | --groups | --vall
   how many were acted on, and their recorded reasons. `--misreads N` prints the first N acted-on
   misunderstandings as stories, with each listener's competing readings (for example
   `FOOD 50% / WATER 49%`) and why.
+- The `repair:` line counts questions and repairs, corrections, word lessons by cause, and
+  complete **SUCCESS EPISODES** (the project's definition of success). `--successes N` prints
+  episodes step by step, and `--lessons N` lists lessons that changed a word's meaning.
 - The `words:` line counts heard words in the first and second half of the run, and how often the
   listener already read the word the way the sender meant it. The `vocabulary:` line is the
   band's agreement on each place word at the start and at the end.
@@ -107,7 +110,7 @@ the latest one.
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
-scripts/validate.sh [--quick] [--gpu]       # all of the above + checksum + headless smoke
+scripts/validate.sh [--quick] [--gpu]       # all of the above + checksum + headless smoke + success test
 ```
 
 Where tests live:

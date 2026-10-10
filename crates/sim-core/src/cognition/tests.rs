@@ -1,4 +1,4 @@
-use super::map::Landmark;
+use super::map::{HintSource, Landmark};
 use super::*;
 use crate::{
     BaseResource, PerceivedResource, PerceivedWater, PhysicalPerception, ResourceKind, WaterSource,
@@ -23,6 +23,7 @@ fn view_around(center: WorldPosition) -> PhysicalPerception {
         traversable_cells: Vec::new(),
         reachable_cells: Vec::new(),
         reserved_cells: Vec::new(),
+        spent_resources: Vec::new(),
     }
 }
 
@@ -58,7 +59,7 @@ fn observe(
     perception: &PhysicalPerception,
     now: u32,
 ) {
-    map.observe(agent, origin, perception, now, &mut |_, _, _| {});
+    map.observe(agent, origin, perception, now, &mut |_| {});
 }
 
 fn landmarks(map: &MentalMap) -> Vec<LandmarkView> {
@@ -67,10 +68,10 @@ fn landmarks(map: &MentalMap) -> Vec<LandmarkView> {
 
 #[test]
 fn mental_map_layout_is_compact() {
-    assert_eq!(size_of::<Landmark>(), 12);
+    assert_eq!(size_of::<Landmark>(), 16);
     assert_eq!(
         size_of::<MentalMap>(),
-        12 * LANDMARK_SLOTS + 4 * VISITED_TILE_SLOTS + 16
+        16 * LANDMARK_SLOTS + 4 * VISITED_TILE_SLOTS + 16
     );
 }
 
@@ -168,12 +169,26 @@ fn slots_are_bounded_per_kind_and_keep_the_freshest() {
 #[test]
 fn hearsay_is_stored_with_uncertainty_and_never_overrides_first_hand_memory() {
     let mut map = MentalMap::default();
-    assert!(map.remember_told(LandmarkKind::Food, at(200, 0), 10, 5, None, 128));
+    assert!(map.remember_told(
+        LandmarkKind::Food,
+        at(200, 0),
+        10,
+        5,
+        HintSource::anonymous(),
+        128
+    ));
     let told = landmarks(&map)[0];
     assert_eq!(told.source, LandmarkSource::Told);
     assert_eq!(told.search_radius, 40);
     // Hearing about the same area again reinforces instead of duplicating.
-    assert!(map.remember_told(LandmarkKind::Food, at(210, 4), 10, 6, None, 128));
+    assert!(map.remember_told(
+        LandmarkKind::Food,
+        at(210, 4),
+        10,
+        6,
+        HintSource::anonymous(),
+        128
+    ));
     assert_eq!(landmarks(&map).len(), 1);
     assert!(landmarks(&map)[0].confidence > told.confidence);
     // Seeing food there replaces the hint with a precise memory.
@@ -183,13 +198,27 @@ fn hearsay_is_stored_with_uncertainty_and_never_overrides_first_hand_memory() {
     assert_eq!(after.len(), 1);
     assert_eq!(after[0].source, LandmarkSource::Seen);
     // Hearsay about a place it has seen adds nothing.
-    assert!(!map.remember_told(LandmarkKind::Food, at(212, 0), 3, 8, None, 128));
+    assert!(!map.remember_told(
+        LandmarkKind::Food,
+        at(212, 0),
+        3,
+        8,
+        HintSource::anonymous(),
+        128
+    ));
 }
 
 #[test]
 fn a_hint_that_keeps_turning_up_empty_is_eventually_forgotten() {
     let mut map = MentalMap::default();
-    map.remember_told(LandmarkKind::Water, at(0, 0), 4, 1, None, 128);
+    map.remember_told(
+        LandmarkKind::Water,
+        at(0, 0),
+        4,
+        1,
+        HintSource::anonymous(),
+        128,
+    );
     for step in 0..20 {
         let Some((probe, _)) = map.recall(LandmarkKind::Water, 3, at(0, 0), 0) else {
             return;
@@ -245,7 +274,14 @@ fn sharing_rotates_through_places_outside_the_view() {
 #[test]
 fn hint_outcomes_are_reported_to_the_teller() {
     let mut map = MentalMap::default();
-    map.remember_told(LandmarkKind::Water, at(0, 0), 4, 1, Some(2), 144);
+    map.remember_told(
+        LandmarkKind::Water,
+        at(0, 0),
+        4,
+        1,
+        HintSource::from_teller(2),
+        144,
+    );
     let mut outcomes = Vec::new();
     let spot = at(3, 2);
     map.observe(
@@ -253,8 +289,8 @@ fn hint_outcomes_are_reported_to_the_teller() {
         spot,
         &with_water(view_around(spot), &[spot]),
         2,
-        &mut |teller, confirmed, _| {
-            outcomes.push((teller, confirmed));
+        &mut |check| {
+            outcomes.push((check.teller.unwrap_or(u8::MAX), check.confirmed));
         },
     );
     assert_eq!(
@@ -264,21 +300,22 @@ fn hint_outcomes_are_reported_to_the_teller() {
     );
 
     let mut map = MentalMap::default();
-    map.remember_told(LandmarkKind::Water, at(0, 0), 4, 1, Some(5), 144);
+    map.remember_told(
+        LandmarkKind::Water,
+        at(0, 0),
+        4,
+        1,
+        HintSource::from_teller(5),
+        144,
+    );
     let mut outcomes = Vec::new();
     for step in 0..20 {
         let Some((probe, _)) = map.recall(LandmarkKind::Water, 3, at(0, 0), 0) else {
             break;
         };
-        map.observe(
-            3,
-            probe,
-            &view_around(probe),
-            2 + step,
-            &mut |teller, confirmed, _| {
-                outcomes.push((teller, confirmed));
-            },
-        );
+        map.observe(3, probe, &view_around(probe), 2 + step, &mut |check| {
+            outcomes.push((check.teller.unwrap_or(u8::MAX), check.confirmed));
+        });
     }
     assert_eq!(
         outcomes,
@@ -290,7 +327,14 @@ fn hint_outcomes_are_reported_to_the_teller() {
 #[test]
 fn forgetting_a_teller_detaches_their_hints() {
     let mut map = MentalMap::default();
-    map.remember_told(LandmarkKind::Food, at(0, 0), 4, 1, Some(1), 144);
+    map.remember_told(
+        LandmarkKind::Food,
+        at(0, 0),
+        4,
+        1,
+        HintSource::from_teller(1),
+        144,
+    );
     map.forget_teller(1);
     let mut outcomes = Vec::new();
     let spot = at(2, 2);
@@ -299,11 +343,15 @@ fn forgetting_a_teller_detaches_their_hints() {
         spot,
         &with_food(view_around(spot), &[spot]),
         2,
-        &mut |teller, confirmed, _| {
-            outcomes.push((teller, confirmed));
+        &mut |check| {
+            outcomes.push((check.teller.unwrap_or(u8::MAX), check.confirmed));
         },
     );
-    assert!(outcomes.is_empty());
+    assert_eq!(
+        outcomes,
+        vec![(u8::MAX, true)],
+        "the check is still reported, but its teller is no longer known"
+    );
 }
 
 #[test]
@@ -330,7 +378,14 @@ fn a_fresh_close_hint_beats_a_stale_far_food_sighting() {
     observe(&mut map, 1, far, &with_food(view_around(far), &[far]), 0);
     // Much later, someone points out food nearby.
     let now = 4_000;
-    map.remember_told(LandmarkKind::Food, at(40, 0), 4, now, None, 120);
+    map.remember_told(
+        LandmarkKind::Food,
+        at(40, 0),
+        4,
+        now,
+        HintSource::anonymous(),
+        120,
+    );
     let (destination, source) = map.recall(LandmarkKind::Food, 1, at(0, 0), now).unwrap();
     assert_eq!(source, LandmarkSource::Told);
     assert_eq!(destination, at(40, 0));
@@ -346,7 +401,14 @@ fn a_fresh_hint_can_displace_a_stale_food_memory_when_slots_are_full() {
         let spot = at(index * 100, 0);
         observe(&mut map, 1, spot, &with_food(view_around(spot), &[spot]), 0);
     }
-    assert!(map.remember_told(LandmarkKind::Food, at(900, 900), 4, 5_000, None, 140));
+    assert!(map.remember_told(
+        LandmarkKind::Food,
+        at(900, 900),
+        4,
+        5_000,
+        HintSource::anonymous(),
+        140
+    ));
     assert!(
         landmarks(&map)
             .iter()
@@ -357,7 +419,21 @@ fn a_fresh_hint_can_displace_a_stale_food_memory_when_slots_are_full() {
 #[test]
 fn curious_agents_pick_the_most_promising_unchecked_hint() {
     let mut map = MentalMap::default();
-    map.remember_told(LandmarkKind::Water, at(300, 0), 4, 1, None, 200);
-    map.remember_told(LandmarkKind::Food, at(30, 0), 4, 1, None, 200);
+    map.remember_told(
+        LandmarkKind::Water,
+        at(300, 0),
+        4,
+        1,
+        HintSource::anonymous(),
+        200,
+    );
+    map.remember_told(
+        LandmarkKind::Food,
+        at(30, 0),
+        4,
+        1,
+        HintSource::anonymous(),
+        200,
+    );
     assert_eq!(map.hint_to_check(1, at(0, 0)), Some(at(30, 0)));
 }

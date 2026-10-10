@@ -8,7 +8,7 @@ mod scenario;
 mod spawns;
 mod study;
 
-pub use comms::{CommunicationLog, CommunicationSummary, Exchange, Reception};
+pub use comms::{CommunicationLog, CommunicationSummary, Exchange, Reception, SuccessEpisode};
 pub use report::{
     ActionCounts, DeathCounts, FailureCounts, FinalAgentCounts, REPORT_FORMAT_VERSION,
     ScenarioReport, SoakEvidence,

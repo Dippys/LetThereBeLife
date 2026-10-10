@@ -95,8 +95,10 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Known problems and limitations
 
-- **Misreadings teach the wrong words.** Listeners learn from their own reading, so cross-family
-  confusions persist (vocabulary 81% → 83% in the seed 1 valley). M5 must correct from consequences.
+- **Complete misunderstanding episodes are rare.** Questions repair most misreadings on the spot.
+  Water and food co-locate at oases, so many misreadings are accidentally true, and cross-family
+  tips are about faraway places. Children (M7), who know little and ask less, should make
+  consequential misunderstandings more common.
 - **Sharing improves survival only where knowledge is scarce.** In most scenarios agents already
   survive on their own knowledge. Sharing should matter more with bigger populations, scarcer
   resources, or children who start out knowing nothing.
@@ -115,7 +117,9 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
-- 2026-10-10 (latest): M4, competing interpretations, two founding dialects, and hints that drive
+- 2026-10-10 (latest): M5, learning and repair from consequences, and M6, the success test
+  (D-075, D-076).
+- 2026-10-10: M4, competing interpretations, two founding dialects, and hints that drive
   decisions (D-074).
 - 2026-10-10: M3, concepts, words, and personal lexicons with a noisy founding
   proto-language (D-073).
@@ -130,9 +134,10 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## What's next
 
-Follow [`plans/VERTICAL_SLICE.md`](plans/VERTICAL_SLICE.md). **M1–M4 are done:** valley and communication
-log, private intent vs public signals, personal lexicons, and competing interpretations.
-**Believable misunderstandings now happen and are acted on.** Next is **M5: learning and repair
-from consequences** (both sides update after a misunderstanding), then personal lexicons, interpretation with
+Follow [`plans/VERTICAL_SLICE.md`](plans/VERTICAL_SLICE.md). **M1–M6 are done. The project's
+definition of success has been met:** in the seed 1 valley an agent misreads a gesture for a
+recorded reason, acts on it, and both sides change what they believe about that word from what they
+observed (see the episode in the plan). It's still **rare** (1 complete episode across 12 seeds × 2.4M
+ticks). Next is **M7: requests, helping, and children**, then personal lexicons, interpretation with
 competing meanings, learning and repair, and finally the automated success test. Run the study
 before and after each milestone.
