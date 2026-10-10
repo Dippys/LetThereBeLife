@@ -168,7 +168,8 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
-- 2026-10-11 (latest): only a look at the spot can refute a word (D-098).
+- 2026-10-11 (latest): the viewer's top bar shows the year and season (raw clock in F3).
+- 2026-10-11: only a look at the spot can refute a word (D-098).
 - 2026-10-11: listeners report back, holding up what they found (D-097).
 - 2026-10-10: two-valley start, `--apart` (D-096).
 - 2026-10-10: fuel (D-094) and stone blades (D-095); misunderstanding episodes are

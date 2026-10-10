@@ -419,7 +419,7 @@ fn details_report_simulation_and_cursor_cell_values() {
     let mut text = String::new();
     write_details(&mut text, &world, &state);
     for expected in [
-        "TICK 3721  SEED 7  CHUNKS ",
+        "TICK 3721  CLOCK 1m 02s  SEED 7  CHUNKS ",
         "CURSOR X 0  Y 0",
         "CHUNK X 0 Y 0  LOCAL 0,0",
         "SURFACE ",

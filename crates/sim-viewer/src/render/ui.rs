@@ -235,13 +235,13 @@ fn top_bar(painter: &mut Painter, state: &RenderState, width: f32) -> f32 {
     x += painter.button("+", x, button_y, UiAction::Faster, false);
     x += painter.chars(2);
     x = painter.text(
-        &labels::duration(state.snapshot.simulated_seconds),
+        &labels::year(state.snapshot.simulated_seconds),
         x,
         text_y,
         colors::UI_TEXT,
     );
     x = painter.text(
-        &format!("  {}", labels::season(state.season)),
+        &format!(" · {}", labels::season(state.season)),
         x,
         text_y,
         colors::UI_DIM,

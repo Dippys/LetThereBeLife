@@ -310,6 +310,13 @@ pub fn personality(personality: Personality) -> &'static str {
 }
 
 /// Simulated time as `1h 05m` (or `45s` in the first minute).
+/// The year of the run (from 1) at `seconds` of simulated time: people age a
+/// year every simulated hour.
+pub fn year(seconds: f64) -> String {
+    let year = seconds.max(0.0) as i64 / sim_core::SECONDS_PER_YEAR + 1;
+    format!("Year {year}")
+}
+
 pub fn duration(seconds: f64) -> String {
     let total = seconds.max(0.0) as u64;
     match (total / 3_600, total / 60 % 60) {
@@ -322,6 +329,13 @@ pub fn duration(seconds: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_year_counts_from_one_and_turns_every_simulated_hour() {
+        assert_eq!(year(0.0), "Year 1");
+        assert_eq!(year(3_599.0), "Year 1");
+        assert_eq!(year(3_600.0), "Year 2");
+    }
 
     #[test]
     fn personality_names_the_most_pronounced_trait_deterministically() {
