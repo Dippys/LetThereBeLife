@@ -21,9 +21,8 @@ pub(crate) fn select_spawn_locations(
     let radius = u64::from(radius);
     let mut wood = Vec::new();
     for feature in engine.world().all_features() {
-        match feature.base_resource().kind {
-            Material::Wood => wood.push(feature.position),
-            Material::Berries | Material::Bitterberries | Material::Stone | Material::Meat => {}
+        if feature.base_resource().kind == Material::Wood {
+            wood.push(feature.position);
         }
     }
     let target_count = population as usize;

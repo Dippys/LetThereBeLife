@@ -530,3 +530,21 @@ keep going gives people a reason to return to the same place, and pairs with win
 **Consequences:** 82-864 fuel additions per 5.5-hour run; over 30 years 751, with 323 relights, no
 deaths from cold (5 before), and fire known by 16 founders and 28 children. More hearths get built
 (50-80 per run), since people build one near home when they remember none burning.
+
+## D-095: Stone blades (2026-10-10)
+
+**Decision:** A new made material, `Blade` (`made_from` 1 stone, `cutting`). One founding family
+knows how to knap (the other keeps fire); anyone who watches it done learns how. A knapper with no
+edge picks up stone in view and knaps a blade (a `Craft` action, 5 minutes). A carried edge doubles
+what one go at chopping or carving yields (wood, meat) and adds 15 points to strikes; one use or
+kill in 6 wears it out, so blades get remade and seen being made. The study counts blades, watchers,
+and who knows how; the feed notes a blade made in front of others.
+**Why:** Plan step 3: knowledge that one group has and another can only get by watching. Tools are
+properties (`cutting`, `made_from`), so new ones need no new code paths.
+**Consequences:** 36-49 blades per 5.5-hour valley; over 30 years 83-227, and 7-22 children learn
+to knap. Survival is unchanged (1,001 vs 1,004 standing on 47 fresh valleys). Adding a material
+shifts concept indices and so reshuffles founding words: episodes in the success test's valleys
+fell from 15 to 3, but fresh valleys (seeds 79-160) show 1 in 47 either way, so the old 15 was a
+lucky cluster and episodes are about 1 per 20-40 valleys. The children's-words slice test now
+averages all 21 valleys among seeds 1-44 (75%; one valley's 4 children swing by tens of points)
+instead of pinning seed 1.

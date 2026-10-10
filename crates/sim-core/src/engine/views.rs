@@ -238,6 +238,11 @@ impl Engine {
         &self.policy_diagnostics
     }
 
+    /// Things made during the latest tick (for logs and tools).
+    pub fn craft_events(&self) -> &[crate::CraftEvent] {
+        &self.craft_events
+    }
+
     /// Fires tended during the latest tick (for logs and tools).
     pub fn fire_events(&self) -> &[crate::FireEvent] {
         &self.fire_events

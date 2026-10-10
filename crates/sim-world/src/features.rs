@@ -24,6 +24,8 @@ pub enum Material {
     Stone,
     /// From a carcass. It spoils where it lies, but keeps once carried.
     Meat,
+    /// A sharp flake knapped from stone.
+    Blade,
 }
 
 /// How a material is taken from where it's found: the motion anyone watching
@@ -53,6 +55,10 @@ pub struct MaterialProperties {
     pub seasonal: bool,
     /// Seconds one unit keeps a fire burning (0 = doesn't burn).
     pub fuel_seconds: u32,
+    /// Has a cutting edge: carrying one makes strikes land more often.
+    pub cutting: bool,
+    /// What it's made from, if people make it (and how many units it takes).
+    pub made_from: Option<(Material, u8)>,
     /// Hunger relieved by eating one unit.
     pub nutrition: u16,
     /// Sickness from eating one unit: added to thirst and to tiredness.
@@ -64,18 +70,21 @@ pub struct MaterialProperties {
 }
 
 impl Material {
-    pub const COUNT: usize = 5;
+    pub const COUNT: usize = 6;
     pub const ALL: [Self; Self::COUNT] = [
         Self::Berries,
         Self::Bitterberries,
         Self::Wood,
         Self::Stone,
         Self::Meat,
+        Self::Blade,
     ];
 
     pub const fn properties(self) -> MaterialProperties {
         match self {
             Self::Berries => MaterialProperties {
+                cutting: false,
+                made_from: None,
                 fuel_seconds: 0,
                 seasonal: true,
                 handling: Handling::Pick,
@@ -86,6 +95,8 @@ impl Material {
                 regrow_seconds: 600,
             },
             Self::Bitterberries => MaterialProperties {
+                cutting: false,
+                made_from: None,
                 fuel_seconds: 0,
                 seasonal: true,
                 handling: Handling::Pick,
@@ -96,6 +107,8 @@ impl Material {
                 regrow_seconds: 600,
             },
             Self::Wood => MaterialProperties {
+                cutting: false,
+                made_from: None,
                 fuel_seconds: 1_800,
                 seasonal: false,
                 handling: Handling::Chop,
@@ -106,6 +119,8 @@ impl Material {
                 regrow_seconds: 3_600,
             },
             Self::Stone => MaterialProperties {
+                cutting: false,
+                made_from: None,
                 fuel_seconds: 0,
                 seasonal: false,
                 handling: Handling::Strike,
@@ -116,11 +131,25 @@ impl Material {
                 regrow_seconds: 0,
             },
             Self::Meat => MaterialProperties {
+                cutting: false,
+                made_from: None,
                 fuel_seconds: 0,
                 seasonal: false,
                 handling: Handling::Carve,
                 fixed_source: false,
                 nutrition: 6_000,
+                toxicity: 0,
+                builds: false,
+                regrow_seconds: 0,
+            },
+            Self::Blade => MaterialProperties {
+                cutting: true,
+                made_from: Some((Self::Stone, 1)),
+                fuel_seconds: 0,
+                seasonal: false,
+                handling: Handling::Strike,
+                fixed_source: false,
+                nutrition: 0,
                 toxicity: 0,
                 builds: false,
                 regrow_seconds: 0,

@@ -237,6 +237,11 @@ pub struct WildlifeStats {
     pub hearths: u64,
     pub warm_ups: u64,
     pub know_fire: [u64; 2],
+    /// Founders and children who know how to knap a blade, at the end.
+    pub know_knapping: [u64; 2],
+    /// Blades knapped, and how many people watched it done.
+    pub blades: u64,
+    pub watched_crafts: u64,
     /// Fuel put on fires, and how often that relit a dead one.
     pub tends: u64,
     pub relit: u64,
@@ -466,6 +471,10 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                     food.first_tastes += u64::from(meal.first_taste);
                     food.watched += u64::from(meal.watchers);
                 }
+                for craft in engine.craft_events() {
+                    wildlife.blades += 1;
+                    wildlife.watched_crafts += u64::from(craft.watchers);
+                }
                 for fire in engine.fire_events() {
                     wildlife.tends += 1;
                     wildlife.relit += u64::from(fire.relit);
@@ -611,6 +620,7 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
             .any(|belief| belief.species == sim_core::Species::Wolf && belief.danger > 64);
         wildlife.fear_wolves[usize::from(mind.child)] += u64::from(fears);
         wildlife.know_fire[usize::from(mind.child)] += u64::from(mind.knows_hearths);
+        wildlife.know_knapping[usize::from(mind.child)] += u64::from(mind.knows_knapping);
     }
     report.food = food;
     wildlife.deer = engine.animal_count(sim_core::Species::Deer) as u64;
@@ -1328,9 +1338,7 @@ fn summarize_world(engine: &Engine, fresh_water: &[WorldPosition]) -> StudyWorld
         match feature.base_resource().kind {
             sim_core::Material::Berries => summary.food_features += 1,
             sim_core::Material::Wood => summary.wood_features += 1,
-            sim_core::Material::Bitterberries
-            | sim_core::Material::Stone
-            | sim_core::Material::Meat => {}
+            _ => {}
         }
     }
     // Coarse occupancy grid of fresh water at 64-cell blocks, then test sampled land cells.
@@ -1558,6 +1566,12 @@ impl fmt::Display for StudyReport {
             formatter,
             "\n  fire: hearths built {}, warm-ups {}, fuel added {} ({} relit); know hearths warm: founders {founders_fire}, children {children_fire}",
             self.wildlife.hearths, self.wildlife.warm_ups, self.wildlife.tends, self.wildlife.relit
+        )?;
+        let [founders_knap, children_knap] = self.wildlife.know_knapping;
+        write!(
+            formatter,
+            "\n  tools: blades made {} (watched {} times); know how to knap: founders {founders_knap}, children {children_knap}",
+            self.wildlife.blades, self.wildlife.watched_crafts
         )?;
         if let Some((children, matching)) = self.children_vocabulary {
             write!(

@@ -10,17 +10,52 @@ fn valley(seed: u64, ticks: u64) -> StudyConfig {
     config
 }
 
-/// Children start with no words and learn only from what they observe.
+/// Children start with no words and learn only from what they observe. One
+/// valley's 4 children swing this by tens of points, so it averages every
+/// valley among seeds 1-44 (21; mean 75% when this was written, D-095).
 #[test]
 #[ignore = "release-only: run with --release --ignored (part of scripts/validate)"]
 fn children_pick_up_most_of_the_band_s_words_from_observation() {
-    let report = run_study(valley(1, 600_000)).expect("seed 1 has a valley");
-    let (children, matching) = report.children_vocabulary.expect("the valley has children");
-    assert_eq!(children, 4);
+    let results = across_valleys(1..=44, |seed| {
+        run_study(valley(seed, 600_000)).ok()?.children_vocabulary
+    });
+    assert_eq!(results.len(), 21, "the valleys among the seeds changed");
     assert!(
-        matching >= 60,
-        "children say the band's word for only {matching}% of places"
+        results.iter().all(|&(children, _)| children == 4),
+        "every valley's founders have 4 children"
     );
+    let mean = results.iter().map(|&(_, matching)| matching).sum::<u64>() / results.len() as u64;
+    assert!(
+        mean >= 60,
+        "children say the band's word for only {mean}% of places on average"
+    );
+}
+
+/// Runs `study` for each seed on all cores, keeping the valleys it returns.
+fn across_valleys<T: Send>(
+    seeds: std::ops::RangeInclusive<u64>,
+    study: impl Fn(u64) -> Option<T> + Sync,
+) -> Vec<T> {
+    let seeds: Vec<u64> = seeds.collect();
+    let threads = std::thread::available_parallelism().map_or(4, usize::from);
+    let study = &study;
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = seeds
+            .chunks(seeds.len().div_ceil(threads))
+            .map(|chunk| {
+                scope.spawn(move || {
+                    chunk
+                        .iter()
+                        .filter_map(|&seed| study(seed))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .flat_map(|worker| worker.join().expect("study thread"))
+            .collect()
+    })
 }
 
 /// In famine valleys (5% of the food, nothing grows back, no game to hunt),
@@ -43,33 +78,15 @@ fn asking_for_food_keeps_more_of_famine_valleys_on_their_feet() {
         };
         run_study(config).ok()
     };
-    let seeds: Vec<u64> = (1..=40).collect();
-    let threads = std::thread::available_parallelism().map_or(4, usize::from);
-    let results: Vec<(u32, u32, u64, u64)> = std::thread::scope(|scope| {
-        let workers: Vec<_> = seeds
-            .chunks(seeds.len().div_ceil(threads))
-            .map(|chunk| {
-                scope.spawn(move || {
-                    chunk
-                        .iter()
-                        .filter_map(|&seed| {
-                            let with_help = run(seed, true)?;
-                            let without = run(seed, false)?;
-                            Some((
-                                with_help.survivors - with_help.collapsed,
-                                without.survivors - without.collapsed,
-                                with_help.comms.summary().requests[2],
-                                without.comms.summary().requests[0],
-                            ))
-                        })
-                        .collect::<Vec<_>>()
-                })
-            })
-            .collect();
-        workers
-            .into_iter()
-            .flat_map(|worker| worker.join().expect("study thread"))
-            .collect()
+    let results = across_valleys(1..=40, |seed| {
+        let with_help = run(seed, true)?;
+        let without = run(seed, false)?;
+        Some((
+            with_help.survivors - with_help.collapsed,
+            without.survivors - without.collapsed,
+            with_help.comms.summary().requests[2],
+            without.comms.summary().requests[0],
+        ))
     });
     assert_eq!(
         results.len(),

@@ -91,6 +91,7 @@ fn mind(lexicon: Vec<LexiconEntryView>, acquaintances: Vec<AcquaintanceView>) ->
             },
         ],
         knows_hearths: true,
+        knows_knapping: false,
         acquaintances,
         lexicon,
     }

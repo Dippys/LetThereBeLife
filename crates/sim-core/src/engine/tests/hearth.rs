@@ -147,3 +147,32 @@ fn a_fire_burns_out_and_someone_with_wood_relights_it() {
         "nothing left to burn"
     );
 }
+
+#[test]
+fn a_knapper_makes_a_blade_from_a_stone_and_a_watcher_learns_how() {
+    let (mut engine, _) = builder_and_watcher();
+    let knapper = AgentId::new(0);
+    let watcher = AgentId::new(1);
+    engine.minds.get_mut(knapper).crafts.saw_knapping();
+    assert!(!engine.minds.get_mut(watcher).crafts.knows_knapping());
+    assert_eq!(
+        engine.apply_craft(watcher),
+        Err(PolicyFailureReason::TargetUnavailable),
+        "it doesn't know how"
+    );
+
+    engine.apply_craft(knapper).unwrap();
+    let carried = engine.population.inventory(knapper).unwrap();
+    assert_eq!(
+        (
+            carried.amount(Material::Stone),
+            carried.amount(Material::Blade)
+        ),
+        (2, 1)
+    );
+    assert_eq!(engine.craft_events()[0].made, Material::Blade);
+    assert!(
+        engine.minds.get_mut(watcher).crafts.knows_knapping(),
+        "watching is enough to learn"
+    );
+}

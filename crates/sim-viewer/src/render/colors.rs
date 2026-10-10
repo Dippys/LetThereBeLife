@@ -81,6 +81,7 @@ pub(super) const fn material_color(material: Material) -> u32 {
         Material::Wood => rgba(164, 104, 52, 235),
         Material::Stone => rgba(176, 176, 170, 235),
         Material::Meat => rgba(150, 40, 40, 235),
+        Material::Blade => rgba(200, 210, 220, 235),
     }
 }
 

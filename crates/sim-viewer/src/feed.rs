@@ -172,6 +172,24 @@ impl Feed {
             }
         }
 
+        for craft in engine
+            .craft_events()
+            .iter()
+            .filter(|craft| craft.watchers > 0)
+        {
+            self.push(
+                format!(
+                    "{} made {} while {} watched",
+                    name(engine, craft.agent),
+                    crate::labels::material(craft.made),
+                    craft.watchers
+                ),
+                Tone::Good,
+                Some(craft.agent),
+                agent_position(engine, craft.agent),
+            );
+        }
+
         for fire in engine.fire_events().iter().filter(|fire| fire.relit) {
             self.push(
                 format!("{} relit a fire", name(engine, fire.agent)),

@@ -11,6 +11,9 @@ use crate::{
     WorldQueryError,
 };
 
+/// One use in this many wears a blade out.
+const BLADE_WEAR_ODDS: u64 = 6;
+
 impl Engine {
     /// Starts one explicit sleep intent at the agent's current physical location.
     pub fn request_sleep(
@@ -109,6 +112,7 @@ impl Engine {
             }
             PhysicalGoal::WarmUp => self.apply_warm_up(event.agent),
             PhysicalGoal::TendFire => self.apply_tend_fire(event.agent),
+            PhysicalGoal::Craft => self.apply_craft(event.agent),
             PhysicalGoal::Signal => self.apply_signal(event.agent, target),
             PhysicalGoal::Hunt => self.apply_hunt(event.agent, target),
             PhysicalGoal::SeekShelter | PhysicalGoal::Incapacitated => {
@@ -302,6 +306,58 @@ impl Engine {
         Ok(())
     }
 
+    /// Makes the first thing the agent knows how to make from what it carries
+    /// (a blade from a stone). Anyone watching sees how it's done.
+    pub(super) fn apply_craft(&mut self, agent: AgentId) -> Result<(), PolicyFailureReason> {
+        if !self
+            .minds
+            .get(agent)
+            .is_some_and(|mind| mind.crafts.knows_knapping())
+        {
+            return Err(PolicyFailureReason::TargetUnavailable);
+        }
+        let inventory = self
+            .population
+            .inventory(agent)
+            .ok_or(PolicyFailureReason::InconsistentState)?;
+        let (made, (input, amount)) = crate::Material::ALL
+            .into_iter()
+            .filter_map(|material| Some((material, material.properties().made_from?)))
+            .find(|&(made, (input, amount))| {
+                inventory.amount(input) >= amount && inventory.can_add(made)
+            })
+            .ok_or(PolicyFailureReason::TargetUnavailable)?;
+        if self.population.take(agent, input, amount) < amount {
+            return Err(PolicyFailureReason::InconsistentState);
+        }
+        self.population.add_inventory(agent, made, 1);
+        let watchers: Vec<AgentId> = self
+            .perceive_physical(agent, crate::PHYSICAL_POLICY_RADIUS)
+            .map(|perception| {
+                perception
+                    .agents
+                    .iter()
+                    .filter(|other| {
+                        other.id != agent && super::cognition::can_watch(other.activity)
+                    })
+                    .map(|other| other.id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if self.policy_options.memory {
+            self.minds.get_mut(agent).crafts.saw_knapping();
+            for &watcher in &watchers {
+                self.minds.get_mut(watcher).crafts.saw_knapping();
+            }
+        }
+        self.craft_events.push(crate::CraftEvent {
+            agent,
+            made,
+            watchers: watchers.len() as u16,
+        });
+        Ok(())
+    }
+
     /// Eats one unit of whatever carried material the agent most wants to eat.
     /// The agent feels what it really does; anyone watching sees it eat, and
     /// sees it retch if it was sickening.
@@ -402,6 +458,12 @@ impl Engine {
                                 && inventory.amount(Material::Wood) < SHELTER_WOOD_COST))
                         && (reason != PolicyReason::HearthMaterials
                             || matches!(resource.kind, Material::Stone | Material::Wood))
+                        && (reason != PolicyReason::Crafting
+                            || Material::ALL.into_iter().any(|made| {
+                                made.properties()
+                                    .made_from
+                                    .is_some_and(|(input, _)| input == resource.kind)
+                            }))
                 })
                 .map(|resource| (candidate, resource))
         })
@@ -425,9 +487,19 @@ impl Engine {
                 },
             );
         };
+        // A cutting edge doubles what one go at chopping or carving yields,
+        // and wears with use.
+        let edge = Material::ALL
+            .into_iter()
+            .find(|material| material.properties().cutting && inventory.amount(*material) > 0);
+        let cuts = matches!(
+            resource.kind.properties().handling,
+            crate::Handling::Chop | crate::Handling::Carve
+        );
+        let edge = edge.filter(|_| cuts);
         let maximum = inventory
             .remaining_capacity(resource.kind)
-            .min(GATHER_YIELD);
+            .min(GATHER_YIELD * if edge.is_some() { 2 } else { 1 });
         let gathered = if resource.kind == Material::Meat {
             self.wildlife.butcher(resource_position, maximum)
         } else if self.spawned_objects.at(resource_position).is_some() {
@@ -442,6 +514,13 @@ impl Engine {
         };
         let accepted = self.population.add_inventory(agent, kind, gathered);
         debug_assert_eq!(accepted, gathered);
+        if let Some(blade) = edge
+            && crate::wildlife::mix(self.config.seed ^ self.time.ticks() ^ u64::from(agent.get()))
+                % BLADE_WEAR_ODDS
+                == 0
+        {
+            self.population.take(agent, blade, 1);
+        }
         Ok(())
     }
 

@@ -18,6 +18,10 @@ pub const STRIKE_RANGE: i64 = 2;
 /// the animal adds `HELPER_CHANCE` (hunting goes better together).
 const STRIKE_CHANCE: u64 = 45;
 const HELPER_CHANCE: u64 = 20;
+/// Extra chance (out of 100) a strike lands with a cutting edge in hand.
+const EDGE_CHANCE: u64 = 15;
+/// One kill in this many breaks the blade used.
+const BLADE_BREAK_ODDS: u64 = 6;
 /// Each wound slows an animal's hurried step by this many ticks.
 const WOUND_SLOWDOWN_TICKS: u64 = 5;
 /// A thinned herd still breeds as if it had this many animals (stragglers
@@ -528,9 +532,16 @@ impl Engine {
                     && chebyshev(view.position, at) <= STRIKE_RANGE
             })
             .count() as u64;
-        let chance = (STRIKE_CHANCE + HELPER_CHANCE * helpers)
-            .saturating_add_signed(self.strength(hunter))
-            .clamp(5, 95);
+        // A cutting edge makes a strike tell.
+        let edge = self.population.inventory(hunter).and_then(|inventory| {
+            crate::Material::ALL
+                .into_iter()
+                .find(|material| material.properties().cutting && inventory.amount(*material) > 0)
+        });
+        let chance =
+            (STRIKE_CHANCE + HELPER_CHANCE * helpers + u64::from(edge.is_some()) * EDGE_CHANCE)
+                .saturating_add_signed(self.strength(hunter))
+                .clamp(5, 95);
         let roll = mix(self.config.seed
             ^ 0x4855_4e54
             ^ (u64::from(hunter.get()) << 40)
@@ -552,6 +563,12 @@ impl Engine {
         }
         if killed {
             self.wildlife.leave_carcass(at, traits.meat, now);
+            // Edges chip: now and then the blade breaks.
+            if let Some(blade) = edge
+                && (roll >> 16) % BLADE_BREAK_ODDS == 0
+            {
+                self.population.take(hunter, blade, 1);
+            }
         } else if traits.bite > 0 {
             // A cornered predator bites back.
             self.wound(hunter, traits.bite);

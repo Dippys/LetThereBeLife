@@ -201,6 +201,8 @@ pub struct MentalMapView {
     pub fauna: Vec<FaunaView>,
     /// Believes a hearth would warm it (and knows how to build one).
     pub knows_hearths: bool,
+    /// Knows how to knap a stone blade.
+    pub knows_knapping: bool,
     pub acquaintances: Vec<AcquaintanceView>,
     /// What the agent believes words mean.
     pub lexicon: Vec<LexiconEntryView>,
@@ -366,6 +368,15 @@ pub enum WordEvent {
         heard: VocalForm,
         learned: VocalForm,
     },
+}
+
+/// Someone made something (latest tick, for logs and tools).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CraftEvent {
+    pub agent: AgentId,
+    pub made: crate::Material,
+    /// How many saw it done (and learned how).
+    pub watchers: u16,
 }
 
 /// Someone put fuel on a fire (latest tick, for logs and tools).

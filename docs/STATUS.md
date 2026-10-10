@@ -55,6 +55,9 @@ lays out phases 0–10, from world → physical agents → cognition → communi
   animals don't breed), summer is mild; the viewer shows the season and tints the land.
 - **Things to talk about come from the world's tables:** every material, species, and kind of
   structure is something people can point at, remember, and name, with gestures from properties.
+- **Fires need fuel:** a hearth burns out after an hour unless someone feeds it wood.
+- **Stone blades:** one family knaps them, others learn by watching; an edge doubles chopping
+  and carving and helps hunting, and wears out.
 - **Hearths:** agents who know fire build one near home from stones and wood and warm up by it;
   others learn fire by watching.
 - **Communication (vertical slice, `--valley`):** private intent is separate from the public
@@ -167,7 +170,9 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
-- 2026-10-10 (latest): concepts from the world's tables (D-092) and seasons (D-093).
+- 2026-10-10 (latest): fuel (D-094) and stone blades (D-095); misunderstanding episodes are
+  rarer than the pinned seeds suggested (about 1 per 20-40 valleys).
+- 2026-10-10: concepts from the world's tables (D-092) and seasons (D-093).
 - 2026-10-10: new words and sound shifts (D-091).
 - 2026-10-10: generations: herds that recover and wolves that hunt deer, age and sex,
   kin, grudges, favours, grief, couples, births, newcomers, and names (D-083-D-089).

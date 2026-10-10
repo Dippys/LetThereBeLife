@@ -158,6 +158,7 @@ impl Engine {
                 | PhysicalGoal::Hunt
                 | PhysicalGoal::WarmUp
                 | PhysicalGoal::TendFire
+                | PhysicalGoal::Craft
         ) {
             self.start_timed_action(agent, selection.goal, target, selection.reason);
             return;

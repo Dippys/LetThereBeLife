@@ -57,6 +57,8 @@ const IDENTIFY_DISTANCE: u64 = 6;
 const ALARM_DISTANCE: u64 = 20;
 /// A body lies where someone died this long (three simulated hours).
 const BODY_TICKS: u64 = 3 * 60 * 60 * 60;
+/// Ticks it takes to make something by hand (knapping a blade).
+const CRAFT_TICKS: u64 = 300;
 /// One in this many words a child hears is picked up with a vowel changed.
 const SOUND_SHIFT_ODDS: u64 = 40;
 /// How long someone mourns a person close to them (30 simulated minutes).
@@ -423,6 +425,7 @@ impl Engine {
                 warn: warn.map(|(_, position)| position),
                 recruit: recruit.map(|(_, position)| position).filter(|_| hunts),
                 knows_hearths: crafts.knows_hearths(),
+                knows_knapping: crafts.knows_knapping(),
                 came_from: map.came_from(origin),
                 grieving: now < grief_until,
             },
@@ -480,6 +483,7 @@ impl Engine {
         let duration = match (goal, reason) {
             (PhysicalGoal::Hunt, _) => super::HUNT_TICKS,
             (PhysicalGoal::WarmUp | PhysicalGoal::TendFire, _) => WARM_UP_TICKS,
+            (PhysicalGoal::Craft, _) => CRAFT_TICKS,
             // A warning is quick: a shout and a point.
             (_, PolicyReason::Warning) => WARNING_TICKS,
             _ => SIGNAL_TICKS,
@@ -1310,6 +1314,7 @@ impl Engine {
             affordances: mind.affordances.views().collect(),
             fauna: mind.fauna.views().collect(),
             knows_hearths: mind.crafts.knows_hearths(),
+            knows_knapping: mind.crafts.knows_knapping(),
             acquaintances: mind.social.views().collect(),
             lexicon: mind.lexicon.views().collect(),
         })

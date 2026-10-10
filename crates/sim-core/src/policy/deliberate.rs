@@ -151,6 +151,8 @@ pub(crate) struct MindInput<'a> {
     pub(crate) came_from: Option<WorldPosition>,
     /// Mourning someone close: stays near others, takes on no work or trips.
     pub(crate) grieving: bool,
+    /// Knows how to knap a blade from stone.
+    pub(crate) knows_knapping: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -444,6 +446,10 @@ impl Planner<'_> {
         if works && let Some(tend) = self.tend_fire(inventory) {
             return tend;
         }
+        // Someone who can knap and has no edge makes one from a carried stone.
+        if works && let Some(craft) = self.make_tool(inventory) {
+            return craft;
+        }
         // Hunting is work too, and prey in view is the best work there is.
         if works && let Some(hunt) = self.hunt(inventory) {
             return hunt;
@@ -606,6 +612,35 @@ impl Planner<'_> {
                 reason: PolicyReason::Warming,
             },
             heading: Some(heading),
+        })
+    }
+
+    /// Makes something it knows how to make when it has none with that use
+    /// (a blade when it carries no cutting edge) and carries what it takes.
+    fn make_tool(&self, inventory: InventoryView) -> Option<Deliberation> {
+        let has_edge = crate::Material::ALL
+            .into_iter()
+            .any(|material| material.properties().cutting && inventory.amount(material) > 0);
+        if !self.mind.knows_knapping || has_edge {
+            return None;
+        }
+        let (input, amount) = crate::Material::ALL
+            .into_iter()
+            .filter(|material| material.properties().cutting)
+            .find_map(|material| material.properties().made_from)?;
+        if inventory.amount(input) >= amount {
+            return Some(Deliberation::act(
+                PhysicalGoal::Craft,
+                self.origin,
+                PolicyReason::Crafting,
+            ));
+        }
+        // Picks up the stone for it when some is in view.
+        nearest_resource_access(self.origin, self.perception, |found| {
+            found == input && inventory.can_add(found)
+        })
+        .map(|target| {
+            Deliberation::act(PhysicalGoal::GatherMaterial, target, PolicyReason::Crafting)
         })
     }
 

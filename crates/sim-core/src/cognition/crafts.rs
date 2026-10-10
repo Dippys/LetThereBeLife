@@ -1,5 +1,5 @@
-//! What an agent knows about things people make (plan L4). For now one craft:
-//! whether a hearth warms you (and so is worth building). Knowing it is enough
+//! What an agent knows about things people make: whether a hearth warms you
+//! (and so is worth building), and how to knap a stone blade. Knowing it is enough
 //! to build one: a hearth is a ring of stones around burning wood, plain to see.
 //! The belief changes only from evidence: warming up at one (felt), watching
 //! someone warm their hands at one, and family lore.
@@ -10,13 +10,15 @@ const FELT_EVIDENCE: u8 = 8;
 const WATCHED_EVIDENCE_CAP: u8 = 5;
 const CULTURE_EVIDENCE: u8 = 4;
 
-/// 2 bytes.
+/// 3 bytes.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub(crate) struct Crafts {
     /// How strongly it believes hearths warm (0–255).
     hearth: u8,
     evidence: u8,
+    /// Knapping it has seen or done (0 = it doesn't know how).
+    knapping: u8,
 }
 
 fn mix(mut key: u64) -> u64 {
@@ -29,14 +31,29 @@ impl Crafts {
     /// One founding family (chosen by the seed) keeps fire; the other doesn't.
     pub(crate) fn founding(seed: u64, founder: AgentId, family_size: u32) -> Self {
         let family = u64::from(founder.get() / family_size.max(1));
+        // One founding family keeps fire, the other knaps blades.
         if (mix(seed ^ 0x4649_5245) + family) % 2 == 0 {
             Self {
                 hearth: 200,
                 evidence: CULTURE_EVIDENCE,
+                knapping: 0,
             }
         } else {
-            Self::default()
+            Self {
+                knapping: CULTURE_EVIDENCE,
+                ..Self::default()
+            }
         }
+    }
+
+    /// Knows how to knap a blade from stone.
+    pub(crate) const fn knows_knapping(self) -> bool {
+        self.knapping > 0
+    }
+
+    /// It knapped a blade, or watched someone do it.
+    pub(crate) fn saw_knapping(&mut self) {
+        self.knapping = self.knapping.saturating_add(1);
     }
 
     /// Believes a hearth would warm it (worth seeking out and building).
@@ -77,6 +94,13 @@ mod tests {
         assert!(!child.knows_hearths());
         child.saw_warming();
         assert!(child.knows_hearths());
-        assert_eq!(std::mem::size_of::<Crafts>(), 2);
+        assert_ne!(
+            first.knows_knapping(),
+            second.knows_knapping(),
+            "the other family knaps"
+        );
+        child.saw_knapping();
+        assert!(child.knows_knapping());
+        assert_eq!(std::mem::size_of::<Crafts>(), 3);
     }
 }

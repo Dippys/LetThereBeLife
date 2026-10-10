@@ -27,12 +27,12 @@ pub use agent::{
 };
 pub use cognition::{
     ACQUAINTANCE_SLOTS, AcquaintanceView, AffordanceView, CONSEQUENCE_WEIGHT, Concept, CoupleEvent,
-    DEFAULT_TRUST, DISTRUST, DesiredEffect, FAMILY_SIZE, FRIEND_FAMILIARITY, FaunaView, FireEvent,
-    Gesture, GestureTopic, GriefEvent, HintOutcomeEvent, InterpretationEvent, LANDMARK_SLOTS,
-    LEXICON_SLOTS, LandmarkKind, LandmarkSource, LandmarkView, LeadFollowedEvent, LessonCause,
-    LessonEvent, LexiconEntryView, MERGE_RADIUS, MealEvent, MentalMapView, Mime, Personality,
-    PolicyOptions, PublicSignal, READING_CANDIDATES, REPAIR_WEIGHT, Reading, ReadingReasons,
-    RepairEvent, RepairResponse, RequestEvent, RequestResponse, SEARCH_SPACING,
+    CraftEvent, DEFAULT_TRUST, DISTRUST, DesiredEffect, FAMILY_SIZE, FRIEND_FAMILIARITY, FaunaView,
+    FireEvent, Gesture, GestureTopic, GriefEvent, HintOutcomeEvent, InterpretationEvent,
+    LANDMARK_SLOTS, LEXICON_SLOTS, LandmarkKind, LandmarkSource, LandmarkView, LeadFollowedEvent,
+    LessonCause, LessonEvent, LexiconEntryView, MERGE_RADIUS, MealEvent, MentalMapView, Mime,
+    Personality, PolicyOptions, PublicSignal, READING_CANDIDATES, REPAIR_WEIGHT, Reading,
+    ReadingReasons, RepairEvent, RepairResponse, RequestEvent, RequestResponse, SEARCH_SPACING,
     SHARE_COOLDOWN_SECONDS, SIGNAL_TICKS, SignalEvent, Tie, Tone, Understanding, UtteranceIntent,
     VISIT_TILE_SIZE, VISITED_TILE_SLOTS, VOCAL_FORMS, VocalForm, WordEvent, concept_topic,
 };

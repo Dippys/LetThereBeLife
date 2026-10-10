@@ -63,6 +63,7 @@ pub const fn material(material: Material) -> &'static str {
         Material::Wood => "wood",
         Material::Stone => "stone",
         Material::Meat => "meat",
+        Material::Blade => "stone blades",
     }
 }
 
@@ -170,6 +171,7 @@ pub const fn goal(goal: PhysicalGoal) -> &'static str {
         PhysicalGoal::BuildHearth => "Building a hearth",
         PhysicalGoal::WarmUp => "Warming up by a fire",
         PhysicalGoal::TendFire => "Putting wood on a fire",
+        PhysicalGoal::Craft => "Knapping a stone blade",
     }
 }
 
@@ -200,7 +202,8 @@ pub const fn reason(reason: PolicyReason) -> Option<&'static str> {
         | PolicyReason::ActionCompleted
         | PolicyReason::Hunting
         | PolicyReason::Warming
-        | PolicyReason::Tending => return None,
+        | PolicyReason::Tending
+        | PolicyReason::Crafting => return None,
     })
 }
 

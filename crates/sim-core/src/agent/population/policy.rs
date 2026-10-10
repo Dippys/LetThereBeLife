@@ -269,6 +269,7 @@ impl Population {
             | PhysicalGoal::WarmUp
             | PhysicalGoal::TendFire
             | PhysicalGoal::Wait => AgentActivity::Idle,
+            PhysicalGoal::Craft => AgentActivity::Building,
             PhysicalGoal::Incapacitated => AgentActivity::Incapacitated,
         };
         if !scheduler.can_schedule(

@@ -107,6 +107,8 @@ pub enum PhysicalGoal {
     WarmUp = 14,
     /// Put fuel on a fire beside the agent.
     TendFire = 15,
+    /// Make something from carried materials (knap a blade).
+    Craft = 16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,6 +154,8 @@ pub enum PolicyReason {
     HearthMaterials,
     /// Keeping a fire going.
     Tending,
+    /// Making a tool.
+    Crafting,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
