@@ -451,3 +451,16 @@ people alive, 84 births, 39 deaths all of old age, 56 couples (21 across familie
 episodes. Words hardly drift: generations 1-3 keep the founders' word for every place, generation 4
 for 97%. Without a way to coin words, the band settles on one language and keeps it; names drift
 far more (227 of 625 known names differ from the given name).
+
+## D-090: The famine helping test counts people standing across 20 valleys (2026-10-10)
+
+**Decision:** The release test that asking for food helps in a famine now runs every livable valley
+among seeds 1-40 (20, in parallel) with and without helping and compares the people standing at
+the end (alive and not collapsed), instead of survivors in seeds 7, 10, and 12.
+**Why:** After the generations work it read 49 "survivors" with helping against 50 without. Two of
+the three seeds no longer had anyone asking for food, and the extra "survivor" without helping was
+lying collapsed. Across all 20 famine valleys, helping keeps 365 standing against 361 without; the
+gain comes from the few valleys where people ask. The claim tested is unchanged (helping beats not
+helping); the measurement is broader and no longer counts the collapsed.
+**Consequences:** About 45 seconds in release. The effect is small, so a behavior change could
+flip it; if it does, look at the valleys with requests before touching the test.

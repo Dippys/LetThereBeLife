@@ -162,7 +162,9 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
-- 2026-10-10 (latest): misunderstandings that run their course: worded hints are judged at the
+- 2026-10-10 (latest): generations: herds that recover and wolves that hunt deer, age and sex,
+  kin, grudges, favours, grief, couples, births, newcomers, and names (D-083-D-089).
+- 2026-10-10: misunderstandings that run their course: worded hints are judged at the
   spot pointed at, idle agents check what was pointed out nearby, a corrected speaker trusts its
   word less, errands avoid wolves in view, wounded people come round, and the success test runs 40
   valleys instead of pinning one episode (D-082). Also a plain-language viewer (D-081).
@@ -189,8 +191,12 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## What's next
 
-1. **Make cross-family contact common**: shared hunts, a shared hearth, visiting, so misreadings
-   between dialects get noticed and repaired by the people involved.
+1. **New words**: with no way to coin words, the band settles on one language in a generation or
+   two and keeps it (generation 4 still uses 97% of the founders' place words). Coining words for
+   new things (people, places, tools) and letting families innovate would let dialects drift.
 2. **Construction by properties (L4, continued)**: structures whose use comes from what they're
-   made of (wind-blocking, warmth, storage), hearths that need fuel, cooking.
+   made of, hearths that need fuel, cooking.
 3. **Episodic memory** (phase 3), so agents remember who misled, helped, or warned them.
+4. Generation leftovers: elders walking slower, late pregnancy slowing, names used in requests
+   and corrections.
+
