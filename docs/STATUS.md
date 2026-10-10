@@ -65,7 +65,8 @@ lays out phases 0–10, from world → physical agents → cognition → communi
   walk, knowing their family, with personalities blended from both parents. Elders grow frail and
   die of old age; a dwindling band is joined by newcomers with their own words. People know their
   kin, hold grudges, owe favours, and mourn those close to them. Names spread when called out and
-  can be misheard or drift into nicknames.
+  can be misheard or drift into nicknames. People without a word for something sometimes coin one,
+  and children sometimes pick words up with a vowel changed, so vocabularies drift.
 - **People are different (viewer and study):** four personality traits (curiosity, caution,
   sociability, diligence) and up to six acquaintances with familiarity, trust, and last-seen
   place. Sociable agents seek out friends and stay with company. Hints count for more from people
@@ -162,7 +163,8 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
-- 2026-10-10 (latest): generations: herds that recover and wolves that hunt deer, age and sex,
+- 2026-10-10 (latest): new words and sound shifts (D-091).
+- 2026-10-10: generations: herds that recover and wolves that hunt deer, age and sex,
   kin, grudges, favours, grief, couples, births, newcomers, and names (D-083-D-089).
 - 2026-10-10: misunderstandings that run their course: worded hints are judged at the
   spot pointed at, idle agents check what was pointed out nearby, a corrected speaker trusts its
@@ -191,9 +193,9 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## What's next
 
-1. **New words**: with no way to coin words, the band settles on one language in a generation or
-   two and keeps it (generation 4 still uses 97% of the founders' place words). Coining words for
-   new things (people, places, tools) and letting families innovate would let dialects drift.
+1. **Separated groups**: words are now coined and sounds shift (D-091), but families in one
+   valley mix enough that most runs converge on one vocabulary. Bands that split and settle apart
+   (or valleys joined only by occasional travel) would let dialects truly diverge.
 2. **Construction by properties (L4, continued)**: structures whose use comes from what they're
    made of, hearths that need fuel, cooking.
 3. **Episodic memory** (phase 3), so agents remember who misled, helped, or warned them.

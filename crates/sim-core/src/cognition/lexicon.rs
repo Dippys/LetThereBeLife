@@ -67,6 +67,16 @@ impl VocalForm {
     }
 }
 
+/// Evidence a newly coined word starts with in its coiner's lexicon.
+const COINED_EVIDENCE: u16 = 2;
+
+impl VocalForm {
+    /// The same word with its first vowel changed, as a child might pick it up.
+    pub(crate) const fn shifted(self) -> Self {
+        Self((self.0 ^ 8) % VOCAL_FORMS)
+    }
+}
+
 /// Entries per lexicon.
 pub const LEXICON_SLOTS: usize = 16;
 /// Evidence a founder's inherited association starts with.
@@ -223,6 +233,28 @@ impl Lexicon {
             })
     }
 
+    /// Makes up a word for `concept`: the first sound, from `roll` on, that it
+    /// doesn't use for anything. `None` if every sound is taken.
+    pub(crate) fn coin(&mut self, concept: Concept, roll: u64) -> Option<VocalForm> {
+        let start = (roll % u64::from(VOCAL_FORMS)) as u8;
+        let form = (0..VOCAL_FORMS)
+            .map(|offset| VocalForm((start + offset) % VOCAL_FORMS))
+            .find(|form| {
+                !self
+                    .entries
+                    .iter()
+                    .any(|entry| !entry.is_empty() && entry.form == form.0)
+            })?;
+        let slot = self.free_slot()?;
+        self.entries[slot] = LexicalEntry {
+            form: form.0,
+            concept: concept as u8,
+            positive: COINED_EVIDENCE,
+            ..LexicalEntry::default()
+        };
+        Some(form)
+    }
+
     /// The form this agent would say for `concept`, if it has one.
     pub(crate) fn produce(&self, concept: Concept) -> Option<VocalForm> {
         self.entries
@@ -343,6 +375,22 @@ impl Lexicon {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_coined_word_uses_a_free_sound_and_a_shift_changes_one_vowel() {
+        let mut lexicon = Lexicon::default();
+        lexicon.reinforce(VocalForm(5), Concept::Water, 6);
+        let coined = lexicon.coin(Concept::Fire, 5).unwrap();
+        assert_ne!(coined, VocalForm(5), "a sound already in use isn't reused");
+        assert_eq!(lexicon.produce(Concept::Fire), Some(coined));
+        let (a, b) = (VocalForm(3).name(), VocalForm(3).shifted().name());
+        assert_eq!(a.len(), b.len());
+        assert_eq!(
+            a.chars().zip(b.chars()).filter(|(x, y)| x != y).count(),
+            1,
+            "{a} vs {b}"
+        );
+    }
 
     #[test]
     fn lexicon_layout_is_compact() {

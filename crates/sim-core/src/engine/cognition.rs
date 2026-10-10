@@ -13,6 +13,7 @@ use crate::cognition::{
 use crate::policy::{
     FoodValues, MindInput, ParentInput, PolicyAction, PolicySelection, deliberate,
 };
+use crate::wildlife::mix;
 use crate::{
     AgentActivity, AgentId, Engine, ExplorationHeading, GestureTopic, HintOutcomeEvent,
     InterpretationEvent, InventoryView, LandmarkKind, MentalMapView, PHYSICAL_POLICY_RADIUS,
@@ -56,6 +57,8 @@ const IDENTIFY_DISTANCE: u64 = 6;
 const ALARM_DISTANCE: u64 = 20;
 /// A body lies where someone died this long (three simulated hours).
 const BODY_TICKS: u64 = 3 * 60 * 60 * 60;
+/// One in this many words a child hears is picked up with a vowel changed.
+const SOUND_SHIFT_ODDS: u64 = 40;
 /// How long someone mourns a person close to them (30 simulated minutes).
 const GRIEF_SECONDS: u32 = 30 * 60;
 /// Ticks spent warming up by a hearth.
@@ -560,7 +563,8 @@ impl Engine {
         let vocal = self
             .minds
             .get(sender)
-            .and_then(|mind| mind.lexicon.produce(topic.concept()));
+            .and_then(|mind| mind.lexicon.produce(topic.concept()))
+            .or_else(|| self.coin_word(sender, topic.concept()));
         let mime = self.mime_of(sender, topic);
         let public = express(sender, from, intent, mime, vocal, urgency)
             .ok_or(PolicyFailureReason::TargetUnavailable)?;
@@ -618,6 +622,10 @@ impl Engine {
                 115,
                 179,
             ) as u8;
+            let shifts = self.age_of(watcher.id) < crate::ADULT_AGE
+                && mix(self.config.seed ^ 0x5348_4946 ^ u64::from(watcher.id.get()) << 32 ^ id)
+                    % SOUND_SHIFT_ODDS
+                    == 0;
             let mind = self.minds.get_mut(watcher.id);
             // Children ask about almost anything they aren't sure of.
             let ask_below = if mind.child {
@@ -642,7 +650,16 @@ impl Engine {
             // Words are learned from the listener's own reading, right or wrong.
             if let Some(form) = public.vocal {
                 let heard_as = understanding.topic.concept();
-                mind.lexicon.hear_with_evidence(form, heard_as);
+                // A child now and then picks a word up with a vowel changed.
+                let learned = if shifts { form.shifted() } else { form };
+                mind.lexicon.hear_with_evidence(learned, heard_as);
+                if learned != form {
+                    self.word_events.push(crate::WordEvent::Shifted {
+                        agent: watcher.id,
+                        heard: form,
+                        learned,
+                    });
+                }
                 if let Some((prior, _)) = word
                     && prior != heard_as
                 {
@@ -1221,6 +1238,29 @@ impl Engine {
             watchers: delivery.watchers,
         });
         Ok(())
+    }
+
+    /// With no word for `concept`, `agent` sometimes makes one up (curious
+    /// people more often) and says it.
+    fn coin_word(&mut self, agent: AgentId, concept: Concept) -> Option<VocalForm> {
+        let curiosity = self.personality_in_use(agent).curiosity;
+        let roll =
+            mix(self.config.seed ^ 0x434f_494e ^ u64::from(agent.get()) << 32 ^ self.time.ticks());
+        if roll % 256 >= Personality::scale(curiosity, 16, 112) as u64 {
+            return None;
+        }
+        let form = self.minds.get_mut(agent).lexicon.coin(concept, roll >> 8)?;
+        self.word_events.push(crate::WordEvent::Coined {
+            agent,
+            form,
+            concept,
+        });
+        Some(form)
+    }
+
+    /// New words and sound shifts from the latest tick (for logs and tools).
+    pub fn word_events(&self) -> &[crate::WordEvent] {
+        &self.word_events
     }
 
     /// People who began mourning during the latest tick (for logs and tools).

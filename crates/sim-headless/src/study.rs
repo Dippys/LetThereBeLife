@@ -201,6 +201,12 @@ pub struct FamilyStats {
     /// Per generation (from 1): people, and the percent of their place words
     /// that are the founders' most common word.
     pub generations: Vec<(u8, u64, u64)>,
+    /// Words coined, coined words said by two or more living people at the end,
+    /// and sound shifts.
+    pub new_words: [u64; 3],
+    /// Percent of place words where the two founding families' most common
+    /// word is the same, at the end.
+    pub shared_words: u64,
 }
 
 /// What happened between people and animals.
@@ -354,6 +360,8 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     let mut families_born = [0_u64; 4];
     let mut arrivals = 0_u8;
     let mut name_calls = [0_u64; 2];
+    let mut coined: Vec<(sim_core::VocalForm, sim_core::Concept)> = Vec::new();
+    let mut shifts = 0_u64;
     let mut early_vocabulary = 0;
     let mut food = FoodStats::default();
     let mut wildlife = WildlifeStats::default();
@@ -455,6 +463,14 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                     food.first_tastes += u64::from(meal.first_taste);
                     food.watched += u64::from(meal.watchers);
                 }
+                for event in engine.word_events() {
+                    match *event {
+                        sim_core::WordEvent::Coined { form, concept, .. } => {
+                            coined.push((form, concept));
+                        }
+                        sim_core::WordEvent::Shifted { .. } => shifts += 1,
+                    }
+                }
                 for call in engine.name_events() {
                     name_calls[0] += 1;
                     name_calls[1] += u64::from(call.heard_as != call.called);
@@ -505,6 +521,44 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     }
     families.births = families_born;
     families.generations = generation_words(&engine, &tracks);
+    let living: Vec<(u8, sim_core::MentalMapView)> = engine
+        .agent_views(usize::MAX)
+        .filter(|view| view.activity != AgentActivity::Dead)
+        .filter_map(|view| {
+            let family = tracks.get(view.id.get() as usize)?.family;
+            Some((family, engine.mental_map(view.id)?))
+        })
+        .collect();
+    coined.sort_unstable();
+    coined.dedup();
+    let caught_on = coined
+        .iter()
+        .filter(|&&(form, concept)| {
+            living
+                .iter()
+                .filter(|(_, mind)| top_word(&mind.lexicon, concept) == Some(form))
+                .count()
+                >= 2
+        })
+        .count() as u64;
+    families.new_words = [coined.len() as u64, caught_on, shifts];
+    let family_minds = |family: u8| -> Vec<&sim_core::MentalMapView> {
+        living
+            .iter()
+            .filter(|(of, _)| *of == family)
+            .map(|(_, mind)| mind)
+            .collect()
+    };
+    let (first, second) = (modal_words(&family_minds(0)), modal_words(&family_minds(1)));
+    let compared: Vec<bool> = first
+        .iter()
+        .zip(second)
+        .filter_map(|(a, b)| Some(*a.as_ref()? == b?))
+        .collect();
+    families.shared_words = percent(
+        compared.iter().filter(|same| **same).count() as u64,
+        compared.len() as u64,
+    );
     families.calls = name_calls;
     for view in engine.agent_views(usize::MAX) {
         if view.activity == AgentActivity::Dead {
@@ -1479,6 +1533,12 @@ impl fmt::Display for StudyReport {
                     parts.join(", ")
                 )?;
             }
+            let [coined, caught_on, shifts] = families.new_words;
+            write!(
+                formatter,
+                "\n  new words: coined {coined} ({caught_on} said by 2+ people at the end), sound shifts {shifts}; the two families share {}% of place words",
+                families.shared_words
+            )?;
             let [known, acquaintances, wrong] = families.names;
             let [heard, misheard] = families.calls;
             write!(

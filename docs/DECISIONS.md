@@ -464,3 +464,19 @@ gain comes from the few valleys where people ask. The claim tested is unchanged 
 helping); the measurement is broader and no longer counts the collapsed.
 **Consequences:** About 45 seconds in release. The effect is small, so a behavior change could
 flip it; if it does, look at the valleys with requests before touching the test.
+
+## D-091: New words and sound shifts (2026-10-10)
+
+**Decision:** Someone pointing something out with no usable word for it (a child who hasn't learned
+one, or an adult whose word was discredited by corrections) sometimes makes one up from a sound it
+doesn't use for anything (curious people more often: 16-112 in 256 tries) and says it; listeners
+learn it like any word. Children now and then (1 in 40 words heard) pick a word up with its first
+vowel changed. The study reports words coined, coined words said by two or more living people at
+the end, sound shifts, and how many place words the two families' most common words still share.
+**Why:** In a 90-year run generation 4 still used 97% of the founders' place words: with no way to
+make words, the band settled on one language and kept it.
+**Consequences:** Over 30 years a valley coins about 50 words, of which 4-5 catch on. Drift varies:
+on seed 4 generation 1 keeps 74% of the founders' place words and the families share half, while
+seeds 13 and 46 converge on one shared vocabulary (the families live in one valley and mix a lot,
+which merges dialects). Long runs are chaotic: complete episodes over 30 years ranged from 0 to 13
+on these seeds. The success test still passes (16 episodes in 40 valleys).

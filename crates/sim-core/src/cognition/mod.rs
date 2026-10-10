@@ -293,6 +293,23 @@ pub struct LeadFollowedEvent {
     pub fled: bool,
 }
 
+/// A word changed hands in a new way (latest tick, for logs and tools).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WordEvent {
+    /// Someone made up a word for something it had no word for.
+    Coined {
+        agent: AgentId,
+        form: VocalForm,
+        concept: Concept,
+    },
+    /// A child picked up a word with a vowel changed.
+    Shifted {
+        agent: AgentId,
+        heard: VocalForm,
+        learned: VocalForm,
+    },
+}
+
 /// Two people became a couple (latest tick, for logs and tools).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoupleEvent {

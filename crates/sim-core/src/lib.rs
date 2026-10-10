@@ -33,7 +33,7 @@ pub use cognition::{
     PublicSignal, READING_CANDIDATES, REPAIR_WEIGHT, Reading, ReadingReasons, RepairEvent,
     RepairResponse, RequestEvent, RequestResponse, SEARCH_SPACING, SHARE_COOLDOWN_SECONDS,
     SIGNAL_TICKS, SignalEvent, Tie, Tone, Understanding, UtteranceIntent, VISIT_TILE_SIZE,
-    VISITED_TILE_SLOTS, VOCAL_FORMS, VocalForm, concept_topic,
+    VISITED_TILE_SLOTS, VOCAL_FORMS, VocalForm, WordEvent, concept_topic,
 };
 pub use diagnostics::{EngineCapacityMetrics, EngineDiagnostics, EngineWorkMetrics};
 pub use engine::{

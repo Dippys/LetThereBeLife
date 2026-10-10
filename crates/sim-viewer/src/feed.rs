@@ -151,6 +151,27 @@ impl Feed {
             self.push(text, tone, Some(agent), agent_position(engine, agent));
         }
 
+        for event in engine.word_events() {
+            if let sim_core::WordEvent::Coined {
+                agent,
+                form,
+                concept,
+            } = *event
+            {
+                self.push(
+                    format!(
+                        "{} made up a word, {}, for {}",
+                        name(engine, agent),
+                        labels::word(form),
+                        labels::concept(concept)
+                    ),
+                    Tone::Talk,
+                    Some(agent),
+                    agent_position(engine, agent),
+                );
+            }
+        }
+
         for couple in engine.couple_events() {
             self.push(
                 format!(

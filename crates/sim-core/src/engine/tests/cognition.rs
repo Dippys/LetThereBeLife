@@ -568,3 +568,39 @@ fn a_correction_waits_while_the_speaker_is_away() {
         "kept for the next meeting"
     );
 }
+
+#[test]
+fn someone_with_no_word_sometimes_makes_one_up() {
+    let (mut engine, sender, _) = two_neighbours();
+    // Both start as children of the band: no words at all.
+    engine.minds.set_founders(0);
+    let lake = WorldPosition {
+        x: sender.x + 40,
+        y: sender.y,
+    };
+    remember_water(&mut engine, AgentId::new(0), lake);
+    let mut coined = None;
+    for attempt in 0..200 {
+        engine.time = SimTime::from_ticks(attempt * 997);
+        engine.signal_events.clear();
+        engine.word_events.clear();
+        engine.apply_signal(AgentId::new(0), lake).unwrap();
+        if let Some(&crate::WordEvent::Coined { form, concept, .. }) = engine.word_events().first()
+        {
+            assert_eq!(concept, crate::Concept::Water);
+            assert_eq!(
+                engine.signal_events()[0].signal.vocal,
+                Some(form),
+                "and says it"
+            );
+            coined = Some(form);
+            break;
+        }
+        assert_eq!(engine.signal_events()[0].signal.vocal, None);
+    }
+    let form = coined.expect("a word was coined");
+    assert_eq!(
+        word_for(&engine, AgentId::new(0), crate::Concept::Water),
+        form
+    );
+}
