@@ -150,10 +150,10 @@ fn looking_at_an_empty_remembered_place_forgets_it() {
         &with_food(view_around(at(52, 50)), &[bush]),
         1,
     );
-    assert_eq!(map.seen_count(LandmarkKind::Berries), 1);
+    assert_eq!(map.seen_count(LandmarkKind::BERRIES), 1);
     // The bush was eaten: the same spot is in view with no food anywhere.
     observe(&mut map, 1, at(51, 50), &view_around(at(51, 50)), 2);
-    assert_eq!(map.seen_count(LandmarkKind::Berries), 0);
+    assert_eq!(map.seen_count(LandmarkKind::BERRIES), 0);
 }
 
 #[test]
@@ -181,7 +181,7 @@ fn slots_are_bounded_per_kind_and_keep_the_freshest() {
 fn hearsay_is_stored_with_uncertainty_and_never_overrides_first_hand_memory() {
     let mut map = MentalMap::default();
     assert!(map.remember_told(
-        LandmarkKind::Berries,
+        LandmarkKind::BERRIES,
         at(200, 0),
         10,
         5,
@@ -193,7 +193,7 @@ fn hearsay_is_stored_with_uncertainty_and_never_overrides_first_hand_memory() {
     assert_eq!(told.search_radius, 40);
     // Hearing about the same area again reinforces instead of duplicating.
     assert!(map.remember_told(
-        LandmarkKind::Berries,
+        LandmarkKind::BERRIES,
         at(210, 4),
         10,
         6,
@@ -210,7 +210,7 @@ fn hearsay_is_stored_with_uncertainty_and_never_overrides_first_hand_memory() {
     assert_eq!(after[0].source, LandmarkSource::Seen);
     // Hearsay about a place it has seen adds nothing.
     assert!(!map.remember_told(
-        LandmarkKind::Berries,
+        LandmarkKind::BERRIES,
         at(212, 0),
         3,
         8,
@@ -339,7 +339,7 @@ fn hint_outcomes_are_reported_to_the_teller() {
 fn forgetting_a_teller_detaches_their_hints() {
     let mut map = MentalMap::default();
     map.remember_told(
-        LandmarkKind::Berries,
+        LandmarkKind::BERRIES,
         at(0, 0),
         4,
         1,
@@ -390,18 +390,18 @@ fn a_fresh_close_hint_beats_a_stale_far_food_sighting() {
     // Much later, someone points out food nearby.
     let now = 4_000;
     map.remember_told(
-        LandmarkKind::Berries,
+        LandmarkKind::BERRIES,
         at(40, 0),
         4,
         now,
         HintSource::anonymous(),
         120,
     );
-    let (destination, source) = map.recall(LandmarkKind::Berries, 1, at(0, 0), now).unwrap();
+    let (destination, source) = map.recall(LandmarkKind::BERRIES, 1, at(0, 0), now).unwrap();
     assert_eq!(source, LandmarkSource::Told);
     assert_eq!(destination, at(40, 0));
     // Right after the sighting, the same hint would not have won.
-    let (_, early) = map.recall(LandmarkKind::Berries, 1, at(380, 0), 1).unwrap();
+    let (_, early) = map.recall(LandmarkKind::BERRIES, 1, at(380, 0), 1).unwrap();
     assert_eq!(early, LandmarkSource::Seen);
 }
 
@@ -413,7 +413,7 @@ fn a_fresh_hint_can_displace_a_stale_food_memory_when_slots_are_full() {
         observe(&mut map, 1, spot, &with_food(view_around(spot), &[spot]), 0);
     }
     assert!(map.remember_told(
-        LandmarkKind::Berries,
+        LandmarkKind::BERRIES,
         at(900, 900),
         4,
         5_000,
@@ -439,7 +439,7 @@ fn curious_agents_pick_the_most_promising_unchecked_hint() {
         200,
     );
     map.remember_told(
-        LandmarkKind::Berries,
+        LandmarkKind::BERRIES,
         at(30, 0),
         4,
         1,
@@ -460,10 +460,10 @@ fn bush(position: WorldPosition, kind: Material) -> PerceivedResource {
 fn worded_berries_hint(map: &mut MentalMap, spot: WorldPosition) {
     let source = HintSource {
         form: Some(VocalForm(4)),
-        alternative: Some(Concept::Bitterberries),
+        alternative: Some(Concept::BITTERBERRIES),
         ..HintSource::from_teller(1)
     };
-    assert!(map.remember_told(LandmarkKind::Berries, spot, 3, 1, source, 144));
+    assert!(map.remember_told(LandmarkKind::BERRIES, spot, 3, 1, source, 144));
 }
 
 #[test]
@@ -501,7 +501,7 @@ fn a_worded_hint_is_judged_by_what_stands_at_the_spot() {
     map.observe(1, near, &view, 3, &mut |check| checks.push(check));
     assert_eq!(checks.len(), 1);
     assert!(!checks[0].confirmed);
-    assert_eq!(checks[0].alternative, Some(Concept::Bitterberries));
+    assert_eq!(checks[0].alternative, Some(Concept::BITTERBERRIES));
     assert_eq!(checks[0].form, Some(VocalForm(4)));
 
     // With berries closest to the spot, the same hint is confirmed.

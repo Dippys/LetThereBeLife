@@ -76,7 +76,7 @@ fn a_friend_with_food_hands_over_a_meal() {
     let mut engine = hungry_and_holding(8);
     let request = ask(&mut engine);
     assert_eq!(request.response, RequestResponse::Gave);
-    assert_eq!(request.read_as, Concept::Berries);
+    assert_eq!(request.read_as, Concept::BERRIES);
     assert_eq!(
         engine
             .population

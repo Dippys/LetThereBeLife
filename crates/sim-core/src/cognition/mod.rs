@@ -57,50 +57,108 @@ pub(crate) const fn told_confidence(trust: u8) -> u8 {
 /// How long a pointing gesture takes, in ticks.
 pub const SIGNAL_TICKS: u64 = 120;
 
+/// A kind of place worth remembering: water, wherever a material is found at a
+/// fixed source, and each kind of structure. Derived from the world's tables.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[repr(u8)]
 pub enum LandmarkKind {
-    Water = 0,
-    Berries = 1,
-    Wood = 2,
-    Stone = 3,
-    Shelter = 4,
-    Bitterberries = 5,
-    Hearth = 6,
+    Water,
+    Material(crate::Material),
+    Structure(crate::StructureKind),
 }
 
+/// Materials found at fixed places, in material order.
+const FIXED_MATERIALS: usize = {
+    let mut count = 0;
+    let mut index = 0;
+    while index < crate::Material::COUNT {
+        if crate::Material::ALL[index].properties().fixed_source {
+            count += 1;
+        }
+        index += 1;
+    }
+    count
+};
+
 impl LandmarkKind {
-    pub const COUNT: usize = 7;
-    pub const ALL: [Self; Self::COUNT] = [
-        Self::Water,
-        Self::Berries,
-        Self::Wood,
-        Self::Stone,
-        Self::Shelter,
-        Self::Bitterberries,
-        Self::Hearth,
-    ];
+    pub const COUNT: usize = 1 + FIXED_MATERIALS + crate::StructureKind::COUNT;
+    pub const ALL: [Self; Self::COUNT] = {
+        let mut all = [Self::Water; Self::COUNT];
+        let mut next = 1;
+        let mut index = 0;
+        while index < crate::Material::COUNT {
+            let material = crate::Material::ALL[index];
+            if material.properties().fixed_source {
+                all[next] = Self::Material(material);
+                next += 1;
+            }
+            index += 1;
+        }
+        index = 0;
+        while index < crate::StructureKind::COUNT {
+            all[next] = Self::Structure(crate::StructureKind::ALL[index]);
+            next += 1;
+            index += 1;
+        }
+        all
+    };
+    pub const BERRIES: Self = Self::Material(crate::Material::Berries);
+    pub const BITTERBERRIES: Self = Self::Material(crate::Material::Bitterberries);
+    pub const WOOD: Self = Self::Material(crate::Material::Wood);
+    pub const STONE: Self = Self::Material(crate::Material::Stone);
+    pub const SHELTER: Self = Self::Structure(crate::StructureKind::Shelter);
+    pub const HEARTH: Self = Self::Structure(crate::StructureKind::Hearth);
+
+    /// Position in `ALL`.
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Water => 0,
+            Self::Material(material) => {
+                let mut position = 1;
+                let mut index = 0;
+                while index < material as usize {
+                    if crate::Material::ALL[index].properties().fixed_source {
+                        position += 1;
+                    }
+                    index += 1;
+                }
+                position
+            }
+            Self::Structure(kind) => 1 + FIXED_MATERIALS + kind as usize,
+        }
+    }
 
     /// The kind of place where `material` can be gathered, if it stays put
     /// (meat lies on carcasses that soon spoil, so nobody remembers them).
     pub const fn of_material(material: crate::Material) -> Option<Self> {
-        match material {
-            crate::Material::Berries => Some(Self::Berries),
-            crate::Material::Bitterberries => Some(Self::Bitterberries),
-            crate::Material::Wood => Some(Self::Wood),
-            crate::Material::Stone => Some(Self::Stone),
-            crate::Material::Meat => None,
+        if material.properties().fixed_source {
+            Some(Self::Material(material))
+        } else {
+            None
         }
     }
 
     /// The material gathered at this kind of place, if any.
     pub const fn material(self) -> Option<crate::Material> {
         match self {
-            Self::Berries => Some(crate::Material::Berries),
-            Self::Bitterberries => Some(crate::Material::Bitterberries),
-            Self::Wood => Some(crate::Material::Wood),
-            Self::Stone => Some(crate::Material::Stone),
-            Self::Water | Self::Shelter | Self::Hearth => None,
+            Self::Material(material) => Some(material),
+            Self::Water | Self::Structure(_) => None,
+        }
+    }
+
+    /// The structure this kind of place is, if any.
+    pub const fn structure(self) -> Option<crate::StructureKind> {
+        match self {
+            Self::Structure(kind) => Some(kind),
+            Self::Water | Self::Material(_) => None,
+        }
+    }
+
+    /// What people think of this kind of place as.
+    pub const fn concept(self) -> Concept {
+        match self {
+            Self::Water => Concept::Water,
+            Self::Material(material) => Concept::Material(material),
+            Self::Structure(kind) => Concept::Structure(kind),
         }
     }
 }
@@ -387,16 +445,9 @@ impl GestureTopic {
     /// The concept a topic is about.
     pub const fn concept(self) -> Concept {
         match self {
-            Self::Place(LandmarkKind::Water) => Concept::Water,
-            Self::Place(LandmarkKind::Berries) => Concept::Berries,
-            Self::Place(LandmarkKind::Wood) => Concept::Wood,
-            Self::Place(LandmarkKind::Stone) => Concept::Stone,
-            Self::Place(LandmarkKind::Shelter) => Concept::Home,
-            Self::Place(LandmarkKind::Bitterberries) => Concept::Bitterberries,
-            Self::Place(LandmarkKind::Hearth) => Concept::Fire,
+            Self::Place(kind) => kind.concept(),
             Self::Explored => Concept::Been,
-            Self::Animal(crate::Species::Deer) => Concept::Deer,
-            Self::Animal(crate::Species::Wolf) => Concept::Wolf,
+            Self::Animal(species) => Concept::Species(species),
         }
     }
 }

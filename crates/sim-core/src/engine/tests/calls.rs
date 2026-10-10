@@ -72,12 +72,12 @@ fn a_warning_makes_a_listener_who_knows_the_word_run() {
     assert_eq!(choice.reason, PolicyReason::Warning);
     assert_eq!(choice.target, Some(wolf));
     // The listener takes the speaker's wolf word to mean wolf.
-    let form = word(&mut engine, 0, Concept::Wolf);
+    let form = word(&mut engine, 0, Concept::WOLF);
     engine
         .minds
         .get_mut(AgentId::new(1))
         .lexicon
-        .reinforce(form, Concept::Wolf, 60);
+        .reinforce(form, Concept::WOLF, 60);
     engine.apply_signal(AgentId::new(0), wolf).unwrap();
 
     let signal = engine.signal_events()[0];
@@ -107,12 +107,12 @@ fn a_wolf_misread_as_deer_is_hunted_found_out_and_corrected() {
         PolicyReason::Warning
     );
     // In the listener's dialect the speaker's word for wolf means deer.
-    let form = word(&mut engine, 0, Concept::Wolf);
+    let form = word(&mut engine, 0, Concept::WOLF);
     engine
         .minds
         .get_mut(AgentId::new(1))
         .lexicon
-        .reinforce(form, Concept::Deer, 60);
+        .reinforce(form, Concept::DEER, 60);
     engine.apply_signal(AgentId::new(0), wolf).unwrap();
 
     // 1. A believable misunderstanding: the word outweighed the snarl.
@@ -157,8 +157,8 @@ fn a_wolf_misread_as_deer_is_hunted_found_out_and_corrected() {
         .copied()
         .expect("it learned from what it found");
     assert_eq!(lesson.form, form);
-    assert_eq!(lesson.strengthened, Some(Concept::Wolf));
-    assert_eq!(lesson.weakened, Some(Concept::Deer));
+    assert_eq!(lesson.strengthened, Some(Concept::WOLF));
+    assert_eq!(lesson.weakened, Some(Concept::DEER));
     // 4. It tells the speaker "not deer, wolf"; the speaker counts its word as misheard.
     let correction = engine
         .minds

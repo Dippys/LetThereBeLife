@@ -136,7 +136,7 @@ fn learn_from_consequence(
     // (the berries were eaten) teaches nothing about the word.
     let Some(actual) = check.alternative.filter(|alternative| {
         crate::cognition::concept_topic(*alternative).is_some_and(|topic| match topic {
-            GestureTopic::Place(kind) => context.visible[kind as usize],
+            GestureTopic::Place(kind) => context.visible[kind.index()],
             GestureTopic::Explored | GestureTopic::Animal(_) => false,
         })
     }) else {
@@ -306,7 +306,7 @@ impl Engine {
                 let teller = check.teller.and_then(|slot| people.agent_in(slot));
                 // Stripped bushes in view explain an empty spot: the tip was right
                 // but stale, which says nothing about the teller or the word.
-                if !check.confirmed && spent[check.kind as usize] {
+                if !check.confirmed && spent[check.kind.index()] {
                     hint_outcomes.push(HintOutcomeEvent {
                         agent,
                         teller,
@@ -733,7 +733,7 @@ impl Engine {
                 && probability >= RUNNER_UP_MIN_PROBABILITY
                 && let Some(GestureTopic::Place(kind)) = crate::cognition::concept_topic(runner_up)
                 && ((kind == LandmarkKind::Water && thirst >= URGENT_NEED)
-                    || (kind == LandmarkKind::Berries && hunger >= URGENT_NEED))
+                    || (kind == LandmarkKind::BERRIES && hunger >= URGENT_NEED))
             {
                 let source = HintSource {
                     teller,

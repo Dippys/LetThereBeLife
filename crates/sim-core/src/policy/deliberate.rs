@@ -242,11 +242,11 @@ pub(crate) fn deliberate(
                 };
             }
             planner
-                .travel_to_known(LandmarkKind::Shelter, PhysicalGoal::SeekShelter)
+                .travel_to_known(LandmarkKind::SHELTER, PhysicalGoal::SeekShelter)
                 .or_else(|| {
                     mind.knows_hearths
                         .then(|| {
-                            planner.travel_to_known(LandmarkKind::Hearth, PhysicalGoal::Explore)
+                            planner.travel_to_known(LandmarkKind::HEARTH, PhysicalGoal::Explore)
                         })
                         .flatten()
                         .map(|trip| trip.with_reason(PolicyReason::Warming))
@@ -286,7 +286,7 @@ impl Planner<'_> {
         }
         if self.home_is_near()
             && let Some(home) =
-                self.travel_to_known(LandmarkKind::Shelter, PhysicalGoal::SeekShelter)
+                self.travel_to_known(LandmarkKind::SHELTER, PhysicalGoal::SeekShelter)
         {
             return home.with_reason(reason);
         }
@@ -308,7 +308,7 @@ impl Planner<'_> {
                 heading: None,
             };
         }
-        self.travel_to_known(LandmarkKind::Shelter, PhysicalGoal::SeekShelter)
+        self.travel_to_known(LandmarkKind::SHELTER, PhysicalGoal::SeekShelter)
             .or_else(|| self.gather_known_wood(inventory))
             .or_else(|| self.explore(reason, false))
             .unwrap_or_else(|| Deliberation::wait(self.origin, reason))
@@ -317,7 +317,7 @@ impl Planner<'_> {
     fn home_is_near(&self) -> bool {
         self.mind
             .map
-            .nearest_seen_distance(LandmarkKind::Shelter, self.origin)
+            .nearest_seen_distance(LandmarkKind::SHELTER, self.origin)
             .is_some_and(|distance| distance <= HOME_RANGE)
     }
 
@@ -468,7 +468,7 @@ impl Planner<'_> {
                 };
             }
             if self.needs.exposure.value >= temperament.prepare_exposure
-                && self.mind.map.seen_count(LandmarkKind::Shelter) == 0
+                && self.mind.map.seen_count(LandmarkKind::SHELTER) == 0
                 && let Some(wood) = self.gather_known_wood(inventory)
             {
                 return wood.with_reason(PolicyReason::PrepareTrip);
@@ -604,11 +604,11 @@ impl Planner<'_> {
     fn make_hearth(&self, inventory: InventoryView) -> Option<Deliberation> {
         let map = self.mind.map;
         let at_home = map
-            .nearest_seen_distance(LandmarkKind::Shelter, self.origin)
+            .nearest_seen_distance(LandmarkKind::SHELTER, self.origin)
             .is_some_and(|distance| distance <= HEARTH_FROM_HOME);
         if !self.mind.knows_hearths
             || !at_home
-            || map.remembers_near(LandmarkKind::Hearth, self.origin, HOME_RANGE)
+            || map.remembers_near(LandmarkKind::HEARTH, self.origin, HOME_RANGE)
         {
             return None;
         }
@@ -788,7 +788,7 @@ impl Planner<'_> {
 
     fn gather_known_wood(&self, inventory: InventoryView) -> Option<Deliberation> {
         (inventory.amount(Material::Wood) < SHELTER_WOOD_COST && inventory.can_add(Material::Wood))
-            .then(|| self.travel_to_known(LandmarkKind::Wood, PhysicalGoal::GatherMaterial))
+            .then(|| self.travel_to_known(LandmarkKind::WOOD, PhysicalGoal::GatherMaterial))
             .flatten()
             .map(|travel| travel.with_reason(PolicyReason::ShelterMaterials))
     }

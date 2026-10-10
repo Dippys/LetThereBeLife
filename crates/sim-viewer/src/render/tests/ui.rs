@@ -147,8 +147,8 @@ fn person() -> AgentInspection {
                 // Same net evidence but less positive evidence: loses.
                 word(2, Concept::Water, 8, 0),
                 // Contested links are not words.
-                word(3, Concept::Stone, 4, 4),
-                word(0, Concept::Wolf, 9, 0),
+                word(3, Concept::STONE, 4, 4),
+                word(0, Concept::WOLF, 9, 0),
             ],
             vec![
                 friend(3, sim_core::FRIEND_FAMILIARITY, 100),
@@ -268,12 +268,12 @@ fn the_dead_get_a_cause_and_nothing_else_and_the_unknowing_say_so() {
 
 #[test]
 fn the_lexicon_copy_is_bounded_and_words_need_net_evidence() {
-    let mut crowded = vec![word(0, Concept::Stone, 1, 0); LEXICON_SLOTS + 4];
-    crowded[LEXICON_SLOTS] = word(0, Concept::Berries, 9, 0);
+    let mut crowded = vec![word(0, Concept::STONE, 1, 0); LEXICON_SLOTS + 4];
+    crowded[LEXICON_SLOTS] = word(0, Concept::BERRIES, 9, 0);
     let memory = MemoryInspection::from_view(&mind(crowded, Vec::new()));
     assert_eq!(memory.lexicon().len(), LEXICON_SLOTS);
-    assert_eq!(memory.word_for(Concept::Berries), None);
-    assert_eq!(memory.word_for(Concept::Stone), Some(VocalForm(0)));
+    assert_eq!(memory.word_for(Concept::BERRIES), None);
+    assert_eq!(memory.word_for(Concept::STONE), Some(VocalForm(0)));
 }
 
 #[test]

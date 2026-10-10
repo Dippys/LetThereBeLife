@@ -11,7 +11,7 @@ use crate::{
 use super::{LandmarkKind, LandmarkSource, LandmarkView};
 
 /// Remembered-place slots per agent, partitioned by kind (see `slot_range`).
-pub const LANDMARK_SLOTS: usize = 16;
+pub const LANDMARK_SLOTS: usize = WATER_SLOTS + KIND_SLOTS * (LandmarkKind::COUNT - 1);
 /// Recently explored tiles remembered for novelty-seeking exploration.
 pub const VISITED_TILE_SLOTS: usize = 24;
 /// Edge length of an exploration tile in cells.
@@ -206,27 +206,25 @@ impl Default for MentalMap {
     }
 }
 
+/// Slots for remembered water; every other kind of place gets `KIND_SLOTS`.
+const WATER_SLOTS: usize = 4;
+const KIND_SLOTS: usize = 2;
+
 const fn slot_range(kind: LandmarkKind) -> std::ops::Range<usize> {
     match kind {
-        LandmarkKind::Water => 0..4,
-        LandmarkKind::Berries => 4..7,
-        LandmarkKind::Wood => 7..9,
-        LandmarkKind::Stone => 9..10,
-        LandmarkKind::Shelter => 10..12,
-        LandmarkKind::Bitterberries => 12..14,
-        LandmarkKind::Hearth => 14..16,
+        LandmarkKind::Water => 0..WATER_SLOTS,
+        _ => {
+            let start = WATER_SLOTS + (kind.index() - 1) * KIND_SLOTS;
+            start..start + KIND_SLOTS
+        }
     }
 }
 
 const fn kind_of_slot(slot: usize) -> LandmarkKind {
-    match slot {
-        0..4 => LandmarkKind::Water,
-        4..7 => LandmarkKind::Berries,
-        7..9 => LandmarkKind::Wood,
-        9..10 => LandmarkKind::Stone,
-        10..12 => LandmarkKind::Shelter,
-        12..14 => LandmarkKind::Bitterberries,
-        _ => LandmarkKind::Hearth,
+    if slot < WATER_SLOTS {
+        LandmarkKind::Water
+    } else {
+        LandmarkKind::ALL[1 + (slot - WATER_SLOTS) / KIND_SLOTS]
     }
 }
 
@@ -257,7 +255,7 @@ pub(crate) fn spent_kinds(perception: &PhysicalPerception) -> [bool; LandmarkKin
     let mut spent = [false; LandmarkKind::COUNT];
     for resource in &perception.spent_resources {
         if let Some(kind) = LandmarkKind::of_material(resource.resource.kind) {
-            spent[kind as usize] = true;
+            spent[kind.index()] = true;
         }
     }
     spent
@@ -291,7 +289,7 @@ fn perceived_instances<'a>(
                 .map(|water| water.position),
         ),
         (_, None) => {
-            let wanted = if kind == LandmarkKind::Hearth {
+            let wanted = if kind == LandmarkKind::HEARTH {
                 StructureKind::Hearth
             } else {
                 StructureKind::Shelter
@@ -351,7 +349,7 @@ impl MentalMap {
         let nearest = perceived_nearest(origin, perception);
         for slot in 0..LANDMARK_SLOTS {
             let landmark = self.landmarks[slot];
-            if landmark.is_empty() || nearest[kind_of_slot(slot) as usize].is_some() {
+            if landmark.is_empty() || nearest[kind_of_slot(slot).index()].is_some() {
                 continue;
             }
             let checked = if landmark.is_first_hand() {
@@ -376,7 +374,7 @@ impl MentalMap {
             }
         }
         for kind in LandmarkKind::ALL {
-            if let Some(position) = nearest[kind as usize] {
+            if let Some(position) = nearest[kind.index()] {
                 self.remember_seen(kind, position, now, on_hint);
             }
         }
@@ -535,7 +533,9 @@ impl MentalMap {
             probes: source.bearing.map_or(0, |bearing| (bearing as u8 + 1) << 4),
             teller: source.teller.map_or(0, |slot| slot + 1),
             form: source.form.map_or(NONE, |form| form.0),
-            alternative: source.alternative.map_or(NONE, |concept| concept as u8),
+            alternative: source
+                .alternative
+                .map_or(NONE, |concept| concept.index() as u8),
             signal: source.signal as u16,
         };
         true
@@ -698,12 +698,12 @@ impl MentalMap {
     pub(crate) fn shareable(&self, view: WorldRect) -> Option<(WorldPosition, u8)> {
         let order = [
             LandmarkKind::Water,
-            LandmarkKind::Berries,
-            LandmarkKind::Shelter,
-            LandmarkKind::Hearth,
-            LandmarkKind::Wood,
-            LandmarkKind::Bitterberries,
-            LandmarkKind::Stone,
+            LandmarkKind::BERRIES,
+            LandmarkKind::SHELTER,
+            LandmarkKind::HEARTH,
+            LandmarkKind::WOOD,
+            LandmarkKind::BITTERBERRIES,
+            LandmarkKind::STONE,
         ];
         let mut candidates = order
             .iter()
@@ -886,7 +886,7 @@ fn spiral_corner(anchor: (i16, i16), step: u16) -> WorldPosition {
 /// sightings lose belief as they age (others pick them); other places stay.
 fn believed_confidence(landmark: Landmark, kind: LandmarkKind, now: u32) -> u64 {
     let age = u64::from(now.saturating_sub(landmark.seen));
-    let decay = if matches!(kind, LandmarkKind::Berries | LandmarkKind::Bitterberries)
+    let decay = if matches!(kind, LandmarkKind::BERRIES | LandmarkKind::BITTERBERRIES)
         && landmark.is_first_hand()
     {
         (age / FOOD_STALENESS_SECONDS).min(180)

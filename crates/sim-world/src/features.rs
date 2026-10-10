@@ -26,10 +26,29 @@ pub enum Material {
     Meat,
 }
 
+/// How a material is taken from where it's found: the motion anyone watching
+/// would recognize.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Handling {
+    /// Picked by hand.
+    Pick,
+    /// Hacked off with blows.
+    Chop,
+    /// Knocked loose.
+    Strike,
+    /// Cut from a carcass.
+    Carve,
+}
+
 /// What a material physically does when eaten or used. Need units match the
 /// 0–10,000 need scale.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MaterialProperties {
+    /// How it's gathered.
+    pub handling: Handling,
+    /// Found at fixed places (bushes, trees, rocks) worth remembering, rather
+    /// than on something that soon goes away (a carcass).
+    pub fixed_source: bool,
     /// Hunger relieved by eating one unit.
     pub nutrition: u16,
     /// Sickness from eating one unit: added to thirst and to tiredness.
@@ -53,30 +72,40 @@ impl Material {
     pub const fn properties(self) -> MaterialProperties {
         match self {
             Self::Berries => MaterialProperties {
+                handling: Handling::Pick,
+                fixed_source: true,
                 nutrition: 4_000,
                 toxicity: 0,
                 builds: false,
                 regrow_seconds: 600,
             },
             Self::Bitterberries => MaterialProperties {
+                handling: Handling::Pick,
+                fixed_source: true,
                 nutrition: 1_200,
                 toxicity: 2_500,
                 builds: false,
                 regrow_seconds: 600,
             },
             Self::Wood => MaterialProperties {
+                handling: Handling::Chop,
+                fixed_source: true,
                 nutrition: 0,
                 toxicity: 0,
                 builds: true,
                 regrow_seconds: 3_600,
             },
             Self::Stone => MaterialProperties {
+                handling: Handling::Strike,
+                fixed_source: true,
                 nutrition: 0,
                 toxicity: 0,
                 builds: false,
                 regrow_seconds: 0,
             },
             Self::Meat => MaterialProperties {
+                handling: Handling::Carve,
+                fixed_source: false,
                 nutrition: 6_000,
                 toxicity: 0,
                 builds: false,

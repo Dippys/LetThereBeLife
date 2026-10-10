@@ -480,3 +480,24 @@ on seed 4 generation 1 keeps 74% of the founders' place words and the families s
 seeds 13 and 46 converge on one shared vocabulary (the families live in one valley and mix a lot,
 which merges dialects). Long runs are chaotic: complete episodes over 30 years ranged from 0 to 13
 on these seeds. The success test still passes (16 episodes in 40 valleys).
+
+## D-092: Things to talk about come from the world's tables (2026-10-10)
+
+**Decision:** `Concept` is now `Water | Been | Material(m) | Species(s) | Structure(k)`, and
+`LandmarkKind` is `Water | Material(m) | Structure(k)` for materials found at fixed places (a new
+`MaterialProperties::fixed_source`; meat isn't, since carcasses rot). Both are built from
+`Material::ALL`, `Species::ALL`, and `StructureKind::ALL`, with short constants (`Concept::BERRIES`,
+`LandmarkKind::SHELTER`) for code and tests. Gestures come from properties: a material's
+`Handling` (pick, chop, strike, carve) or the sender's belief that it feeds or sickens; a species'
+bite (snarl) or not (spear); a structure's `Purpose` (rest, warmth). Readings score every concept by
+how well the seen gesture matches what the listener associates with it, with partial credit for
+similar motions; this reproduces the old hand-written table. Hunger and urgency favor whatever
+the listener believes is food (not just berries), and hungry listeners treat calls about
+harmless animals as calls to hunt. Memory slots are 4 for water and 2 for every other kind of
+place. Viewer labels and colors are composed from material, species, and structure labels.
+**Why:** Adding a material, animal, or structure needed new code in the concept list, the gesture
+tables, the reading table, the memory layout, and the viewer. Now it needs a row of properties
+(plus a name and a color for the viewer).
+**Consequences:** Meat is a concept (people can have a word for it) but not a place. Concept order
+changed, so founding vocabularies are dealt differently. The success test found 16 episodes in 6
+valleys.

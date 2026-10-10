@@ -7,7 +7,10 @@
 //! sender's visible urgency. The result is a small probability distribution and
 //! a record of why. Nothing here can see the sender's intent.
 
-use super::{Concept, GestureTopic, LandmarkKind, Mime, PublicSignal};
+use super::{
+    Concept, GestureTopic, LandmarkKind, Mime, PublicSignal,
+    signal::{handling_motion, natural_motion},
+};
 use crate::Material;
 
 /// Candidates kept per reading.
@@ -78,61 +81,65 @@ impl ListenerContext {
     }
 }
 
-/// How strongly a mime suggests each concept, strongest first. Mimes are
-/// physical movements, so similar movements give similar evidence, and what an
-/// eating or retching mime suggests depends on what the listener believes is
-/// food or makes you sick.
-fn mime_evidence(mime: Mime, listener: &ListenerContext) -> [(Concept, i32); 3] {
-    let belief = |material: Material| listener.food[material as usize];
-    let eaten = |material: Material| match belief(material) {
-        Some(value) if value > 0 => 30,
-        Some(value) if value < 0 => 4,
-        _ => 14,
-    };
-    let sickening = |material: Material| match belief(material) {
-        Some(value) if value < 0 => 40,
-        Some(value) if value > 0 => 4,
-        _ => 14,
-    };
-    let mut evidence = match mime {
-        Mime::Scoop => [
-            (Concept::Water, 30),
-            (Concept::Berries, eaten(Material::Berries) * 2 / 3),
-            (
-                Concept::Bitterberries,
-                eaten(Material::Bitterberries) * 2 / 3,
-            ),
-        ],
-        Mime::PickAndChew => [
-            (Concept::Berries, eaten(Material::Berries)),
-            (Concept::Bitterberries, eaten(Material::Bitterberries)),
-            (Concept::Water, 20),
-        ],
-        Mime::Retch => [
-            (Concept::Bitterberries, sickening(Material::Bitterberries)),
-            (Concept::Berries, sickening(Material::Berries)),
-            (Concept::Water, 0),
-        ],
-        Mime::Chop => [
-            (Concept::Wood, 40),
-            (Concept::Stone, 10),
-            (Concept::Home, 0),
-        ],
-        Mime::Strike => [
-            (Concept::Stone, 40),
-            (Concept::Wood, 10),
-            (Concept::Home, 0),
-        ],
-        Mime::RestHead => [(Concept::Home, 40), (Concept::Been, 0), (Concept::Wood, 0)],
-        Mime::Sweep => [(Concept::Been, 40), (Concept::Home, 0), (Concept::Wood, 0)],
-        // Both are tense postures aimed at an animal: easy to tell apart up
-        // close, less so in a hurry.
-        Mime::Snarl => [(Concept::Wolf, 30), (Concept::Deer, 18), (Concept::Home, 0)],
-        Mime::Spear => [(Concept::Deer, 30), (Concept::Wolf, 18), (Concept::Home, 0)],
-        Mime::Warm => [(Concept::Fire, 40), (Concept::Home, 10), (Concept::Been, 0)],
-    };
+/// The motions a listener associates with a concept, with how strongly. What
+/// eating and retching suggest depends on what the listener believes is food or
+/// makes you sick; things picked by hand look like they might be eaten.
+fn associations(concept: Concept, listener: &ListenerContext) -> [(Mime, i32); 2] {
+    match concept {
+        Concept::Material(material) => {
+            let properties = material.properties();
+            let looks_edible = matches!(
+                properties.handling,
+                crate::Handling::Pick | crate::Handling::Carve
+            );
+            match listener.food[material as usize] {
+                Some(value) if value > 0 => [(Mime::PickAndChew, 30), (Mime::Retch, 4)],
+                Some(value) if value < 0 => [(Mime::Retch, 40), (Mime::PickAndChew, 4)],
+                _ if looks_edible => [(Mime::PickAndChew, 14), (Mime::Retch, 14)],
+                _ => [(handling_motion(properties.handling), 40), (Mime::Sweep, 0)],
+            }
+        }
+        Concept::Water => [(Mime::Scoop, 30), (Mime::Sweep, 0)],
+        Concept::Species(_) => [(natural_motion(concept), 30), (Mime::Sweep, 0)],
+        _ => [(natural_motion(concept), 40), (Mime::Sweep, 0)],
+    }
+}
+
+/// How alike two motions look, out of 12: scooping water and eating both bring
+/// a hand to the mouth; chopping and striking are both blows; a snarl and a
+/// raised spear are both tense postures aimed at an animal.
+const fn likeness(seen: Mime, associated: Mime) -> i32 {
+    if seen as u8 == associated as u8 {
+        return 12;
+    }
+    match (seen, associated) {
+        (Mime::Scoop, Mime::PickAndChew) | (Mime::PickAndChew, Mime::Scoop) => 8,
+        (Mime::Snarl, Mime::Spear) | (Mime::Spear, Mime::Snarl) => 7,
+        (Mime::Chop, Mime::Strike)
+        | (Mime::Strike, Mime::Chop)
+        | (Mime::Warm, Mime::RestHead)
+        | (Mime::RestHead, Mime::Warm) => 3,
+        _ => 0,
+    }
+}
+
+/// How strongly a mime suggests each concept, strongest first (the top three).
+fn mime_evidence(mime: Mime, listener: &ListenerContext) -> [(Concept, i32); READING_CANDIDATES] {
+    let mut evidence: Vec<(Concept, i32)> = Concept::ALL
+        .into_iter()
+        .map(|concept| {
+            let weight = associations(concept, listener)
+                .into_iter()
+                .map(|(motion, strength)| strength * likeness(mime, motion) / 12)
+                .max()
+                .unwrap_or(0);
+            (concept, weight)
+        })
+        .collect();
     evidence.sort_by_key(|&(concept, weight)| (-weight, concept));
-    evidence
+    let mut top = [(Concept::Water, 0); READING_CANDIDATES];
+    top.copy_from_slice(&evidence[..READING_CANDIDATES]);
+    top
 }
 
 /// Evidence a known word adds: more for well-established readings.
@@ -155,13 +162,9 @@ const URGENCY_WEIGHT: i32 = 5;
 pub(crate) const fn concept_kind(concept: Concept) -> Option<LandmarkKind> {
     match concept {
         Concept::Water => Some(LandmarkKind::Water),
-        Concept::Berries => Some(LandmarkKind::Berries),
-        Concept::Wood => Some(LandmarkKind::Wood),
-        Concept::Stone => Some(LandmarkKind::Stone),
-        Concept::Home => Some(LandmarkKind::Shelter),
-        Concept::Bitterberries => Some(LandmarkKind::Bitterberries),
-        Concept::Fire => Some(LandmarkKind::Hearth),
-        _ => None,
+        Concept::Material(material) => LandmarkKind::of_material(material),
+        Concept::Structure(kind) => Some(LandmarkKind::Structure(kind)),
+        Concept::Been | Concept::Species(_) => None,
     }
 }
 
@@ -169,8 +172,7 @@ pub(crate) const fn concept_kind(concept: Concept) -> Option<LandmarkKind> {
 pub const fn concept_topic(concept: Concept) -> Option<GestureTopic> {
     match concept {
         Concept::Been => Some(GestureTopic::Explored),
-        Concept::Deer => Some(GestureTopic::Animal(crate::Species::Deer)),
-        Concept::Wolf => Some(GestureTopic::Animal(crate::Species::Wolf)),
+        Concept::Species(species) => Some(GestureTopic::Animal(species)),
         _ => match concept_kind(concept) {
             Some(kind) => Some(GestureTopic::Place(kind)),
             None => None,
@@ -178,52 +180,72 @@ pub const fn concept_topic(concept: Concept) -> Option<GestureTopic> {
     }
 }
 
+/// Animals with some evidence that don't bite: what a hungry listener would
+/// go after.
+fn huntable(scores: &[i32; Concept::COUNT]) -> Vec<Concept> {
+    crate::Species::ALL
+        .into_iter()
+        .map(Concept::Species)
+        .filter(|concept| scores[concept.index()] > 0)
+        .filter(|concept| matches!(natural_motion(*concept), Mime::Spear))
+        .collect()
+}
+
+/// Materials the listener believes are worth eating.
+fn believed_food(listener: &ListenerContext) -> Vec<Concept> {
+    Material::ALL
+        .into_iter()
+        .filter(|material| listener.food[*material as usize].is_some_and(|value| value > 0))
+        .map(Concept::Material)
+        .collect()
+}
+
 /// Scores the candidates. Deterministic: ties break by concept order.
 pub(crate) fn read(signal: &PublicSignal, listener: ListenerContext) -> Reading {
     let mut scores = [0_i32; Concept::COUNT];
     let mime = mime_evidence(signal.mime, &listener);
     for (concept, weight) in mime {
-        scores[concept as usize] += weight;
+        scores[concept.index()] += weight;
     }
     if let Some((concept, strength)) = listener.word {
-        scores[concept as usize] += word_weight(strength);
+        scores[concept.index()] += word_weight(strength);
     }
     let thirst = need_weight(listener.thirst);
     let hunger = need_weight(listener.hunger);
-    scores[Concept::Water as usize] += thirst;
-    // A hungry listener hears a call about an animal as a call to hunt.
-    if scores[Concept::Deer as usize] > 0 {
-        scores[Concept::Deer as usize] += hunger;
+    scores[Concept::Water.index()] += thirst;
+    // A hungry listener hears a call about a harmless animal as a call to hunt,
+    // and favors whatever it thinks is food.
+    let hunted = huntable(&scores);
+    for concept in &hunted {
+        scores[concept.index()] += hunger;
     }
-    // Hunger favors whatever the listener thinks is food.
-    for (material, concept) in [
-        (Material::Berries, Concept::Berries),
-        (Material::Bitterberries, Concept::Bitterberries),
-    ] {
-        if listener.food[material as usize].is_some_and(|value| value > 0) {
-            scores[concept as usize] += hunger;
-        }
+    let food = believed_food(&listener);
+    for concept in &food {
+        scores[concept.index()] += hunger;
     }
     let mut memory_scores = [0_i32; Concept::COUNT];
     for concept in Concept::ALL {
         if let Some(kind) = concept_kind(concept)
-            && listener.remembered_near[kind as usize]
-            && scores[concept as usize] > 0
+            && listener.remembered_near[kind.index()]
+            && scores[concept.index()] > 0
         {
-            scores[concept as usize] += MEMORY_WEIGHT;
-            memory_scores[concept as usize] = MEMORY_WEIGHT;
+            scores[concept.index()] += MEMORY_WEIGHT;
+            memory_scores[concept.index()] = MEMORY_WEIGHT;
         }
     }
+    // Urgency suggests something needed: water, or what the listener thinks is food.
     if signal.tone.urgency >= 128 {
-        scores[Concept::Water as usize] += URGENCY_WEIGHT;
-        scores[Concept::Berries as usize] += URGENCY_WEIGHT;
+        scores[Concept::Water.index()] += URGENCY_WEIGHT;
+        for concept in &food {
+            scores[concept.index()] += URGENCY_WEIGHT;
+        }
     }
 
     // Only gesture-able concepts with positive evidence are candidates.
     let mut ranked: Vec<(Concept, i32)> = Concept::ALL
         .into_iter()
-        .filter(|concept| concept_topic(*concept).is_some() && scores[*concept as usize] > 0)
-        .map(|concept| (concept, scores[concept as usize]))
+        .filter(|concept| concept_topic(*concept).is_some() && scores[concept.index()] > 0)
+        .map(|concept| (concept, scores[concept.index()]))
         .collect();
     ranked.sort_by_key(|&(concept, score)| (-score, concept));
     ranked.truncate(READING_CANDIDATES);
@@ -244,20 +266,12 @@ pub(crate) fn read(signal: &PublicSignal, listener: ListenerContext) -> Reading 
         Concept::ALL
             .into_iter()
             .filter(|concept| concept_topic(*concept).is_some())
-            .max_by_key(|concept| (alternative[*concept as usize], -(*concept as i32)))
+            .max_by_key(|concept| (alternative[concept.index()], -(concept.index() as i32)))
     };
     let mut need_scores = [0_i32; Concept::COUNT];
-    need_scores[Concept::Water as usize] = thirst;
-    if scores[Concept::Deer as usize] > hunger {
-        need_scores[Concept::Deer as usize] = hunger;
-    }
-    for (material, concept) in [
-        (Material::Berries, Concept::Berries),
-        (Material::Bitterberries, Concept::Bitterberries),
-    ] {
-        if listener.food[material as usize].is_some_and(|value| value > 0) {
-            need_scores[concept as usize] = hunger;
-        }
+    need_scores[Concept::Water.index()] = thirst;
+    for concept in hunted.iter().chain(&food) {
+        need_scores[concept.index()] = hunger;
     }
     let reasons = ReadingReasons {
         ambiguous_mime: mime[1].1 > 0 && mime[1].1 * 2 >= mime[0].1,
@@ -324,7 +338,7 @@ mod tests {
             "confident: {:?}",
             reading.candidates
         );
-        assert_eq!(reading.runner_up().map(|(c, _)| c), Some(Concept::Berries));
+        assert_eq!(reading.runner_up().map(|(c, _)| c), Some(Concept::BERRIES));
         assert!(reading.reasons.ambiguous_mime);
         assert!(!reading.reasons.need_bias);
     }
@@ -332,7 +346,7 @@ mod tests {
     #[test]
     fn a_hungry_listener_who_doesnt_know_the_word_reads_scooping_as_food() {
         let reading = read(&signal(Mime::Scoop, 0), listener(None, 0, 255));
-        assert_eq!(reading.best().0, Concept::Berries);
+        assert_eq!(reading.best().0, Concept::BERRIES);
         assert!(reading.reasons.unknown_word);
         assert!(reading.reasons.need_bias);
         assert!(reading.reasons.ambiguous_mime);
@@ -342,9 +356,9 @@ mod tests {
     fn a_misheld_word_can_override_an_ambiguous_mime() {
         let reading = read(
             &signal(Mime::Scoop, 0),
-            listener(Some((Concept::Berries, 10)), 0, 0),
+            listener(Some((Concept::BERRIES, 10)), 0, 0),
         );
-        assert_eq!(reading.best().0, Concept::Berries);
+        assert_eq!(reading.best().0, Concept::BERRIES);
         assert!(reading.reasons.word_disagrees);
     }
 
@@ -354,15 +368,15 @@ mod tests {
             &signal(Mime::Chop, 0),
             listener(Some((Concept::Water, 0)), 0, 0),
         );
-        assert_eq!(reading.best().0, Concept::Wood);
+        assert_eq!(reading.best().0, Concept::WOOD);
     }
 
     #[test]
     fn memory_near_the_place_can_tip_an_ambiguous_reading() {
         let mut context = listener(None, 0, 0);
-        context.remembered_near[LandmarkKind::Berries as usize] = true;
+        context.remembered_near[LandmarkKind::BERRIES.index()] = true;
         let reading = read(&signal(Mime::Scoop, 0), context);
-        assert_eq!(reading.best().0, Concept::Berries);
+        assert_eq!(reading.best().0, Concept::BERRIES);
         assert!(reading.reasons.memory_bias);
     }
 

@@ -915,7 +915,7 @@ fn build_report(
                             .count()
                     };
                     let water = count(sim_core::LandmarkKind::Water);
-                    let food = count(sim_core::LandmarkKind::Berries);
+                    let food = count(sim_core::LandmarkKind::BERRIES);
                     (water, food, map.landmarks.len() - water - food)
                 }),
         })
@@ -1109,10 +1109,10 @@ fn trait_effects(
 /// it is the band's most common one; averaged over concepts.
 const PLACE_CONCEPTS: [sim_core::Concept; 6] = [
     sim_core::Concept::Water,
-    sim_core::Concept::Berries,
-    sim_core::Concept::Wood,
-    sim_core::Concept::Stone,
-    sim_core::Concept::Home,
+    sim_core::Concept::BERRIES,
+    sim_core::Concept::WOOD,
+    sim_core::Concept::STONE,
+    sim_core::Concept::HOME,
     sim_core::Concept::Been,
 ];
 

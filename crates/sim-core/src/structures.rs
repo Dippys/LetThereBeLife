@@ -21,7 +21,7 @@ impl StructureId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 pub enum StructureKind {
     /// A lean-to: sleeping beside it keeps the cold off.
@@ -30,7 +30,26 @@ pub enum StructureKind {
     Hearth = 1,
 }
 
+/// What a structure is for, which is also how people show it to others.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Purpose {
+    /// A place to sleep out of the wind.
+    Rest,
+    /// A place to get warm.
+    Warmth,
+}
+
 impl StructureKind {
+    pub const COUNT: usize = 2;
+    pub const ALL: [Self; Self::COUNT] = [Self::Shelter, Self::Hearth];
+
+    pub const fn purpose(self) -> Purpose {
+        match self {
+            Self::Shelter => Purpose::Rest,
+            Self::Hearth => Purpose::Warmth,
+        }
+    }
+
     /// What it takes to build: materials and amounts.
     pub const fn cost(self) -> [(crate::Material, u8); 2] {
         match self {

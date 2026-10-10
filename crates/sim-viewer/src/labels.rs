@@ -74,15 +74,10 @@ pub const fn species_plural(species: Species) -> &'static str {
 pub const fn concept(concept: Concept) -> &'static str {
     match concept {
         Concept::Water => "water",
-        Concept::Berries => "berries",
-        Concept::Wood => "wood",
-        Concept::Stone => "stone",
-        Concept::Home => "home",
         Concept::Been => "been there",
-        Concept::Bitterberries => "bitter berries",
-        Concept::Deer => "deer",
-        Concept::Wolf => "wolf",
-        Concept::Fire => "fire",
+        Concept::Material(material) => self::material(material),
+        Concept::Species(animal) => species(animal),
+        Concept::Structure(kind) => structure_word(kind),
     }
 }
 
@@ -90,20 +85,25 @@ pub const fn concept(concept: Concept) -> &'static str {
 pub const fn concept_short(concept: Concept) -> &'static str {
     match concept {
         Concept::Been => "searched",
-        Concept::Bitterberries => "bitter",
+        Concept::BITTERBERRIES => "bitter",
         other => self::concept(other),
+    }
+}
+
+/// What a kind of structure is called in a sentence.
+pub const fn structure_word(kind: StructureKind) -> &'static str {
+    match kind {
+        StructureKind::Shelter => "hut",
+        StructureKind::Hearth => "fire",
     }
 }
 
 pub const fn place(kind: LandmarkKind) -> &'static str {
     match kind {
         LandmarkKind::Water => "water",
-        LandmarkKind::Berries => "berries",
-        LandmarkKind::Wood => "wood",
-        LandmarkKind::Stone => "stone",
-        LandmarkKind::Shelter => "a hut",
-        LandmarkKind::Bitterberries => "bitter berries",
-        LandmarkKind::Hearth => "a hearth",
+        LandmarkKind::Material(material) => self::material(material),
+        LandmarkKind::Structure(StructureKind::Shelter) => "a hut",
+        LandmarkKind::Structure(StructureKind::Hearth) => "a hearth",
     }
 }
 

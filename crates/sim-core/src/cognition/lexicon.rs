@@ -6,40 +6,65 @@
 //! (production). Founders inherit a noisy proto-language; there is no global
 //! dictionary — the "community language" is only the overlap between people.
 
-use crate::AgentId;
+use crate::{AgentId, Material, Species, StructureKind};
 
-/// Internal categories agents can think and talk about. Ids are an engine
-/// convenience; agents may come to link them to different forms.
+/// Internal categories agents can think and talk about: water, "I've been
+/// there", and every material, species, and kind of structure in the world (a
+/// new one becomes something to talk about without new code). Agents may come
+/// to link them to different forms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[repr(u8)]
 pub enum Concept {
-    Water = 0,
-    Berries = 1,
-    Wood = 2,
-    Stone = 3,
-    Home = 4,
+    Water,
     /// "I've been over there."
-    Been = 5,
-    Bitterberries = 6,
-    Deer = 7,
-    Wolf = 8,
-    Fire = 9,
+    Been,
+    Material(Material),
+    Species(Species),
+    Structure(StructureKind),
 }
 
 impl Concept {
-    pub const COUNT: usize = 10;
-    pub const ALL: [Self; Self::COUNT] = [
-        Self::Water,
-        Self::Berries,
-        Self::Wood,
-        Self::Stone,
-        Self::Home,
-        Self::Been,
-        Self::Bitterberries,
-        Self::Deer,
-        Self::Wolf,
-        Self::Fire,
-    ];
+    pub const COUNT: usize = 2 + Material::COUNT + Species::COUNT + StructureKind::COUNT;
+    pub const ALL: [Self; Self::COUNT] = {
+        let mut all = [Self::Water; Self::COUNT];
+        all[1] = Self::Been;
+        let mut index = 0;
+        while index < Material::COUNT {
+            all[2 + index] = Self::Material(Material::ALL[index]);
+            index += 1;
+        }
+        index = 0;
+        while index < Species::COUNT {
+            all[2 + Material::COUNT + index] = Self::Species(Species::ALL[index]);
+            index += 1;
+        }
+        index = 0;
+        while index < StructureKind::COUNT {
+            all[2 + Material::COUNT + Species::COUNT + index] =
+                Self::Structure(StructureKind::ALL[index]);
+            index += 1;
+        }
+        all
+    };
+    pub const BERRIES: Self = Self::Material(Material::Berries);
+    pub const BITTERBERRIES: Self = Self::Material(Material::Bitterberries);
+    pub const WOOD: Self = Self::Material(Material::Wood);
+    pub const STONE: Self = Self::Material(Material::Stone);
+    pub const MEAT: Self = Self::Material(Material::Meat);
+    pub const DEER: Self = Self::Species(Species::Deer);
+    pub const WOLF: Self = Self::Species(Species::Wolf);
+    pub const HOME: Self = Self::Structure(StructureKind::Shelter);
+    pub const FIRE: Self = Self::Structure(StructureKind::Hearth);
+
+    /// Position in `ALL`.
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Water => 0,
+            Self::Been => 1,
+            Self::Material(material) => 2 + material as usize,
+            Self::Species(species) => 2 + Material::COUNT + species as usize,
+            Self::Structure(kind) => 2 + Material::COUNT + Species::COUNT + kind as usize,
+        }
+    }
 
     const fn from_index(index: u8) -> Self {
         Self::ALL[index as usize % Self::COUNT]
@@ -158,7 +183,7 @@ pub(crate) fn founding_form(seed: u64, concept: Concept) -> VocalForm {
         key = mix(key.wrapping_add(index as u64));
         forms.swap(index, (key % (index as u64 + 1)) as usize);
     }
-    VocalForm(forms[concept as usize])
+    VocalForm(forms[concept.index()])
 }
 
 /// The word a founding family uses for a concept: the community's word, except
@@ -168,7 +193,7 @@ pub(crate) fn family_form(seed: u64, family: u32, concept: Concept) -> VocalForm
     if family == 0 {
         return founding_form(seed, concept);
     }
-    let roll = mix(seed ^ 0x4641_4d49_4c59 ^ (u64::from(family) << 32) ^ concept as u64);
+    let roll = mix(seed ^ 0x4641_4d49_4c59 ^ (u64::from(family) << 32) ^ concept.index() as u64);
     if roll % 100 < FAMILY_DIALECT_PERCENT {
         founding_form(
             seed ^ u64::from(family).wrapping_mul(0x9e37_79b9_7f4a_7c15),
@@ -186,7 +211,7 @@ impl Lexicon {
         let mut lexicon = Self::default();
         let family = agent.get() / FAMILY_SIZE;
         for concept in Concept::ALL {
-            let roll = mix(seed ^ (u64::from(agent.get()) << 20) ^ (concept as u64) << 4);
+            let roll = mix(seed ^ (u64::from(agent.get()) << 20) ^ (concept.index() as u64) << 4);
             let conventional = family_form(seed, family, concept);
             let form = if roll % 100 < VARIANT_PERCENT {
                 VocalForm(((roll >> 8) % u64::from(VOCAL_FORMS)) as u8)
@@ -211,7 +236,7 @@ impl Lexicon {
         if let Some(slot) = self.free_slot() {
             self.entries[slot] = LexicalEntry {
                 form: form.0,
-                concept: concept as u8,
+                concept: concept.index() as u8,
                 positive: INHERITED_EVIDENCE,
                 ..LexicalEntry::default()
             };
@@ -220,7 +245,7 @@ impl Lexicon {
 
     fn find(&self, form: VocalForm, concept: Concept) -> Option<usize> {
         self.entries.iter().position(|entry| {
-            !entry.is_empty() && entry.form == form.0 && entry.concept == concept as u8
+            !entry.is_empty() && entry.form == form.0 && entry.concept == concept.index() as u8
         })
     }
 
@@ -248,7 +273,7 @@ impl Lexicon {
         let slot = self.free_slot()?;
         self.entries[slot] = LexicalEntry {
             form: form.0,
-            concept: concept as u8,
+            concept: concept.index() as u8,
             positive: COINED_EVIDENCE,
             ..LexicalEntry::default()
         };
@@ -260,7 +285,7 @@ impl Lexicon {
         self.entries
             .iter()
             .enumerate()
-            .filter(|(_, entry)| !entry.is_empty() && entry.concept == concept as u8)
+            .filter(|(_, entry)| !entry.is_empty() && entry.concept == concept.index() as u8)
             .filter(|(_, entry)| entry.production_score() > 0)
             .max_by_key(|&(slot, entry)| (entry.production_score(), usize::MAX - slot))
             .map(|(_, entry)| VocalForm(entry.form))
@@ -289,7 +314,7 @@ impl Lexicon {
     /// other readings of the form. Returns whether the reading was new.
     pub(crate) fn hear_with_evidence(&mut self, form: VocalForm, concept: Concept) -> bool {
         for entry in &mut self.entries {
-            if !entry.is_empty() && entry.form == form.0 && entry.concept != concept as u8 {
+            if !entry.is_empty() && entry.form == form.0 && entry.concept != concept.index() as u8 {
                 entry.contradictory = entry.contradictory.saturating_add(1);
             }
         }
@@ -304,7 +329,7 @@ impl Lexicon {
                 if let Some(slot) = self.free_slot() {
                     self.entries[slot] = LexicalEntry {
                         form: form.0,
-                        concept: concept as u8,
+                        concept: concept.index() as u8,
                         positive: 1,
                         heard: 1,
                         ..LexicalEntry::default()
@@ -327,7 +352,7 @@ impl Lexicon {
                 if let Some(slot) = self.free_slot() {
                     self.entries[slot] = LexicalEntry {
                         form: form.0,
-                        concept: concept as u8,
+                        concept: concept.index() as u8,
                         positive: weight,
                         ..LexicalEntry::default()
                     };
@@ -380,9 +405,9 @@ mod tests {
     fn a_coined_word_uses_a_free_sound_and_a_shift_changes_one_vowel() {
         let mut lexicon = Lexicon::default();
         lexicon.reinforce(VocalForm(5), Concept::Water, 6);
-        let coined = lexicon.coin(Concept::Fire, 5).unwrap();
+        let coined = lexicon.coin(Concept::FIRE, 5).unwrap();
         assert_ne!(coined, VocalForm(5), "a sound already in use isn't reused");
-        assert_eq!(lexicon.produce(Concept::Fire), Some(coined));
+        assert_eq!(lexicon.produce(Concept::FIRE), Some(coined));
         let (a, b) = (VocalForm(3).name(), VocalForm(3).shifted().name());
         assert_eq!(a.len(), b.len());
         assert_eq!(
@@ -451,22 +476,22 @@ mod tests {
         assert_eq!(lexicon.recognize(form), Some(Concept::Water));
         // Repeated contrary evidence overturns the reading.
         for _ in 0..3 {
-            lexicon.hear_with_evidence(form, Concept::Berries);
+            lexicon.hear_with_evidence(form, Concept::BERRIES);
         }
-        assert_eq!(lexicon.recognize(form), Some(Concept::Berries));
+        assert_eq!(lexicon.recognize(form), Some(Concept::BERRIES));
     }
 
     #[test]
     fn failed_uses_steer_production_toward_another_word() {
         let mut lexicon = Lexicon::default();
-        lexicon.reinforce(VocalForm(1), Concept::Berries, 6);
-        lexicon.reinforce(VocalForm(2), Concept::Berries, 3);
-        assert_eq!(lexicon.produce(Concept::Berries), Some(VocalForm(1)));
+        lexicon.reinforce(VocalForm(1), Concept::BERRIES, 6);
+        lexicon.reinforce(VocalForm(2), Concept::BERRIES, 3);
+        assert_eq!(lexicon.produce(Concept::BERRIES), Some(VocalForm(1)));
         for _ in 0..2 {
-            lexicon.record_use(VocalForm(1), Concept::Berries, false);
+            lexicon.record_use(VocalForm(1), Concept::BERRIES, false);
         }
         assert_eq!(
-            lexicon.produce(Concept::Berries),
+            lexicon.produce(Concept::BERRIES),
             Some(VocalForm(2)),
             "switches to the word that works"
         );
@@ -477,8 +502,8 @@ mod tests {
         let mut lexicon = Lexicon::default();
         lexicon.reinforce(VocalForm(4), Concept::Water, 6);
         lexicon.contradict(VocalForm(4), Concept::Water, 8);
-        lexicon.reinforce(VocalForm(4), Concept::Berries, 4);
-        assert_eq!(lexicon.recognize(VocalForm(4)), Some(Concept::Berries));
+        lexicon.reinforce(VocalForm(4), Concept::BERRIES, 4);
+        assert_eq!(lexicon.recognize(VocalForm(4)), Some(Concept::BERRIES));
     }
 
     #[test]

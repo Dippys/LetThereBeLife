@@ -215,7 +215,7 @@ fn memory_markers_show_seen_places_solid_and_hints_as_search_outlines() {
         seen_second: 5,
     };
     let told = LandmarkView {
-        kind: LandmarkKind::Berries,
+        kind: LandmarkKind::BERRIES,
         position: WorldPosition { x: -20, y: 6 },
         source: LandmarkSource::Told,
         confidence: 120,
@@ -223,7 +223,7 @@ fn memory_markers_show_seen_places_solid_and_hints_as_search_outlines() {
         seen_second: 9,
     };
     let narrow_hint = LandmarkView {
-        kind: LandmarkKind::Stone,
+        kind: LandmarkKind::STONE,
         search_radius: 0,
         ..told
     };
@@ -240,7 +240,7 @@ fn memory_markers_show_seen_places_solid_and_hints_as_search_outlines() {
     assert!(
         outline
             .iter()
-            .all(|edge| edge.color == landmark_color(LandmarkKind::Berries))
+            .all(|edge| edge.color == landmark_color(LandmarkKind::BERRIES))
     );
     assert_eq!(outline[0].position, [-28.0, -2.0]);
     assert_eq!(outline[0].size, [17.0, 0.5]);

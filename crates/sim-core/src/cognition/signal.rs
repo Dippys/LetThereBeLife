@@ -93,20 +93,64 @@ pub struct PublicSignal {
 /// mime for food, a grimace for something that makes you sick, otherwise the
 /// motion of gathering it.
 pub(crate) const fn mime_for(topic: GestureTopic, food: Option<i16>) -> Mime {
-    match (topic, food) {
-        (GestureTopic::Place(LandmarkKind::Water), _) => Mime::Scoop,
-        (GestureTopic::Place(LandmarkKind::Shelter), _) => Mime::RestHead,
-        (GestureTopic::Place(LandmarkKind::Hearth), _) => Mime::Warm,
-        (GestureTopic::Explored, _) => Mime::Sweep,
-        (GestureTopic::Animal(_), Some(value)) if value < 0 => Mime::Snarl,
-        (GestureTopic::Animal(_), _) => Mime::Spear,
-        (_, Some(value)) if value > 0 => Mime::PickAndChew,
-        (_, Some(value)) if value < 0 => Mime::Retch,
-        (GestureTopic::Place(LandmarkKind::Wood), _) => Mime::Chop,
-        (GestureTopic::Place(LandmarkKind::Stone), _) => Mime::Strike,
-        (GestureTopic::Place(LandmarkKind::Berries | LandmarkKind::Bitterberries), _) => {
-            Mime::PickAndChew
+    match topic {
+        GestureTopic::Place(LandmarkKind::Water) => Mime::Scoop,
+        GestureTopic::Place(LandmarkKind::Structure(kind)) => purpose_motion(kind.purpose()),
+        GestureTopic::Explored => Mime::Sweep,
+        GestureTopic::Animal(_) => match food {
+            Some(value) if value < 0 => Mime::Snarl,
+            _ => Mime::Spear,
+        },
+        GestureTopic::Place(LandmarkKind::Material(material)) => match food {
+            Some(value) if value > 0 => Mime::PickAndChew,
+            Some(value) if value < 0 => Mime::Retch,
+            _ => handling_motion(material.properties().handling),
+        },
+    }
+}
+
+/// The motion of gathering a material that way.
+pub(crate) const fn handling_motion(handling: crate::Handling) -> Mime {
+    match handling {
+        crate::Handling::Pick | crate::Handling::Carve => Mime::PickAndChew,
+        crate::Handling::Chop => Mime::Chop,
+        crate::Handling::Strike => Mime::Strike,
+    }
+}
+
+/// How people show what a structure is for.
+pub(crate) const fn purpose_motion(purpose: crate::Purpose) -> Mime {
+    match purpose {
+        crate::Purpose::Rest => Mime::RestHead,
+        crate::Purpose::Warmth => Mime::Warm,
+    }
+}
+
+/// The motion that depicts a concept by what the thing really is: eating for
+/// food, retching for what makes you sick, otherwise how it's gathered or used;
+/// a snarl for an animal that bites, a spear for one that doesn't.
+pub(crate) const fn natural_motion(concept: Concept) -> Mime {
+    match concept {
+        Concept::Water => Mime::Scoop,
+        Concept::Been => Mime::Sweep,
+        Concept::Material(material) => {
+            let properties = material.properties();
+            if properties.toxicity > 0 {
+                Mime::Retch
+            } else if properties.nutrition > 0 {
+                Mime::PickAndChew
+            } else {
+                handling_motion(properties.handling)
+            }
         }
+        Concept::Species(species) => {
+            if species.traits().bite > 0 {
+                Mime::Snarl
+            } else {
+                Mime::Spear
+            }
+        }
+        Concept::Structure(kind) => purpose_motion(kind.purpose()),
     }
 }
 
@@ -169,18 +213,15 @@ pub(crate) fn understand(signal: &PublicSignal, listener: ListenerContext) -> Un
 
 /// What an exaggerated (or explicitly negated) mime unmistakably shows.
 pub(crate) const fn unmistakable(mime: Mime) -> Concept {
-    match mime {
-        Mime::Scoop => Concept::Water,
-        Mime::PickAndChew => Concept::Berries,
-        Mime::Chop => Concept::Wood,
-        Mime::Strike => Concept::Stone,
-        Mime::RestHead => Concept::Home,
-        Mime::Sweep => Concept::Been,
-        Mime::Retch => Concept::Bitterberries,
-        Mime::Snarl => Concept::Wolf,
-        Mime::Spear => Concept::Deer,
-        Mime::Warm => Concept::Fire,
+    let mut index = 0;
+    while index < Concept::COUNT {
+        let concept = Concept::ALL[index];
+        if natural_motion(concept) as u8 == mime as u8 {
+            return concept;
+        }
+        index += 1;
     }
+    Concept::Water
 }
 
 /// Where the pointing leads, for anyone watching.
@@ -209,10 +250,10 @@ mod tests {
     fn every_topic_has_a_distinct_mime_that_watchers_read_back() {
         let topics = [
             GestureTopic::Place(LandmarkKind::Water),
-            GestureTopic::Place(LandmarkKind::Berries),
-            GestureTopic::Place(LandmarkKind::Wood),
-            GestureTopic::Place(LandmarkKind::Stone),
-            GestureTopic::Place(LandmarkKind::Shelter),
+            GestureTopic::Place(LandmarkKind::BERRIES),
+            GestureTopic::Place(LandmarkKind::WOOD),
+            GestureTopic::Place(LandmarkKind::STONE),
+            GestureTopic::Place(LandmarkKind::SHELTER),
             GestureTopic::Explored,
         ];
         for topic in topics {
@@ -268,7 +309,7 @@ mod tests {
     fn nearby_places_produce_no_signal() {
         let intent = UtteranceIntent {
             effect: DesiredEffect::Inform,
-            topic: GestureTopic::Place(LandmarkKind::Berries),
+            topic: GestureTopic::Place(LandmarkKind::BERRIES),
             place: at(3, 3),
         };
         assert_eq!(

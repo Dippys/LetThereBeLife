@@ -111,8 +111,8 @@ pub struct CommunicationLog {
 const fn kind_for_goal(goal: PhysicalGoal) -> Option<LandmarkKind> {
     match goal {
         PhysicalGoal::SeekWater => Some(LandmarkKind::Water),
-        PhysicalGoal::SeekFood => Some(LandmarkKind::Berries),
-        PhysicalGoal::SeekShelter => Some(LandmarkKind::Shelter),
+        PhysicalGoal::SeekFood => Some(LandmarkKind::BERRIES),
+        PhysicalGoal::SeekShelter => Some(LandmarkKind::SHELTER),
         _ => None,
     }
 }
@@ -489,7 +489,7 @@ impl CommunicationLog {
         summary.leads_followed = self.leads_followed;
         for request in &self.requests {
             summary.requests[0] += 1;
-            summary.requests[1] += u64::from(request.read_as != sim_core::Concept::Berries);
+            summary.requests[1] += u64::from(request.read_as != sim_core::Concept::BERRIES);
             summary.requests[match request.response {
                 RequestResponse::Gave => 2,
                 RequestResponse::Refused => 3,
@@ -513,7 +513,7 @@ impl CommunicationLog {
                 u64::from(exchange.signal.intent.effect == DesiredEffect::Correct);
             match exchange.signal.intent.topic {
                 _ if exchange.signal.intent.effect == DesiredEffect::Request => {}
-                GestureTopic::Place(kind) => summary.place_exchanges[kind as usize] += 1,
+                GestureTopic::Place(kind) => summary.place_exchanges[kind.index()] += 1,
                 GestureTopic::Explored => summary.explored_exchanges += 1,
                 GestureTopic::Animal(species) => summary.animal_exchanges[species as usize] += 1,
             }
@@ -556,11 +556,22 @@ impl CommunicationLog {
 
 impl fmt::Display for CommunicationSummary {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let [water, berries, wood, stone, shelter, bitter, hearth] = self.place_exchanges;
+        let places: Vec<String> = sim_core::LandmarkKind::ALL
+            .into_iter()
+            .map(|kind| {
+                let name = format!("{:?}", kind.concept())
+                    .to_lowercase()
+                    .replace("material(", "")
+                    .replace("structure(", "")
+                    .replace(')', "");
+                format!("{name} {}", self.place_exchanges[kind.index()])
+            })
+            .collect();
         write!(
             formatter,
-            "  communication: exchanges={} (water {water}, berries {berries}, bitterberries {bitter}, wood {wood}, stone {stone}, shelter {shelter}, hearth {hearth}, explored {}) receptions={} informed={} acted={} confirmed={} refuted={} misread={}",
+            "  communication: exchanges={} ({}, explored {}) receptions={} informed={} acted={} confirmed={} refuted={} misread={}",
             self.exchanges,
+            places.join(", "),
             self.explored_exchanges,
             self.receptions,
             self.informed,

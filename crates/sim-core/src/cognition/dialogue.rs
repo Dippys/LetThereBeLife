@@ -177,7 +177,7 @@ mod tests {
             speaker: AgentId::new(1),
             form: VocalForm(2),
             misread: Concept::Water,
-            actual: Concept::Berries,
+            actual: Concept::BERRIES,
             place: at(0, 0),
             since: 100,
         });

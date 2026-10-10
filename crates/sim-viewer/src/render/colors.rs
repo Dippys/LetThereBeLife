@@ -1,8 +1,8 @@
 //! Color palette for terrain, features, spawned objects, agents, structures, remembered places, relationships, gestures, and selection previews.
 
 use sim_core::{
-    AgentActivity, BiomeType, FeatureKind, LandmarkKind, SpawnKind, StructureKind, StructureState,
-    SurfaceType,
+    AgentActivity, BiomeType, FeatureKind, LandmarkKind, Material, SpawnKind, StructureKind,
+    StructureState, SurfaceType,
 };
 
 pub(super) const HUT: u32 = rgba(116, 72, 38, 255);
@@ -64,12 +64,20 @@ pub(super) const fn agent_color(activity: AgentActivity) -> u32 {
 pub(super) const fn landmark_color(kind: LandmarkKind) -> u32 {
     match kind {
         LandmarkKind::Water => rgba(70, 176, 255, 235),
-        LandmarkKind::Berries => rgba(240, 84, 136, 235),
-        LandmarkKind::Wood => rgba(164, 104, 52, 235),
-        LandmarkKind::Stone => rgba(176, 176, 170, 235),
-        LandmarkKind::Shelter => rgba(255, 150, 40, 235),
-        LandmarkKind::Bitterberries => rgba(150, 90, 230, 235),
-        LandmarkKind::Hearth => rgba(255, 90, 30, 235),
+        LandmarkKind::Material(material) => material_color(material),
+        LandmarkKind::Structure(StructureKind::Shelter) => rgba(255, 150, 40, 235),
+        LandmarkKind::Structure(StructureKind::Hearth) => rgba(255, 90, 30, 235),
+    }
+}
+
+/// A material's marker color.
+pub(super) const fn material_color(material: Material) -> u32 {
+    match material {
+        Material::Berries => rgba(240, 84, 136, 235),
+        Material::Bitterberries => rgba(150, 90, 230, 235),
+        Material::Wood => rgba(164, 104, 52, 235),
+        Material::Stone => rgba(176, 176, 170, 235),
+        Material::Meat => rgba(150, 40, 40, 235),
     }
 }
 

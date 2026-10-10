@@ -104,14 +104,14 @@ impl Engine {
             .ok_or(PolicyFailureReason::TargetUnavailable)?;
         let intent = UtteranceIntent {
             effect: DesiredEffect::Request,
-            topic: GestureTopic::Place(LandmarkKind::Berries),
+            topic: GestureTopic::Place(LandmarkKind::BERRIES),
             place: giver_position,
         };
         let urgency = self.visible_urgency(asker);
         let vocal = self
             .minds
             .get(asker)
-            .and_then(|mind| mind.lexicon.produce(Concept::Berries));
+            .and_then(|mind| mind.lexicon.produce(Concept::BERRIES));
         let public = PublicSignal {
             sender: asker,
             origin: from,
@@ -159,12 +159,12 @@ impl Engine {
             word_reading: word.map(|(concept, _)| concept),
             reading: understanding.reading,
         });
-        if read_as == Concept::Berries {
+        if read_as == Concept::BERRIES {
             if let Some(form) = vocal {
                 self.minds
                     .get_mut(asker)
                     .lexicon
-                    .record_use(form, Concept::Berries, true);
+                    .record_use(form, Concept::BERRIES, true);
             }
         } else {
             self.repair_request(id, asker, giver, vocal, read_as);
@@ -249,12 +249,12 @@ impl Engine {
             giver_mind.lexicon.contradict(form, read_as, REPAIR_WEIGHT);
             giver_mind
                 .lexicon
-                .reinforce(form, Concept::Berries, REPAIR_WEIGHT);
+                .reinforce(form, Concept::BERRIES, REPAIR_WEIGHT);
             self.lesson_events.push(LessonEvent {
                 agent: giver,
                 at: self.time,
                 form,
-                strengthened: Some(Concept::Berries),
+                strengthened: Some(Concept::BERRIES),
                 weakened: Some(read_as),
                 use_worked: None,
                 cause: LessonCause::Repair,
@@ -263,7 +263,7 @@ impl Engine {
         }
         let asker_mind = self.minds.get_mut(asker);
         if let Some(form) = vocal {
-            asker_mind.lexicon.record_use(form, Concept::Berries, false);
+            asker_mind.lexicon.record_use(form, Concept::BERRIES, false);
         }
         if let Some(word) = listener_word {
             asker_mind.lexicon.hear_with_evidence(word, read_as);
@@ -274,7 +274,7 @@ impl Engine {
             at: self.time,
             guess: read_as,
             listener_word,
-            response: RepairResponse::Repaired(Concept::Berries),
+            response: RepairResponse::Repaired(Concept::BERRIES),
         });
     }
 

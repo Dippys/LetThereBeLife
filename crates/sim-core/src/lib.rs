@@ -69,7 +69,7 @@ pub use sim_world::{
     ArchiveBakeProgress, ArchiveBakeStats, BandLayout, BaseResource, BiomeType, CAMP_RADIUS,
     CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkInspection, ChunkLoadRequest, ChunkLocalPosition,
     ChunkOverview, ChunkPresence, ClimateSample, DEFAULT_INITIAL_WORLD_SIZE, Feature, FeatureKind,
-    GenerateAreaError, GeneratedCell, MAX_CHUNKS_PER_GENERATION, MAX_GENERATED_CELLS,
+    GenerateAreaError, GeneratedCell, Handling, MAX_CHUNKS_PER_GENERATION, MAX_GENERATED_CELLS,
     MAX_GENERATED_CHUNKS, MAX_GENERATED_TERRAIN_BYTES, MAX_INITIAL_CHUNKS,
     MAX_TRAVERSABLE_ELEVATION_DELTA, Material, MaterialProperties, PrevailingWind, Standability,
     SurfaceType, TerrainCell, TerrainClass, TraversalKind, TraversalStep, VALLEY_BAND,
@@ -85,7 +85,7 @@ pub use sleep::{
 };
 pub use structures::{
     BuildShelterError, HEARTH_BUILD_TICKS, HEARTH_STONE_COST, HEARTH_WARMTH, HEARTH_WOOD_COST,
-    SHELTER_BUILD_TICKS, SHELTER_STONE_COST, SHELTER_WOOD_COST, StructureDiagnostic,
+    Purpose, SHELTER_BUILD_TICKS, SHELTER_STONE_COST, SHELTER_WOOD_COST, StructureDiagnostic,
     StructureDiagnosticKind, StructureId, StructureKind, StructureState, StructureView,
 };
 pub use wildlife::{
