@@ -177,8 +177,10 @@ impl NeedState {
         let recovery = u128::from(quality.rest_recovery_per_period());
         let rest_elapsed = remaining.div_ceil(recovery);
         let exposure_elapsed = if recover_exposure {
+            // Warm up well below the threshold before getting up: waking just
+            // under it, the cold (worse in winter) would send it straight back.
             let target =
-                u128::from(threshold(NeedKind::Exposure) - 1) * u128::from(NEED_RATE_PERIOD_TICKS);
+                u128::from(threshold(NeedKind::Exposure) / 2) * u128::from(NEED_RATE_PERIOD_TICKS);
             let remaining = self
                 .numerator(NeedKind::Exposure, now)
                 .saturating_sub(target);
@@ -459,21 +461,22 @@ mod tests {
     }
 
     #[test]
-    fn exposure_driven_shelter_sleep_predicts_one_below_threshold_interval() {
+    fn exposure_driven_shelter_sleep_lasts_until_well_warmed() {
         let mut state = NeedState::new(SimTime::ZERO);
         state.values[NeedKind::Rest.index()] = 0;
         state.values[NeedKind::Exposure.index()] = threshold(NeedKind::Exposure);
-        assert_eq!(
-            state.sleep_recovery_due_for(SleepQuality::Sheltered, SimTime::ZERO, true),
-            Some(SimTime::from_ticks(15))
-        );
+        let due = state
+            .sleep_recovery_due_for(SleepQuality::Sheltered, SimTime::ZERO, true)
+            .unwrap();
         state.transition_sleep(SleepQuality::Sheltered, SimTime::ZERO);
+        let exposure = |at: SimTime| state.view(AgentId::new(0), at).exposure.value;
+        let half = threshold(NeedKind::Exposure) / 2;
+        assert!(exposure(due) <= half, "warmed to half the threshold");
         assert!(
-            state
-                .view(AgentId::new(0), SimTime::from_ticks(15))
-                .exposure
-                .value
-                < threshold(NeedKind::Exposure)
+            exposure(SimTime::from_ticks(
+                due.ticks() - u64::from(NEED_RATE_PERIOD_TICKS)
+            )) > half,
+            "and not a period longer"
         );
     }
 

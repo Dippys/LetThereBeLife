@@ -620,3 +620,15 @@ the last action (so idle people seemed to be "pointing something out" for minute
 **Consequences:** Six 10-year valleys: 139 vs 140 survivors, 0 vs 1 deaths from thirst (traps were
 rare in headless runs; the unit test covers the nook case). The "Pointing" label fell from 28% to 2%
 of samples; behavior is unchanged.
+
+## D-101: Warming up in a hut lasts until well warmed (2026-10-11)
+
+**Decision:** Sleeping in a shelter to get warm lasts until exposure is down to half its threshold
+(was one point below it).
+**Why:** Late in each winter the simulation did 3-4 times the work (about 80,000 events per 15
+simulated minutes instead of 20,000, and about 6 times the compute), which made the viewer crawl.
+Everyone was cold; each warming nap ended just under the threshold, the winter chill pushed them
+back over a tick later, and they lay down again: 14,000 naps in 15 minutes.
+**Consequences:** Late winter now costs the same as other seasons. Six 10-year valleys: 146
+survivors vs 139, deaths from cold 6 vs 11. Episodes 60 in 28 of the success test's valleys (86 in
+23 before).
