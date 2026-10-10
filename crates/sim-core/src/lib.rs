@@ -78,8 +78,8 @@ pub use sim_world::{
     VALLEY_CHILDREN_PER_FAMILY, VALLEY_FAMILIES, VALLEY_SIDE, Valley, ValleyScore,
     WORLD_GENERATION_BOUNDS, WORLD_GENERATOR_VERSION, WORLD_HALF_EXTENT, WORLD_SIDE_CELLS,
     WaterSource, World, WorldArchive, WorldArchiveError, WorldChunk, WorldChunkLoad, WorldConfig,
-    WorldConfigError, WorldOverview, WorldPosition, WorldQueryError, WorldRect, band_layout,
-    camp_sites, family_camps, find_valley, score_square,
+    WorldConfigError, WorldOverview, WorldPosition, WorldQueryError, WorldRect, apart_layout,
+    band_layout, camp_sites, family_camps, find_valley, find_valley_pair, score_square,
 };
 pub use sleep::{
     REST_COLLAPSE, SleepDiagnostic, SleepDiagnosticKind, SleepInterruptionReason, SleepQuality,

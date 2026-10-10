@@ -46,7 +46,7 @@ procedurally instead. Re-run the command after changing the seed or the generato
 Measures how viewer-like agents actually fare. They spawn without supplies and run headless:
 
 ```sh
-cargo run --release -p sim-headless -- --study [--near-water | --groups | --valley] [--seed N]
+cargo run --release -p sim-headless -- --study [--near-water | --groups | --valley | --apart] [--seed N]
     [--agents N] [--ticks N | --years N] [--mind legacy|memory|sharing|full] [--no-help] [--food PERCENT]
     [--no-wildlife] [--no-regrowth]
     [--verbose] [--trace AGENT]
@@ -57,7 +57,9 @@ cargo run --release -p sim-headless -- --study [--near-water | --groups | --vall
   `--valley` is the spec's vertical slice: a 768² livable valley (found per seed) with two
   families camped at their own water, 8 adults and 2 children each (children start with no words
   and follow a parent); only the valley is simulated. `--valley --agents 16` is the adults-only
-  band the success test uses. The default spawns on random land.
+  band the success test uses. `--apart` puts each family of the band in its own valley of a
+  neighboring pair (camps about 1,100 cells apart; about half of seeds have a pair). The default
+  spawns on random land.
 - The valley also releases 24 deer and 2 wolves (`--no-wildlife` to leave them out).
   `--food PERCENT` strips all but that share of the berries at the start, `--no-regrowth` stops
   picked bushes and trees from growing back (a famine valley), and `--no-help` turns off asking

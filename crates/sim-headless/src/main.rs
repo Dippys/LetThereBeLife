@@ -12,6 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut near_water = false;
     let mut groups = false;
     let mut valley = false;
+    let mut apart = false;
     let mut trace = None;
     let mut comms_lines = 0_usize;
     let mut misread_lines = 0_usize;
@@ -34,6 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--near-water" => near_water = true,
             "--groups" => groups = true,
             "--valley" => valley = true,
+            "--apart" => apart = true,
             "--food" => food_percent = parse_next(&mut args, "--food"),
             "--no-help" => no_help = true,
             "--no-wildlife" => no_wildlife = true,
@@ -75,7 +77,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--config" => config_path = parse_next(&mut args, "--config"),
             "--help" | "-h" => {
                 println!(
-                    "Usage: sim-headless [--canonical | --study [--near-water | --groups | --valley] [--mind legacy|memory|sharing|full] [--no-help] [--no-wildlife] [--no-regrowth] [--food PERCENT] [--verbose] [--trace AGENT] [--comms N] [--misreads N] [--successes N] [--lessons N] [--explain AGENT]] [--config PATH] [--ticks NUMBER | --years NUMBER] [--seed NUMBER] [--agents NUMBER] [--batch-size NUMBER]"
+                    "Usage: sim-headless [--canonical | --study [--near-water | --groups | --valley | --apart] [--mind legacy|memory|sharing|full] [--no-help] [--no-wildlife] [--no-regrowth] [--food PERCENT] [--verbose] [--trace AGENT] [--comms N] [--misreads N] [--successes N] [--lessons N] [--explain AGENT]] [--config PATH] [--ticks NUMBER | --years NUMBER] [--seed NUMBER] [--agents NUMBER] [--batch-size NUMBER]"
                 );
                 return Ok(());
             }
@@ -109,6 +111,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         if valley {
             config.spawn = sim_headless::StudySpawn::Valley;
+        }
+        if apart {
+            config.spawn = sim_headless::StudySpawn::Apart;
         }
         let report = run_study(config)?;
         println!("{report}");

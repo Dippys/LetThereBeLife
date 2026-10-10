@@ -49,6 +49,17 @@ pub enum StudySpawn {
     /// The spec's vertical slice: one band together beside water in a small
     /// livable valley (see `sim_core::find_valley`); only the valley is simulated.
     Valley,
+    /// The same band, but each family in its own valley, about a thousand cells
+    /// from the other (see `sim_core::find_valley_pair`); both valleys and the
+    /// land between are simulated.
+    Apart,
+}
+
+impl StudySpawn {
+    /// A band of families with children (one valley or two).
+    pub const fn is_band(self) -> bool {
+        matches!(self, Self::Valley | Self::Apart)
+    }
 }
 
 /// The spec's first vertical slice: 16 adults and 4 children.
@@ -189,6 +200,8 @@ pub struct FamilyStats {
     /// how many of those were misread.
     pub cross_receptions: u64,
     pub cross_misread: u64,
+    /// Tick of the first reception across families (when they first met).
+    pub first_cross: Option<u64>,
     /// Couples formed within a family and across families.
     pub couples: [u64; 2],
     /// Pregnancies, babies born, children who started walking, and losses.
@@ -329,8 +342,14 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     if !config.regrowth {
         engine.disable_regrowth();
     }
-    if config.wildlife && config.spawn == StudySpawn::Valley {
-        engine.release_wildlife(active_area, VALLEY_DEER, VALLEY_WOLVES);
+    if config.wildlife && config.spawn.is_band() {
+        // As many animals per valley either way.
+        let valleys = if config.spawn == StudySpawn::Apart {
+            2
+        } else {
+            1
+        };
+        engine.release_wildlife(active_area, VALLEY_DEER * valleys, VALLEY_WOLVES * valleys);
     }
     if let Some(founders) = founders {
         engine.set_founders(founders);
@@ -530,6 +549,8 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
         for reception in &exchange.receptions {
             if family_of(reception.interpretation.receiver) != speaker {
                 families.cross_receptions += 1;
+                let at = exchange.signal.at.ticks();
+                families.first_cross = Some(families.first_cross.map_or(at, |first| first.min(at)));
                 families.cross_misread +=
                     u64::from(reception.interpretation.understood != exchange.signal.intent.topic);
             }
@@ -631,7 +652,7 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
 
 /// Builds the engine and chooses where everyone starts.
 fn prepare_world(config: StudyConfig) -> Result<Start, ScenarioError> {
-    let side = if config.spawn == StudySpawn::Valley {
+    let side = if config.spawn.is_band() {
         64
     } else {
         config.world_side
@@ -645,7 +666,7 @@ fn prepare_world(config: StudyConfig) -> Result<Start, ScenarioError> {
     engine
         .materialize_initial_area()
         .map_err(|error| ScenarioError(format!("world materialization failed: {error}")))?;
-    if config.spawn != StudySpawn::Valley {
+    if !config.spawn.is_band() {
         let fresh_water = fresh_water_cells(&engine);
         let spawns = random_land_spawns(&engine, config, &fresh_water)?;
         let area = engine.world().initial_bounds();
@@ -657,6 +678,9 @@ fn prepare_world(config: StudyConfig) -> Result<Start, ScenarioError> {
             founders: None,
             parents: Vec::new(),
         });
+    }
+    if config.spawn == StudySpawn::Apart {
+        return apart_start(engine, config);
     }
     let valley = sim_core::find_valley(config.seed, VALLEY_SIDE).ok_or_else(|| {
         ScenarioError(format!(
@@ -710,6 +734,54 @@ fn prepare_world(config: StudyConfig) -> Result<Start, ScenarioError> {
         spawns,
         founders: None,
         parents: Vec::new(),
+    })
+}
+
+/// Each family of the standard band in its own valley of a neighboring pair.
+fn apart_start(mut engine: Engine, config: StudyConfig) -> Result<Start, ScenarioError> {
+    let [first, second] =
+        sim_core::find_valley_pair(config.seed, VALLEY_SIDE).ok_or_else(|| {
+            ScenarioError(format!(
+                "no two neighboring livable valleys near the origin for seed {}",
+                config.seed
+            ))
+        })?;
+    if config.population != VALLEY_POPULATION {
+        return Err(ScenarioError(
+            "two valleys need the standard band (no --agents)".into(),
+        ));
+    }
+    let area = sim_core::WorldRect {
+        min: WorldPosition {
+            x: first.bounds.min.x.min(second.bounds.min.x),
+            y: first.bounds.min.y.min(second.bounds.min.y),
+        },
+        max: WorldPosition {
+            x: first.bounds.max.x.max(second.bounds.max.x),
+            y: first.bounds.max.y.max(second.bounds.max.y),
+        },
+    };
+    engine.command(EngineCommand::GenerateWorldArea(area));
+    let fresh_water: Vec<_> = fresh_water_cells(&engine)
+        .into_iter()
+        .filter(|cell| area.contains(*cell))
+        .collect();
+    let families = sim_core::VALLEY_FAMILIES;
+    let layout = sim_core::apart_layout(
+        engine.world(),
+        &[first.bounds, second.bounds],
+        sim_core::VALLEY_BAND / families,
+        sim_core::VALLEY_CHILDREN_PER_FAMILY,
+        config.seed,
+    )
+    .ok_or_else(|| ScenarioError("a valley has no room for its family beside water".into()))?;
+    Ok(Start {
+        engine,
+        area,
+        fresh_water,
+        spawns: layout.sites,
+        founders: Some(layout.founders as u32),
+        parents: layout.parents,
     })
 }
 
@@ -1312,7 +1384,9 @@ fn random_land_spawns(
             y: anchor.y + ((key >> 32) % 13) as i64 - 6,
         });
         let near_enough = match config.spawn {
-            StudySpawn::AnyLand | StudySpawn::Groups | StudySpawn::Valley => true,
+            StudySpawn::AnyLand | StudySpawn::Groups | StudySpawn::Valley | StudySpawn::Apart => {
+                true
+            }
             StudySpawn::NearWater => nearest_distance(position, fresh_water)
                 .is_some_and(|distance| distance <= NEAR_WATER_DISTANCE),
         };
@@ -1498,7 +1572,7 @@ impl fmt::Display for StudyReport {
             food.watched,
         )?;
         let wild = &self.wildlife;
-        if self.config.wildlife && self.config.spawn == StudySpawn::Valley {
+        if self.config.wildlife && self.config.spawn.is_band() {
             let [founders_fear, children_fear] = wild.fear_wolves;
             write!(
                 formatter,
@@ -1517,7 +1591,7 @@ impl fmt::Display for StudyReport {
                 wild.wolves,
             )?;
         }
-        if self.config.spawn == StudySpawn::Valley {
+        if self.config.spawn.is_band() {
             let families = &self.families;
             write!(
                 formatter,
@@ -1529,6 +1603,13 @@ impl fmt::Display for StudyReport {
                 families.couples[0],
                 families.couples[1]
             )?;
+            if let Some(first) = families.first_cross {
+                write!(
+                    formatter,
+                    "; first heard each other in year {:.1}",
+                    first as f64 / (sim_core::SECONDS_PER_YEAR * 60) as f64
+                )?;
+            }
             let [conceived, born, walking, lost] = families.births;
             write!(
                 formatter,

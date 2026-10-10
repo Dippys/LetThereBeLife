@@ -548,3 +548,19 @@ fell from 15 to 3, but fresh valleys (seeds 79-160) show 1 in 47 either way, so 
 lucky cluster and episodes are about 1 per 20-40 valleys. The children's-words slice test now
 averages all 21 valleys among seeds 1-44 (75%; one valley's 4 children swing by tens of points)
 instead of pinning seed 1.
+
+## D-096: Two-valley start, and where episodes really break (2026-10-10)
+
+**Decision:** `--apart` (`StudySpawn::Apart`) starts each family of the standard band in its own
+livable valley of a neighboring pair (`find_valley_pair`, centers 1,024 cells apart); both valleys
+and the land between are simulated, with as many animals per valley as the one-valley start.
+`find_valley` shares the candidate scan and keeps its old choices.
+**Why:** Plan step 4: groups apart long enough for dialects to diverge, then meeting.
+**Consequences:** The families first hear each other within 0.1-0.8 years (people roam that far in
+weeks) and spend 2-22% of their time near each other early on (36-68% in one valley), but their
+words still converge over 30 years. Episodes don't change: 4 in 57 apart runs against 4 in 89
+single valleys (5.5 hours each). Even with entirely different founding words (an experiment, not
+kept) there were 1 in 35 apart and 3 in 42 together, though cross-family misreadings tripled. The
+episode funnel shows why: the speaker almost never learns afterwards (0-1 per run), because it
+would have to hear the listener use the word the old way, which the listener just unlearned. Next
+is giving speakers observable feedback, not more separation.

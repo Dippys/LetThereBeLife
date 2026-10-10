@@ -138,11 +138,12 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Known problems and limitations
 
-- **Complete misunderstanding episodes happen in about one valley in seven** (7 in the 40 valleys
-  the success test runs; 10 in 66 valleys over seeds 1-120), mostly bitter berries pointed out as
-  food and read as berries. The families do meet (people spend about 25% of their time near the
-  other family); what's limited is the speaker learning afterwards. A constructed test covers the
-  animal-call version end to end (a wolf warning misread as deer, hunted, found out, corrected).
+- **Complete misunderstanding episodes are rare: about 1 per 20-40 valleys** (D-095, D-096).
+  The chain breaks at the last step: listeners misread and learn from what they find, but the
+  speaker almost never gets evidence it was misunderstood (it would have to hear the listener
+  use the word the old way, and the listener just learned not to). Separating the families, or
+  even giving them entirely different words, doesn't change the count. A constructed test covers
+  the animal-call version end to end (a wolf warning misread as deer, hunted, found out, corrected).
 - **Wolves are hard on loners.** Agents who wander off alone get bitten; wounded people now come
   round after 5 minutes, but some die of thirst while down or soon after.
 - **Helping matters only in famines.** With regrowth and game, nobody needs to ask for food; the M7
@@ -170,7 +171,8 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
-- 2026-10-10 (latest): fuel (D-094) and stone blades (D-095); misunderstanding episodes are
+- 2026-10-10 (latest): two-valley start, `--apart` (D-096).
+- 2026-10-10: fuel (D-094) and stone blades (D-095); misunderstanding episodes are
   rarer than the pinned seeds suggested (about 1 per 20-40 valleys).
 - 2026-10-10: concepts from the world's tables (D-092) and seasons (D-093).
 - 2026-10-10: new words and sound shifts (D-091).
@@ -203,11 +205,12 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## What's next
 
-1. **Separated groups**: words are now coined and sounds shift (D-091), but families in one
-   valley mix enough that most runs converge on one vocabulary. Bands that split and settle apart
-   (or valleys joined only by occasional travel) would let dialects truly diverge.
-2. **Construction by properties (L4, continued)**: structures whose use comes from what they're
-   made of, hearths that need fuel, cooking.
+1. **Speakers seeing they were misunderstood**: the bottleneck for the north star (see Known
+   problems). Speakers need observable feedback: watching where a listener goes or what it eats
+   after a gesture, or a listener coming back and showing what it found.
+2. **Separated groups (continued)**: `--apart` starts each family in its own valley, but people
+   roam about a thousand cells within weeks, so the groups still meet early and converge. Real
+   divergence needs a lasting barrier or much longer isolation.
 3. **Episodic memory** (phase 3), so agents remember who misled, helped, or warned them.
 4. Generation leftovers: elders walking slower, late pregnancy slowing, names used in requests
    and corrections.

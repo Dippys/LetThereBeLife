@@ -60,9 +60,51 @@ pub struct Valley {
 /// or `None` if no candidate qualifies. `side` is rounded up to whole chunks.
 /// Deterministic for a seed: equal inputs always pick the same valley.
 pub fn find_valley(seed: u64, side: i64) -> Option<Valley> {
+    candidates(seed, side)
+        .into_iter()
+        .filter_map(|(grid, valley)| Some((grid, valley?)))
+        // Prefer better sites, then sites closer to the origin, then the first scanned.
+        .min_by_key(|((gx, gy), valley)| {
+            (std::cmp::Reverse(valley.score.rank()), gx.abs() + gy.abs())
+        })
+        .map(|(_, valley)| valley)
+}
+
+/// Two livable `side × side` squares in neighboring candidate spots (their
+/// centers `CANDIDATE_SPACING` apart), for groups that start out of each
+/// other's reach. The best pair by the worse of the two, then closest to the origin.
+pub fn find_valley_pair(seed: u64, side: i64) -> Option<[Valley; 2]> {
+    let candidates = candidates(seed, side);
+    let at = |gx: i64, gy: i64| {
+        candidates
+            .iter()
+            .find(|(grid, _)| *grid == (gx, gy))
+            .and_then(|(_, valley)| *valley)
+    };
+    candidates
+        .iter()
+        .filter_map(|&((gx, gy), valley)| Some(((gx, gy), valley?)))
+        .flat_map(|((gx, gy), first)| {
+            [(gx + 1, gy), (gx, gy + 1)]
+                .into_iter()
+                .filter_map(move |(nx, ny)| Some(((gx, gy), first, at(nx, ny)?)))
+                .collect::<Vec<_>>()
+        })
+        .min_by_key(|((gx, gy), first, second)| {
+            (
+                std::cmp::Reverse(first.score.rank().min(second.score.rank())),
+                gx.abs() + gy.abs(),
+            )
+        })
+        .map(|(_, first, second)| [first, second])
+}
+
+/// Every candidate spot around the origin (grid coordinates), with its square
+/// if it's inside the world and livable. `side` is rounded up to whole chunks.
+fn candidates(seed: u64, side: i64) -> Vec<((i64, i64), Option<Valley>)> {
     let side = (side.max(CHUNK_SIZE) + CHUNK_SIZE - 1) / CHUNK_SIZE * CHUNK_SIZE;
     let half = CANDIDATES_PER_AXIS / 2;
-    let mut best: Option<(u32, i64, Valley)> = None;
+    let mut found = Vec::new();
     for gy in -half..=half {
         for gx in -half..=half {
             let center = WorldPosition {
@@ -80,25 +122,15 @@ pub fn find_valley(seed: u64, side: i64) -> Option<Valley> {
                     y: min.y + side,
                 },
             };
-            if !WORLD_GENERATION_BOUNDS.contains_rect(bounds) {
-                continue;
-            }
-            let score = score_square(seed, bounds);
-            if !score.is_livable() {
-                continue;
-            }
-            // Prefer better sites, then sites closer to the origin.
-            let distance = gx.abs() + gy.abs();
-            let candidate = (score.rank(), -distance, Valley { bounds, score });
-            if best
-                .as_ref()
-                .is_none_or(|current| (candidate.0, candidate.1) > (current.0, current.1))
-            {
-                best = Some(candidate);
-            }
+            let valley = WORLD_GENERATION_BOUNDS
+                .contains_rect(bounds)
+                .then(|| score_square(seed, bounds))
+                .filter(|score| score.is_livable())
+                .map(|score| Valley { bounds, score });
+            found.push(((gx, gy), valley));
         }
     }
-    best.map(|(_, _, valley)| valley)
+    found
 }
 
 /// Samples a square every `SAMPLE_STEP` cells.
@@ -189,6 +221,37 @@ pub fn band_layout(
         return None;
     }
     let camps = family_camps(world, bounds, families, size, seed)?;
+    Some(layout_from_camps(&camps, families, adults, children))
+}
+
+/// Like [`band_layout`], but each family camps in its own valley
+/// (`valleys[family]`), out of reach of the others.
+pub fn apart_layout(
+    world: &World,
+    valleys: &[WorldRect],
+    adults: usize,
+    children: usize,
+    seed: u64,
+) -> Option<BandLayout> {
+    let size = adults + children;
+    if adults == 0 {
+        return None;
+    }
+    let mut camps = Vec::with_capacity(valleys.len() * size);
+    for &valley in valleys {
+        camps.extend(family_camps(world, valley, 1, size, seed)?);
+    }
+    Some(layout_from_camps(&camps, valleys.len(), adults, children))
+}
+
+/// Founders first in family order, then children, from per-family camp sites.
+fn layout_from_camps(
+    camps: &[WorldPosition],
+    families: usize,
+    adults: usize,
+    children: usize,
+) -> BandLayout {
+    let size = adults + children;
     let mut sites: Vec<_> = (0..families)
         .flat_map(|family| camps[family * size..family * size + adults].iter().copied())
         .collect();
@@ -199,11 +262,11 @@ pub fn band_layout(
             sites.push(camps[family * size + adults + child]);
         }
     }
-    Some(BandLayout {
+    BandLayout {
         sites,
         founders: families * adults,
         parents,
-    })
+    }
 }
 
 /// Standable cells next to drinkable water inside `bounds`, row-major.
@@ -337,6 +400,20 @@ mod tests {
         assert_eq!(valley.bounds.min.x.rem_euclid(CHUNK_SIZE), 0);
         assert_eq!(valley.bounds.max.x - valley.bounds.min.x, 768);
         assert_eq!(score_square(1, valley.bounds), valley.score);
+    }
+
+    #[test]
+    fn some_seeds_have_two_neighboring_valleys() {
+        let found = (1..=20)
+            .filter_map(|seed| Some((seed, find_valley_pair(seed, VALLEY_SIDE)?)))
+            .collect::<Vec<_>>();
+        assert!(!found.is_empty(), "no seed among 1-20 has a valley pair");
+        for (seed, [first, second]) in found {
+            assert!(first.score.is_livable() && second.score.is_livable());
+            let gap = first.bounds.min.x.abs_diff(second.bounds.min.x)
+                + first.bounds.min.y.abs_diff(second.bounds.min.y);
+            assert_eq!(gap, CANDIDATE_SPACING as u64, "seed {seed}: neighbors");
+        }
     }
 
     #[test]

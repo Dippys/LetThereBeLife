@@ -126,3 +126,19 @@ fn valley_misunderstandings_happen_for_recorded_reasons_and_are_acted_on() {
         "every misreading has a recorded reason"
     );
 }
+
+#[test]
+fn apart_families_start_in_neighboring_valleys() {
+    let mut config = StudyConfig::new(1, sim_headless::VALLEY_POPULATION, 6_000);
+    config.spawn = StudySpawn::Apart;
+    let report = run_study(config).expect("seed 1 has two neighboring valleys");
+    assert!(
+        report.families.camp_distance > 1_000,
+        "a valley apart: camps {} cells apart",
+        report.families.camp_distance
+    );
+    assert_eq!(report.survivors, sim_headless::VALLEY_POPULATION);
+    let mut other = StudyConfig::new(1, 8, 6_000);
+    other.spawn = StudySpawn::Apart;
+    assert!(run_study(other).is_err(), "only the standard band");
+}
