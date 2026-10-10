@@ -43,5 +43,6 @@ pub(super) fn test_render_state(cursor_world: Option<WorldPosition>) -> RenderSt
         build: None,
         feed: Vec::new(),
         census: Census::default(),
+        season: sim_core::Season::Spring,
     }
 }

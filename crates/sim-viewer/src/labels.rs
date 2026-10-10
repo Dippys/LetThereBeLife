@@ -38,6 +38,15 @@ pub fn called(other: &AcquaintanceView) -> String {
         .map_or_else(|| person(other.agent), |name| name.spoken())
 }
 
+pub const fn season(season: sim_core::Season) -> &'static str {
+    match season {
+        sim_core::Season::Spring => "Spring",
+        sim_core::Season::Summer => "Summer",
+        sim_core::Season::Autumn => "Autumn",
+        sim_core::Season::Winter => "Winter",
+    }
+}
+
 pub fn person(agent: AgentId) -> String {
     format!("Person {}", agent.get())
 }

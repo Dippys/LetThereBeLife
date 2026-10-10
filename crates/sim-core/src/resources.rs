@@ -122,7 +122,13 @@ fn regrown(delta: Delta, base: BaseResource, now: u32) -> u16 {
     if period == 0 {
         return delta.remaining;
     }
-    let grown = now.saturating_sub(delta.since) / period;
+    let properties = base.kind.properties();
+    let elapsed = if properties.seasonal {
+        crate::season::growing_seconds(delta.since, now)
+    } else {
+        now.saturating_sub(delta.since)
+    };
+    let grown = elapsed / period;
     let grown = u16::try_from(grown).unwrap_or(u16::MAX);
     delta.remaining.saturating_add(grown).min(base.capacity)
 }

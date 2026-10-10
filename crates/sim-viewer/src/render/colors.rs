@@ -16,6 +16,8 @@ pub(super) const CARCASS: u32 = rgba(110, 24, 24, 255);
 pub(super) const BABY: u32 = rgba(255, 214, 230, 255);
 pub(super) const ELDER_EDGE: u32 = rgba(170, 170, 176, 255);
 pub(super) const PARTNER: u32 = rgba(255, 120, 170, 235);
+pub(super) const WINTER_TINT: u32 = rgba(225, 238, 255, 70);
+pub(super) const AUTUMN_TINT: u32 = rgba(255, 160, 60, 26);
 
 /// Interface palette: dark translucent panels, light text, a few signal colors.
 pub(super) const UI_BAR: u32 = rgba(16, 20, 26, 236);

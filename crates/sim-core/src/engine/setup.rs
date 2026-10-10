@@ -124,7 +124,7 @@ impl Engine {
     /// When autonomy is active, the new agent receives its first decision on the next tick.
     pub fn spawn_agent(&mut self, position: WorldPosition) -> Result<AgentId, AgentSpawnError> {
         self.compact_scheduler_if_needed();
-        self.population.spawn_agent(
+        let agent = self.population.spawn_agent(
             &mut self.scheduler,
             MovementEnvironment {
                 world: &self.world,
@@ -134,7 +134,13 @@ impl Engine {
             self.time,
             position,
             self.policy_active,
-        )
+        )?;
+        // Born into (or arriving in) the current season's weather.
+        let chill = self.season().chill();
+        let _ = self
+            .population
+            .apply_chill(&mut self.scheduler, self.time, agent, chill);
+        Ok(agent)
     }
 
     /// Scenario setup for scarcity: leaves about `keep_percent` of the generated

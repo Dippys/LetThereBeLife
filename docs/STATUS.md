@@ -51,6 +51,10 @@ lays out phases 0–10, from world → physical agents → cognition → communi
 - **Learned knowledge:** what each material is good for, which animals are prey or dangerous, and
   whether a hearth warms you are beliefs, changed only by evidence (eating, retching, bites,
   watching others, family lore). The two founding families start with different lore.
+- **Seasons:** four seasons of an hour each. Winter is cold and bare (fruit doesn't regrow,
+  animals don't breed), summer is mild; the viewer shows the season and tints the land.
+- **Things to talk about come from the world's tables:** every material, species, and kind of
+  structure is something people can point at, remember, and name, with gestures from properties.
 - **Hearths:** agents who know fire build one near home from stones and wood and warm up by it;
   others learn fire by watching.
 - **Communication (vertical slice, `--valley`):** private intent is separate from the public
@@ -163,7 +167,8 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
-- 2026-10-10 (latest): new words and sound shifts (D-091).
+- 2026-10-10 (latest): concepts from the world's tables (D-092) and seasons (D-093).
+- 2026-10-10: new words and sound shifts (D-091).
 - 2026-10-10: generations: herds that recover and wolves that hunt deer, age and sex,
   kin, grudges, favours, grief, couples, births, newcomers, and names (D-083-D-089).
 - 2026-10-10: misunderstandings that run their course: worded hints are judged at the

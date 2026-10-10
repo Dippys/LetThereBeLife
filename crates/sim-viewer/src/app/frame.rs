@@ -135,6 +135,7 @@ impl ViewerApp {
                 build: self.build,
                 feed: self.feed.entries().cloned().collect(),
                 census,
+                season: self.engine.season(),
             },
             &self.gestures,
             allow_world_sync,

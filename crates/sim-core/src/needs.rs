@@ -94,6 +94,8 @@ pub(crate) struct NeedState {
     rates: [i8; 4],
     remainders: [u8; 4],
     crossed: u8,
+    /// The season's extra cold, added to the exposure rate.
+    chill: i8,
 }
 
 impl NeedState {
@@ -105,6 +107,7 @@ impl NeedState {
             rates: ACTIVITY_RATES[AgentActivity::Idle as usize],
             remainders: [0; 4],
             crossed: 0,
+            chill: 0,
         }
     }
 
@@ -113,7 +116,27 @@ impl NeedState {
     }
 
     pub(crate) fn requires_transition(self, activity: AgentActivity) -> bool {
-        self.rates != rates_for(activity)
+        self.rates != self.chilled(rates_for(activity))
+    }
+
+    /// `rates` with the season's chill on exposure.
+    const fn chilled(self, mut rates: [i8; 4]) -> [i8; 4] {
+        let exposure = NeedKind::Exposure as usize;
+        rates[exposure] = rates[exposure].saturating_add(self.chill);
+        rates
+    }
+
+    /// The season changed: exposure now rises by `chill` more per period.
+    pub(crate) fn set_chill(&mut self, chill: i8, now: SimTime) -> bool {
+        if self.chill == chill {
+            return false;
+        }
+        let mut base = self.rates;
+        let exposure = NeedKind::Exposure as usize;
+        base[exposure] = base[exposure].saturating_sub(self.chill);
+        self.chill = chill;
+        let rates = self.chilled(base);
+        self.transition_rates(rates, now)
     }
 
     pub(crate) fn event_is_current(self, generation: u32, kind: NeedKind) -> bool {
@@ -121,11 +144,11 @@ impl NeedState {
     }
 
     pub(crate) fn transition(&mut self, activity: AgentActivity, now: SimTime) -> bool {
-        self.transition_rates(rates_for(activity), now)
+        self.transition_rates(self.chilled(rates_for(activity)), now)
     }
 
     pub(crate) fn transition_sleep(&mut self, quality: SleepQuality, now: SimTime) -> bool {
-        self.transition_rates(sleep_rates(quality), now)
+        self.transition_rates(self.chilled(sleep_rates(quality)), now)
     }
 
     fn transition_rates(&mut self, new_rates: [i8; 4], now: SimTime) -> bool {

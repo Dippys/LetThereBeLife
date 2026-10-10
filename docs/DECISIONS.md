@@ -501,3 +501,18 @@ tables, the reading table, the memory layout, and the viewer. Now it needs a row
 **Consequences:** Meat is a concept (people can have a word for it) but not a place. Concept order
 changed, so founding vocabularies are dealt differently. The success test found 16 episodes in 6
 valleys.
+
+## D-093: Seasons (2026-10-10)
+
+**Decision:** Four seasons of one simulated hour each (runs start in spring). Lives are compressed
+more than seasons (a year of age per hour) so that a winter outlasts a hunger cycle and matters.
+Each season adds a chill to everyone's exposure rate (summer -1, spring 0, autumn +1, winter +2 per
+rate period); need states carry it (still 32 bytes) and are re-based at each change, and people
+spawned mid-season get it too. Fruit (`MaterialProperties::seasonal`) doesn't grow back in winter.
+Animals don't breed in winter. The viewer shows the season and tints the land in winter and autumn.
+**Why:** Life was too easy for information and cooperation to matter (about 99% survival, food
+everywhere, 60% idle). Seasons bring scarcity and cold without scripting what people do about it.
+**Consequences:** Hearths finally matter: 35-78 warm-ups per 5.5-hour run instead of about 2, and
+over 30 years 443 warm-ups, with fire known by 13 founders and 20 children (8 founders before).
+Over 30 years 5 people died of cold. Agents don't know about seasons; they feel the cold and find
+bushes bare. The success test found 16 episodes in 7 valleys.

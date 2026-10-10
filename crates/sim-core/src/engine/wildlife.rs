@@ -286,7 +286,10 @@ impl Engine {
                 self.immigrate(species, now);
                 continue;
             }
-            if living.len() >= usize::from(traits.max_population) {
+            // Young are born outside winter.
+            if living.len() >= usize::from(traits.max_population)
+                || self.season() == crate::Season::Winter
+            {
                 continue;
             }
             let parent = living[(mix(self.config.seed ^ now) % living.len() as u64) as usize];

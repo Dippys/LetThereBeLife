@@ -94,6 +94,29 @@ impl Population {
         Ok(())
     }
 
+    /// The season changed: `agent`'s exposure rises by `chill` more per period
+    /// from now on.
+    pub(crate) fn apply_chill(
+        &mut self,
+        scheduler: &mut Scheduler,
+        now: SimTime,
+        agent: AgentId,
+        chill: i8,
+    ) -> Result<(), MoveRequestError> {
+        let index = agent.0 as usize;
+        if !scheduler.can_schedule(5) {
+            return Err(MoveRequestError::EventSequenceExhausted);
+        }
+        if self.needs[index].set_chill(chill, now) {
+            let state = self.needs[index];
+            self.schedule_need_thresholds(scheduler, agent, state, now)
+                .map_err(|_| MoveRequestError::EventSequenceExhausted)?;
+            self.reschedule_health(scheduler, agent, state, now)
+                .map_err(|_| MoveRequestError::EventSequenceExhausted)?;
+        }
+        Ok(())
+    }
+
     fn settle_activity_without_events(
         &mut self,
         now: SimTime,

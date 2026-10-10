@@ -202,6 +202,7 @@ impl Engine {
         self.runtime_counters.due_backlog_ticks += u64::from(due_backlog);
         self.step_wildlife();
         self.revive_due();
+        self.turn_season();
         self.age_people();
         self.tend_families();
         // Autonomous agents re-schedule constantly; without this, stale events

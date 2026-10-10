@@ -65,6 +65,7 @@ pub struct RenderState {
     pub build: Option<BuildTool>,
     pub feed: Vec<FeedEntry>,
     pub census: Census,
+    pub season: sim_core::Season,
 }
 
 /// Head counts for the top bar.
@@ -734,6 +735,22 @@ impl Renderer {
 
         let world_overlay = &mut self.world_overlay_instances;
         world_overlay.clear();
+        // The season tints the land: frosty in winter, warm in autumn.
+        let tint = match state.season {
+            sim_core::Season::Winter => Some(colors::WINTER_TINT),
+            sim_core::Season::Autumn => Some(colors::AUTUMN_TINT),
+            sim_core::Season::Spring | sim_core::Season::Summer => None,
+        };
+        if let Some(tint) = tint {
+            let bounds = view.world_bounds();
+            world_overlay.push(Instance::new(
+                bounds.min.x as f32,
+                bounds.min.y as f32,
+                (bounds.max.x - bounds.min.x) as f32,
+                (bounds.max.y - bounds.min.y) as f32,
+                tint,
+            ));
+        }
         if let Some(position) = state.hovered {
             world_overlay.push(Instance::new(
                 position.x as f32,
@@ -922,8 +939,9 @@ fn ring(position: WorldPosition, scale: f32, color: u32) -> [Instance; 4] {
 const MAX_INSTANCES_PER_BUFFER: usize = 1_000_000;
 const MIN_TERRAIN_SAMPLE_PIXELS: f32 = 2.0;
 const CACHE_MARGIN_PIXELS: f32 = 128.0;
-/// Hovered cell, generation selection, two person rings, chunk outline, world border.
-const WORLD_OVERLAY_CAPACITY: usize = 18;
+/// Season tint, hovered cell, generation selection, two person rings, chunk
+/// outline, world border.
+const WORLD_OVERLAY_CAPACITY: usize = 19;
 /// Initial interface buffer; it grows when a frame needs more.
 const SCREEN_OVERLAY_CAPACITY: usize = 16_384;
 const MAX_AGENT_INSTANCES: usize = 4_096;

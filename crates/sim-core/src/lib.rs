@@ -12,6 +12,7 @@ mod policy;
 mod resources;
 mod routing;
 mod scheduler;
+mod season;
 mod sleep;
 mod spatial;
 mod structures;
@@ -65,6 +66,7 @@ pub use resources::{
     INVENTORY_CAPACITY_PER_KIND, InitialInventoryError, InventoryView, ResourceDeltaView,
 };
 pub use routing::{MAX_ROUTE_EXPANSIONS, RouteRequest, RouteRequestError};
+pub use season::{SEASON_SECONDS, SEASON_TICKS, Season};
 pub use sim_world::{
     ArchiveBakeProgress, ArchiveBakeStats, BandLayout, BaseResource, BiomeType, CAMP_RADIUS,
     CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkInspection, ChunkLoadRequest, ChunkLocalPosition,

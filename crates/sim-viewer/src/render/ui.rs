@@ -240,6 +240,12 @@ fn top_bar(painter: &mut Painter, state: &RenderState, width: f32) -> f32 {
         text_y,
         colors::UI_TEXT,
     );
+    x = painter.text(
+        &format!("  {}", labels::season(state.season)),
+        x,
+        text_y,
+        colors::UI_DIM,
+    );
     if paused {
         x = painter.text("  Paused", x, text_y, colors::UI_WARN);
     }

@@ -64,6 +64,30 @@ impl Engine {
         sex - age_penalty
     }
 
+    /// The season now.
+    pub fn season(&self) -> crate::Season {
+        crate::Season::at(self.time)
+    }
+
+    /// At each change of season, everyone's exposure rate follows the new chill.
+    pub(super) fn turn_season(&mut self) {
+        if self.time.ticks() % crate::season::SEASON_TICKS != 0 {
+            return;
+        }
+        let chill = self.season().chill();
+        let living: Vec<AgentId> = self
+            .population
+            .views(usize::MAX)
+            .filter(|view| view.activity != AgentActivity::Dead)
+            .map(|view| view.id)
+            .collect();
+        for agent in living {
+            let _ = self
+                .population
+                .apply_chill(&mut self.scheduler, self.time, agent, chill);
+        }
+    }
+
     /// Once a year: the old may die of old age.
     pub(super) fn age_people(&mut self) {
         let now = self.time.ticks();
