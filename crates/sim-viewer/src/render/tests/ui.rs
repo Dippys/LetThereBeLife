@@ -138,6 +138,7 @@ fn person() -> AgentInspection {
             age: 9,
             stage: sim_core::LifeStage::Child,
         }),
+        motherhood: None,
         memory: Some(MemoryInspection::from_view(&mind(
             vec![
                 word(1, Concept::Water, 9, 1),

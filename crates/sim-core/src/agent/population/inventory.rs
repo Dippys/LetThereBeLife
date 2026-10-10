@@ -122,6 +122,29 @@ impl Population {
         Ok(properties)
     }
 
+    /// Adds `amount` to one need (a nursing mother gets hungrier).
+    pub(crate) fn worsen_need(
+        &mut self,
+        scheduler: &mut Scheduler,
+        now: SimTime,
+        agent: AgentId,
+        kind: NeedKind,
+        amount: u16,
+    ) -> Result<(), ActionEffectError> {
+        let index = agent.0 as usize;
+        if !scheduler.can_schedule(5) {
+            return Err(ActionEffectError::EventSequenceExhausted);
+        }
+        let mut next = self.needs[index];
+        next.worsen(kind, amount, now);
+        self.schedule_need_thresholds(scheduler, agent, next, now)
+            .map_err(|_| ActionEffectError::EventSequenceExhausted)?;
+        self.reschedule_health(scheduler, agent, next, now)
+            .map_err(|_| ActionEffectError::EventSequenceExhausted)?;
+        self.needs[index] = next;
+        Ok(())
+    }
+
     pub(crate) fn apply_need_relief(
         &mut self,
         scheduler: &mut Scheduler,

@@ -64,6 +64,7 @@ impl ViewerApp {
                 .as_ref()
                 .map(render::MemoryInspection::from_view),
             life: self.engine.life(view.id),
+            motherhood: self.engine.motherhood(view.id),
         })
     }
 

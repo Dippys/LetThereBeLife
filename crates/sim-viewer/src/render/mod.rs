@@ -161,6 +161,7 @@ pub struct AgentInspection {
     pub death: Option<DeathRecord>,
     pub memory: Option<MemoryInspection>,
     pub life: Option<sim_core::LifeView>,
+    pub motherhood: Option<sim_core::MotherhoodView>,
 }
 
 /// A bounded, copyable snapshot of one agent's mind (places, personality,
@@ -653,6 +654,24 @@ impl Renderer {
             view.scale() as f32,
             &mut self.agent_instances,
         );
+        // A carried baby: a small pale dot on its mother.
+        let bounds = view.world_bounds();
+        for agent in engine.agent_views(MAX_AGENT_INSTANCES) {
+            if bounds.contains(agent.position)
+                && engine
+                    .motherhood(agent.id)
+                    .is_some_and(|motherhood| motherhood.baby.is_some())
+                && self.agent_instances.len() < MAX_AGENT_INSTANCES
+            {
+                self.agent_instances.push(Instance::new(
+                    agent.position.x as f32 + 0.55,
+                    agent.position.y as f32 + 0.05,
+                    0.4,
+                    0.4,
+                    colors::BABY,
+                ));
+            }
+        }
         debug_assert!(self.agent_instances.len() <= MAX_AGENT_INSTANCES);
         self.agents.write(&self.queue, &self.agent_instances);
         build_spawned_object_instances(

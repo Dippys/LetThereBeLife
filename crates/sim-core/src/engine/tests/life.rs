@@ -24,6 +24,7 @@ fn the_very_old_die_of_old_age_and_young_adults_do_not() {
         Some(Life {
             born: -((age * SECONDS_PER_YEAR) as i32),
             sex: Sex::Female,
+            inherited: None,
         })
     };
     engine.lives = vec![born(95), born(20)];
@@ -63,6 +64,7 @@ fn seeing_the_body_of_family_brings_grief() {
         Some(Life {
             born: -((120 * SECONDS_PER_YEAR) as i32),
             sex: Sex::Male,
+            inherited: None,
         }),
         None,
     ];
@@ -97,6 +99,7 @@ fn acquainted(familiarity_sightings: u32, raised_together: bool) -> Engine {
         Some(Life {
             born: -((25 * SECONDS_PER_YEAR) as i32),
             sex,
+            inherited: None,
         })
     };
     engine.lives = vec![adult(Sex::Female), adult(Sex::Male)];
@@ -166,4 +169,67 @@ fn people_raised_together_do_not_pair_unless_long_alone() {
         .collect();
     decide(&mut engine, 0);
     assert_eq!(engine.partner_of(AgentId::new(0)), Some(AgentId::new(1)));
+}
+
+#[test]
+fn a_couple_has_a_baby_who_later_walks_and_knows_its_family() {
+    let mut engine = acquainted(60, false);
+    engine
+        .activate_physical_policy_with_options(crate::PolicyOptions::full())
+        .unwrap();
+    decide(&mut engine, 0);
+    assert_eq!(engine.partner_of(AgentId::new(0)), Some(AgentId::new(1)));
+    // Try until she conceives (each try is one decision spent together).
+    let mut tries = 0;
+    while engine.motherhood(AgentId::new(0)).is_none() {
+        engine.time = SimTime::from_ticks(engine.time.ticks() + 7);
+        engine.try_conceive(AgentId::new(0), AgentId::new(1));
+        tries += 1;
+        assert!(tries < 20_000, "never conceived");
+    }
+    assert!(engine.motherhood(AgentId::new(0)).unwrap().pregnant);
+
+    // Nine months, then three years carried.
+    let check = crate::engine::births::FAMILY_CHECK_TICKS;
+    let start = engine.time.ticks().div_ceil(check) * check;
+    let mut walking = None;
+    let mut step = 0;
+    while walking.is_none() {
+        step += 1;
+        engine.time = SimTime::from_ticks(start + step * crate::engine::births::FAMILY_CHECK_TICKS);
+        // Keep the mother fed so nursing doesn't starve her in this short-cut.
+        engine.population.set_need_value_for_test(
+            AgentId::new(0),
+            crate::NeedKind::Hunger,
+            0,
+            engine.time,
+        );
+        engine.tend_families();
+        walking = engine
+            .family_events()
+            .iter()
+            .find_map(|event| match *event {
+                crate::FamilyEvent::Walking { child, .. } => Some(child),
+                _ => None,
+            });
+        engine.family_events.clear();
+        assert!(step < 3_000, "the child never walked");
+    }
+    let child = walking.unwrap();
+    assert_eq!(child, AgentId::new(2));
+    let life = engine.life(child).unwrap();
+    assert_eq!(life.age, crate::WEANING_AGE);
+    let mind = engine.minds.get(child).unwrap();
+    assert_eq!(mind.parent, Some(AgentId::new(0)), "it follows its mother");
+    assert!(
+        mind.lexicon.produce(crate::Concept::Water).is_none(),
+        "born with no words"
+    );
+    assert_eq!(
+        mind.social.tie_with(AgentId::new(1)),
+        Some(crate::Tie::Parent)
+    );
+    let mother = &engine.minds.get(AgentId::new(0)).unwrap().social;
+    assert_eq!(mother.tie_with(child), Some(crate::Tie::Child));
+    assert!(engine.motherhood(AgentId::new(0)).is_none());
 }

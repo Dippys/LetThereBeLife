@@ -254,6 +254,14 @@ impl CommunicationLog {
     /// wrongly confirming its misreading); then the speaker changed what it
     /// believes about that word because of something that same listener visibly
     /// did (corrected it, or used it in the other sense).
+    /// Index of the exchange for gesture `id`. Gesture ids only increase, so
+    /// the log is sorted by them.
+    fn exchange_index(&self, id: u64) -> Option<usize> {
+        self.exchanges
+            .binary_search_by_key(&id, |exchange| exchange.signal.id)
+            .ok()
+    }
+
     pub fn success_episodes(&self) -> Vec<SuccessEpisode> {
         self.trace_episodes().0
     }
@@ -268,11 +276,7 @@ impl CommunicationLog {
 
     fn trace_episodes(&self) -> (Vec<SuccessEpisode>, [u64; 5]) {
         let mut funnel = [0_u64; 5];
-        let exchange_by_id = |id: u64| {
-            self.exchanges
-                .iter()
-                .position(|exchange| exchange.signal.id == id)
-        };
+        let exchange_by_id = |id: u64| self.exchange_index(id);
         let mut episodes = Vec::new();
         for listener_lesson in &self.lessons {
             let (LessonCause::Consequence, Some(id)) =
@@ -470,11 +474,10 @@ impl CommunicationLog {
             summary.lessons[slot] += 1;
             // A consequence lesson that drops what the speaker meant is a false lesson.
             if lesson.cause == LessonCause::Consequence
-                && let Some(exchange) = lesson.signal.and_then(|id| {
-                    self.exchanges
-                        .iter()
-                        .find(|exchange| exchange.signal.id == id)
-                })
+                && let Some(exchange) = lesson
+                    .signal
+                    .and_then(|id| self.exchange_index(id))
+                    .map(|index| &self.exchanges[index])
                 && lesson.weakened == Some(exchange.signal.intent.topic.concept())
             {
                 summary.false_lessons += 1;

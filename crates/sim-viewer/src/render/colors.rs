@@ -13,6 +13,7 @@ pub(super) const DEER_ALERT: u32 = rgba(222, 170, 96, 255);
 pub(super) const WOLF: u32 = rgba(132, 132, 140, 255);
 pub(super) const WOLF_ALERT: u32 = rgba(200, 200, 214, 255);
 pub(super) const CARCASS: u32 = rgba(110, 24, 24, 255);
+pub(super) const BABY: u32 = rgba(255, 214, 230, 255);
 
 /// Interface palette: dark translucent panels, light text, a few signal colors.
 pub(super) const UI_BAR: u32 = rgba(16, 20, 26, 236);

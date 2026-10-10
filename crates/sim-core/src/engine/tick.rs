@@ -35,6 +35,7 @@ impl Engine {
         self.lead_events.clear();
         self.grief_events.clear();
         self.couple_events.clear();
+        self.family_events.clear();
         self.wildlife_events.clear();
         self.lesson_events.clear();
         self.repair_events.clear();
@@ -200,6 +201,7 @@ impl Engine {
         self.step_wildlife();
         self.revive_due();
         self.age_people();
+        self.tend_families();
         // Autonomous agents re-schedule constantly; without this, stale events
         // were only pruned on manual commands and piled up during long runs.
         self.compact_scheduler_if_needed();

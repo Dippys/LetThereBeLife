@@ -37,8 +37,9 @@ pub use cognition::{
 };
 pub use diagnostics::{EngineCapacityMetrics, EngineDiagnostics, EngineWorkMetrics};
 pub use engine::{
-    Engine, EngineCommand, EngineCommandOutcome, EngineConfig, HUNT_TICKS, MAX_SIMULATION_SPEED,
-    STRIKE_RANGE, SimulationAdvanced, SimulationSnapshot, TickOutcome,
+    Engine, EngineCommand, EngineCommandOutcome, EngineConfig, FamilyEvent, HUNT_TICKS,
+    MAX_SIMULATION_SPEED, MotherhoodView, STRIKE_RANGE, SimulationAdvanced, SimulationSnapshot,
+    TickOutcome,
 };
 pub use health::{
     DeathCause, DeathRecord, HEALTH_CONSEQUENCE_INTERVAL_TICKS, HEALTH_INCAPACITATION_THRESHOLD,

@@ -189,6 +189,8 @@ pub struct FamilyStats {
     pub cross_misread: u64,
     /// Couples formed within a family and across families.
     pub couples: [u64; 2],
+    /// Pregnancies, babies born, children who started walking, and losses.
+    pub births: [u64; 4],
 }
 
 /// What happened between people and animals.
@@ -337,12 +339,35 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     let mut trace = std::collections::VecDeque::new();
     let mut comms = crate::comms::CommunicationLog::default();
     let mut couples: Vec<(AgentId, AgentId)> = Vec::new();
+    // Pregnancies, births, children walking, and losses.
+    let mut families_born = [0_u64; 4];
     let mut early_vocabulary = 0;
     let mut food = FoodStats::default();
     let mut wildlife = WildlifeStats::default();
     for tick in 1..=config.ticks {
         match engine.tick() {
             TickOutcome::Advanced { .. } => {
+                // Children who start walking join the study.
+                for event in engine.family_events() {
+                    match *event {
+                        sim_core::FamilyEvent::Walking { mother, child } => {
+                            let index = child.get() as usize;
+                            if tracks.len() <= index {
+                                tracks.resize(index + 1, AgentTrack::default());
+                                tiles.resize(index + 1, BTreeSet::new());
+                            }
+                            tracks[index].family = tracks[mother.get() as usize].family;
+                            tracks[index].spawn = engine
+                                .agent_views(usize::MAX)
+                                .nth(index)
+                                .map(|view| view.position);
+                            families_born[2] += 1;
+                        }
+                        sim_core::FamilyEvent::Born { .. } => families_born[1] += 1,
+                        sim_core::FamilyEvent::Conceived { .. } => families_born[0] += 1,
+                        sim_core::FamilyEvent::Lost { .. } => families_born[3] += 1,
+                    }
+                }
                 collect_tick(&engine, &mut tracks);
                 for decision in engine.policy_diagnostics() {
                     if decision.kind == PolicyDiagnosticKind::Selected {
@@ -442,11 +467,13 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
             }
         }
     }
+    families.births = families_born;
     report.families = families;
     report.comms = comms;
+    let everyone = engine.snapshot().agent_count as usize;
     report.vocabulary_agreement = [early_vocabulary, vocabulary_agreement(&engine, population)];
-    report.children_vocabulary = children_vocabulary(&engine, population);
-    for index in 0..population {
+    report.children_vocabulary = children_vocabulary(&engine, everyone);
+    for index in 0..everyone {
         let Some(mind) = engine.mental_map(AgentId::new(index as u32)) else {
             continue;
         };
@@ -746,10 +773,14 @@ fn build_report(
     let per_agent = tracks
         .iter()
         .enumerate()
-        .map(|(index, track)| StudyAgentLine {
+        .map(|(index, track)| {
+            let spawn = track.spawn.unwrap_or(spawns[index.min(spawns.len() - 1)]);
+            (index, track, spawn)
+        })
+        .map(|(index, track, spawn)| StudyAgentLine {
             agent: AgentId::new(index as u32),
-            spawn: spawns[index],
-            spawn_water_distance: nearest_distance(spawns[index], fresh_water),
+            spawn,
+            spawn_water_distance: nearest_distance(spawn, fresh_water),
             death: death_by_agent[index],
             moves: track.moves,
             tiles: tiles[index].len() as u64,
@@ -781,7 +812,7 @@ fn build_report(
     StudyReport {
         config,
         world: summarize_world(engine, fresh_water),
-        survivors: config.population - deaths.iter().sum::<u32>(),
+        survivors: engine.snapshot().living_agent_count,
         collapsed: engine
             .agent_views(usize::MAX)
             .filter(|view| view.activity == AgentActivity::Incapacitated)
@@ -1322,6 +1353,11 @@ impl fmt::Display for StudyReport {
                 families.cross_misread,
                 families.couples[0],
                 families.couples[1]
+            )?;
+            let [conceived, born, walking, lost] = families.births;
+            write!(
+                formatter,
+                "\n  births: pregnancies {conceived}, babies born {born}, children walking {walking}, lost with their mother {lost}"
             )?;
         }
         let [founders_fire, children_fire] = self.wildlife.know_fire;

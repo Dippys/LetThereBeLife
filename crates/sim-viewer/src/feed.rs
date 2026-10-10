@@ -4,8 +4,8 @@
 use std::collections::VecDeque;
 
 use sim_core::{
-    AgentId, DesiredEffect, Engine, GestureTopic, HealthDiagnosticKind, LessonCause, Mime,
-    WildlifeEvent, WorldPosition,
+    AgentId, DesiredEffect, Engine, FamilyEvent, GestureTopic, HealthDiagnosticKind, LessonCause,
+    Mime, Sex, WildlifeEvent, WorldPosition,
 };
 
 use crate::labels;
@@ -107,6 +107,39 @@ impl Feed {
                 Some(health.agent),
                 agent_position(engine, health.agent),
             );
+        }
+
+        for event in engine.family_events() {
+            let (text, tone, agent) = match *event {
+                FamilyEvent::Born { mother, sex, .. } => (
+                    format!(
+                        "{} gave birth to a {}",
+                        labels::person(mother),
+                        match sex {
+                            Sex::Female => "girl",
+                            Sex::Male => "boy",
+                        }
+                    ),
+                    Tone::Good,
+                    mother,
+                ),
+                FamilyEvent::Walking { mother, child } => (
+                    format!(
+                        "{}, {}'s child, took their first steps",
+                        labels::person(child),
+                        labels::person(mother)
+                    ),
+                    Tone::Good,
+                    child,
+                ),
+                FamilyEvent::Lost { mother } => (
+                    format!("{}'s baby was lost with her", labels::person(mother)),
+                    Tone::Bad,
+                    mother,
+                ),
+                FamilyEvent::Conceived { .. } => continue,
+            };
+            self.push(text, tone, Some(agent), agent_position(engine, agent));
         }
 
         for couple in engine.couple_events() {

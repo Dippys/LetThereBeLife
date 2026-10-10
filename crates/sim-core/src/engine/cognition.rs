@@ -1290,13 +1290,13 @@ impl Engine {
     pub fn personality(&self, agent: AgentId) -> Option<Personality> {
         self.population
             .view(agent)
-            .map(|_| Personality::of(self.config.seed, agent))
+            .map(|_| self.innate_personality(agent))
     }
 
     /// The personality the policy acts on: innate with `social`, else average.
     pub(super) fn personality_in_use(&self, agent: AgentId) -> Personality {
         if self.policy_options.social {
-            Personality::of(self.config.seed, agent)
+            self.innate_personality(agent)
         } else {
             Personality::AVERAGE
         }

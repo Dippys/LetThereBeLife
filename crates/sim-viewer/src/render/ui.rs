@@ -437,6 +437,19 @@ pub(super) fn person_rows(agent: &AgentInspection) -> Vec<Row> {
             rows.push(need_bar(label, need));
         }
     }
+    if let Some(motherhood) = agent.motherhood {
+        let carrying = match motherhood.baby {
+            Some((sex, age)) => format!(
+                "Carrying a baby {}, {age}",
+                match sex {
+                    sim_core::Sex::Female => "girl",
+                    sim_core::Sex::Male => "boy",
+                }
+            ),
+            None => "Pregnant".to_owned(),
+        };
+        rows.push(Row::Text(carrying, colors::UI_TEXT));
+    }
     if let Some(inventory) = agent.inventory {
         let carried: Vec<String> = Material::ALL
             .into_iter()

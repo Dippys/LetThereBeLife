@@ -24,6 +24,14 @@ impl Engine {
             })
     }
 
+    /// The personality `agent` was born with: inherited from its parents if it
+    /// was born during the run, otherwise drawn from the seed.
+    pub(super) fn innate_personality(&self, agent: AgentId) -> crate::Personality {
+        self.life_of(agent)
+            .inherited
+            .unwrap_or_else(|| crate::Personality::of(self.config.seed, agent))
+    }
+
     /// Years of age of `agent` now.
     pub(super) fn age_of(&self, agent: AgentId) -> u32 {
         self.life_of(agent).age(self.life_seconds())

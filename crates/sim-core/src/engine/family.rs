@@ -47,9 +47,11 @@ impl Engine {
             return;
         }
         let social = &self.minds.get_mut(agent).social;
-        if let Some((slot, _)) = social.partner() {
+        if let Some((slot, partner)) = social.partner() {
             if now.saturating_sub(social.last_seen(slot)) > PARTNER_FADE_SECONDS {
                 self.minds.get_mut(agent).social.clear_partner(slot);
+            } else if others.contains(&partner) {
+                self.try_conceive(agent, partner);
             }
             return;
         }
@@ -133,6 +135,11 @@ impl Engine {
     /// Couples formed during the latest tick (for logs and tools).
     pub fn couple_events(&self) -> &[CoupleEvent] {
         &self.couple_events
+    }
+
+    /// The parent `agent` grew up following, if it is a child of the band.
+    pub fn parent_of(&self, agent: AgentId) -> Option<AgentId> {
+        self.minds.get(agent)?.parent
     }
 
     /// `agent`'s partner, if it has one.

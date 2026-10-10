@@ -383,3 +383,26 @@ company) and then lets them go.
 **Consequences:** Behavior in the valleys is unchanged within noise (no one asks for food there
 while food is plentiful). Bodies aren't in the spatial index, so seeing one is based on the
 death record's place and time.
+
+## D-086: Couples and births (2026-10-10)
+
+**Decision:**
+- Couples: unpartnered adults of the other sex who know each other well (familiarity 100) and
+  don't distrust each other pair when it's mutual. Partners look for each other when apart and
+  share food as family. People who were children together (both under 10, noted in the
+  acquaintance's spare bit) don't pair unless one has seen nobody else they could pair with for
+  eight years. A partnership fades after two years apart.
+- Births: a woman of 15-45 with her partner (up to 65) in view, well fed and rested, not pregnant,
+  not carrying a baby, and not having weaned one in the past year, conceives with odds of 1 in 400
+  per decision together. Pregnancy lasts nine months. The baby is a record on its mother (carried
+  and nursed, which makes her hungrier) until age 3, then becomes a person beside her: blank mind,
+  bonded to both parents and its siblings, personality blended from both parents with variation.
+  A pregnancy or carried baby is lost with its mother.
+- The study follows the growing population (survivors are the living; new tracks for children who
+  start walking) and reports couples and births. Exchange lookups use binary search (the log is
+  sorted by gesture id), which keeps long runs fast.
+**Why:** Plan G4: a band that renews itself, with households and dialect mixing left to emerge.
+**Consequences:** In valley 1 over 30 years: 10 couples (all within a family), 11 children born and
+walking, the band grows from 20 to 28. Babies aren't agents until weaning, so carrying needs no
+special movement. Late pregnancy doesn't slow anyone yet. Newcomers (when a band dwindles) are not
+in yet.

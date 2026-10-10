@@ -51,9 +51,12 @@ pub(crate) struct Life {
     /// Simulated second of birth (negative for people older than the run).
     pub(crate) born: i32,
     pub(crate) sex: Sex,
+    /// For someone born during the run: the personality they got from their
+    /// parents (others' come from the seed).
+    pub(crate) inherited: Option<crate::Personality>,
 }
 
-const _: () = assert!(size_of::<Life>() == 8);
+const _: () = assert!(size_of::<Life>() == 12);
 
 impl Life {
     /// Someone present when the run starts: a founder is an adult of 18-39, a
@@ -74,6 +77,7 @@ impl Life {
         Self {
             born: -((age as i64 * SECONDS_PER_YEAR + offset as i64) as i32),
             sex,
+            inherited: None,
         }
     }
 
@@ -139,6 +143,7 @@ mod tests {
         let life = Life {
             born: 0,
             sex: Sex::Male,
+            inherited: None,
         };
         assert_eq!(life.age(SECONDS_PER_YEAR * 2 - 1), 1);
         assert_eq!(life.view(SECONDS_PER_YEAR * 2).stage, LifeStage::Baby);
