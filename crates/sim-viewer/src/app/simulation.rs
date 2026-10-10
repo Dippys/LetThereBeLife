@@ -1,6 +1,10 @@
 //! Fixed-step simulation advancement and population lifecycle (reset, agent and object spawning).
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+/// Real time a frame may spend simulating. Past it the rest is dropped, so a
+/// speed the computer can't reach slows the simulation instead of the window.
+const SIMULATION_BUDGET: Duration = Duration::from_millis(30);
 
 use super::{PopulationStatus, ViewerApp};
 use crate::{
@@ -17,7 +21,13 @@ impl ViewerApp {
         if self.population_status == PopulationStatus::Active && !snapshot.paused {
             self.accumulator += elapsed.as_secs_f64().min(0.25) * f64::from(snapshot.speed);
             let tick_seconds = self.engine.config().tick_duration().as_secs_f64();
+            let mut ticks = 0_u32;
             while self.accumulator >= tick_seconds {
+                if ticks % 32 == 0 && now.elapsed() > SIMULATION_BUDGET {
+                    self.accumulator = 0.0;
+                    break;
+                }
+                ticks += 1;
                 self.engine.tick();
                 // Engine event logs cover only the latest tick, so collect them per tick.
                 self.gestures.record(
@@ -27,6 +37,20 @@ impl ViewerApp {
                 self.feed.record(&self.engine);
                 self.accumulator -= tick_seconds;
             }
+            let frame = elapsed.as_secs_f64();
+            if frame > 0.0 {
+                let reached = f64::from(ticks) * tick_seconds / frame;
+                self.reached_speed = 0.9 * self.reached_speed + 0.1 * reached;
+            }
+        }
+        self.track_year();
+    }
+
+    /// Notes the deaths and births so far whenever a new year begins.
+    fn track_year(&mut self) {
+        let year = self.engine.snapshot().simulated_seconds as i64 / sim_core::SECONDS_PER_YEAR;
+        if year != self.year_start.0 {
+            self.year_start = (year, self.engine.snapshot().death_count, self.feed.births());
         }
     }
 

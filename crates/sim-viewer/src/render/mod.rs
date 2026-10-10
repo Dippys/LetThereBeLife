@@ -60,7 +60,10 @@ pub struct RenderState {
     pub following: bool,
     pub toast: Option<String>,
     pub help_open: bool,
+    pub info_open: bool,
     pub details_open: bool,
+    /// The speed actually reached, when the computer can't keep up.
+    pub reached_speed: Option<u32>,
     /// The build palette's chosen tool while the palette is open.
     pub build: Option<BuildTool>,
     pub feed: Vec<FeedEntry>,
@@ -75,6 +78,16 @@ pub struct Census {
     pub dead: u32,
     pub deer: u32,
     pub wolves: u32,
+    /// Living people past each need's threshold.
+    pub cold: u32,
+    pub hungry: u32,
+    pub thirsty: u32,
+    pub tired: u32,
+    /// Finished hearths, and how many are burning.
+    pub hearths: u32,
+    pub fires_burning: u32,
+    pub born_this_year: u32,
+    pub died_this_year: u32,
 }
 
 /// The thing under the mouse, described in the tooltip.
@@ -136,6 +149,7 @@ pub enum UiAction {
     Slower,
     Faster,
     Help,
+    Info,
     CloseSelected,
     Follow,
     NextPerson,

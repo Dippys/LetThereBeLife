@@ -13,7 +13,9 @@ use super::test_render_state;
 use crate::feed::{FeedEntry, Tone};
 use crate::render::colors;
 use crate::render::details::write_details;
-use crate::render::ui::{Hit, Row, build_interface, hover_lines, person_rows, status_lines};
+use crate::render::ui::{
+    Hit, Row, build_interface, hover_lines, info_rows, person_rows, status_lines,
+};
 use crate::render::{
     AgentInspection, BuildTool, GenerationStatus, Hover, MemoryInspection, UiAction,
 };
@@ -457,4 +459,31 @@ fn the_status_block_keeps_its_height_whatever_it_says() {
     assert_eq!(long.len(), 3);
     assert!(long[2].0.ends_with("..."), "{long:?}");
     assert!(long.iter().all(|(line, _)| line.chars().count() <= 20));
+}
+
+#[test]
+fn the_info_box_tells_the_weather_and_how_people_are_doing() {
+    let mut state = super::test_render_state(None);
+    state.season = sim_core::Season::Winter;
+    state.census.hearths = 3;
+    state.census.fires_burning = 1;
+    state.census.cold = 4;
+    state.census.born_this_year = 2;
+    let rows = info_rows(&state);
+    let text: Vec<String> = rows
+        .iter()
+        .map(|(label, value)| format!("{label}: {value}"))
+        .collect();
+    for expected in [
+        "Weather: Winter, freezing",
+        "Bushes: bare, nothing grows back",
+        "Fires: 1 burning of 3",
+        "Feeling: 4 cold, 0 hungry, 0 thirsty, 0 tired",
+        "This year: 2 born, 0 died",
+    ] {
+        assert!(
+            text.iter().any(|line| line == expected),
+            "{expected}: {text:?}"
+        );
+    }
 }

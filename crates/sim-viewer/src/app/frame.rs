@@ -81,6 +81,29 @@ impl ViewerApp {
                 Species::Wolf => census.wolves += 1,
             }
         }
+        for view in self.engine.agent_views(usize::MAX) {
+            if view.activity == sim_core::AgentActivity::Dead {
+                continue;
+            }
+            let Ok(needs) = self.engine.physical_needs(view.id) else {
+                continue;
+            };
+            let past = |need: sim_core::NeedLevelView| u32::from(need.value >= need.threshold);
+            census.cold += past(needs.exposure);
+            census.hungry += past(needs.hunger);
+            census.thirsty += past(needs.thirst);
+            census.tired += past(needs.rest);
+        }
+        let now = (snapshot.tick / 60) as u32;
+        for structure in self.engine.structure_views(usize::MAX) {
+            if structure.kind.burns() && structure.state == sim_core::StructureState::Complete {
+                census.hearths += 1;
+                census.fires_burning += u32::from(structure.working(now));
+            }
+        }
+        let (_, deaths, births) = self.year_start;
+        census.died_this_year = snapshot.death_count.saturating_sub(deaths);
+        census.born_this_year = self.feed.births().saturating_sub(births);
         census
     }
 
@@ -131,6 +154,12 @@ impl ViewerApp {
                 following: self.following,
                 toast: self.toast.as_ref().map(|(message, _)| message.clone()),
                 help_open: self.help_open,
+                info_open: self.info_open,
+                reached_speed: {
+                    let speed = f64::from(self.engine.snapshot().speed);
+                    (!self.engine.snapshot().paused && self.reached_speed < 0.9 * speed)
+                        .then(|| self.reached_speed.round() as u32)
+                },
                 details_open: self.details_open,
                 build: self.build,
                 feed: self.feed.entries().cloned().collect(),

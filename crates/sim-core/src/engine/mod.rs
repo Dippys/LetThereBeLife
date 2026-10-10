@@ -47,7 +47,7 @@ pub struct EngineConfig {
     pub world: WorldConfig,
 }
 
-pub const MAX_SIMULATION_SPEED: f32 = 256.0;
+pub const MAX_SIMULATION_SPEED: f32 = 4096.0;
 
 impl Default for EngineConfig {
     fn default() -> Self {

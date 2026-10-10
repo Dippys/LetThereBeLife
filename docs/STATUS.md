@@ -166,7 +166,9 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
-- 2026-10-11 (latest): warming up in a hut lasts until well warmed, ending the late-winter
+- 2026-10-11 (latest): viewer speeds up to 4096× (a frame budget shows the speed reached), the
+  season's cold beside the year, and an info box (I) with fires, needs, births and deaths.
+- 2026-10-11: warming up in a hut lasts until well warmed, ending the late-winter
   slowdown (D-101).
 - 2026-10-11: no building that shuts anyone in; idle people show as resting (D-100).
 - 2026-10-11: a year is one turn of the seasons (D-099); the viewer's top bar shows the year and season (raw clock in F3).

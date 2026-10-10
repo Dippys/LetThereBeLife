@@ -39,6 +39,7 @@ pub struct FeedEntry {
 pub struct Feed {
     entries: VecDeque<FeedEntry>,
     deaths_seen: usize,
+    births: u32,
 }
 
 impl Feed {
@@ -50,6 +51,12 @@ impl Feed {
     pub fn clear(&mut self) {
         self.entries.clear();
         self.deaths_seen = 0;
+        self.births = 0;
+    }
+
+    /// Babies born since the feed started.
+    pub const fn births(&self) -> u32 {
+        self.births
     }
 
     fn push(&mut self, text: String, tone: Tone, agent: Option<AgentId>, position: WorldPosition) {
@@ -109,6 +116,11 @@ impl Feed {
             );
         }
 
+        self.births += engine
+            .family_events()
+            .iter()
+            .filter(|event| matches!(event, FamilyEvent::Born { .. }))
+            .count() as u32;
         for event in engine.family_events() {
             let (text, tone, agent) = match *event {
                 FamilyEvent::Born { mother, sex, .. } => (

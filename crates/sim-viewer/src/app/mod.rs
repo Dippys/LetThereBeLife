@@ -50,6 +50,10 @@ pub(crate) struct ViewerApp {
     archive: Option<WorldArchive>,
     last_frame: Option<Instant>,
     accumulator: f64,
+    /// Simulated seconds per real second actually reached lately (smoothed).
+    reached_speed: f64,
+    /// The year last seen, and the deaths and births counted when it began.
+    year_start: (i64, u32, u32),
     camera: Camera,
     cursor: Option<(f64, f64)>,
     cursor_world: Option<WorldPosition>,
@@ -83,6 +87,7 @@ pub(crate) struct ViewerApp {
     selected: Option<AgentId>,
     following: bool,
     help_open: bool,
+    info_open: bool,
     details_open: bool,
     /// The build palette's chosen tool while it is open.
     build: Option<BuildTool>,
@@ -122,6 +127,8 @@ impl ViewerApp {
             engine,
             archive,
             last_frame: None,
+            reached_speed: 1.0,
+            year_start: (0, 0, 0),
             accumulator: 0.0,
             camera,
             cursor: None,
@@ -158,6 +165,7 @@ impl ViewerApp {
             following: false,
             // Open the help on a normal launch so first-time viewers know what they see.
             help_open: smoke_frames.is_none(),
+            info_open: false,
             details_open: false,
             build: None,
             press: None,

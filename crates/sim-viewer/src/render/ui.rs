@@ -151,8 +151,13 @@ pub(super) fn build_interface(
     if let Some(agent) = &state.selected {
         person_panel(painter, agent, state.following, width, height, bar);
     }
+    let below_info = if state.info_open {
+        info_panel(painter, state, bar)
+    } else {
+        bar
+    };
     if let Some(details) = details {
-        details_panel(painter, details, bar);
+        details_panel(painter, details, below_info);
     }
     if state.build.is_none() {
         if let Some(hint) = start_hint(state) {
@@ -199,7 +204,10 @@ fn banner(painter: &mut Painter, text: &str, width: f32, y: f32, color: u32) {
 }
 
 /// Speed steps the bar's buttons move between.
-pub const SPEEDS: [f32; 9] = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0];
+/// Keys 1-9 pick the first nine; + and - step through all of them.
+pub const SPEEDS: [f32; 13] = [
+    1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0, 512.0, 1024.0, 2048.0, 4096.0,
+];
 
 /// Draws the top bar and returns its height.
 /// Twelve month notches colored by season, lit up to `months` (0-12) into the
@@ -249,10 +257,14 @@ fn top_bar(painter: &mut Painter, state: &RenderState, width: f32) -> f32 {
     x += gap * 2.0;
     x += painter.button("-", x, button_y, UiAction::Slower, false) + gap;
     let speed = format!("{}×", state.snapshot.speed);
-    let speed_x = x + (painter.chars(4) - text_width(&speed, px)) / 2.0;
+    let speed_x = x + (painter.chars(5) - text_width(&speed, px)) / 2.0;
     painter.text(&speed, speed_x, text_y, colors::UI_TEXT);
-    x += painter.chars(4) + gap;
+    x += painter.chars(5) + gap;
     x += painter.button("+", x, button_y, UiAction::Faster, false);
+    // Faster than this computer can go: show what it manages.
+    if let Some(reached) = state.reached_speed {
+        x = painter.text(&format!(" (≈{reached}×)"), x, text_y, colors::UI_WARN);
+    }
     x += painter.chars(2);
     x = painter.text(
         &labels::year(state.snapshot.simulated_seconds),
@@ -268,7 +280,11 @@ fn top_bar(painter: &mut Painter, state: &RenderState, width: f32) -> f32 {
         text_y,
     );
     x = painter.text(
-        &format!(" {}", labels::season(state.season)),
+        &format!(
+            " {}, {}",
+            labels::season(state.season),
+            labels::cold(state.season)
+        ),
         x,
         text_y,
         colors::UI_DIM,
@@ -283,6 +299,9 @@ fn top_bar(painter: &mut Painter, state: &RenderState, width: f32) -> f32 {
     let help_width = painter.button_width("? Help");
     let help_x = width - painter.pad() - help_width;
     painter.button("? Help", help_x, button_y, UiAction::Help, state.help_open);
+    let info_width = painter.button_width("Info");
+    let info_x = help_x - gap - info_width;
+    painter.button("Info", info_x, button_y, UiAction::Info, state.info_open);
     let census = &state.census;
     let mut items: Vec<(Option<u32>, String, u32)> = vec![(
         Some(colors::agent_color(AgentActivity::Moving)),
@@ -882,6 +901,70 @@ fn person_panel(
 }
 
 /// The F3 readout, top left under the bar.
+/// What the valley is like right now, from what the simulation tracks.
+/// Returns the y below it.
+pub(super) fn info_rows(state: &RenderState) -> Vec<(&'static str, String)> {
+    let census = &state.census;
+    vec![
+        (
+            "Weather",
+            format!(
+                "{}, {}",
+                labels::season(state.season),
+                labels::cold(state.season)
+            ),
+        ),
+        ("Bushes", labels::growth(state.season).to_owned()),
+        (
+            "Fires",
+            format!("{} burning of {}", census.fires_burning, census.hearths),
+        ),
+        (
+            "Feeling",
+            format!(
+                "{} cold, {} hungry, {} thirsty, {} tired",
+                census.cold, census.hungry, census.thirsty, census.tired
+            ),
+        ),
+        (
+            "This year",
+            format!(
+                "{} born, {} died",
+                census.born_this_year, census.died_this_year
+            ),
+        ),
+    ]
+}
+
+fn info_panel(painter: &mut Painter, state: &RenderState, top: f32) -> f32 {
+    let pad = painter.pad();
+    let line = painter.line();
+    let rows = info_rows(state);
+    let chars = rows
+        .iter()
+        .map(|(_, value)| INFO_LABEL_CHARS + value.chars().count())
+        .max()
+        .unwrap_or(0);
+    let x = pad;
+    let y = top + pad;
+    let h = rows.len() as f32 * line + 2.0 * pad;
+    painter.panel(x, y, painter.chars(chars) + 2.0 * pad, h);
+    for (row, (label, value)) in rows.iter().enumerate() {
+        let row_y = y + pad + row as f32 * line;
+        painter.text(label, x + pad, row_y, colors::UI_DIM);
+        painter.text(
+            value,
+            x + pad + painter.chars(INFO_LABEL_CHARS),
+            row_y,
+            colors::UI_TEXT,
+        );
+    }
+    y + h
+}
+
+/// Width of the info box's label column.
+const INFO_LABEL_CHARS: usize = 11;
+
 fn details_panel(painter: &mut Painter, text: &str, top: f32) {
     let pad = painter.pad();
     let line = painter.line();
@@ -1116,14 +1199,15 @@ fn help(painter: &mut Painter, width: f32, height: f32) {
          things. Words can be misunderstood, and both sides learn from what happens next.",
         column * 2 + 2,
     );
-    const CONTROLS: [(&str, &str); 13] = [
+    const CONTROLS: [(&str, &str); 14] = [
         ("Drag", "move the map"),
         ("Scroll", "zoom in and out"),
         ("Click", "pick a person"),
         ("Tab", "next person"),
         ("F", "follow the picked person"),
         ("Space", "pause or resume"),
-        ("1-9  + -", "speed"),
+        ("1-9  + -", "speed (+ goes past 256×)"),
+        ("I", "valley info"),
         ("H", "this help"),
         ("Esc", "close what's open"),
         ("T", "add a person at the mouse"),

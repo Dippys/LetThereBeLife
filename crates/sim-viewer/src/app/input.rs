@@ -197,6 +197,7 @@ impl ViewerApp {
             UiAction::Slower => self.step_speed(-1),
             UiAction::Faster => self.step_speed(1),
             UiAction::Help => self.help_open = !self.help_open,
+            UiAction::Info => self.info_open = !self.info_open,
             UiAction::CloseSelected => {
                 self.selected = None;
                 self.following = false;
@@ -304,6 +305,7 @@ impl ViewerApp {
             KeyCode::Equal | KeyCode::NumpadAdd => self.step_speed(1),
             KeyCode::Minus | KeyCode::NumpadSubtract => self.step_speed(-1),
             KeyCode::KeyH | KeyCode::F1 => self.help_open = !self.help_open,
+            KeyCode::KeyI => self.info_open = !self.info_open,
             KeyCode::F3 => self.details_open = !self.details_open,
             KeyCode::Escape => {
                 if self.help_open {

@@ -39,6 +39,8 @@ pub(super) fn test_render_state(cursor_world: Option<WorldPosition>) -> RenderSt
         following: false,
         toast: None,
         help_open: false,
+        info_open: false,
+        reached_speed: None,
         details_open: false,
         build: None,
         feed: Vec::new(),

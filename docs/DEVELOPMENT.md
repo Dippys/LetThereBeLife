@@ -120,14 +120,15 @@ Compare minds before and after any behavior change. Current numbers are in [STAT
 | Click a person | Open their panel: what they're doing and why, need bars, what they carry, what they believe (eats, avoids, hunts, fears, fire), their words, and friends. The map shows their remembered places (solid = seen, outline = hint) and dotted lines to people they know |
 | `Tab` / `F` | Next living person / follow the picked person |
 | `Esc` | Close help, then the build palette, then the person panel (it no longer quits) |
-| `Space`, `1`–`9`, `+`/`-` | Pause, speed 1×–256×, step the speed (also buttons in the top bar) |
+| `Space`, `1`–`9`, `+`/`-` | Pause, speed 1×–256×, step the speed up to 4096× (also buttons in the top bar); past what the computer manages, the bar shows the speed reached |
+| `I` | Valley info: weather, fires burning, how many are cold/hungry/thirsty/tired, births and deaths this year |
 | `T` | Add a person at the cursor |
 | `B` | Build palette: person, tree, berry bush, rock, water; click the map to place |
 | `Shift+R` | Remove everyone (keeps terrain) |
 | Right-drag, `C` | Select an area to generate (yellow = OK, red = too big); cancel pending generation |
 | `F3` | Technical details: ticks, seed, chunks, the cell under the cursor, the picked person's raw values |
 
-The top bar shows time, speed, and head counts. Hovering shows a one-line tooltip (person, animal,
+The top bar shows the year (a strip of twelve months colored by season), the season and its cold, speed, and head counts. Hovering shows a one-line tooltip (person, animal,
 bush with what's left, terrain). **Recent events** (bottom left) lists deaths, bites, kills, gifts,
 warnings, collapses and recoveries, corrections, and misunderstandings ("Person 16 mistook
 "kani" for water (meant berries)"); click one to look. Words appear for 2.5 s as bubbles over the speaker with the gesture

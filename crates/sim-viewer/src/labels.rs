@@ -323,6 +323,24 @@ pub fn months_into_year(seconds: f64) -> f32 {
     (seconds.max(0.0) % year / sim_core::MONTH_SECONDS as f64) as f32
 }
 
+/// How cold the season is, as people feel it.
+pub const fn cold(season: sim_core::Season) -> &'static str {
+    match season {
+        sim_core::Season::Spring => "mild",
+        sim_core::Season::Summer => "warm",
+        sim_core::Season::Autumn => "chilly",
+        sim_core::Season::Winter => "freezing",
+    }
+}
+
+/// Whether fruit grows back this season.
+pub const fn growth(season: sim_core::Season) -> &'static str {
+    match season {
+        sim_core::Season::Winter => "bare, nothing grows back",
+        _ => "growing back",
+    }
+}
+
 pub fn duration(seconds: f64) -> String {
     let total = seconds.max(0.0) as u64;
     match (total / 3_600, total / 60 % 60) {
