@@ -187,6 +187,8 @@ pub struct FamilyStats {
     /// how many of those were misread.
     pub cross_receptions: u64,
     pub cross_misread: u64,
+    /// Couples formed within a family and across families.
+    pub couples: [u64; 2],
 }
 
 /// What happened between people and animals.
@@ -334,6 +336,7 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     });
     let mut trace = std::collections::VecDeque::new();
     let mut comms = crate::comms::CommunicationLog::default();
+    let mut couples: Vec<(AgentId, AgentId)> = Vec::new();
     let mut early_vocabulary = 0;
     let mut food = FoodStats::default();
     let mut wildlife = WildlifeStats::default();
@@ -395,6 +398,9 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                     food.first_tastes += u64::from(meal.first_taste);
                     food.watched += u64::from(meal.watchers);
                 }
+                for couple in engine.couple_events() {
+                    couples.push((couple.first, couple.second));
+                }
                 comms.record_tick(&engine);
                 if let Some(traced) = config.trace {
                     record_trace(&engine, AgentId::new(traced), &mut trace);
@@ -423,6 +429,9 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
         ),
         ..FamilyStats::default()
     };
+    for &(first, second) in &couples {
+        families.couples[usize::from(family_of(first) != family_of(second))] += 1;
+    }
     for exchange in comms.exchanges() {
         let speaker = family_of(exchange.signal.signal.sender);
         for reception in &exchange.receptions {
@@ -1306,11 +1315,13 @@ impl fmt::Display for StudyReport {
             let families = &self.families;
             write!(
                 formatter,
-                "\n  families: camps {} cells apart; near the other family {}% of the time; receptions across families {} ({} misread)",
+                "\n  families: camps {} cells apart; near the other family {}% of the time; receptions across families {} ({} misread); couples within families {}, across {}",
                 families.camp_distance,
                 families.mixed_percent,
                 families.cross_receptions,
-                families.cross_misread
+                families.cross_misread,
+                families.couples[0],
+                families.couples[1]
             )?;
         }
         let [founders_fire, children_fire] = self.wildlife.know_fire;

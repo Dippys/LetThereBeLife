@@ -88,3 +88,82 @@ fn seeing_the_body_of_family_brings_grief() {
         "mourned, then let go"
     );
 }
+
+/// Two adults of the other sex who know each other this well.
+fn acquainted(familiarity_sightings: u32, raised_together: bool) -> Engine {
+    let mut engine = two_people();
+    engine.policy_options = crate::PolicyOptions::full();
+    let adult = |sex| {
+        Some(Life {
+            born: -((25 * SECONDS_PER_YEAR) as i32),
+            sex,
+        })
+    };
+    engine.lives = vec![adult(Sex::Female), adult(Sex::Male)];
+    for (me, other) in [(0, 1), (1, 0)] {
+        let position = engine
+            .population
+            .view(AgentId::new(other))
+            .unwrap()
+            .position;
+        let social = &mut engine.minds.get_mut(AgentId::new(me)).social;
+        for _ in 0..familiarity_sightings {
+            social.notice(AgentId::new(other), position, 1);
+        }
+        if raised_together {
+            let slot = social.slot_of(AgentId::new(other)).unwrap();
+            social.mark_raised_together(slot);
+        }
+    }
+    engine
+}
+
+fn decide(engine: &mut Engine, agent: u32) {
+    let perception = engine
+        .perceive_physical(AgentId::new(agent), crate::PHYSICAL_POLICY_RADIUS)
+        .unwrap();
+    engine.pair_up(AgentId::new(agent), &perception);
+}
+
+#[test]
+fn people_who_know_each_other_well_become_a_couple() {
+    let mut engine = acquainted(60, false);
+    decide(&mut engine, 0);
+    assert_eq!(engine.couple_events().len(), 1);
+    assert_eq!(engine.partner_of(AgentId::new(0)), Some(AgentId::new(1)));
+    assert_eq!(engine.partner_of(AgentId::new(1)), Some(AgentId::new(0)));
+
+    // Barely acquainted people don't.
+    let mut engine = acquainted(5, false);
+    decide(&mut engine, 0);
+    assert_eq!(engine.partner_of(AgentId::new(0)), None);
+}
+
+#[test]
+fn people_raised_together_do_not_pair_unless_long_alone() {
+    let mut engine = acquainted(60, true);
+    decide(&mut engine, 0);
+    assert_eq!(
+        engine.partner_of(AgentId::new(0)),
+        None,
+        "they grew up as siblings"
+    );
+
+    // Years with nobody else to pair with wear the feeling down.
+    engine.time = SimTime::from_ticks(10 * TICKS_PER_YEAR);
+    for agent in [0, 1] {
+        engine.minds.get_mut(AgentId::new(agent)).last_eligible_seen = 0;
+    }
+    engine.lives = engine
+        .lives
+        .iter()
+        .map(|life| {
+            life.map(|life| Life {
+                born: life.born - 10 * SECONDS_PER_YEAR as i32,
+                ..life
+            })
+        })
+        .collect();
+    decide(&mut engine, 0);
+    assert_eq!(engine.partner_of(AgentId::new(0)), Some(AgentId::new(1)));
+}

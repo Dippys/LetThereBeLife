@@ -25,7 +25,7 @@ pub use agent::{
     RouteEventOutcome, RouteOutcomeKind, RouteScheduled, SimTime, SpawnInvalidReason,
 };
 pub use cognition::{
-    ACQUAINTANCE_SLOTS, AcquaintanceView, AffordanceView, CONSEQUENCE_WEIGHT, Concept,
+    ACQUAINTANCE_SLOTS, AcquaintanceView, AffordanceView, CONSEQUENCE_WEIGHT, Concept, CoupleEvent,
     DEFAULT_TRUST, DISTRUST, DesiredEffect, FAMILY_SIZE, FRIEND_FAMILIARITY, FaunaView, Gesture,
     GestureTopic, GriefEvent, HintOutcomeEvent, InterpretationEvent, LANDMARK_SLOTS, LEXICON_SLOTS,
     LandmarkKind, LandmarkSource, LandmarkView, LeadFollowedEvent, LessonCause, LessonEvent,

@@ -25,6 +25,8 @@ pub const FRIEND_FAMILIARITY: u8 = 24;
 pub const DISTRUST: u8 = 64;
 /// Most favours one remembers owing someone.
 const MAX_OWED: u8 = 15;
+const TIE_BITS: u8 = 0x07;
+const RAISED_TOGETHER: u8 = 0x08;
 
 /// How someone is related to the agent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,8 +70,8 @@ struct Acquaintance {
     trust: u8,
     /// Whether `x, y` is still where the agent expects to find them.
     position_known: bool,
-    /// Low 4 bits: how they're related (`Tie`, 0 = not); high 4 bits: favours
-    /// the agent owes them.
+    /// Bits 0-2: how they're related (`Tie`, 0 = not); bit 3: they were
+    /// children together; bits 4-7: favours the agent owes them.
     ties: u8,
 }
 
@@ -90,7 +92,7 @@ impl Default for Acquaintance {
 
 impl Acquaintance {
     const fn tie(self) -> Option<Tie> {
-        Tie::from_bits(self.ties & 0x0F)
+        Tie::from_bits(self.ties & TIE_BITS)
     }
 
     const fn owed(self) -> u8 {
@@ -242,7 +244,36 @@ impl SocialMemory {
     /// Records how `slot` is related to the agent.
     pub(crate) fn set_tie(&mut self, slot: u8, tie: Tie) {
         let known = &mut self.slots[usize::from(slot)];
-        known.ties = (known.ties & 0xF0) | tie as u8;
+        known.ties = (known.ties & !TIE_BITS) | tie as u8;
+    }
+
+    /// Ends a partnership (they drifted apart).
+    pub(crate) fn clear_partner(&mut self, slot: u8) {
+        let known = &mut self.slots[usize::from(slot)];
+        if known.tie() == Some(Tie::Partner) {
+            known.ties &= !TIE_BITS;
+        }
+    }
+
+    /// The agent's partner and the slot that holds them, if any.
+    pub(crate) fn partner(&self) -> Option<(u8, AgentId)> {
+        self.slots
+            .iter()
+            .position(|known| known.agent != EMPTY && known.tie() == Some(Tie::Partner))
+            .map(|slot| (slot as u8, AgentId::new(self.slots[slot].agent)))
+    }
+
+    /// They were children together (which rules them out as a partner).
+    pub(crate) fn mark_raised_together(&mut self, slot: u8) {
+        self.slots[usize::from(slot)].ties |= RAISED_TOGETHER;
+    }
+
+    pub(crate) fn raised_together(&self, slot: u8) -> bool {
+        self.slots[usize::from(slot)].ties & RAISED_TOGETHER != 0
+    }
+
+    pub(crate) fn last_seen(&self, slot: u8) -> u32 {
+        self.slots[usize::from(slot)].last_seen
     }
 
     pub(crate) fn tie(&self, slot: u8) -> Option<Tie> {
@@ -258,14 +289,14 @@ impl SocialMemory {
     pub(crate) fn owe(&mut self, slot: u8) {
         let known = &mut self.slots[usize::from(slot)];
         let owed = (known.owed() + 1).min(MAX_OWED);
-        known.ties = (known.ties & 0x0F) | owed << 4;
+        known.ties = (known.ties & !0xF0) | owed << 4;
     }
 
     /// The agent did `slot` a favour back: one fewer owed.
     pub(crate) fn repay(&mut self, slot: u8) {
         let known = &mut self.slots[usize::from(slot)];
         let owed = known.owed().saturating_sub(1);
-        known.ties = (known.ties & 0x0F) | owed << 4;
+        known.ties = (known.ties & !0xF0) | owed << 4;
     }
 
     pub(crate) fn owed(&self, slot: u8) -> u8 {
@@ -313,7 +344,15 @@ impl SocialMemory {
                     && known.trust >= DISTRUST
                     && now.saturating_sub(known.last_seen) <= max_age
             })
-            .max_by_key(|known| (known.familiarity, known.last_seen, u32::MAX - known.agent))
+            .max_by_key(|known| {
+                (
+                    // A partner first.
+                    known.tie() == Some(Tie::Partner),
+                    known.familiarity,
+                    known.last_seen,
+                    u32::MAX - known.agent,
+                )
+            })
             .map(|known| known.position())
     }
 

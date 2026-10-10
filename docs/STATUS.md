@@ -146,7 +146,7 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
   smokes after M7, then 1 in 12 smokes after the living world. It happens with and without agents. Cause unknown, possibly GPU teardown.
 - **No save/load.** Simulation state can't be persisted. The world archive needs regenerating for
   generator v2 (`--pregenerate-world`).
-- **Minds are 808 B per agent** (mental map 372 B). That's fine at viewer scale; the spec's 10M
+- **Minds are 816 B per agent** (mental map 372 B). That's fine at viewer scale; the spec's 10M
   agents would need ~8 GB, so compaction comes later.
 - **Structures could wall off ponds:** shelters and hearths are no longer built on shore cells,
   but agents can still occasionally start or end up in a pocket with no way to water.

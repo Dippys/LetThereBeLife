@@ -173,6 +173,7 @@ impl Engine {
         inventory: InventoryView,
         perception: &PhysicalPerception,
     ) -> (PolicySelection, Option<ExplorationHeading>) {
+        self.pair_up(agent, perception);
         let now = belief_seconds(self.time);
         let heading = self
             .population
@@ -255,6 +256,7 @@ impl Engine {
             child: _,
             parent,
             grief_until,
+            last_eligible_seen: _,
         } = mind;
         let grief_until = *grief_until;
         map.observe(
@@ -337,8 +339,12 @@ impl Engine {
                     .then(|| map.shareable(perception.area))
                     .flatten()
             });
-        // Visit friends only when alone; sociable people remember them for longer.
-        let friend_target = (social && !company)
+        // Visit friends only when alone, or a partner who is out of sight;
+        // sociable people remember them for longer.
+        let partner_away = people
+            .partner()
+            .is_some_and(|(_, partner)| !perception.agents.iter().any(|other| other.id == partner));
+        let friend_target = (social && (!company || partner_away))
             .then(|| {
                 people.friend_to_visit(
                     now,

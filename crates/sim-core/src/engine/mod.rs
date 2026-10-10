@@ -10,6 +10,7 @@ mod requests;
 mod routes;
 mod setup;
 pub use setup::SimulationAdvanced;
+mod family;
 mod life;
 mod shelter;
 mod tick;
@@ -135,6 +136,7 @@ pub struct Engine {
     meal_events: Vec<crate::MealEvent>,
     lead_events: Vec<crate::LeadFollowedEvent>,
     grief_events: Vec<crate::GriefEvent>,
+    couple_events: Vec<crate::CoupleEvent>,
     wildlife: crate::wildlife::Wildlife,
     wildlife_events: Vec<crate::WildlifeEvent>,
     /// Sex and birth of people born during the run (others are derived from the seed).
@@ -184,6 +186,7 @@ impl Engine {
             meal_events: Vec::new(),
             lead_events: Vec::new(),
             grief_events: Vec::new(),
+            couple_events: Vec::new(),
             wildlife: crate::wildlife::Wildlife::default(),
             wildlife_events: Vec::new(),
             lives: Vec::new(),
@@ -238,6 +241,7 @@ impl Engine {
                 self.meal_events.clear();
                 self.lead_events.clear();
                 self.grief_events.clear();
+                self.couple_events.clear();
                 self.wildlife = crate::wildlife::Wildlife::default();
                 self.wildlife_events.clear();
                 self.lives.clear();

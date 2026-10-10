@@ -293,6 +293,14 @@ pub struct LeadFollowedEvent {
     pub fled: bool,
 }
 
+/// Two people became a couple (latest tick, for logs and tools).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CoupleEvent {
+    pub first: AgentId,
+    pub second: AgentId,
+    pub at: crate::SimTime,
+}
+
 /// Someone saw the body of a person close to them and is mourning (latest
 /// tick, for logs and tools).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -396,6 +404,8 @@ pub(crate) struct Mind {
     pub(crate) parent: Option<AgentId>,
     /// Mourning someone close until this simulated second.
     pub(crate) grief_until: u32,
+    /// Simulated second it last saw someone it could pair with.
+    pub(crate) last_eligible_seen: u32,
 }
 
 impl Mind {

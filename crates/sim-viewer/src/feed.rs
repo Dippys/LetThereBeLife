@@ -109,6 +109,19 @@ impl Feed {
             );
         }
 
+        for couple in engine.couple_events() {
+            self.push(
+                format!(
+                    "{} and {} became a couple",
+                    labels::person(couple.first),
+                    labels::person(couple.second)
+                ),
+                Tone::Good,
+                Some(couple.first),
+                agent_position(engine, couple.first),
+            );
+        }
+
         for grief in engine.grief_events() {
             self.push(
                 format!(
