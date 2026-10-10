@@ -24,10 +24,10 @@ lays out phases 0–10, from world → physical agents → cognition → communi
 | 0. Technical spikes: workspace, headless core, viewer, quality gate | Done |
 | 1. World foundation: terrain, climate, rivers/lakes, waterholes, biomes, resources | Done |
 | 2. Physical agents: movement, perception, needs, gathering, sleep, shelter, health, death | Done |
-| 3. Beliefs, memory, relationships | **In progress.** Mental maps, personalities, and sparse relationships with trust are done; episodic memory isn't. Plan: [`plans/MINDS.md`](plans/MINDS.md) |
+| 3. Beliefs, memory, relationships | **In progress.** Mental maps, personalities, and relationships (trust, kin, partners, grudges, favours, grief) are done; episodic memory isn't |
 | 4. Nonverbal communication | **Mostly done.** Pointing, mimes, tone, questions, repairs, corrections, requests for food, and shouted warnings and calls to hunt |
 | 5. Proto-language | **Started (vertical slice).** Personal lexicons, two founding dialects, competing interpretations, learning from consequences |
-| 6. Children and transmission | **Started.** Children start with no words or knowledge and pick up words, what's edible, what's dangerous, and (sometimes) fire by watching |
+| 6. Children and transmission | **Underway.** Couples, births, aging, and death of old age make a band that renews itself over generations; children start with no words or knowledge and learn by watching; names are given and spread. Plan: [`plans/GENERATIONS.md`](plans/GENERATIONS.md) |
 | 7. Invention and diffusion | **Started.** Food lore, animal lore, and the hearth spread between families by observation |
 | 8–10. Settlements and economy, migration and language divergence, conflict and institutions | Not started |
 
@@ -59,6 +59,13 @@ lays out phases 0–10, from world → physical agents → cognition → communi
   they find, and correct the speaker later. Hungry agents ask others for food, who give or refuse.
   Children start with no words. Every exchange is in the communication log (`--comms`,
   `--misreads`, `--successes`, `--explain`).
+- **Generations (viewer and study):** everyone has a sex, an age (one simulated hour is a year),
+  and a name. Couples form from closeness (not between people raised together, unless long alone)
+  and fade when apart; well-fed couples have babies, who are carried and nursed until 3 and then
+  walk, knowing their family, with personalities blended from both parents. Elders grow frail and
+  die of old age; a dwindling band is joined by newcomers with their own words. People know their
+  kin, hold grudges, owe favours, and mourn those close to them. Names spread when called out and
+  can be misheard or drift into nicknames.
 - **People are different (viewer and study):** four personality traits (curiosity, caution,
   sociability, diligence) and up to six acquaintances with familiarity, trust, and last-seen
   place. Sociable agents seek out friends and stay with company. Hints count for more from people

@@ -746,7 +746,7 @@ fn person_panel(
         .map(|row| row_height(painter, row, PANEL_CHARS))
         .sum();
     let legend = wrap(
-        "On the map: squares are places they remember, dots lead to people they know",
+        "On the map: squares are places they remember, dots lead to people they know (pink: their partner)",
         PANEL_CHARS,
     );
     let button_h = line + 2.0 * painter.px;
@@ -1090,6 +1090,7 @@ fn help(painter: &mut Painter, width: f32, height: f32) {
         ),
     ];
     let notes: Vec<String> = [
+        "Women's squares have notched corners; children are smaller; elders have a grey edge; a pink dot is a carried baby.",
         "Bitter berries look like food but make you sick.",
         "A bubble is a word being said, with the gesture that went with it. A dotted line is someone pointing.",
     ]

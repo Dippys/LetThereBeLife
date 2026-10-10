@@ -507,10 +507,18 @@ mod tests {
         let slot = social.notice(AgentId::new(3), at(0, 0), 0).unwrap().slot;
         social.learn_name(slot, crate::Name(10));
         social.learn_name(slot, crate::Name(20));
-        assert_eq!(social.name(slot), Some(crate::Name(10)), "once is not enough");
+        assert_eq!(
+            social.name(slot),
+            Some(crate::Name(10)),
+            "once is not enough"
+        );
         social.learn_name(slot, crate::Name(10));
         social.learn_name(slot, crate::Name(20));
-        assert_eq!(social.name(slot), Some(crate::Name(10)), "the doubt was reset");
+        assert_eq!(
+            social.name(slot),
+            Some(crate::Name(10)),
+            "the doubt was reset"
+        );
         social.learn_name(slot, crate::Name(20));
         assert_eq!(social.name(slot), Some(crate::Name(20)));
     }

@@ -53,7 +53,7 @@ fn agent_instances_reflect_position_activity_and_bounded_far_zoom_culling() {
             activity,
         });
     let mut instances = Vec::new();
-    build_agent_instances(views, bounds, 2.0, &mut instances);
+    build_agent_instances(views.map(|view| (view, None)), bounds, 2.0, &mut instances);
     assert_eq!(instances.len(), activities.len());
     assert_eq!(instances[0].color, agent_color(AgentActivity::Idle));
     assert_eq!(
@@ -66,11 +66,14 @@ fn agent_instances_reflect_position_activity_and_bounded_far_zoom_culling() {
 
     build_agent_instances(
         std::iter::repeat_n(
-            AgentView {
-                id: sim_core::AgentId::new(0),
-                position: WorldPosition { x: 0, y: 0 },
-                activity: AgentActivity::Moving,
-            },
+            (
+                AgentView {
+                    id: sim_core::AgentId::new(0),
+                    position: WorldPosition { x: 0, y: 0 },
+                    activity: AgentActivity::Moving,
+                },
+                None,
+            ),
             MAX_AGENT_INSTANCES + 100,
         ),
         bounds,
@@ -80,6 +83,58 @@ fn agent_instances_reflect_position_activity_and_bounded_far_zoom_culling() {
     assert_eq!(instances.len(), MAX_AGENT_INSTANCES);
     build_agent_instances(std::iter::empty(), bounds, 0.5, &mut instances);
     assert!(instances.is_empty());
+}
+
+#[test]
+fn women_children_and_elders_are_drawn_distinctly() {
+    let bounds = WorldRect {
+        min: WorldPosition { x: -4, y: -4 },
+        max: WorldPosition { x: 4, y: 4 },
+    };
+    let person = |id: u32, sex, age| {
+        (
+            AgentView {
+                id: sim_core::AgentId::new(id),
+                position: WorldPosition { x: 0, y: 0 },
+                activity: AgentActivity::Idle,
+            },
+            Some(sim_core::LifeView {
+                name: sim_core::Name(0),
+                sex,
+                age,
+                stage: sim_core::LifeStage::of(age),
+            }),
+        )
+    };
+    let mut instances = Vec::new();
+    build_agent_instances(
+        [person(0, sim_core::Sex::Male, 30)],
+        bounds,
+        4.0,
+        &mut instances,
+    );
+    assert_eq!(instances.len(), 1, "a man is one square");
+    build_agent_instances(
+        [person(1, sim_core::Sex::Female, 30)],
+        bounds,
+        4.0,
+        &mut instances,
+    );
+    assert_eq!(instances.len(), 2, "a woman's square has notched corners");
+    build_agent_instances(
+        [person(2, sim_core::Sex::Male, 8)],
+        bounds,
+        4.0,
+        &mut instances,
+    );
+    assert!(instances[0].size[0] < 0.5, "children are smaller");
+    build_agent_instances(
+        [person(3, sim_core::Sex::Male, 70)],
+        bounds,
+        4.0,
+        &mut instances,
+    );
+    assert_eq!(instances.len(), 2, "an elder has a grey edge");
 }
 
 #[test]

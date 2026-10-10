@@ -47,7 +47,7 @@ Measures how viewer-like agents actually fare. They spawn without supplies and r
 
 ```sh
 cargo run --release -p sim-headless -- --study [--near-water | --groups | --valley] [--seed N]
-    [--agents N] [--ticks N] [--mind legacy|memory|sharing|full] [--no-help] [--food PERCENT]
+    [--agents N] [--ticks N | --years N] [--mind legacy|memory|sharing|full] [--no-help] [--food PERCENT]
     [--no-wildlife] [--no-regrowth]
     [--verbose] [--trace AGENT]
     [--comms N] [--misreads N] [--lessons N] [--successes N] [--explain AGENT]
@@ -87,6 +87,12 @@ cargo run --release -p sim-headless -- --study [--near-water | --groups | --vall
 - The `words:` line counts heard words in the first and second half of the run, and how often the
   listener already read the word the way the sender meant it. The `vocabulary:` line is the
   band's agreement on each place word at the start and at the end.
+- `--years N` runs N years of life (one simulated hour each, 216,000 ticks). Over decades the
+  `families:` line counts couples within and across families, `births:` counts pregnancies,
+  babies, children who started walking, and losses, `names:` counts names known (and how many
+  differ from the given name) and names misheard, and `words passed down` shows, per generation,
+  how many of their place words are still the founders' most common ones. `survivors` counts the
+  living; `(collapsed N)` are alive but down.
 - `--mind legacy` is the old reactive policy (what the viewer used before). `memory` adds the
   mental map. `sharing` adds gestures. `full` (the default) adds personalities and relationships.
 - The `social:` line shows the % of time agents spend near another agent, their acquaintances,

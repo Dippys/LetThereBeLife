@@ -437,3 +437,17 @@ own name for them.
 104 of those differ from the given name, partly from mishearing and partly because a name that
 catches on spreads (a nickname). The viewer shows given names, and in the person panel what that
 person calls the people they know. Names aren't used in requests or corrections yet.
+
+## D-089: Watching generations (2026-10-10)
+
+**Decision:** The map draws women's squares with notched corners, children smaller, elders with a
+grey edge, a pink dot for a carried baby, and a pink line from the picked person to their partner.
+Family members know each other's names from the start. The study tracks each person's generation
+(founders and newcomers 0, their children 1, and so on), reports per generation how many of their
+place words are still the founders' most common, and takes `--years N`.
+**Why:** Plan G6: make generations visible and measurable.
+**Consequences:** In a 90-year valley run (seed 1, 8 minutes headless): five generations, 61
+people alive, 84 births, 39 deaths all of old age, 56 couples (21 across families), 84 complete
+episodes. Words hardly drift: generations 1-3 keep the founders' word for every place, generation 4
+for 97%. Without a way to coin words, the band settles on one language and keeps it; names drift
+far more (227 of 625 known names differ from the given name).

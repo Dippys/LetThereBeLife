@@ -67,13 +67,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "--ticks" => ticks = Some(parse_next(&mut args, "--ticks")),
+            // One simulated hour is one year of life.
+            "--years" => ticks = Some(parse_next::<u64>(&mut args, "--years") * 216_000),
             "--seed" => seed = Some(parse_next(&mut args, "--seed")),
             "--agents" => agent_count = Some(parse_next(&mut args, "--agents")),
             "--batch-size" => batch_size = parse_next(&mut args, "--batch-size"),
             "--config" => config_path = parse_next(&mut args, "--config"),
             "--help" | "-h" => {
                 println!(
-                    "Usage: sim-headless [--canonical | --study [--near-water | --groups | --valley] [--mind legacy|memory|sharing|full] [--no-help] [--no-wildlife] [--no-regrowth] [--food PERCENT] [--verbose] [--trace AGENT] [--comms N] [--misreads N] [--successes N] [--lessons N] [--explain AGENT]] [--config PATH] [--ticks NUMBER] [--seed NUMBER] [--agents NUMBER] [--batch-size NUMBER]"
+                    "Usage: sim-headless [--canonical | --study [--near-water | --groups | --valley] [--mind legacy|memory|sharing|full] [--no-help] [--no-wildlife] [--no-regrowth] [--food PERCENT] [--verbose] [--trace AGENT] [--comms N] [--misreads N] [--successes N] [--lessons N] [--explain AGENT]] [--config PATH] [--ticks NUMBER | --years NUMBER] [--seed NUMBER] [--agents NUMBER] [--batch-size NUMBER]"
                 );
                 return Ok(());
             }

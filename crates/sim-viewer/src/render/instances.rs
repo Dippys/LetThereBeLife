@@ -3,8 +3,8 @@
 use sim_core::{
     ACQUAINTANCE_SLOTS, AcquaintanceView, AgentActivity, AgentView, AnimalMode, AnimalView,
     CHUNK_SIZE, ChunkInspection, ChunkPresence, FRIEND_FAMILIARITY, LANDMARK_SLOTS, LandmarkSource,
-    LandmarkView, SpawnKind, SpawnedObjectView, Species, StructureView, WORLD_GENERATION_BOUNDS,
-    World, WorldPosition, WorldRect,
+    LandmarkView, LifeStage, LifeView, Sex, SpawnKind, SpawnedObjectView, Species, StructureView,
+    WORLD_GENERATION_BOUNDS, World, WorldPosition, WorldRect,
 };
 
 use super::{
@@ -12,8 +12,9 @@ use super::{
     MAX_SPAWNED_OBJECT_INSTANCES, MAX_STRUCTURE_INSTANCES, MAX_WORLD_BORDER_WIDTH,
     MIN_CHUNK_OUTLINE_PIXELS, MIN_DYNAMIC_INSTANCE_PIXELS,
     colors::{
-        CARCASS, DEER, DEER_ALERT, GESTURE_COLOR, WOLF, WOLF_ALERT, agent_color, feature_color,
-        landmark_color, relationship_color, rgba, spawn_kind_color, structure_color, terrain_color,
+        CARCASS, DEER, DEER_ALERT, ELDER_EDGE, GESTURE_COLOR, PARTNER, WOLF, WOLF_ALERT,
+        agent_color, feature_color, landmark_color, relationship_color, rgba, spawn_kind_color,
+        structure_color, terrain_color,
     },
     gpu::Instance,
 };
@@ -94,8 +95,10 @@ pub(super) fn append_wildlife_instances(
     }
 }
 
+/// People as squares colored by activity. Children are drawn smaller, elders
+/// get a grey edge, and women's squares have notched corners.
 pub(super) fn build_agent_instances(
-    views: impl IntoIterator<Item = AgentView>,
+    people: impl IntoIterator<Item = (AgentView, Option<LifeView>)>,
     visible: WorldRect,
     scale: f32,
     output: &mut Vec<Instance>,
@@ -104,22 +107,41 @@ pub(super) fn build_agent_instances(
     if scale < MIN_DYNAMIC_INSTANCE_PIXELS {
         return;
     }
-    for agent in views.into_iter().take(MAX_AGENT_INSTANCES) {
+    for (agent, life) in people.into_iter().take(MAX_AGENT_INSTANCES) {
         if !visible.contains(agent.position) {
             continue;
         }
+        let stage = life.map(|life| life.stage);
         let inset = if matches!(agent.activity, AgentActivity::Dead) {
             0.08
+        } else if matches!(stage, Some(LifeStage::Baby | LifeStage::Child)) {
+            0.28
         } else {
             0.14
         };
-        output.push(Instance::new(
+        let (x, y) = (
             agent.position.x as f32 + inset,
             agent.position.y as f32 + inset,
-            1.0 - inset * 2.0,
-            1.0 - inset * 2.0,
-            agent_color(agent.activity),
-        ));
+        );
+        let side = 1.0 - inset * 2.0;
+        if stage == Some(LifeStage::Elder) {
+            let edge = 0.08;
+            output.push(Instance::new(
+                x - edge,
+                y - edge,
+                side + 2.0 * edge,
+                side + 2.0 * edge,
+                ELDER_EDGE,
+            ));
+        }
+        let color = agent_color(agent.activity);
+        if life.is_some_and(|life| life.sex == Sex::Female) {
+            let notch = side * 0.22;
+            output.push(Instance::new(x, y + notch, side, side - 2.0 * notch, color));
+            output.push(Instance::new(x + notch, y, side - 2.0 * notch, side, color));
+        } else {
+            output.push(Instance::new(x, y, side, side, color));
+        }
     }
 }
 
@@ -196,7 +218,11 @@ pub(super) fn build_relationship_marker_instances(
             continue;
         };
         let friend = acquaintance.familiarity >= FRIEND_FAMILIARITY;
-        let color = relationship_color(friend);
+        let color = if acquaintance.tie == Some(sim_core::Tie::Partner) {
+            PARTNER
+        } else {
+            relationship_color(friend)
+        };
         let to_x = target.x as f32 + 0.5;
         let to_y = target.y as f32 + 0.5;
         let (dx, dy) = (to_x - from_x, to_y - from_y);

@@ -109,6 +109,8 @@ struct AgentTrack {
     /// Samples with someone of another family within 8 cells.
     mixed_samples: u64,
     family: u8,
+    /// 0 for people present at the start (and newcomers), their children 1, and so on.
+    generation: u8,
     /// Decisions to head for a place someone pointed out.
     hint_decisions: u64,
     /// Decisions to head for a place the agent saw itself.
@@ -196,6 +198,9 @@ pub struct FamilyStats {
     pub names: [u64; 3],
     /// Names heard called, and how many were pinned on the wrong person.
     pub calls: [u64; 2],
+    /// Per generation (from 1): people, and the percent of their place words
+    /// that are the founders' most common word.
+    pub generations: Vec<(u8, u64, u64)>,
 }
 
 /// What happened between people and animals.
@@ -337,6 +342,7 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     }
     for &(child, parent) in &parents {
         tracks[child].family = tracks[parent].family;
+        tracks[child].generation = 1;
     }
     let camp_distance = spawns.get(family_size).map_or(0, |other| {
         spawns[0].x.abs_diff(other.x) + spawns[0].y.abs_diff(other.y)
@@ -364,6 +370,8 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                                 tiles.resize(index + 1, BTreeSet::new());
                             }
                             tracks[index].family = tracks[mother.get() as usize].family;
+                            tracks[index].generation =
+                                tracks[mother.get() as usize].generation.saturating_add(1);
                             tracks[index].spawn = engine
                                 .agent_views(usize::MAX)
                                 .nth(index)
@@ -496,6 +504,7 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
         }
     }
     families.births = families_born;
+    families.generations = generation_words(&engine, &tracks);
     families.calls = name_calls;
     for view in engine.agent_views(usize::MAX) {
         if view.activity == AgentActivity::Dead {
@@ -508,8 +517,11 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
             families.names[1] += 1;
             if let Some(name) = known.name {
                 families.names[0] += 1;
-                families.names[2] +=
-                    u64::from(engine.life(known.agent).is_some_and(|life| life.name != name));
+                families.names[2] += u64::from(
+                    engine
+                        .life(known.agent)
+                        .is_some_and(|life| life.name != name),
+                );
             }
         }
     }
@@ -1091,6 +1103,55 @@ fn modal_words(minds: &[&sim_core::MentalMapView]) -> [Option<sim_core::VocalFor
     })
 }
 
+/// For each generation after the founders: how many people, and what percent
+/// of their place words match the founders' most common word for each place.
+fn generation_words(engine: &Engine, tracks: &[AgentTrack]) -> Vec<(u8, u64, u64)> {
+    let views: Vec<(u8, sim_core::MentalMapView)> = tracks
+        .iter()
+        .enumerate()
+        .filter_map(|(index, track)| {
+            engine
+                .mental_map(AgentId::new(index as u32))
+                .map(|view| (track.generation, view))
+        })
+        .collect();
+    let founders: Vec<&sim_core::MentalMapView> = views
+        .iter()
+        .filter(|(generation, _)| *generation == 0)
+        .map(|(_, view)| view)
+        .collect();
+    let modal = modal_words(&founders);
+    let last = views
+        .iter()
+        .map(|(generation, _)| *generation)
+        .max()
+        .unwrap_or(0);
+    (1..=last)
+        .filter_map(|generation| {
+            let members: Vec<&sim_core::MentalMapView> = views
+                .iter()
+                .filter(|(of, _)| *of == generation)
+                .map(|(_, view)| view)
+                .collect();
+            if members.is_empty() {
+                return None;
+            }
+            let (mut matching, mut total) = (0_u64, 0_u64);
+            for member in &members {
+                for (concept, founders_word) in PLACE_CONCEPTS.into_iter().zip(modal) {
+                    if let (Some(word), Some(founders_word)) =
+                        (top_word(&member.lexicon, concept), founders_word)
+                    {
+                        total += 1;
+                        matching += u64::from(word == founders_word);
+                    }
+                }
+            }
+            Some((generation, members.len() as u64, percent(matching, total)))
+        })
+        .collect()
+}
+
 fn vocabulary_agreement(engine: &Engine, population: usize) -> u64 {
     let views: Vec<_> = (0..population)
         .filter_map(|index| engine.mental_map(AgentId::new(index as u32)))
@@ -1404,6 +1465,20 @@ impl fmt::Display for StudyReport {
                 formatter,
                 "\n  births: pregnancies {conceived}, babies born {born}, children walking {walking}, lost with their mother {lost}"
             )?;
+            if !families.generations.is_empty() {
+                let parts: Vec<String> = families
+                    .generations
+                    .iter()
+                    .map(|(generation, people, shared)| {
+                        format!("generation {generation} ({people} people) {shared}%")
+                    })
+                    .collect();
+                write!(
+                    formatter,
+                    "\n  words passed down (share of place words that are the founders' most common): {}",
+                    parts.join(", ")
+                )?;
+            }
             let [known, acquaintances, wrong] = families.names;
             let [heard, misheard] = families.calls;
             write!(

@@ -462,8 +462,8 @@ impl Renderer {
                 MAX_STRUCTURE_INSTANCES,
             ),
             structure_instances: Vec::with_capacity(MAX_STRUCTURE_INSTANCES),
-            agents: InstanceBuffer::dynamic(&device, "agent instances", MAX_AGENT_INSTANCES),
-            agent_instances: Vec::with_capacity(MAX_AGENT_INSTANCES),
+            agents: InstanceBuffer::dynamic(&device, "agent instances", MAX_AGENT_DRAWN),
+            agent_instances: Vec::with_capacity(MAX_AGENT_DRAWN),
             memory_markers: InstanceBuffer::dynamic(
                 &device,
                 "memory marker instances",
@@ -651,7 +651,9 @@ impl Renderer {
         self.structures
             .write(&self.queue, &self.structure_instances);
         build_agent_instances(
-            engine.agent_views(MAX_AGENT_INSTANCES),
+            engine
+                .agent_views(MAX_AGENT_INSTANCES)
+                .map(|agent| (agent, engine.life(agent.id))),
             view.world_bounds(),
             view.scale() as f32,
             &mut self.agent_instances,
@@ -663,7 +665,7 @@ impl Renderer {
                 && engine
                     .motherhood(agent.id)
                     .is_some_and(|motherhood| motherhood.baby.is_some())
-                && self.agent_instances.len() < MAX_AGENT_INSTANCES
+                && self.agent_instances.len() < MAX_AGENT_DRAWN
             {
                 self.agent_instances.push(Instance::new(
                     agent.position.x as f32 + 0.55,
@@ -674,7 +676,7 @@ impl Renderer {
                 ));
             }
         }
-        debug_assert!(self.agent_instances.len() <= MAX_AGENT_INSTANCES);
+        debug_assert!(self.agent_instances.len() <= MAX_AGENT_DRAWN);
         self.agents.write(&self.queue, &self.agent_instances);
         build_spawned_object_instances(
             engine.spawned_object_views(),
@@ -925,6 +927,9 @@ const WORLD_OVERLAY_CAPACITY: usize = 18;
 /// Initial interface buffer; it grows when a frame needs more.
 const SCREEN_OVERLAY_CAPACITY: usize = 16_384;
 const MAX_AGENT_INSTANCES: usize = 4_096;
+/// Up to three rectangles per person (an elder's edge, a woman's two bars) and
+/// a carried baby's dot.
+const MAX_AGENT_DRAWN: usize = MAX_AGENT_INSTANCES * 4;
 const MAX_STRUCTURE_INSTANCES: usize = 4_096;
 const MAX_SPAWNED_OBJECT_INSTANCES: usize = 16_384;
 const MAX_MEMORY_MARKER_INSTANCES: usize = LANDMARK_SLOTS * 4;

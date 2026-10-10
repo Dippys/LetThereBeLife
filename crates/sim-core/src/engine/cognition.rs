@@ -1292,14 +1292,19 @@ impl Engine {
             return false;
         };
         let now = belief_seconds(self.time);
+        let (parent_name, child_name) = (self.life_of(parent).name, self.life_of(child).name);
         let mind = self.minds.get_mut(child);
         mind.parent = Some(parent);
         let Some(slot) = mind.social.bond(parent, parent_at, now) else {
             return false;
         };
+        // Family know each other's names.
         mind.social.set_tie(slot, Tie::Parent);
-        if let Some(slot) = self.minds.get_mut(parent).social.bond(child, child_at, now) {
-            self.minds.get_mut(parent).social.set_tie(slot, Tie::Child);
+        mind.social.learn_name(slot, parent_name);
+        let social = &mut self.minds.get_mut(parent).social;
+        if let Some(slot) = social.bond(child, child_at, now) {
+            social.set_tie(slot, Tie::Child);
+            social.learn_name(slot, child_name);
         }
         let siblings: Vec<(AgentId, WorldPosition)> = self
             .population
@@ -1315,9 +1320,11 @@ impl Engine {
             .collect();
         for (sibling, sibling_at) in siblings {
             for (from, to, at) in [(child, sibling, sibling_at), (sibling, child, child_at)] {
+                let name = self.life_of(to).name;
                 let social = &mut self.minds.get_mut(from).social;
                 if let Some(slot) = social.bond(to, at, now) {
                     social.set_tie(slot, Tie::Sibling);
+                    social.learn_name(slot, name);
                 }
             }
         }

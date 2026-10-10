@@ -1,6 +1,6 @@
 # Generations: age, sex, relationships, births, and names
 
-Status: active (started 2026-10-10). Follows [`LIVING_WORLD.md`](LIVING_WORLD.md).
+Status: done (2026-10-10). Leftovers: slower walking for elders, late pregnancy slowing, names in requests and corrections. Follows [`LIVING_WORLD.md`](LIVING_WORLD.md).
 
 ## Goal
 
@@ -59,7 +59,7 @@ several generations fit in a headless run of a few minutes.
 - Names are used when calling someone (requests, corrections) and can be misheard or differ by
   family.
 
-### G6. Generations
+### G6. Generations ✅ (D-089)
 
 - A long-run study mode and a measure of how people's words change between generations.
 - Viewer: shape for sex, smaller children, grey-edged elders, carried babies, partner lines,
