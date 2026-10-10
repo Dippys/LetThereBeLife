@@ -99,7 +99,7 @@ mod tests {
             speaker: AgentId::new(1),
             form: VocalForm(2),
             misread: Concept::Water,
-            actual: Concept::Food,
+            actual: Concept::Berries,
             place: at(0, 0),
             since: 100,
         });

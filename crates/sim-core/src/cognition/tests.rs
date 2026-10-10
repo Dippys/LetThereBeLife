@@ -1,7 +1,7 @@
 use super::map::{HintSource, Landmark};
 use super::*;
 use crate::{
-    BaseResource, PerceivedResource, PerceivedWater, PhysicalPerception, ResourceKind, WaterSource,
+    BaseResource, Material, PerceivedResource, PerceivedWater, PhysicalPerception, WaterSource,
     WorldRect, policy::ExplorationHeading,
 };
 
@@ -45,7 +45,7 @@ fn with_food(mut perception: PhysicalPerception, cells: &[WorldPosition]) -> Phy
             position,
             resource: BaseResource {
                 capacity: 12,
-                kind: ResourceKind::Food,
+                kind: Material::Berries,
             },
         })
         .collect();
@@ -85,9 +85,11 @@ fn mind_layout_is_bounded() {
             + size_of::<super::SocialMemory>()
             + size_of::<super::Lexicon>()
             + size_of::<super::Dialogue>()
-            + 16,
-        "the child flag and parent id take one padded 16-byte tail"
+            + size_of::<super::Affordances>()
+            + 12,
+        "the child flag and parent id pack into the 12 bytes after the beliefs"
     );
+    assert_eq!(size_of::<super::Mind>(), 696);
 }
 
 #[test]
@@ -154,10 +156,10 @@ fn looking_at_an_empty_remembered_place_forgets_it() {
         &with_food(view_around(at(52, 50)), &[bush]),
         1,
     );
-    assert_eq!(map.seen_count(LandmarkKind::Food), 1);
+    assert_eq!(map.seen_count(LandmarkKind::Berries), 1);
     // The bush was eaten: the same spot is in view with no food anywhere.
     observe(&mut map, 1, at(51, 50), &view_around(at(51, 50)), 2);
-    assert_eq!(map.seen_count(LandmarkKind::Food), 0);
+    assert_eq!(map.seen_count(LandmarkKind::Berries), 0);
 }
 
 #[test]
@@ -185,7 +187,7 @@ fn slots_are_bounded_per_kind_and_keep_the_freshest() {
 fn hearsay_is_stored_with_uncertainty_and_never_overrides_first_hand_memory() {
     let mut map = MentalMap::default();
     assert!(map.remember_told(
-        LandmarkKind::Food,
+        LandmarkKind::Berries,
         at(200, 0),
         10,
         5,
@@ -197,7 +199,7 @@ fn hearsay_is_stored_with_uncertainty_and_never_overrides_first_hand_memory() {
     assert_eq!(told.search_radius, 40);
     // Hearing about the same area again reinforces instead of duplicating.
     assert!(map.remember_told(
-        LandmarkKind::Food,
+        LandmarkKind::Berries,
         at(210, 4),
         10,
         6,
@@ -214,7 +216,7 @@ fn hearsay_is_stored_with_uncertainty_and_never_overrides_first_hand_memory() {
     assert_eq!(after[0].source, LandmarkSource::Seen);
     // Hearsay about a place it has seen adds nothing.
     assert!(!map.remember_told(
-        LandmarkKind::Food,
+        LandmarkKind::Berries,
         at(212, 0),
         3,
         8,
@@ -343,7 +345,7 @@ fn hint_outcomes_are_reported_to_the_teller() {
 fn forgetting_a_teller_detaches_their_hints() {
     let mut map = MentalMap::default();
     map.remember_told(
-        LandmarkKind::Food,
+        LandmarkKind::Berries,
         at(0, 0),
         4,
         1,
@@ -394,18 +396,18 @@ fn a_fresh_close_hint_beats_a_stale_far_food_sighting() {
     // Much later, someone points out food nearby.
     let now = 4_000;
     map.remember_told(
-        LandmarkKind::Food,
+        LandmarkKind::Berries,
         at(40, 0),
         4,
         now,
         HintSource::anonymous(),
         120,
     );
-    let (destination, source) = map.recall(LandmarkKind::Food, 1, at(0, 0), now).unwrap();
+    let (destination, source) = map.recall(LandmarkKind::Berries, 1, at(0, 0), now).unwrap();
     assert_eq!(source, LandmarkSource::Told);
     assert_eq!(destination, at(40, 0));
     // Right after the sighting, the same hint would not have won.
-    let (_, early) = map.recall(LandmarkKind::Food, 1, at(380, 0), 1).unwrap();
+    let (_, early) = map.recall(LandmarkKind::Berries, 1, at(380, 0), 1).unwrap();
     assert_eq!(early, LandmarkSource::Seen);
 }
 
@@ -417,7 +419,7 @@ fn a_fresh_hint_can_displace_a_stale_food_memory_when_slots_are_full() {
         observe(&mut map, 1, spot, &with_food(view_around(spot), &[spot]), 0);
     }
     assert!(map.remember_told(
-        LandmarkKind::Food,
+        LandmarkKind::Berries,
         at(900, 900),
         4,
         5_000,
@@ -443,7 +445,7 @@ fn curious_agents_pick_the_most_promising_unchecked_hint() {
         200,
     );
     map.remember_told(
-        LandmarkKind::Food,
+        LandmarkKind::Berries,
         at(30, 0),
         4,
         1,

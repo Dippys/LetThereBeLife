@@ -117,7 +117,7 @@ fn output_metadata_is_byte_stable_for_equal_inputs() {
         stats: SampleStats {
             surfaces: [1, 2, 3, 4, 5, 6, 7],
             biomes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
-            features: [8, 9, 10],
+            features: [8, 9, 10, 0],
             samples: 28,
             sample_hash: 0x1234_5678_9abc_def0,
         },

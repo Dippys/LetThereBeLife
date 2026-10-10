@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use sim_core::{Engine, ResourceKind, Standability, WaterSource, WorldPosition};
+use sim_core::{Engine, Material, Standability, WaterSource, WorldPosition};
 
 use crate::scenario::ScenarioError;
 
@@ -22,9 +22,8 @@ pub(crate) fn select_spawn_locations(
     let mut wood = Vec::new();
     for feature in engine.world().all_features() {
         match feature.base_resource().kind {
-            ResourceKind::Food => {}
-            ResourceKind::Wood => wood.push(feature.position),
-            ResourceKind::Stone => {}
+            Material::Wood => wood.push(feature.position),
+            Material::Berries | Material::Bitterberries | Material::Stone => {}
         }
     }
     let target_count = population as usize;

@@ -18,7 +18,7 @@ pub use scenario::{
     ScenarioError, ScenarioRunner,
 };
 pub use study::{
-    GROUP_SIZE, NEAR_WATER_DISTANCE, STUDY_SAMPLE_TICKS, STUDY_TILE_SIZE, StudyAgentLine,
-    StudyConfig, StudyReport, StudySpawn, StudyWorldSummary, VALLEY_POPULATION, VALLEY_SIDE,
-    explain, run_study,
+    FoodStats, GROUP_SIZE, NEAR_WATER_DISTANCE, STUDY_SAMPLE_TICKS, STUDY_TILE_SIZE,
+    StudyAgentLine, StudyConfig, StudyReport, StudySpawn, StudyWorldSummary, VALLEY_POPULATION,
+    VALLEY_SIDE, explain, run_study,
 };

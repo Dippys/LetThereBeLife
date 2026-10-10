@@ -157,6 +157,24 @@ pub struct StudyReport {
     pub vocabulary_agreement: [u64; 2],
     /// Children and the percent of place words where they say what most founders say.
     pub children_vocabulary: Option<(u64, u64)>,
+    /// Eating and what agents came to believe about food.
+    pub food: FoodStats,
+}
+
+/// What the band ate and believes about food.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct FoodStats {
+    /// Meals by material (indexed by `Material as usize`).
+    pub meals: [u64; sim_core::Material::COUNT],
+    /// Meals that made the eater sick.
+    pub sick: u64,
+    /// First tastes of something the eater had no belief about.
+    pub first_tastes: u64,
+    /// Times someone watched another agent eat.
+    pub watched: u64,
+    /// At the end, for founders then children: how many think bitter berries are
+    /// food, how many think they make you sick, and how many have no idea.
+    pub bitter_beliefs: [[u64; 3]; 2],
 }
 
 const TRACE_LINES: usize = 60;
@@ -241,10 +259,17 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     let mut trace = std::collections::VecDeque::new();
     let mut comms = crate::comms::CommunicationLog::default();
     let mut early_vocabulary = 0;
+    let mut food = FoodStats::default();
     for tick in 1..=config.ticks {
         match engine.tick() {
             TickOutcome::Advanced { .. } => {
                 collect_tick(&engine, &mut tracks);
+                for meal in engine.meal_events() {
+                    food.meals[meal.material as usize] += 1;
+                    food.sick += u64::from(meal.retched);
+                    food.first_tastes += u64::from(meal.first_taste);
+                    food.watched += u64::from(meal.watchers);
+                }
                 comms.record_tick(&engine);
                 if let Some(traced) = config.trace {
                     record_trace(&engine, AgentId::new(traced), &mut trace);
@@ -267,6 +292,22 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     report.comms = comms;
     report.vocabulary_agreement = [early_vocabulary, vocabulary_agreement(&engine, population)];
     report.children_vocabulary = children_vocabulary(&engine, population);
+    for index in 0..population {
+        let Some(mind) = engine.mental_map(AgentId::new(index as u32)) else {
+            continue;
+        };
+        let bitter = mind
+            .affordances
+            .iter()
+            .find(|belief| belief.material == sim_core::Material::Bitterberries);
+        let slot = match bitter {
+            Some(belief) if belief.feeds > 2 * belief.sickens => 0,
+            Some(_) => 1,
+            None => 2,
+        };
+        food.bitter_beliefs[usize::from(mind.child)][slot] += 1;
+    }
+    report.food = food;
     Ok(report)
 }
 
@@ -534,7 +575,7 @@ fn build_report(
                             .count()
                     };
                     let water = count(sim_core::LandmarkKind::Water);
-                    let food = count(sim_core::LandmarkKind::Food);
+                    let food = count(sim_core::LandmarkKind::Berries);
                     (water, food, map.landmarks.len() - water - food)
                 }),
         })
@@ -585,6 +626,7 @@ fn build_report(
         comms: crate::comms::CommunicationLog::default(),
         vocabulary_agreement: [0, 0],
         children_vocabulary: None,
+        food: FoodStats::default(),
         minds: (0..tracks.len())
             .map(|index| engine.mental_map(AgentId::new(index as u32)))
             .collect(),
@@ -721,7 +763,7 @@ fn trait_effects(
 /// it is the band's most common one; averaged over concepts.
 const PLACE_CONCEPTS: [sim_core::Concept; 6] = [
     sim_core::Concept::Water,
-    sim_core::Concept::Food,
+    sim_core::Concept::Berries,
     sim_core::Concept::Wood,
     sim_core::Concept::Stone,
     sim_core::Concept::Home,
@@ -882,9 +924,9 @@ fn summarize_world(engine: &Engine, fresh_water: &[WorldPosition]) -> StudyWorld
     };
     for feature in engine.world().all_features() {
         match feature.base_resource().kind {
-            sim_core::ResourceKind::Food => summary.food_features += 1,
-            sim_core::ResourceKind::Wood => summary.wood_features += 1,
-            sim_core::ResourceKind::Stone => {}
+            sim_core::Material::Berries => summary.food_features += 1,
+            sim_core::Material::Wood => summary.wood_features += 1,
+            sim_core::Material::Bitterberries | sim_core::Material::Stone => {}
         }
     }
     // Coarse occupancy grid of fresh water at 64-cell blocks, then test sampled land cells.
@@ -1022,6 +1064,22 @@ impl fmt::Display for StudyReport {
             formatter,
             "\n  vocabulary: band agreement on each place word {}% at start -> {}% at end",
             self.vocabulary_agreement[0], self.vocabulary_agreement[1]
+        )?;
+        let food = &self.food;
+        let [
+            [founders_eat, founders_avoid, founders_unsure],
+            [children_eat, children_avoid, children_unsure],
+        ] = food.bitter_beliefs;
+        write!(
+            formatter,
+            "\n  food: meals berries {} bitterberries {} wood {} stone {}; sick {}, first tastes {}, watched {}; bitterberries thought food/sickening/unknown: founders {founders_eat}/{founders_avoid}/{founders_unsure}, children {children_eat}/{children_avoid}/{children_unsure}",
+            food.meals[sim_core::Material::Berries as usize],
+            food.meals[sim_core::Material::Bitterberries as usize],
+            food.meals[sim_core::Material::Wood as usize],
+            food.meals[sim_core::Material::Stone as usize],
+            food.sick,
+            food.first_tastes,
+            food.watched,
         )?;
         if let Some((children, matching)) = self.children_vocabulary {
             write!(

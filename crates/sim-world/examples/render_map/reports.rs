@@ -93,7 +93,7 @@ pub(super) fn representation_report() -> String {
         type_layout::<ClimateSample>("ClimateSample"),
         type_layout::<FeatureKind>("FeatureKind"),
         type_layout::<Feature>("Feature"),
-        type_layout::<ResourceKind>("ResourceKind"),
+        type_layout::<Material>("Material"),
         type_layout::<BaseResource>("BaseResource"),
         type_layout::<GeneratedCell>("GeneratedCell"),
         type_layout::<ChunkCoord>("ChunkCoord"),

@@ -1,4 +1,5 @@
-//! Sparse generated surface features and their base resource yields.
+//! Sparse generated surface features, the materials they yield, and what those
+//! materials physically do. Agents don't know these properties; they learn them.
 
 use crate::WorldPosition;
 
@@ -8,15 +9,62 @@ pub enum FeatureKind {
     Tree,
     Rock,
     BerryBush,
+    /// Looks much like a berry bush; its berries make you sick.
+    BitterBush,
 }
 
-/// Gatherable material exposed by an immutable generated surface feature.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A gatherable, carryable material. Behavior should depend on its
+/// [`MaterialProperties`], never on which material it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
-pub enum ResourceKind {
-    Food,
+pub enum Material {
+    Berries,
+    Bitterberries,
     Wood,
     Stone,
+}
+
+/// What a material physically does when eaten or used. Need units match the
+/// 0–10,000 need scale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MaterialProperties {
+    /// Hunger relieved by eating one unit.
+    pub nutrition: u16,
+    /// Sickness from eating one unit: added to thirst and to tiredness.
+    pub toxicity: u16,
+    /// Usable as building material (wind-blocking structure).
+    pub builds: bool,
+}
+
+impl Material {
+    pub const COUNT: usize = 4;
+    pub const ALL: [Self; Self::COUNT] =
+        [Self::Berries, Self::Bitterberries, Self::Wood, Self::Stone];
+
+    pub const fn properties(self) -> MaterialProperties {
+        match self {
+            Self::Berries => MaterialProperties {
+                nutrition: 4_000,
+                toxicity: 0,
+                builds: false,
+            },
+            Self::Bitterberries => MaterialProperties {
+                nutrition: 1_200,
+                toxicity: 2_500,
+                builds: false,
+            },
+            Self::Wood => MaterialProperties {
+                nutrition: 0,
+                toxicity: 0,
+                builds: true,
+            },
+            Self::Stone => MaterialProperties {
+                nutrition: 0,
+                toxicity: 0,
+                builds: false,
+            },
+        }
+    }
 }
 
 /// Generated maximum yield before any future sparse depletion state is applied.
@@ -28,7 +76,7 @@ pub enum ResourceKind {
 #[repr(C)]
 pub struct BaseResource {
     pub capacity: u16,
-    pub kind: ResourceKind,
+    pub kind: Material,
 }
 
 impl FeatureKind {
@@ -36,15 +84,19 @@ impl FeatureKind {
         match self {
             Self::Tree => BaseResource {
                 capacity: 120,
-                kind: ResourceKind::Wood,
+                kind: Material::Wood,
             },
             Self::Rock => BaseResource {
                 capacity: 80,
-                kind: ResourceKind::Stone,
+                kind: Material::Stone,
             },
             Self::BerryBush => BaseResource {
                 capacity: 12,
-                kind: ResourceKind::Food,
+                kind: Material::Berries,
+            },
+            Self::BitterBush => BaseResource {
+                capacity: 12,
+                kind: Material::Bitterberries,
             },
         }
     }

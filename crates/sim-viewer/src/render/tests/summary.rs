@@ -193,7 +193,7 @@ fn release_summary_cache_measurement() {
 #[test]
 fn sample_step_targets_two_pixel_blocks_and_chunk_divisors() {
     assert_eq!(size_of::<VisualSample>(), 12);
-    assert_eq!(size_of::<SummaryAccumulator>(), 186);
+    assert_eq!(size_of::<SummaryAccumulator>(), 188);
     assert_eq!(terrain_sample_step(4.0), 1);
     assert_eq!(terrain_sample_step(1.1), 2);
     assert_eq!(terrain_sample_step(0.5), 4);

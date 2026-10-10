@@ -1,6 +1,6 @@
 use sim_core::{
-    AgentId, Engine, EngineCommand, EngineConfig, FeatureKind, MovementOutcomeKind, PopulationInit,
-    ResourceKind, SpawnKind, SpawnObjectError, Standability, WaterSource, WorldConfig,
+    AgentId, Engine, EngineCommand, EngineConfig, FeatureKind, Material, MovementOutcomeKind,
+    PopulationInit, SpawnKind, SpawnObjectError, Standability, WaterSource, WorldConfig,
     WorldPosition, WorldRect,
 };
 
@@ -84,13 +84,13 @@ fn spawned_resources_and_fresh_water_are_authoritative_agent_facts() {
         perception
             .resources
             .iter()
-            .any(|fact| { fact.position == tree && fact.resource.kind == ResourceKind::Wood })
+            .any(|fact| { fact.position == tree && fact.resource.kind == Material::Wood })
     );
     assert!(
         perception
             .resources
             .iter()
-            .any(|fact| { fact.position == berries && fact.resource.kind == ResourceKind::Food })
+            .any(|fact| { fact.position == berries && fact.resource.kind == Material::Berries })
     );
     assert!(
         perception

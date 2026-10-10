@@ -14,9 +14,12 @@ use super::{
     },
 };
 use crate::{
-    InventoryView, NeedKind, PhysicalNeedsView, PhysicalPerception, ResourceKind, WorldPosition,
+    InventoryView, Material, NeedKind, PhysicalNeedsView, PhysicalPerception, WorldPosition,
     cognition::{LandmarkKind, MentalMap, Personality},
-    policy::{ExplorationHeading, PHYSICAL_POLICY_IDLE_RECHECK_TICKS, PhysicalGoal, PolicyReason},
+    policy::{
+        ExplorationHeading, FoodValues, PHYSICAL_POLICY_IDLE_RECHECK_TICKS, PhysicalGoal,
+        PolicyReason,
+    },
     structures::SHELTER_WOOD_COST,
 };
 
@@ -114,6 +117,8 @@ pub(crate) struct MindInput<'a> {
     pub(crate) parent: Option<ParentInput>,
     /// Someone in view worth asking for food (offered only when the agent may ask).
     pub(crate) beg_target: Option<WorldPosition>,
+    /// What the agent believes is worth eating.
+    pub(crate) food: FoodValues,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,8 +144,9 @@ pub(crate) fn deliberate(
         temperament: Temperament::of(mind.personality),
     };
     let water_here = nearest_water_access(origin, perception);
+    let food = mind.food;
     let food_here = nearest_resource_access(origin, perception, |kind| {
-        kind == ResourceKind::Food && inventory.can_add(kind)
+        food.is_food(kind) && inventory.can_add(kind)
     });
     match most_urgent(needs) {
         Some(NeedKind::Thirst) => water_here
@@ -154,7 +160,7 @@ pub(crate) fn deliberate(
             .or_else(|| planner.travel_to_known(LandmarkKind::Water, PhysicalGoal::SeekWater))
             .or_else(|| planner.explore(PolicyReason::ThirstThreshold, false))
             .unwrap_or_else(|| Deliberation::wait(origin, PolicyReason::ThirstThreshold)),
-        Some(NeedKind::Hunger) if inventory.food > 0 => {
+        Some(NeedKind::Hunger) if food.carried(inventory) > 0 => {
             Deliberation::act(PhysicalGoal::Eat, origin, PolicyReason::HungerThreshold)
         }
         Some(NeedKind::Hunger) => food_here
@@ -165,7 +171,7 @@ pub(crate) fn deliberate(
                     PolicyReason::HungerThreshold,
                 )
             })
-            .or_else(|| planner.travel_to_known(LandmarkKind::Food, PhysicalGoal::SeekFood))
+            .or_else(|| planner.travel_to_food(PhysicalGoal::SeekFood))
             .or_else(|| {
                 // Knowing no food anywhere, ask someone nearby before searching blind.
                 mind.beg_target.map(|giver| {
@@ -324,10 +330,11 @@ impl Planner<'_> {
                 return travel.with_reason(PolicyReason::PrepareTrip);
             }
         }
-        if self.needs.hunger.value >= temperament.top_up_hunger && inventory.food > 0 {
+        let food = self.mind.food;
+        if self.needs.hunger.value >= temperament.top_up_hunger && food.carried(inventory) > 0 {
             return Deliberation::act(PhysicalGoal::Eat, origin, PolicyReason::PrepareTrip);
         }
-        if inventory.food < temperament.food_reserve {
+        if food.carried(inventory) < temperament.food_reserve {
             if let Some(target) = food_here {
                 return Deliberation::act(
                     PhysicalGoal::SeekFood,
@@ -336,7 +343,7 @@ impl Planner<'_> {
                 );
             }
             // Stock up from a remembered food place, seen or pointed out.
-            if let Some(trip) = self.travel_to_known(LandmarkKind::Food, PhysicalGoal::SeekFood) {
+            if let Some(trip) = self.travel_to_food(PhysicalGoal::SeekFood) {
                 return trip.with_reason(PolicyReason::PrepareTrip);
             }
         }
@@ -404,8 +411,16 @@ impl Planner<'_> {
             };
         }
         let map = self.mind.map;
+        let food_places: usize = LandmarkKind::ALL
+            .into_iter()
+            .filter(|kind| {
+                kind.material()
+                    .is_some_and(|material| food.is_food(material))
+            })
+            .map(|kind| map.seen_count(kind))
+            .sum();
         let curious = map.seen_count(LandmarkKind::Water) < temperament.curiosity_target
-            || map.seen_count(LandmarkKind::Food) < temperament.curiosity_target;
+            || food_places < temperament.curiosity_target;
         // Lounging agents (no mood for work) don't take casual excursions either.
         let excursion = works
             && self.roll(3) < temperament.excursion_chance
@@ -445,12 +460,32 @@ impl Planner<'_> {
 
     /// Head for the best remembered place of `kind`, one visible waypoint at a time.
     fn travel_to_known(&self, kind: LandmarkKind, goal: PhysicalGoal) -> Option<Deliberation> {
-        let (destination, source) = self.mind.map.recall(
-            kind,
-            self.needs.agent.get(),
-            self.origin,
-            (self.needs.at.ticks() / 60) as u32,
-        )?;
+        self.travel_to_best(&[kind], goal)
+    }
+
+    /// Head for the best remembered place of anything the agent considers food.
+    fn travel_to_food(&self, goal: PhysicalGoal) -> Option<Deliberation> {
+        let food = self.mind.food;
+        let kinds: Vec<LandmarkKind> = LandmarkKind::ALL
+            .into_iter()
+            .filter(|kind| {
+                kind.material()
+                    .is_some_and(|material| food.is_food(material))
+            })
+            .collect();
+        self.travel_to_best(&kinds, goal)
+    }
+
+    fn travel_to_best(&self, kinds: &[LandmarkKind], goal: PhysicalGoal) -> Option<Deliberation> {
+        let now = (self.needs.at.ticks() / 60) as u32;
+        let (_, destination, source) = kinds
+            .iter()
+            .filter_map(|&kind| {
+                self.mind
+                    .map
+                    .recall_scored(kind, self.needs.agent.get(), self.origin, now)
+            })
+            .min_by_key(|&(score, destination, _)| (score, destination.y, destination.x))?;
         let reason = match source {
             crate::LandmarkSource::Seen => PolicyReason::RememberedPlace,
             crate::LandmarkSource::Told => PolicyReason::ToldPlace,
@@ -467,7 +502,7 @@ impl Planner<'_> {
     }
 
     fn gather_known_wood(&self, inventory: InventoryView) -> Option<Deliberation> {
-        (inventory.wood < SHELTER_WOOD_COST && inventory.can_add(ResourceKind::Wood))
+        (inventory.amount(Material::Wood) < SHELTER_WOOD_COST && inventory.can_add(Material::Wood))
             .then(|| self.travel_to_known(LandmarkKind::Wood, PhysicalGoal::GatherMaterial))
             .flatten()
             .map(|travel| travel.with_reason(PolicyReason::ShelterMaterials))

@@ -67,7 +67,7 @@ fn terminal_health_cancels_construction_and_makes_completion_stale() {
         .unwrap();
     engine
         .population
-        .add_inventory(AgentId::new(0), ResourceKind::Wood, SHELTER_WOOD_COST);
+        .add_inventory(AgentId::new(0), Material::Wood, SHELTER_WOOD_COST);
     let build = engine.request_build_shelter(AgentId::new(0), site).unwrap();
     engine.population.set_need_value_for_test(
         AgentId::new(0),

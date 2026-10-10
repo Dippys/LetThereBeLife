@@ -35,6 +35,7 @@ pub(super) fn feature_index(feature: FeatureKind) -> usize {
         FeatureKind::Tree => 0,
         FeatureKind::Rock => 1,
         FeatureKind::BerryBush => 2,
+        FeatureKind::BitterBush => 3,
     }
 }
 
@@ -44,6 +45,7 @@ pub(super) fn sample_color(cell: GeneratedCell, show_features: bool) -> [u8; 3] 
             FeatureKind::Tree => [17, 48, 24],
             FeatureKind::Rock => [84, 82, 78],
             FeatureKind::BerryBush => [164, 35, 77],
+            FeatureKind::BitterBush => [96, 52, 140],
         };
     }
     terrain_color(cell.terrain)

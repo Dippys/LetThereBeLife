@@ -64,7 +64,7 @@ fn terrain_records_keep_their_compact_layout() {
     assert_eq!(std::mem::size_of::<TerrainCell>(), 4);
     assert_eq!(std::mem::size_of::<ClimateSample>(), 4);
     assert_eq!(std::mem::size_of::<FeatureKind>(), 1);
-    assert_eq!(std::mem::size_of::<ResourceKind>(), 1);
+    assert_eq!(std::mem::size_of::<Material>(), 1);
     assert_eq!(std::mem::size_of::<BaseResource>(), 4);
     assert_eq!(std::mem::size_of::<WaterSource>(), 1);
     assert_eq!(std::mem::size_of::<TraversalKind>(), 1);
@@ -252,9 +252,9 @@ fn physical_world_queries_are_explicit_and_derived_from_resident_base_data() {
 #[test]
 fn feature_resources_are_derived_without_mutating_generated_base() {
     let cases = [
-        (FeatureKind::Tree, ResourceKind::Wood, 120),
-        (FeatureKind::Rock, ResourceKind::Stone, 80),
-        (FeatureKind::BerryBush, ResourceKind::Food, 12),
+        (FeatureKind::Tree, Material::Wood, 120),
+        (FeatureKind::Rock, Material::Stone, 80),
+        (FeatureKind::BerryBush, Material::Berries, 12),
     ];
     for (kind, resource_kind, capacity) in cases {
         let feature = Feature {

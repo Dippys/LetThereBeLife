@@ -14,7 +14,7 @@ use crate::AgentId;
 #[repr(u8)]
 pub enum Concept {
     Water = 0,
-    Food = 1,
+    Berries = 1,
     Wood = 2,
     Stone = 3,
     Home = 4,
@@ -26,13 +26,14 @@ pub enum Concept {
     You = 9,
     Yes = 10,
     No = 11,
+    Bitterberries = 12,
 }
 
 impl Concept {
-    pub const COUNT: usize = 12;
+    pub const COUNT: usize = 13;
     pub const ALL: [Self; Self::COUNT] = [
         Self::Water,
-        Self::Food,
+        Self::Berries,
         Self::Wood,
         Self::Stone,
         Self::Home,
@@ -43,6 +44,7 @@ impl Concept {
         Self::You,
         Self::Yes,
         Self::No,
+        Self::Bitterberries,
     ];
 
     const fn from_index(index: u8) -> Self {
@@ -407,22 +409,22 @@ mod tests {
         assert_eq!(lexicon.recognize(form), Some(Concept::Water));
         // Repeated contrary evidence overturns the reading.
         for _ in 0..3 {
-            lexicon.hear_with_evidence(form, Concept::Food);
+            lexicon.hear_with_evidence(form, Concept::Berries);
         }
-        assert_eq!(lexicon.recognize(form), Some(Concept::Food));
+        assert_eq!(lexicon.recognize(form), Some(Concept::Berries));
     }
 
     #[test]
     fn failed_uses_steer_production_toward_another_word() {
         let mut lexicon = Lexicon::default();
-        lexicon.reinforce(VocalForm(1), Concept::Food, 6);
-        lexicon.reinforce(VocalForm(2), Concept::Food, 3);
-        assert_eq!(lexicon.produce(Concept::Food), Some(VocalForm(1)));
+        lexicon.reinforce(VocalForm(1), Concept::Berries, 6);
+        lexicon.reinforce(VocalForm(2), Concept::Berries, 3);
+        assert_eq!(lexicon.produce(Concept::Berries), Some(VocalForm(1)));
         for _ in 0..2 {
-            lexicon.record_use(VocalForm(1), Concept::Food, false);
+            lexicon.record_use(VocalForm(1), Concept::Berries, false);
         }
         assert_eq!(
-            lexicon.produce(Concept::Food),
+            lexicon.produce(Concept::Berries),
             Some(VocalForm(2)),
             "switches to the word that works"
         );
@@ -433,8 +435,8 @@ mod tests {
         let mut lexicon = Lexicon::default();
         lexicon.reinforce(VocalForm(4), Concept::Water, 6);
         lexicon.contradict(VocalForm(4), Concept::Water, 8);
-        lexicon.reinforce(VocalForm(4), Concept::Food, 4);
-        assert_eq!(lexicon.recognize(VocalForm(4)), Some(Concept::Food));
+        lexicon.reinforce(VocalForm(4), Concept::Berries, 4);
+        assert_eq!(lexicon.recognize(VocalForm(4)), Some(Concept::Berries));
     }
 
     #[test]

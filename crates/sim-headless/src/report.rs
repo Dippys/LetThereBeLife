@@ -182,9 +182,9 @@ pub(crate) fn build_report(
             AgentActivity::Dead => final_agents.dead += 1,
         }
         if let Some(inventory) = engine.inventory(agent.id) {
-            inventory_food += u64::from(inventory.food);
-            inventory_wood += u64::from(inventory.wood);
-            inventory_stone += u64::from(inventory.stone);
+            inventory_food += u64::from(inventory.amount(sim_core::Material::Berries));
+            inventory_wood += u64::from(inventory.amount(sim_core::Material::Wood));
+            inventory_stone += u64::from(inventory.amount(sim_core::Material::Stone));
         }
     }
     let mut deaths = DeathCounts::default();

@@ -180,6 +180,7 @@ fn decode_chunk(coord: ChunkCoord, bytes: &[u8]) -> Result<WorldChunk, WorldArch
             0 => FeatureKind::Tree,
             1 => FeatureKind::Rock,
             2 => FeatureKind::BerryBush,
+            3 => FeatureKind::BitterBush,
             value => return Err(invalid(format!("invalid feature kind {value}"))),
         };
         let order = (record[1], record[0]);

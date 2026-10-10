@@ -207,14 +207,14 @@ impl VisualSample {
 #[derive(Clone)]
 pub(super) struct SummaryAccumulator {
     pub(super) visuals: [VisualSample; TERRAIN_VISUAL_COUNT],
-    pub(super) feature_counts: [u16; 3],
+    pub(super) feature_counts: [u16; 4],
 }
 
 impl Default for SummaryAccumulator {
     fn default() -> Self {
         Self {
             visuals: [VisualSample::default(); TERRAIN_VISUAL_COUNT],
-            feature_counts: [0; 3],
+            feature_counts: [0; 4],
         }
     }
 }
@@ -234,6 +234,7 @@ impl SummaryAccumulator {
             FeatureKind::Tree => 0,
             FeatureKind::Rock => 1,
             FeatureKind::BerryBush => 2,
+            FeatureKind::BitterBush => 3,
         };
         self.feature_counts[index] = self.feature_counts[index].saturating_add(1);
     }
@@ -281,7 +282,12 @@ impl SummaryAccumulator {
         let height = ((block.max.y - block.min.y) as f32 * fraction).max(1.0);
         let x = block.min.x as f32 + ((block.max.x - block.min.x) as f32 - width) * 0.5;
         let y = block.min.y as f32 + ((block.max.y - block.min.y) as f32 - height) * 0.5;
-        let kind = [FeatureKind::Tree, FeatureKind::Rock, FeatureKind::BerryBush][feature_index];
+        let kind = [
+            FeatureKind::Tree,
+            FeatureKind::Rock,
+            FeatureKind::BerryBush,
+            FeatureKind::BitterBush,
+        ][feature_index];
         features.push(Instance::new(
             x,
             y,

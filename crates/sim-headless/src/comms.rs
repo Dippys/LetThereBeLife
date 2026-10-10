@@ -45,7 +45,7 @@ pub struct Exchange {
 pub struct CommunicationSummary {
     pub exchanges: u64,
     /// Exchanges pointing at a place, by kind: water, food, wood, stone, shelter.
-    pub place_exchanges: [u64; 5],
+    pub place_exchanges: [u64; sim_core::LandmarkKind::COUNT],
     pub explored_exchanges: u64,
     pub receptions: u64,
     /// Receptions that changed the receiver's beliefs.
@@ -102,7 +102,7 @@ pub struct CommunicationLog {
 const fn kind_for_goal(goal: PhysicalGoal) -> Option<LandmarkKind> {
     match goal {
         PhysicalGoal::SeekWater => Some(LandmarkKind::Water),
-        PhysicalGoal::SeekFood => Some(LandmarkKind::Food),
+        PhysicalGoal::SeekFood => Some(LandmarkKind::Berries),
         PhysicalGoal::SeekShelter => Some(LandmarkKind::Shelter),
         _ => None,
     }
@@ -408,7 +408,7 @@ impl CommunicationLog {
         summary.success_episodes = self.success_episodes().len() as u64;
         for request in &self.requests {
             summary.requests[0] += 1;
-            summary.requests[1] += u64::from(request.read_as != sim_core::Concept::Food);
+            summary.requests[1] += u64::from(request.read_as != sim_core::Concept::Berries);
             summary.requests[match request.response {
                 RequestResponse::Gave => 2,
                 RequestResponse::Refused => 3,
@@ -474,10 +474,10 @@ impl CommunicationLog {
 
 impl fmt::Display for CommunicationSummary {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let [water, food, wood, stone, shelter] = self.place_exchanges;
+        let [water, berries, wood, stone, shelter, bitter] = self.place_exchanges;
         write!(
             formatter,
-            "  communication: exchanges={} (water {water}, food {food}, wood {wood}, stone {stone}, shelter {shelter}, explored {}) receptions={} informed={} acted={} confirmed={} refuted={} misread={}",
+            "  communication: exchanges={} (water {water}, berries {berries}, bitterberries {bitter}, wood {wood}, stone {stone}, shelter {shelter}, explored {}) receptions={} informed={} acted={} confirmed={} refuted={} misread={}",
             self.exchanges,
             self.explored_exchanges,
             self.receptions,

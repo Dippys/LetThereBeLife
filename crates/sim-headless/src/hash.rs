@@ -92,9 +92,9 @@ pub(crate) fn semantic_hash(
             }
         }
         if let Some(inventory) = engine.inventory(agent.id) {
-            hash.u8(inventory.food);
-            hash.u8(inventory.wood);
-            hash.u8(inventory.stone);
+            for amount in inventory.items {
+                hash.u8(amount);
+            }
         }
         if let Some(policy) = engine.physical_policy(agent.id) {
             hash.u8(policy.goal as u8);

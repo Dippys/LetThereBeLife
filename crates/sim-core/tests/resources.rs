@@ -2,8 +2,7 @@
 
 use sim_core::{
     AgentId, Engine, EngineCommand, EngineConfig, InventoryView, PhysicalGoal,
-    PolicyDiagnosticKind, PopulationInit, ResourceKind, Standability, WorldConfig, WorldPosition,
-    WorldRect,
+    PolicyDiagnosticKind, PopulationInit, Standability, WorldConfig, WorldPosition, WorldRect,
 };
 
 fn resident_engine() -> Engine {
@@ -22,7 +21,7 @@ fn berry_with_two_accesses(engine: &Engine) -> (WorldPosition, [WorldPosition; 2
         for x in bounds.min.x + 8..bounds.max.x - 8 {
             let berry = WorldPosition { x, y };
             if !engine.world().resource_at(berry).is_ok_and(|resource| {
-                resource.is_some_and(|resource| resource.kind == ResourceKind::Food)
+                resource.is_some_and(|resource| resource.kind == sim_core::Material::Berries)
             }) {
                 continue;
             }
@@ -109,7 +108,8 @@ fn equal_time_gathering_depletes_one_sparse_delta_without_mutating_base_world() 
     let first = engine.inventory(AgentId::new(0)).unwrap();
     let second = engine.inventory(AgentId::new(1)).unwrap();
     assert_eq!(
-        u16::from(first.food) + u16::from(second.food),
+        u16::from(first.amount(sim_core::Material::Berries))
+            + u16::from(second.amount(sim_core::Material::Berries)),
         base.capacity
     );
     assert_eq!(engine.modified_resource_count(), 1);
@@ -136,10 +136,13 @@ fn equal_time_gathering_depletes_one_sparse_delta_without_mutating_base_world() 
 
 #[test]
 fn inventory_capacity_is_enforced_without_heap_items() {
-    assert_eq!(std::mem::size_of::<InventoryView>(), 3);
+    assert_eq!(
+        std::mem::size_of::<InventoryView>(),
+        sim_core::Material::COUNT
+    );
     assert_eq!(sim_core::INVENTORY_CAPACITY_PER_KIND, 32);
     assert_eq!(
-        InventoryView::default().remaining_capacity(ResourceKind::Stone),
+        InventoryView::default().remaining_capacity(sim_core::Material::Stone),
         32
     );
 }

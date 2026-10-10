@@ -3,14 +3,14 @@
 //! is the agent's private belief, never authoritative world state.
 
 use crate::{
-    PhysicalPerception, ResourceKind, WorldPosition, WorldRect, policy::ExplorationHeading,
+    PhysicalPerception, WorldPosition, WorldRect, policy::ExplorationHeading,
     structures::StructureState,
 };
 
 use super::{LandmarkKind, LandmarkSource, LandmarkView};
 
 /// Remembered-place slots per agent, partitioned by kind (see `slot_range`).
-pub const LANDMARK_SLOTS: usize = 12;
+pub const LANDMARK_SLOTS: usize = 14;
 /// Recently explored tiles remembered for novelty-seeking exploration.
 pub const VISITED_TILE_SLOTS: usize = 24;
 /// Edge length of an exploration tile in cells.
@@ -197,20 +197,22 @@ impl Default for MentalMap {
 const fn slot_range(kind: LandmarkKind) -> std::ops::Range<usize> {
     match kind {
         LandmarkKind::Water => 0..4,
-        LandmarkKind::Food => 4..7,
+        LandmarkKind::Berries => 4..7,
         LandmarkKind::Wood => 7..9,
         LandmarkKind::Stone => 9..10,
         LandmarkKind::Shelter => 10..12,
+        LandmarkKind::Bitterberries => 12..14,
     }
 }
 
 const fn kind_of_slot(slot: usize) -> LandmarkKind {
     match slot {
         0..4 => LandmarkKind::Water,
-        4..7 => LandmarkKind::Food,
+        4..7 => LandmarkKind::Berries,
         7..9 => LandmarkKind::Wood,
         9..10 => LandmarkKind::Stone,
-        _ => LandmarkKind::Shelter,
+        10..12 => LandmarkKind::Shelter,
+        _ => LandmarkKind::Bitterberries,
     }
 }
 
@@ -237,21 +239,19 @@ fn tile_of(position: WorldPosition) -> (i16, i16) {
 }
 
 /// Which resource kinds have picked-clean instances in view, in kind order.
-pub(crate) fn spent_kinds(perception: &PhysicalPerception) -> [bool; 5] {
-    let mut spent = [false; 5];
+pub(crate) fn spent_kinds(perception: &PhysicalPerception) -> [bool; LandmarkKind::COUNT] {
+    let mut spent = [false; LandmarkKind::COUNT];
     for resource in &perception.spent_resources {
-        let kind = match resource.resource.kind {
-            ResourceKind::Food => LandmarkKind::Food,
-            ResourceKind::Wood => LandmarkKind::Wood,
-            ResourceKind::Stone => LandmarkKind::Stone,
-        };
-        spent[kind as usize] = true;
+        spent[LandmarkKind::of_material(resource.resource.kind) as usize] = true;
     }
     spent
 }
 
 /// Which landmark kinds are in view right now, in kind order.
-pub(crate) fn visible_kinds(origin: WorldPosition, perception: &PhysicalPerception) -> [bool; 5] {
+pub(crate) fn visible_kinds(
+    origin: WorldPosition,
+    perception: &PhysicalPerception,
+) -> [bool; LandmarkKind::COUNT] {
     perceived_nearest(origin, perception).map(|nearest| nearest.is_some())
 }
 
@@ -259,37 +259,32 @@ pub(crate) fn visible_kinds(origin: WorldPosition, perception: &PhysicalPercepti
 fn perceived_nearest(
     origin: WorldPosition,
     perception: &PhysicalPerception,
-) -> [Option<WorldPosition>; 5] {
+) -> [Option<WorldPosition>; LandmarkKind::COUNT] {
     let nearest = |positions: &mut dyn Iterator<Item = WorldPosition>| {
         positions.min_by_key(|position| (manhattan(origin, *position), position.y, position.x))
     };
-    let resource = |kind: ResourceKind| {
-        nearest(
+    LandmarkKind::ALL.map(|kind| match (kind, kind.material()) {
+        (_, Some(material)) => nearest(
             &mut perception
                 .resources
                 .iter()
-                .filter(move |resource| resource.resource.kind == kind)
+                .filter(move |resource| resource.resource.kind == material)
                 .map(|resource| resource.position),
-        )
-    };
-    [
-        nearest(
+        ),
+        (LandmarkKind::Water, None) => nearest(
             &mut perception
                 .drinkable_water
                 .iter()
                 .map(|water| water.position),
         ),
-        resource(ResourceKind::Food),
-        resource(ResourceKind::Wood),
-        resource(ResourceKind::Stone),
-        nearest(
+        _ => nearest(
             &mut perception
                 .structures
                 .iter()
                 .filter(|structure| structure.state == StructureState::Complete)
                 .map(|structure| structure.position),
         ),
-    ]
+    })
 }
 
 impl MentalMap {
@@ -475,6 +470,7 @@ impl MentalMap {
     /// concrete destination (hints are searched around their estimate). Places
     /// compete by expected cost: distance plus search effort, divided by how much
     /// the agent still believes in them. Food sightings go stale (it gets eaten).
+    #[cfg(test)]
     pub(crate) fn recall(
         &self,
         kind: LandmarkKind,
@@ -482,6 +478,18 @@ impl MentalMap {
         origin: WorldPosition,
         now: u32,
     ) -> Option<(WorldPosition, LandmarkSource)> {
+        self.recall_scored(kind, agent, origin, now)
+            .map(|(_, destination, source)| (destination, source))
+    }
+
+    /// Like `recall`, with the expected cost, so places of different kinds can compete.
+    pub(crate) fn recall_scored(
+        &self,
+        kind: LandmarkKind,
+        agent: u32,
+        origin: WorldPosition,
+        now: u32,
+    ) -> Option<(u64, WorldPosition, LandmarkSource)> {
         slot_range(kind)
             .filter(|&slot| !self.landmarks[slot].is_empty())
             .map(|slot| {
@@ -496,7 +504,7 @@ impl MentalMap {
                 (score, slot, destination, source)
             })
             .min_by_key(|&(score, slot, _, _)| (score, slot))
-            .map(|(_, _, destination, source)| (destination, source))
+            .map(|(score, _, destination, source)| (score, destination, source))
     }
 
     /// The most believable hint the agent hasn't checked yet, as a destination:
@@ -585,9 +593,10 @@ impl MentalMap {
     pub(crate) fn shareable(&self, view: WorldRect) -> Option<(WorldPosition, u8)> {
         let order = [
             LandmarkKind::Water,
-            LandmarkKind::Food,
+            LandmarkKind::Berries,
             LandmarkKind::Shelter,
             LandmarkKind::Wood,
+            LandmarkKind::Bitterberries,
             LandmarkKind::Stone,
         ];
         let mut candidates = order
@@ -750,11 +759,13 @@ fn spiral_corner(anchor: (i16, i16), step: u16) -> WorldPosition {
     WorldPosition { x, y }
 }
 
-/// How much the agent still believes a place holds what it remembers. Food
-/// sightings lose belief as they age; other places stay as remembered.
+/// How much the agent still believes a place holds what it remembers. Bush
+/// sightings lose belief as they age (others pick them); other places stay.
 fn believed_confidence(landmark: Landmark, kind: LandmarkKind, now: u32) -> u64 {
     let age = u64::from(now.saturating_sub(landmark.seen));
-    let decay = if kind == LandmarkKind::Food && landmark.is_first_hand() {
+    let decay = if matches!(kind, LandmarkKind::Berries | LandmarkKind::Bitterberries)
+        && landmark.is_first_hand()
+    {
         (age / FOOD_STALENESS_SECONDS).min(180)
     } else {
         0

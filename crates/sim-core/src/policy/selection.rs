@@ -3,8 +3,8 @@
 
 use super::exploration::{exploration_target, varied_exploration_heading};
 use crate::{
-    InventoryView, NeedKind, PhysicalNeedsView, PhysicalPerception, ResourceKind, WorldPosition,
-    policy::{ExplorationHeading, PhysicalGoal, PolicyReason},
+    InventoryView, Material, NeedKind, PhysicalNeedsView, PhysicalPerception, WorldPosition,
+    policy::{ExplorationHeading, FoodValues, PhysicalGoal, PolicyReason},
     structures::{SHELTER_WOOD_COST, StructureState},
 };
 
@@ -46,7 +46,7 @@ pub(crate) fn select_with_exploration(
             target: nearest_water_access(origin, perception),
             reason: PolicyReason::ThirstThreshold,
         },
-        Some(NeedKind::Hunger) if inventory.food > 0 => PolicySelection {
+        Some(NeedKind::Hunger) if FoodValues::truth().carried(inventory) > 0 => PolicySelection {
             goal: PhysicalGoal::Eat,
             target: Some(origin),
             reason: PolicyReason::HungerThreshold,
@@ -54,7 +54,7 @@ pub(crate) fn select_with_exploration(
         Some(NeedKind::Hunger) => PolicySelection {
             goal: PhysicalGoal::SeekFood,
             target: nearest_resource_access(origin, perception, |kind| {
-                kind == ResourceKind::Food && inventory.can_add(kind)
+                FoodValues::truth().is_food(kind) && inventory.can_add(kind)
             }),
             reason: PolicyReason::HungerThreshold,
         },
@@ -156,7 +156,7 @@ pub(super) fn shelter_selection(
         );
     }
 
-    if inventory.wood >= SHELTER_WOOD_COST {
+    if inventory.amount(Material::Wood) >= SHELTER_WOOD_COST {
         if let Some(site) = nearest_build_site(origin, perception) {
             return PolicySelection {
                 goal: PhysicalGoal::BuildShelter,
@@ -166,9 +166,9 @@ pub(super) fn shelter_selection(
         }
     }
 
-    let needs_wood = inventory.wood < SHELTER_WOOD_COST;
+    let needs_wood = inventory.amount(Material::Wood) < SHELTER_WOOD_COST;
     let material = nearest_resource_access(origin, perception, |kind| {
-        inventory.can_add(kind) && needs_wood && kind == ResourceKind::Wood
+        inventory.can_add(kind) && needs_wood && kind == Material::Wood
     });
     let fallback = (reason == PolicyReason::NoUrgentNeed)
         .then(|| nearest_resource_access(origin, perception, |kind| inventory.can_add(kind)))
@@ -247,7 +247,7 @@ pub(super) fn nearest_water_access(
 pub(super) fn nearest_resource_access(
     origin: WorldPosition,
     perception: &PhysicalPerception,
-    accepts: impl Fn(ResourceKind) -> bool,
+    accepts: impl Fn(Material) -> bool,
 ) -> Option<WorldPosition> {
     perception
         .resources

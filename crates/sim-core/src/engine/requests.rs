@@ -10,14 +10,14 @@
 use super::cognition::can_watch;
 use super::errors::perception_failure;
 use crate::cognition::{
-    Concept, DesiredEffect, LessonCause, LessonEvent, ListenerContext, PublicSignal, REPAIR_WEIGHT,
-    RepairEvent, RepairResponse, RequestEvent, RequestResponse, Tone, UtteranceIntent,
-    belief_seconds, mime_for, reach_toward, understand,
+    Concept, DesiredEffect, LessonCause, LessonEvent, ListenerContext, Mime, PublicSignal,
+    REPAIR_WEIGHT, RepairEvent, RepairResponse, RequestEvent, RequestResponse, Tone,
+    UtteranceIntent, belief_seconds, reach_toward, understand,
 };
 use crate::{
     AgentId, DEFAULT_TRUST, Engine, FOOD_CONSUMPTION, GestureTopic, InterpretationEvent,
-    LandmarkKind, PHYSICAL_POLICY_RADIUS, PhysicalPerception, PolicyFailureReason, ResourceKind,
-    SignalEvent, WorldPosition,
+    LandmarkKind, PHYSICAL_POLICY_RADIUS, PhysicalPerception, PolicyFailureReason, SignalEvent,
+    WorldPosition,
 };
 
 /// Food handed over per request: one meal.
@@ -41,7 +41,10 @@ impl Engine {
         }
         let mind = self.minds.get(agent);
         if mind.is_some_and(|mind| !mind.dialogue.may_request(belief_seconds(self.time)))
-            || self.population.inventory(agent)?.food > 0
+            || self
+                .food_values(agent)
+                .carried(self.population.inventory(agent)?)
+                > 0
         {
             return None;
         }
@@ -81,20 +84,20 @@ impl Engine {
             .ok_or(PolicyFailureReason::TargetUnavailable)?;
         let intent = UtteranceIntent {
             effect: DesiredEffect::Request,
-            topic: GestureTopic::Place(LandmarkKind::Food),
+            topic: GestureTopic::Place(LandmarkKind::Berries),
             place: giver_position,
         };
         let urgency = self.visible_urgency(asker);
         let vocal = self
             .minds
             .get(asker)
-            .and_then(|mind| mind.lexicon.produce(Concept::Food));
+            .and_then(|mind| mind.lexicon.produce(Concept::Berries));
         let public = PublicSignal {
             sender: asker,
             origin: from,
             pointing: reach_toward(from, giver_position)
                 .ok_or(PolicyFailureReason::TargetUnavailable)?,
-            mime: mime_for(intent.topic),
+            mime: Mime::PickAndChew,
             vocal,
             negated: None,
             addressee: Some(giver),
@@ -114,7 +117,8 @@ impl Engine {
                 heard_word: vocal.is_some(),
                 thirst,
                 hunger,
-                remembered_near: [false; 5],
+                remembered_near: [false; LandmarkKind::COUNT],
+                food: mind.affordances.food_values(),
             },
         );
         let read_as = understanding.reading.best().0;
@@ -134,24 +138,34 @@ impl Engine {
             word_reading: word.map(|(concept, _)| concept),
             reading: understanding.reading,
         });
-        if read_as == Concept::Food {
+        if read_as == Concept::Berries {
             if let Some(form) = vocal {
                 self.minds
                     .get_mut(asker)
                     .lexicon
-                    .record_use(form, Concept::Food, true);
+                    .record_use(form, Concept::Berries, true);
             }
         } else {
             self.repair_request(id, asker, giver, vocal, read_as);
         }
 
         let response = self.decide_gift(giver, asker, urgency);
-        if response == RequestResponse::Gave {
-            let given = self.population.take_food(giver, GIFT);
-            let accepted = self
+        let mut given = None;
+        if response == RequestResponse::Gave
+            && let Some(material) = self
                 .population
-                .add_inventory(asker, ResourceKind::Food, given);
-            debug_assert_eq!(accepted, given, "the asker carried no food");
+                .inventory(giver)
+                .and_then(|inventory| self.food_values(giver).best_carried(inventory))
+        {
+            let taken = self.population.take(giver, material, GIFT);
+            let accepted = self.population.add_inventory(asker, material, taken);
+            debug_assert_eq!(accepted, taken, "the asker carried no food");
+            given = Some(material);
+            // Being handed something to eat says the giver thinks it's food.
+            self.minds
+                .get_mut(asker)
+                .affordances
+                .saw_eaten(material, false);
         }
         // The asker sees the answer.
         let asker_mind = self.minds.get_mut(asker);
@@ -172,6 +186,7 @@ impl Engine {
             at: self.time,
             read_as,
             response,
+            given,
         });
         self.signal_events.push(SignalEvent {
             id,
@@ -203,12 +218,12 @@ impl Engine {
             giver_mind.lexicon.contradict(form, read_as, REPAIR_WEIGHT);
             giver_mind
                 .lexicon
-                .reinforce(form, Concept::Food, REPAIR_WEIGHT);
+                .reinforce(form, Concept::Berries, REPAIR_WEIGHT);
             self.lesson_events.push(LessonEvent {
                 agent: giver,
                 at: self.time,
                 form,
-                strengthened: Some(Concept::Food),
+                strengthened: Some(Concept::Berries),
                 weakened: Some(read_as),
                 use_worked: None,
                 cause: LessonCause::Repair,
@@ -217,7 +232,7 @@ impl Engine {
         }
         let asker_mind = self.minds.get_mut(asker);
         if let Some(form) = vocal {
-            asker_mind.lexicon.record_use(form, Concept::Food, false);
+            asker_mind.lexicon.record_use(form, Concept::Berries, false);
         }
         if let Some(word) = listener_word {
             asker_mind.lexicon.hear_with_evidence(word, read_as);
@@ -228,7 +243,7 @@ impl Engine {
             at: self.time,
             guess: read_as,
             listener_word,
-            response: RepairResponse::Repaired(Concept::Food),
+            response: RepairResponse::Repaired(Concept::Berries),
         });
     }
 
@@ -240,7 +255,7 @@ impl Engine {
         let food = self
             .population
             .inventory(giver)
-            .map_or(0, |inventory| inventory.food);
+            .map_or(0, |inventory| self.food_values(giver).carried(inventory));
         if food < GIFT {
             return RequestResponse::NothingToGive;
         }

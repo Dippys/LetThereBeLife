@@ -27,6 +27,7 @@ const MOUNTAIN_SNOW_TEMPERATURE_MAX: i32 = 9_000;
 const DETAIL_SEED_A: u64 = 0x4445_5441_494c_4131;
 const DETAIL_SEED_B: u64 = 0x4445_5441_494c_4232;
 const FEATURE_SEED: u64 = 0x4654_5253;
+const BITTER_SEED: u64 = 0x4249_5454_4552;
 /// Below this temperature shores stay bare (too cold for oasis vegetation).
 const OASIS_TEMPERATURE_MIN: i32 = 9_000;
 
@@ -132,6 +133,12 @@ pub(super) fn feature(
         return None;
     }
     let rolls = hash(seed ^ FEATURE_SEED, x, y);
+    // About 30% of bushes are bitter, wherever bushes grow.
+    let bush = if hash(seed ^ BITTER_SEED, x, y) % 100 < 30 {
+        FeatureKind::BitterBush
+    } else {
+        FeatureKind::BerryBush
+    };
     let tree_roll = (rolls % 10_000) as i64;
     let berry_roll = ((rolls >> 21) % 10_000) as i64;
     let rock_roll = ((rolls >> 42) % 10_000) as i64;
@@ -142,7 +149,7 @@ pub(super) fn feature(
             } else if ecology > -7_000 && tree_roll < 820 {
                 Some(FeatureKind::Tree)
             } else {
-                (ecology > -20_000 && berry_roll < 120).then_some(FeatureKind::BerryBush)
+                (ecology > -20_000 && berry_roll < 120).then_some(bush)
             }
         }
         (SurfaceType::Soil, biome) => {
@@ -159,7 +166,7 @@ pub(super) fn feature(
                     return Some(FeatureKind::Tree);
                 }
                 if berry_roll < 900 {
-                    return Some(FeatureKind::BerryBush);
+                    return Some(bush);
                 }
             }
             let tree_threshold = match biome {
@@ -181,7 +188,7 @@ pub(super) fn feature(
                 && ecology <= tree_threshold
                 && berry_roll < 160
             {
-                return Some(FeatureKind::BerryBush);
+                return Some(bush);
             }
 
             ((slope >= 70 || ecology < -14_000) && rock_roll < 150).then_some(FeatureKind::Rock)

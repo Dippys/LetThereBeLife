@@ -21,7 +21,7 @@ pub use archive::{
 };
 pub use chunk::{ChunkCoord, ChunkInspection, ChunkLocalPosition, ChunkPresence, WorldChunk};
 pub use config::{WorldConfig, WorldConfigError};
-pub use features::{BaseResource, Feature, FeatureKind, ResourceKind};
+pub use features::{BaseResource, Feature, FeatureKind, Material, MaterialProperties};
 pub use generator::{ChunkGenerator, GeneratedCell};
 pub use geometry::{WorldPosition, WorldRect};
 pub use loads::{ChunkLoadRequest, WorldChunkLoad};
@@ -41,7 +41,7 @@ pub use valley::{
 
 use worldgen::REGION_SIZE;
 
-pub const WORLD_GENERATOR_VERSION: u32 = 2;
+pub const WORLD_GENERATOR_VERSION: u32 = 3;
 
 /// Default side length of the initially generated area.
 pub const DEFAULT_INITIAL_WORLD_SIZE: u32 = 1_024;

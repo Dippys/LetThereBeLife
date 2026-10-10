@@ -1,7 +1,7 @@
 //! Public-API autonomous gathering, shelter construction, and reset scenario.
 
 use sim_core::{
-    AgentId, Engine, EngineCommand, EngineConfig, PopulationInit, ResourceKind, Standability,
+    AgentId, Engine, EngineCommand, EngineConfig, Material, PopulationInit, Standability,
     StructureState, WorldConfig, WorldPosition,
 };
 
@@ -18,7 +18,7 @@ fn engine_and_spawn() -> (Engine, WorldPosition) {
         for x in bounds.min.x..bounds.max.x {
             let position = WorldPosition { x, y };
             match engine.world().resource_at(position).unwrap() {
-                Some(resource) if resource.kind == ResourceKind::Wood => wood.push(position),
+                Some(resource) if resource.kind == Material::Wood => wood.push(position),
                 _ => {}
             }
         }

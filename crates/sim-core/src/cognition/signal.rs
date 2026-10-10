@@ -53,6 +53,8 @@ pub enum Mime {
     RestHead,
     /// A wide sweep of the arm across the pointed direction.
     Sweep,
+    /// Hand on the belly and a grimace: "that makes you sick".
+    Retch,
 }
 
 /// How the sender looks while signalling, derived from its own state.
@@ -78,15 +80,22 @@ pub struct PublicSignal {
     pub tone: Tone,
 }
 
-/// The mime a sender performs for a topic (the sender's production habit).
-pub(crate) const fn mime_for(topic: GestureTopic) -> Mime {
-    match topic {
-        GestureTopic::Place(LandmarkKind::Water) => Mime::Scoop,
-        GestureTopic::Place(LandmarkKind::Food) => Mime::PickAndChew,
-        GestureTopic::Place(LandmarkKind::Wood) => Mime::Chop,
-        GestureTopic::Place(LandmarkKind::Stone) => Mime::Strike,
-        GestureTopic::Place(LandmarkKind::Shelter) => Mime::RestHead,
-        GestureTopic::Explored => Mime::Sweep,
+/// The mime a sender performs for a topic, given what the sender believes the
+/// place's material is worth eating (`food`, its own belief, if any): the eating
+/// mime for food, a grimace for something that makes you sick, otherwise the
+/// motion of gathering it.
+pub(crate) const fn mime_for(topic: GestureTopic, food: Option<i16>) -> Mime {
+    match (topic, food) {
+        (GestureTopic::Place(LandmarkKind::Water), _) => Mime::Scoop,
+        (GestureTopic::Place(LandmarkKind::Shelter), _) => Mime::RestHead,
+        (GestureTopic::Explored, _) => Mime::Sweep,
+        (_, Some(value)) if value > 0 => Mime::PickAndChew,
+        (_, Some(value)) if value < 0 => Mime::Retch,
+        (GestureTopic::Place(LandmarkKind::Wood), _) => Mime::Chop,
+        (GestureTopic::Place(LandmarkKind::Stone), _) => Mime::Strike,
+        (GestureTopic::Place(LandmarkKind::Berries | LandmarkKind::Bitterberries), _) => {
+            Mime::PickAndChew
+        }
     }
 }
 
@@ -96,6 +105,7 @@ pub(crate) fn express(
     sender: AgentId,
     origin: WorldPosition,
     intent: UtteranceIntent,
+    mime: Mime,
     vocal: Option<VocalForm>,
     urgency: u8,
 ) -> Option<PublicSignal> {
@@ -103,7 +113,7 @@ pub(crate) fn express(
         sender,
         origin,
         pointing: point(origin, intent.place)?,
-        mime: mime_for(intent.topic),
+        mime,
         vocal,
         negated: None,
         addressee: None,
@@ -141,11 +151,12 @@ pub(crate) fn understand(signal: &PublicSignal, listener: ListenerContext) -> Un
 pub(crate) const fn unmistakable(mime: Mime) -> Concept {
     match mime {
         Mime::Scoop => Concept::Water,
-        Mime::PickAndChew => Concept::Food,
+        Mime::PickAndChew => Concept::Berries,
         Mime::Chop => Concept::Wood,
         Mime::Strike => Concept::Stone,
         Mime::RestHead => Concept::Home,
         Mime::Sweep => Concept::Been,
+        Mime::Retch => Concept::Bitterberries,
     }
 }
 
@@ -167,9 +178,7 @@ mod tests {
         ListenerContext {
             word: Some((topic.concept(), 20)),
             heard_word: true,
-            thirst: 0,
-            hunger: 0,
-            remembered_near: [false; 5],
+            ..ListenerContext::blank()
         }
     }
 
@@ -177,7 +186,7 @@ mod tests {
     fn every_topic_has_a_distinct_mime_that_watchers_read_back() {
         let topics = [
             GestureTopic::Place(LandmarkKind::Water),
-            GestureTopic::Place(LandmarkKind::Food),
+            GestureTopic::Place(LandmarkKind::Berries),
             GestureTopic::Place(LandmarkKind::Wood),
             GestureTopic::Place(LandmarkKind::Stone),
             GestureTopic::Place(LandmarkKind::Shelter),
@@ -189,7 +198,15 @@ mod tests {
                 topic,
                 place: at(80, -30),
             };
-            let signal = express(AgentId::new(1), at(0, 0), intent, None, 40).unwrap();
+            let signal = express(
+                AgentId::new(1),
+                at(0, 0),
+                intent,
+                mime_for(intent.topic, None),
+                None,
+                40,
+            )
+            .unwrap();
             assert_eq!(understand(&signal, clear_listener(topic)).topic, topic);
         }
     }
@@ -201,7 +218,15 @@ mod tests {
             topic: GestureTopic::Place(LandmarkKind::Water),
             place: at(137, 41),
         };
-        let signal = express(AgentId::new(3), at(5, 5), intent, None, 200).unwrap();
+        let signal = express(
+            AgentId::new(3),
+            at(5, 5),
+            intent,
+            mime_for(intent.topic, None),
+            None,
+            200,
+        )
+        .unwrap();
         assert_eq!(signal.tone.urgency, 200);
         let reading = understand(&signal, clear_listener(intent.topic));
         assert_ne!(
@@ -220,9 +245,19 @@ mod tests {
     fn nearby_places_produce_no_signal() {
         let intent = UtteranceIntent {
             effect: DesiredEffect::Inform,
-            topic: GestureTopic::Place(LandmarkKind::Food),
+            topic: GestureTopic::Place(LandmarkKind::Berries),
             place: at(3, 3),
         };
-        assert_eq!(express(AgentId::new(0), at(0, 0), intent, None, 0), None);
+        assert_eq!(
+            express(
+                AgentId::new(0),
+                at(0, 0),
+                intent,
+                mime_for(intent.topic, None),
+                None,
+                0
+            ),
+            None
+        );
     }
 }

@@ -17,7 +17,7 @@ use std::{
 
 use sim_world::{
     BaseResource, BiomeType, CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkLocalPosition,
-    ClimateSample, Feature, FeatureKind, GeneratedCell, PrevailingWind, ResourceKind, SurfaceType,
+    ClimateSample, Feature, FeatureKind, GeneratedCell, Material, PrevailingWind, SurfaceType,
     TerrainCell, TerrainClass, WORLD_GENERATION_BOUNDS, WorldPosition, WorldRect,
 };
 
@@ -180,7 +180,7 @@ enum Mode {
 struct SampleStats {
     surfaces: [u64; 7],
     biomes: [u64; 11],
-    features: [u64; 3],
+    features: [u64; 4],
     samples: u64,
     sample_hash: u64,
 }
@@ -190,7 +190,7 @@ impl Default for SampleStats {
         Self {
             surfaces: [0; 7],
             biomes: [0; 11],
-            features: [0; 3],
+            features: [0; 4],
             samples: 0,
             sample_hash: FNV_OFFSET_BASIS,
         }

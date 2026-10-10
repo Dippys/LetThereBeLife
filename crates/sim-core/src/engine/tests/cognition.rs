@@ -389,14 +389,17 @@ fn a_word_the_listener_holds_differently_causes_a_believable_misreading() {
         .unwrap()
         .lexicon
         .into_iter()
-        .filter(|entry| entry.concept == crate::Concept::Food)
+        .filter(|entry| entry.concept == crate::Concept::Berries)
         .max_by_key(|entry| i32::from(entry.positive) - i32::from(entry.contradictory))
         .expect("founders have a word for food")
         .form;
     public.vocal = Some(food_word);
     listener_world.deliver(0, &public).unwrap();
     let reading = listener_world.interpretation_events()[0];
-    assert_eq!(reading.understood, GestureTopic::Place(LandmarkKind::Food));
+    assert_eq!(
+        reading.understood,
+        GestureTopic::Place(LandmarkKind::Berries)
+    );
     assert!(reading.reading.reasons.ambiguous_mime);
     assert!(reading.reading.reasons.word_disagrees);
     assert_eq!(
@@ -428,7 +431,7 @@ fn an_unsure_listener_asks_and_the_speaker_repairs() {
     remember_water(&mut engine, AgentId::new(0), lake);
     engine.minds.get_mut(AgentId::new(1));
     // The speaker says, for water, the word the listener firmly reads as food.
-    let confusing = word_for(&engine, AgentId::new(1), crate::Concept::Food);
+    let confusing = word_for(&engine, AgentId::new(1), crate::Concept::Berries);
     engine
         .minds
         .get_mut(AgentId::new(0))
@@ -450,7 +453,7 @@ fn an_unsure_listener_asks_and_the_speaker_repairs() {
         .copied()
         .expect("the listener asked");
     assert_eq!(repair.listener, AgentId::new(1));
-    assert_eq!(repair.guess, crate::Concept::Food);
+    assert_eq!(repair.guess, crate::Concept::Berries);
     assert_eq!(
         repair.response,
         crate::RepairResponse::Repaired(crate::Concept::Water)
@@ -467,7 +470,7 @@ fn an_unsure_listener_asks_and_the_speaker_repairs() {
         !listener
             .landmarks
             .iter()
-            .any(|place| place.kind == LandmarkKind::Food),
+            .any(|place| place.kind == LandmarkKind::Berries),
         "and dropped the misread food hint"
     );
     let causes: Vec<_> = engine
@@ -495,7 +498,7 @@ fn a_correction_teaches_the_speaker_its_word_was_misheard() {
         .plan_correction(crate::cognition::PendingCorrection {
             speaker: AgentId::new(0),
             form,
-            misread: crate::Concept::Food,
+            misread: crate::Concept::Berries,
             actual: crate::Concept::Water,
             place: pond,
             since: 0,
@@ -537,7 +540,7 @@ fn a_correction_waits_while_the_speaker_is_away() {
         .plan_correction(crate::cognition::PendingCorrection {
             speaker: AgentId::new(7),
             form: crate::VocalForm(3),
-            misread: crate::Concept::Food,
+            misread: crate::Concept::Berries,
             actual: crate::Concept::Water,
             place: pond,
             since: 0,

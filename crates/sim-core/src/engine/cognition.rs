@@ -8,7 +8,9 @@ use crate::cognition::{
     RepairResponse, UtteranceIntent, VocalForm, belief_seconds, express, locate, mime_for,
     spent_kinds, told_confidence, understand, unmistakable, visible_kinds,
 };
-use crate::policy::{MindInput, ParentInput, PolicyAction, PolicySelection, deliberate};
+use crate::policy::{
+    FoodValues, MindInput, ParentInput, PolicyAction, PolicySelection, deliberate,
+};
 use crate::{
     AgentActivity, AgentId, Engine, ExplorationHeading, GestureTopic, HintOutcomeEvent,
     InterpretationEvent, InventoryView, LandmarkKind, MentalMapView, PHYSICAL_POLICY_RADIUS,
@@ -61,7 +63,7 @@ struct ConsequenceContext {
     agent: AgentId,
     at: crate::SimTime,
     now: u32,
-    visible: [bool; 5],
+    visible: [bool; LandmarkKind::COUNT],
     teller: Option<AgentId>,
     /// The next gesture id, to recover full ids from a hint's low 16 bits.
     latest_signal: u64,
@@ -160,6 +162,7 @@ impl Engine {
         let at = self.time;
         let latest_signal = self.next_signal_id;
         let beg = self.beg_target(agent, perception);
+        let food = self.food_values(agent);
         let visible = visible_kinds(origin, perception);
         let spent = spent_kinds(perception);
         let hint_outcomes = &mut self.hint_outcomes;
@@ -180,6 +183,7 @@ impl Engine {
             social: people,
             lexicon,
             dialogue,
+            affordances: _,
             child: _,
             parent,
         } = mind;
@@ -291,6 +295,7 @@ impl Engine {
                 friend_target,
                 parent,
                 beg_target: beg.map(|(_, position)| position),
+                food,
             },
         );
         if deliberation.selection.reason == PolicyReason::Begging
@@ -394,7 +399,8 @@ impl Engine {
             .minds
             .get(sender)
             .and_then(|mind| mind.lexicon.produce(topic.concept()));
-        let public = express(sender, from, intent, vocal, urgency)
+        let mime = self.mime_of(sender, topic);
+        let public = express(sender, from, intent, mime, vocal, urgency)
             .ok_or(PolicyFailureReason::TargetUnavailable)?;
         let id = self.next_signal_id;
         self.next_signal_id += 1;
@@ -463,6 +469,7 @@ impl Engine {
                 hunger,
                 remembered_near: LandmarkKind::ALL
                     .map(|kind| mind.map.remembers_near(kind, estimate, radius)),
+                food: mind.affordances.food_values(),
             };
             let understanding = understand(public, listener);
             // Words are learned from the listener's own reading, right or wrong.
@@ -515,7 +522,7 @@ impl Engine {
                 && probability >= RUNNER_UP_MIN_PROBABILITY
                 && let Some(GestureTopic::Place(kind)) = crate::cognition::concept_topic(runner_up)
                 && ((kind == LandmarkKind::Water && thirst >= URGENT_NEED)
-                    || (kind == LandmarkKind::Food && hunger >= URGENT_NEED))
+                    || (kind == LandmarkKind::Berries && hunger >= URGENT_NEED))
             {
                 let source = HintSource {
                     teller,
@@ -590,6 +597,33 @@ impl Engine {
         })
     }
 
+    /// The mime `agent` makes for `topic`, given what it believes about the
+    /// place's material.
+    pub(super) fn mime_of(&self, agent: AgentId, topic: GestureTopic) -> crate::Mime {
+        let food = match topic {
+            GestureTopic::Place(kind) => kind
+                .material()
+                .and_then(|material| self.minds.affordances(agent).food_value(material)),
+            GestureTopic::Explored => None,
+        };
+        mime_for(topic, food)
+    }
+
+    /// What `agent` wants to eat. With a mind: its beliefs, plus (only while
+    /// hungry) a taste of anything it has never tried. Without one (legacy
+    /// policy): what an all-knowing agent would eat.
+    pub(super) fn food_values(&self, agent: AgentId) -> FoodValues {
+        if !self.policy_options.memory {
+            return FoodValues::truth();
+        }
+        let hungry = self
+            .population
+            .needs_view(agent, self.time)
+            .is_ok_and(|needs| needs.hunger.threshold_reached);
+        let beliefs = self.minds.affordances(agent).food_values();
+        FoodValues(beliefs.map(|value| value.unwrap_or(i16::from(hungry))))
+    }
+
     /// Thirst and hunger relative to their thresholds (128 = at threshold).
     pub(super) fn relative_need(&self, agent: AgentId) -> (u16, u16) {
         self.population
@@ -617,7 +651,7 @@ impl Engine {
         let response = if question.guess == meant {
             RepairResponse::Confirmed
         } else {
-            RepairResponse::Repaired(unmistakable(mime_for(intent.topic)))
+            RepairResponse::Repaired(unmistakable(public.mime))
         };
         // Sender side: did its word work, and what does the listener call it?
         let sender = self.minds.get_mut(public.sender);
@@ -748,9 +782,10 @@ impl Engine {
             place: correction.place,
         };
         let urgency = self.visible_urgency(sender);
-        let mut public = express(sender, from, intent, Some(correction.form), urgency)
+        let mime = self.mime_of(sender, actual);
+        let mut public = express(sender, from, intent, mime, Some(correction.form), urgency)
             .ok_or(PolicyFailureReason::TargetUnavailable)?;
-        public.negated = Some(mime_for(misread));
+        public.negated = Some(self.mime_of(sender, misread));
         let id = self.next_signal_id;
         self.next_signal_id += 1;
         let delivery = self.deliver(id, &public)?;
@@ -806,6 +841,7 @@ impl Engine {
             landmarks: mind.map.views().collect(),
             explored_tiles: mind.map.explored_tile_count(),
             child: mind.child,
+            affordances: mind.affordances.views().collect(),
             acquaintances: mind.social.views().collect(),
             lexicon: mind.lexicon.views().collect(),
         })
@@ -853,6 +889,11 @@ impl Engine {
     /// How each watcher read the latest tick's gestures.
     pub fn interpretation_events(&self) -> &[InterpretationEvent] {
         &self.interpretation_events
+    }
+
+    /// Meals eaten during the latest tick (for logs and tools).
+    pub fn meal_events(&self) -> &[crate::MealEvent] {
+        &self.meal_events
     }
 
     /// Hints confirmed or abandoned during the latest tick.

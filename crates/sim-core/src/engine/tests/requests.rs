@@ -22,11 +22,7 @@ fn hungry_and_holding(food: u8) -> Engine {
     engine
         .set_initial_inventory(
             AgentId::new(1),
-            InventoryView {
-                food,
-                wood: 0,
-                stone: 0,
-            },
+            InventoryView::of(&[(crate::Material::Berries, food)]),
         )
         .unwrap();
     engine.policy_options = PolicyOptions {
@@ -80,13 +76,21 @@ fn a_friend_with_food_hands_over_a_meal() {
     let mut engine = hungry_and_holding(8);
     let request = ask(&mut engine);
     assert_eq!(request.response, RequestResponse::Gave);
-    assert_eq!(request.read_as, Concept::Food);
+    assert_eq!(request.read_as, Concept::Berries);
     assert_eq!(
-        engine.population.inventory(AgentId::new(0)).unwrap().food,
+        engine
+            .population
+            .inventory(AgentId::new(0))
+            .unwrap()
+            .amount(crate::Material::Berries),
         1
     );
     assert_eq!(
-        engine.population.inventory(AgentId::new(1)).unwrap().food,
+        engine
+            .population
+            .inventory(AgentId::new(1))
+            .unwrap()
+            .amount(crate::Material::Berries),
         7
     );
     let signal = engine.signal_events()[0];
@@ -118,7 +122,11 @@ fn empty_hands_give_nothing_and_givers_keep_what_they_need() {
     );
     assert_eq!(ask(&mut engine).response, RequestResponse::Refused);
     assert_eq!(
-        engine.population.inventory(AgentId::new(1)).unwrap().food,
+        engine
+            .population
+            .inventory(AgentId::new(1))
+            .unwrap()
+            .amount(crate::Material::Berries),
         8
     );
 }
@@ -126,7 +134,11 @@ fn empty_hands_give_nothing_and_givers_keep_what_they_need() {
 #[test]
 fn a_parent_feeds_its_child_and_a_misread_request_is_repaired() {
     let mut engine = hungry_and_holding(1);
-    engine.minds.set_founders(1);
+    // Agent 0 is a child with no words or food beliefs; agent 1, its parent,
+    // has its family's.
+    engine.minds.set_founders(0);
+    engine.minds.get_mut(AgentId::new(1)).affordances =
+        crate::cognition::Affordances::founding(engine.config.seed, AgentId::new(1), 8);
     assert!(engine.bond(AgentId::new(0), AgentId::new(1)));
     // The child has no words, and the parent is thirsty: it first takes the
     // eating mime for a request about water.

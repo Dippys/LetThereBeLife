@@ -71,7 +71,7 @@ const MIMES: [Mime; 6] = [
 fn place_words(form: u8) -> Vec<LexiconEntryView> {
     [
         Concept::Water,
-        Concept::Food,
+        Concept::Berries,
         Concept::Wood,
         Concept::Stone,
         Concept::Home,
@@ -96,6 +96,7 @@ fn mind_with_words(
         landmarks: Vec::new(),
         explored_tiles: 0,
         child: false,
+        affordances: Vec::new(),
         acquaintances,
         lexicon,
     })
@@ -210,7 +211,7 @@ fn agent_card_lists_each_place_word_with_the_most_net_evidence() {
         word(1, Concept::Water, 9, 1),
         // Same net evidence as form 1 but less positive evidence: loses.
         word(2, Concept::Water, 8, 0),
-        word(0, Concept::Food, 6, 0),
+        word(0, Concept::Berries, 6, 0),
         // Equal evidence ties go to the lowest form id.
         word(3, Concept::Wood, 5, 0),
         word(2, Concept::Wood, 5, 0),
@@ -250,10 +251,10 @@ fn agent_card_lists_each_place_word_with_the_most_net_evidence() {
     // A word that does not fit after STONE also wraps, and the lexicon copy is bounded.
     let mut crowded = vec![word(0, Concept::Stone, 1, 0); LEXICON_SLOTS + 4];
     crowded[0] = word(0, Concept::Water, 1, 0);
-    crowded[LEXICON_SLOTS] = word(0, Concept::Food, 9, 0);
+    crowded[LEXICON_SLOTS] = word(0, Concept::Berries, 9, 0);
     let memory = mind_with_words(Personality::AVERAGE, Vec::new(), crowded);
     assert_eq!(memory.lexicon().len(), LEXICON_SLOTS);
-    assert_eq!(memory.word_for(Concept::Food), None);
+    assert_eq!(memory.word_for(Concept::Berries), None);
     let lines = card_lines(memory);
     assert_eq!(lines[2..], ["WORDS WATER KANI  STONE KANI"]);
 
@@ -489,11 +490,11 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
                 due: sim_core::SimTime::from_ticks(1_000),
             }),
         }),
-        inventory: Some(InventoryView {
-            food: 2,
-            wood: 3,
-            stone: 4,
-        }),
+        inventory: Some(InventoryView::of(&[
+            (sim_core::Material::Berries, 2),
+            (sim_core::Material::Wood, 3),
+            (sim_core::Material::Stone, 4),
+        ])),
         health: Some(HealthView {
             agent: view.id,
             value: 9_000,
@@ -519,11 +520,12 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
             landmarks: vec![
                 landmark(LandmarkKind::Water, LandmarkSource::Seen, 0),
                 landmark(LandmarkKind::Water, LandmarkSource::Told, 1),
-                landmark(LandmarkKind::Food, LandmarkSource::Seen, 2),
+                landmark(LandmarkKind::Berries, LandmarkSource::Seen, 2),
                 landmark(LandmarkKind::Shelter, LandmarkSource::Told, 3),
             ],
             explored_tiles: 37,
             child: false,
+            affordances: Vec::new(),
         })),
     };
     let mut text = String::with_capacity(AGENT_TEXT_CAPACITY);
@@ -601,6 +603,7 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
         // The mental map caps explored tiles at its fixed visit-tile slots.
         explored_tiles: VISITED_TILE_SLOTS,
         child: false,
+        affordances: Vec::new(),
     };
     let budget_inspection = AgentInspection {
         view: budget_view,
@@ -616,11 +619,11 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
                 due: sim_core::SimTime::from_ticks(u64::MAX),
             }),
         }),
-        inventory: Some(InventoryView {
-            food: u8::MAX,
-            wood: u8::MAX,
-            stone: u8::MAX,
-        }),
+        inventory: Some(InventoryView::of(&[
+            (sim_core::Material::Berries, u8::MAX),
+            (sim_core::Material::Wood, u8::MAX),
+            (sim_core::Material::Stone, u8::MAX),
+        ])),
         health: Some(HealthView {
             agent: budget_view.id,
             value: 10_000,
@@ -659,7 +662,7 @@ fn hovered_agent_panel_reports_authoritative_physical_state() {
     assert!(budget_text.contains("WHY EXPOSURE THRESHOLD"));
     assert!(budget_text.contains("DEATH CAUSE EXHAUSTION"));
     assert!(budget_text.contains("DIED AT TICK 18446744073709551615"));
-    assert!(budget_text.contains("SHELTER 12  HINTS 12  EXPLORED 24 TILES"));
+    assert!(budget_text.contains("SHELTER 14  HINTS 14  EXPLORED 24 TILES"));
     assert!(budget_text.contains("BALANCED  CUR 100 CAU 100 SOC 100 DIL 100\n"));
     assert!(budget_text.contains("FRIENDS 6 OF 6 KNOWN\n"));
     assert!(budget_text.contains("TOP  #4000000000 T100  #4000000000 T100\n"));

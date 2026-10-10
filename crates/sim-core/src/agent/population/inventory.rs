@@ -23,9 +23,10 @@ impl Population {
         agent: AgentId,
         inventory: InventoryView,
     ) -> Result<(), InitialInventoryError> {
-        if inventory.food > crate::INVENTORY_CAPACITY_PER_KIND
-            || inventory.wood > crate::INVENTORY_CAPACITY_PER_KIND
-            || inventory.stone > crate::INVENTORY_CAPACITY_PER_KIND
+        if inventory
+            .items
+            .iter()
+            .any(|&amount| amount > crate::INVENTORY_CAPACITY_PER_KIND)
         {
             return Err(InitialInventoryError::AmountExceedsCapacity);
         }
@@ -39,7 +40,7 @@ impl Population {
 
     pub(crate) fn can_build_shelter(&self, agent: AgentId) -> bool {
         self.inventory(agent)
-            .is_some_and(|inventory| inventory.wood >= SHELTER_WOOD_COST)
+            .is_some_and(|inventory| inventory.amount(crate::Material::Wood) >= SHELTER_WOOD_COST)
     }
 
     pub(crate) fn consume_shelter_materials(
@@ -50,41 +51,71 @@ impl Population {
             .inventories
             .get_mut(agent.0 as usize)
             .ok_or(BuildShelterError::MissingAgent)?;
-        if inventory.wood < SHELTER_WOOD_COST {
+        let wood = &mut inventory.items[crate::Material::Wood as usize];
+        if *wood < SHELTER_WOOD_COST {
             return Err(BuildShelterError::InsufficientMaterials);
         }
-        inventory.wood -= SHELTER_WOOD_COST;
+        *wood -= SHELTER_WOOD_COST;
         Ok(())
     }
 
     pub(crate) fn refund_shelter_materials(&mut self, agent: AgentId) {
         let inventory = &mut self.inventories[agent.0 as usize];
-        inventory.wood = inventory.wood.saturating_add(SHELTER_WOOD_COST);
+        let wood = &mut inventory.items[crate::Material::Wood as usize];
+        *wood = wood.saturating_add(SHELTER_WOOD_COST);
     }
 
     pub(crate) fn add_inventory(
         &mut self,
         agent: AgentId,
-        kind: crate::ResourceKind,
+        kind: crate::Material,
         amount: u8,
     ) -> u8 {
         let inventory = &mut self.inventories[agent.0 as usize];
         let accepted = inventory.remaining_capacity(kind).min(amount);
-        let slot = match kind {
-            crate::ResourceKind::Food => &mut inventory.food,
-            crate::ResourceKind::Wood => &mut inventory.wood,
-            crate::ResourceKind::Stone => &mut inventory.stone,
-        };
-        *slot += accepted;
+        inventory.items[kind as usize] += accepted;
         accepted
     }
 
-    /// Removes up to `amount` food; returns how much was taken.
-    pub(crate) fn take_food(&mut self, agent: AgentId, amount: u8) -> u8 {
-        let inventory = &mut self.inventories[agent.0 as usize];
-        let taken = inventory.food.min(amount);
-        inventory.food -= taken;
+    /// Removes up to `amount` of `material`; returns how much was taken.
+    pub(crate) fn take(&mut self, agent: AgentId, material: crate::Material, amount: u8) -> u8 {
+        let carried = &mut self.inventories[agent.0 as usize].items[material as usize];
+        let taken = (*carried).min(amount);
+        *carried -= taken;
         taken
+    }
+
+    /// Eats one carried unit of `material`: hunger falls by its nutrition, and
+    /// its toxicity is added to thirst and tiredness. Returns its properties
+    /// (what the agent feels).
+    pub(crate) fn eat(
+        &mut self,
+        scheduler: &mut Scheduler,
+        now: SimTime,
+        agent: AgentId,
+        material: crate::Material,
+    ) -> Result<crate::MaterialProperties, ActionEffectError> {
+        let index = agent.0 as usize;
+        if self.inventories[index].amount(material) < FOOD_CONSUMPTION {
+            return Err(ActionEffectError::NoEdibleInventory);
+        }
+        if !scheduler.can_schedule(5) {
+            return Err(ActionEffectError::EventSequenceExhausted);
+        }
+        let properties = material.properties();
+        let mut next = self.needs[index];
+        next.relieve(NeedKind::Hunger, properties.nutrition, now);
+        if properties.toxicity > 0 {
+            next.worsen(NeedKind::Thirst, properties.toxicity, now);
+            next.worsen(NeedKind::Rest, properties.toxicity, now);
+        }
+        self.schedule_need_thresholds(scheduler, agent, next, now)
+            .map_err(|_| ActionEffectError::EventSequenceExhausted)?;
+        self.reschedule_health(scheduler, agent, next, now)
+            .map_err(|_| ActionEffectError::EventSequenceExhausted)?;
+        self.inventories[index].items[material as usize] -= FOOD_CONSUMPTION;
+        self.needs[index] = next;
+        Ok(properties)
     }
 
     pub(crate) fn apply_need_relief(
@@ -94,12 +125,8 @@ impl Population {
         agent: AgentId,
         kind: NeedKind,
         amount: u16,
-        consume_food: bool,
     ) -> Result<(), ActionEffectError> {
         let index = agent.0 as usize;
-        if consume_food && self.inventories[index].food < FOOD_CONSUMPTION {
-            return Err(ActionEffectError::NoEdibleInventory);
-        }
         if !scheduler.can_schedule(5) {
             return Err(ActionEffectError::EventSequenceExhausted);
         }
@@ -109,9 +136,6 @@ impl Population {
             .map_err(|_| ActionEffectError::EventSequenceExhausted)?;
         self.reschedule_health(scheduler, agent, next, now)
             .map_err(|_| ActionEffectError::EventSequenceExhausted)?;
-        if consume_food {
-            self.inventories[index].food -= FOOD_CONSUMPTION;
-        }
         self.needs[index] = next;
         Ok(())
     }

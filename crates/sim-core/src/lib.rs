@@ -23,14 +23,15 @@ pub use agent::{
     RouteEventOutcome, RouteOutcomeKind, RouteScheduled, SimTime, SpawnInvalidReason,
 };
 pub use cognition::{
-    ACQUAINTANCE_SLOTS, AcquaintanceView, CONSEQUENCE_WEIGHT, Concept, DEFAULT_TRUST,
-    DesiredEffect, FAMILY_SIZE, FRIEND_FAMILIARITY, Gesture, GestureTopic, HintOutcomeEvent,
-    InterpretationEvent, LANDMARK_SLOTS, LEXICON_SLOTS, LandmarkKind, LandmarkSource, LandmarkView,
-    LessonCause, LessonEvent, LexiconEntryView, MERGE_RADIUS, MentalMapView, Mime, Personality,
-    PolicyOptions, PublicSignal, READING_CANDIDATES, REPAIR_WEIGHT, Reading, ReadingReasons,
-    RepairEvent, RepairResponse, RequestEvent, RequestResponse, SEARCH_SPACING,
-    SHARE_COOLDOWN_SECONDS, SIGNAL_TICKS, SignalEvent, Tone, Understanding, UtteranceIntent,
-    VISIT_TILE_SIZE, VISITED_TILE_SLOTS, VOCAL_FORMS, VocalForm, concept_topic,
+    ACQUAINTANCE_SLOTS, AcquaintanceView, AffordanceView, CONSEQUENCE_WEIGHT, Concept,
+    DEFAULT_TRUST, DesiredEffect, FAMILY_SIZE, FRIEND_FAMILIARITY, Gesture, GestureTopic,
+    HintOutcomeEvent, InterpretationEvent, LANDMARK_SLOTS, LEXICON_SLOTS, LandmarkKind,
+    LandmarkSource, LandmarkView, LessonCause, LessonEvent, LexiconEntryView, MERGE_RADIUS,
+    MealEvent, MentalMapView, Mime, Personality, PolicyOptions, PublicSignal, READING_CANDIDATES,
+    REPAIR_WEIGHT, Reading, ReadingReasons, RepairEvent, RepairResponse, RequestEvent,
+    RequestResponse, SEARCH_SPACING, SHARE_COOLDOWN_SECONDS, SIGNAL_TICKS, SignalEvent, Tone,
+    Understanding, UtteranceIntent, VISIT_TILE_SIZE, VISITED_TILE_SLOTS, VOCAL_FORMS, VocalForm,
+    concept_topic,
 };
 pub use diagnostics::{EngineCapacityMetrics, EngineDiagnostics, EngineWorkMetrics};
 pub use engine::{
@@ -63,8 +64,8 @@ pub use sim_world::{
     ChunkOverview, ChunkPresence, ClimateSample, DEFAULT_INITIAL_WORLD_SIZE, Feature, FeatureKind,
     GenerateAreaError, GeneratedCell, MAX_CHUNKS_PER_GENERATION, MAX_GENERATED_CELLS,
     MAX_GENERATED_CHUNKS, MAX_GENERATED_TERRAIN_BYTES, MAX_INITIAL_CHUNKS,
-    MAX_TRAVERSABLE_ELEVATION_DELTA, PrevailingWind, ResourceKind, Standability, SurfaceType,
-    TerrainCell, TerrainClass, TraversalKind, TraversalStep, VALLEY_BAND,
+    MAX_TRAVERSABLE_ELEVATION_DELTA, Material, MaterialProperties, PrevailingWind, Standability,
+    SurfaceType, TerrainCell, TerrainClass, TraversalKind, TraversalStep, VALLEY_BAND,
     VALLEY_CHILDREN_PER_FAMILY, VALLEY_FAMILIES, VALLEY_SIDE, Valley, ValleyScore,
     WORLD_GENERATION_BOUNDS, WORLD_GENERATOR_VERSION, WORLD_HALF_EXTENT, WORLD_SIDE_CELLS,
     WaterSource, World, WorldArchive, WorldArchiveError, WorldChunk, WorldChunkLoad, WorldConfig,

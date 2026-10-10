@@ -17,16 +17,28 @@ fn shelter_build_blocks_travel_completes_and_enables_safer_sleep() {
         .unwrap();
     engine
         .population
-        .add_inventory(AgentId::new(0), ResourceKind::Wood, SHELTER_WOOD_COST);
+        .add_inventory(AgentId::new(0), crate::Material::Wood, SHELTER_WOOD_COST);
     engine
         .population
-        .add_inventory(AgentId::new(0), ResourceKind::Stone, SHELTER_STONE_COST);
+        .add_inventory(AgentId::new(0), crate::Material::Stone, SHELTER_STONE_COST);
 
     let started = engine.request_build_shelter(AgentId::new(0), site).unwrap();
     assert_eq!(started.state, StructureState::UnderConstruction);
     assert_eq!(engine.snapshot().structure_count, 1);
-    assert_eq!(engine.inventory(AgentId::new(0)).unwrap().wood, 0);
-    assert_eq!(engine.inventory(AgentId::new(0)).unwrap().stone, 0);
+    assert_eq!(
+        engine
+            .inventory(AgentId::new(0))
+            .unwrap()
+            .amount(crate::Material::Wood),
+        0
+    );
+    assert_eq!(
+        engine
+            .inventory(AgentId::new(0))
+            .unwrap()
+            .amount(crate::Material::Stone),
+        0
+    );
     let perception = engine.perceive_physical(AgentId::new(0), 2).unwrap();
     assert_eq!(perception.structures, [started]);
     assert!(!perception.traversable_cells.contains(&site));
@@ -92,10 +104,10 @@ fn construction_interruption_refunds_once_and_stale_completion_is_harmless() {
         .unwrap();
     engine
         .population
-        .add_inventory(AgentId::new(0), ResourceKind::Wood, SHELTER_WOOD_COST);
+        .add_inventory(AgentId::new(0), crate::Material::Wood, SHELTER_WOOD_COST);
     engine
         .population
-        .add_inventory(AgentId::new(0), ResourceKind::Stone, SHELTER_STONE_COST);
+        .add_inventory(AgentId::new(0), crate::Material::Stone, SHELTER_STONE_COST);
     engine.time = SimTime::from_ticks(89_950);
     let started = engine
         .start_shelter_build(AgentId::new(0), site, PolicyReason::NoUrgentNeed)
@@ -107,11 +119,17 @@ fn construction_interruption_refunds_once_and_stale_completion_is_harmless() {
     let cancelled_at = engine.snapshot().tick;
     assert_eq!(engine.snapshot().structure_count, 0);
     assert_eq!(
-        engine.inventory(AgentId::new(0)).unwrap().wood,
+        engine
+            .inventory(AgentId::new(0))
+            .unwrap()
+            .amount(crate::Material::Wood),
         SHELTER_WOOD_COST
     );
     assert_eq!(
-        engine.inventory(AgentId::new(0)).unwrap().stone,
+        engine
+            .inventory(AgentId::new(0))
+            .unwrap()
+            .amount(crate::Material::Stone),
         SHELTER_STONE_COST
     );
     assert_eq!(
@@ -127,7 +145,10 @@ fn construction_interruption_refunds_once_and_stale_completion_is_harmless() {
     }
     assert_eq!(engine.snapshot().structure_count, 0);
     assert_eq!(
-        engine.inventory(AgentId::new(0)).unwrap().wood,
+        engine
+            .inventory(AgentId::new(0))
+            .unwrap()
+            .amount(crate::Material::Wood),
         SHELTER_WOOD_COST
     );
 }
@@ -163,7 +184,7 @@ fn structure_reserved_after_move_request_blocks_at_movement_completion() {
         .unwrap();
     engine
         .population
-        .add_inventory(AgentId::new(1), ResourceKind::Wood, SHELTER_WOOD_COST);
+        .add_inventory(AgentId::new(1), crate::Material::Wood, SHELTER_WOOD_COST);
     let movement = engine.request_move(AgentId::new(0), site).unwrap();
     let shelter = engine.request_build_shelter(AgentId::new(1), site).unwrap();
     while engine.snapshot().tick < movement.completes_at.ticks() {
@@ -239,10 +260,10 @@ fn equal_time_builders_resolve_overlap_by_agent_id_without_double_spending() {
     for agent in [AgentId::new(0), AgentId::new(1)] {
         engine
             .population
-            .add_inventory(agent, ResourceKind::Wood, SHELTER_WOOD_COST);
+            .add_inventory(agent, crate::Material::Wood, SHELTER_WOOD_COST);
         engine
             .population
-            .add_inventory(agent, ResourceKind::Stone, SHELTER_STONE_COST);
+            .add_inventory(agent, crate::Material::Stone, SHELTER_STONE_COST);
     }
     engine.activate_physical_policy().unwrap();
     engine.tick();
@@ -250,9 +271,18 @@ fn equal_time_builders_resolve_overlap_by_agent_id_without_double_spending() {
     let structure = engine.structure_views(1).next().unwrap();
     assert_eq!(structure.position, center);
     assert_eq!(structure.builder, Some(AgentId::new(0)));
-    assert_eq!(engine.inventory(AgentId::new(0)).unwrap().wood, 0);
     assert_eq!(
-        engine.inventory(AgentId::new(1)).unwrap().wood,
+        engine
+            .inventory(AgentId::new(0))
+            .unwrap()
+            .amount(crate::Material::Wood),
+        0
+    );
+    assert_eq!(
+        engine
+            .inventory(AgentId::new(1))
+            .unwrap()
+            .amount(crate::Material::Wood),
         SHELTER_WOOD_COST
     );
 }

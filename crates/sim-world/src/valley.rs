@@ -40,7 +40,7 @@ impl ValleyScore {
             && self.fresh_water_samples >= MIN_FRESH_SAMPLES
             && self.fresh_water_percent <= 20
             && self.ocean_percent == 0
-            && self.food_samples >= 12
+            && self.food_samples >= 8
     }
 
     /// Higher is better among livable sites: food first, then wood, then water.

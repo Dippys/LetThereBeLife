@@ -50,6 +50,7 @@ impl ChunkOverview {
             0 => FeatureKind::Tree,
             1 => FeatureKind::Rock,
             2 => FeatureKind::BerryBush,
+            3 => FeatureKind::BitterBush,
             _ => return None,
         };
         Some((kind, self.feature_count))

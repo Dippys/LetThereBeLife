@@ -5,8 +5,8 @@ use std::mem::{align_of, size_of};
 use super::state::PolicyNavigation;
 use super::*;
 use crate::{
-    BaseResource, InventoryView, NeedLevelView, PerceivedResource, PerceivedWater,
-    PhysicalNeedsView, PhysicalPerception, ResourceKind, WaterSource, WorldRect,
+    BaseResource, InventoryView, Material, NeedLevelView, PerceivedResource, PerceivedWater,
+    PhysicalNeedsView, PhysicalPerception, WaterSource, WorldRect,
 };
 
 #[test]
@@ -76,7 +76,7 @@ fn perception() -> PhysicalPerception {
             position: WorldPosition { x: 0, y: 2 },
             resource: BaseResource {
                 capacity: 12,
-                kind: ResourceKind::Food,
+                kind: Material::Berries,
             },
         }],
         structures: Vec::new(),
@@ -135,7 +135,7 @@ fn irrelevant_candidates_do_not_reorder_the_selected_water_access() {
         position: WorldPosition { x: -3, y: -3 },
         resource: BaseResource {
             capacity: 120,
-            kind: ResourceKind::Wood,
+            kind: Material::Wood,
         },
     });
     assert_eq!(
@@ -212,10 +212,7 @@ fn occupied_and_claimed_objective_cells_select_distinct_fallbacks() {
 fn carried_food_turns_hunger_into_eating_and_idle_agents_gather_capacity() {
     let origin = WorldPosition { x: 0, y: 0 };
     let facts = perception();
-    let carrying_food = InventoryView {
-        food: 1,
-        ..InventoryView::default()
-    };
+    let carrying_food = InventoryView::of(&[(Material::Berries, 1)]);
     assert_eq!(
         select(origin, needs(7_000, 0, 0, 0), carrying_food, &facts).goal,
         PhysicalGoal::Eat
@@ -225,9 +222,7 @@ fn carried_food_turns_hunger_into_eating_and_idle_agents_gather_capacity() {
         PhysicalGoal::GatherMaterial
     );
     let full = InventoryView {
-        food: crate::INVENTORY_CAPACITY_PER_KIND,
-        wood: crate::INVENTORY_CAPACITY_PER_KIND,
-        stone: crate::INVENTORY_CAPACITY_PER_KIND,
+        items: [crate::INVENTORY_CAPACITY_PER_KIND; Material::COUNT],
     };
     assert_eq!(
         select(origin, needs(0, 0, 0, 0), full, &facts).goal,

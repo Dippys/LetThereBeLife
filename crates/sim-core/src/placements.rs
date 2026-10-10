@@ -1,8 +1,8 @@
 use std::{collections::BTreeMap, error::Error, fmt};
 
 use crate::{
-    BaseResource, FeatureKind, ResourceKind, Standability, TraversalKind, TraversalStep,
-    WaterSource, World, WorldPosition, WorldQueryError,
+    BaseResource, FeatureKind, Material, Standability, TraversalKind, TraversalStep, WaterSource,
+    World, WorldPosition, WorldQueryError,
 };
 
 /// Object kinds that an explicit simulation command can place into resident terrain.
@@ -190,7 +190,7 @@ impl SpawnedObjects {
         &mut self,
         position: WorldPosition,
         maximum: u8,
-    ) -> Option<(ResourceKind, u8)> {
+    ) -> Option<(Material, u8)> {
         let key = CompactSpawnPosition::checked(position)?;
         let object = self.objects.get_mut(&key)?;
         let resource = object.kind.resource()?;

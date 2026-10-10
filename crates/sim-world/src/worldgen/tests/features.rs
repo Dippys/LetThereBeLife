@@ -60,7 +60,7 @@ fn synthetic_feature_counts(
                 counts[match kind {
                     FeatureKind::Tree => 0,
                     FeatureKind::Rock => 1,
-                    FeatureKind::BerryBush => 2,
+                    FeatureKind::BerryBush | FeatureKind::BitterBush => 2,
                 }] += 1;
             }
         }

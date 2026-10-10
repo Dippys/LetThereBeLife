@@ -129,6 +129,7 @@ pub struct Engine {
     signal_events: Vec<SignalEvent>,
     interpretation_events: Vec<InterpretationEvent>,
     hint_outcomes: Vec<HintOutcomeEvent>,
+    meal_events: Vec<crate::MealEvent>,
     lesson_events: Vec<crate::LessonEvent>,
     repair_events: Vec<crate::RepairEvent>,
     request_events: Vec<crate::RequestEvent>,
@@ -169,6 +170,7 @@ impl Engine {
             signal_events: Vec::new(),
             interpretation_events: Vec::new(),
             hint_outcomes: Vec::new(),
+            meal_events: Vec::new(),
             lesson_events: Vec::new(),
             repair_events: Vec::new(),
             request_events: Vec::new(),
@@ -216,6 +218,7 @@ impl Engine {
                 self.signal_events.clear();
                 self.interpretation_events.clear();
                 self.hint_outcomes.clear();
+                self.meal_events.clear();
                 self.lesson_events.clear();
                 self.repair_events.clear();
                 self.request_events.clear();

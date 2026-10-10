@@ -19,13 +19,19 @@ fn eating_consumes_one_food_and_rebases_only_hunger() {
     assert_eq!(
         engine
             .population
-            .add_inventory(AgentId::new(0), ResourceKind::Food, 2),
+            .add_inventory(AgentId::new(0), crate::Material::Berries, 2),
         2
     );
     let before = engine.physical_needs(AgentId::new(0)).unwrap();
     engine.apply_eat(AgentId::new(0)).unwrap();
     let after = engine.physical_needs(AgentId::new(0)).unwrap();
-    assert_eq!(engine.inventory(AgentId::new(0)).unwrap().food, 1);
+    assert_eq!(
+        engine
+            .inventory(AgentId::new(0))
+            .unwrap()
+            .amount(crate::Material::Berries),
+        1
+    );
     assert_eq!(after.hunger.value, before.hunger.value - EAT_HUNGER_RELIEF);
     assert_eq!(after.thirst.value, before.thirst.value);
     assert_eq!(after.rest.value, before.rest.value);
@@ -59,7 +65,13 @@ fn eating_without_food_is_an_explicit_atomic_failure() {
         Err(PolicyFailureReason::NoEdibleInventory)
     );
     assert_eq!(engine.physical_needs(AgentId::new(0)).unwrap(), before);
-    assert_eq!(engine.inventory(AgentId::new(0)).unwrap().food, 0);
+    assert_eq!(
+        engine
+            .inventory(AgentId::new(0))
+            .unwrap()
+            .amount(crate::Material::Berries),
+        0
+    );
 }
 
 #[test]
@@ -78,17 +90,20 @@ fn inventory_addition_clamps_at_the_per_kind_capacity() {
     assert_eq!(
         engine
             .population
-            .add_inventory(AgentId::new(0), ResourceKind::Wood, u8::MAX),
+            .add_inventory(AgentId::new(0), crate::Material::Wood, u8::MAX),
         INVENTORY_CAPACITY_PER_KIND
     );
     assert_eq!(
         engine
             .population
-            .add_inventory(AgentId::new(0), ResourceKind::Wood, 1),
+            .add_inventory(AgentId::new(0), crate::Material::Wood, 1),
         0
     );
     assert_eq!(
-        engine.inventory(AgentId::new(0)).unwrap().wood,
+        engine
+            .inventory(AgentId::new(0))
+            .unwrap()
+            .amount(crate::Material::Wood),
         INVENTORY_CAPACITY_PER_KIND
     );
 }

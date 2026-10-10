@@ -5,10 +5,10 @@ use super::errors::{action_effect_failure, move_failure};
 use crate::agent::MovementEnvironment;
 use crate::scheduler::{self};
 use crate::{
-    AgentId, DRINK_THIRST_RELIEF, EAT_HUNGER_RELIEF, Engine, GATHER_YIELD, NeedKind, PhysicalGoal,
-    PolicyDiagnostic, PolicyDiagnosticKind, PolicyFailureReason, PolicyReason, ResourceKind,
-    SHELTER_WOOD_COST, SleepDiagnostic, SleepDiagnosticKind, SleepRequestError, SleepView,
-    WorldPosition, WorldQueryError,
+    AgentId, DRINK_THIRST_RELIEF, Engine, GATHER_YIELD, Material, NeedKind, PhysicalGoal,
+    PolicyDiagnostic, PolicyDiagnosticKind, PolicyFailureReason, PolicyReason, SHELTER_WOOD_COST,
+    SleepDiagnostic, SleepDiagnosticKind, SleepRequestError, SleepView, WorldPosition,
+    WorldQueryError,
 };
 
 impl Engine {
@@ -191,22 +191,61 @@ impl Engine {
                 agent,
                 NeedKind::Thirst,
                 DRINK_THIRST_RELIEF,
-                false,
             )
             .map_err(action_effect_failure)
     }
 
+    /// Eats one unit of whatever carried material the agent most wants to eat.
+    /// The agent feels what it really does; anyone watching sees it eat, and
+    /// sees it retch if it was sickening.
     pub(super) fn apply_eat(&mut self, agent: AgentId) -> Result<(), PolicyFailureReason> {
-        self.population
-            .apply_need_relief(
-                &mut self.scheduler,
-                self.time,
-                agent,
-                NeedKind::Hunger,
-                EAT_HUNGER_RELIEF,
-                true,
-            )
-            .map_err(action_effect_failure)
+        let inventory = self
+            .population
+            .inventory(agent)
+            .ok_or(PolicyFailureReason::InconsistentState)?;
+        let material = self
+            .food_values(agent)
+            .best_carried(inventory)
+            .ok_or(PolicyFailureReason::NoEdibleInventory)?;
+        let properties = self
+            .population
+            .eat(&mut self.scheduler, self.time, agent, material)
+            .map_err(action_effect_failure)?;
+        if !self.policy_options.memory {
+            return Ok(());
+        }
+        let retched = properties.toxicity > 0;
+        let eater = self.minds.get_mut(agent);
+        let first_taste = !eater.affordances.knows(material);
+        eater.affordances.felt(material, properties);
+        let watchers: Vec<AgentId> = self
+            .perceive_physical(agent, crate::PHYSICAL_POLICY_RADIUS)
+            .map(|perception| {
+                perception
+                    .agents
+                    .iter()
+                    .filter(|other| {
+                        other.id != agent && super::cognition::can_watch(other.activity)
+                    })
+                    .map(|other| other.id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        for watcher in &watchers {
+            self.minds
+                .get_mut(*watcher)
+                .affordances
+                .saw_eaten(material, retched);
+        }
+        self.meal_events.push(crate::MealEvent {
+            agent,
+            at: self.time,
+            material,
+            retched,
+            first_taste,
+            watchers: watchers.len() as u16,
+        });
+        Ok(())
     }
 
     fn apply_gather(
@@ -223,6 +262,7 @@ impl Engine {
             .population
             .inventory(agent)
             .ok_or(PolicyFailureReason::InconsistentState)?;
+        let food = self.food_values(agent);
         let candidate = [
             WorldPosition {
                 x: position.x,
@@ -249,11 +289,10 @@ impl Engine {
                 .flatten()
                 .filter(|resource| {
                     inventory.can_add(resource.kind)
-                        && (reason != PolicyReason::HungerThreshold
-                            || resource.kind == ResourceKind::Food)
+                        && (reason != PolicyReason::HungerThreshold || food.is_food(resource.kind))
                         && (reason != PolicyReason::ShelterMaterials
-                            || (resource.kind == ResourceKind::Wood
-                                && inventory.wood < SHELTER_WOOD_COST))
+                            || (resource.kind == Material::Wood
+                                && inventory.amount(Material::Wood) < SHELTER_WOOD_COST))
                 })
                 .map(|resource| (candidate, resource))
         })
@@ -267,7 +306,7 @@ impl Engine {
         });
         let Some((resource_position, resource)) = candidate else {
             return Err(
-                if [ResourceKind::Food, ResourceKind::Wood, ResourceKind::Stone]
+                if Material::ALL
                     .into_iter()
                     .all(|kind| !inventory.can_add(kind))
                 {

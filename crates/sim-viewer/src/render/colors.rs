@@ -28,10 +28,11 @@ pub(super) const fn agent_color(activity: AgentActivity) -> u32 {
 pub(super) const fn landmark_color(kind: LandmarkKind) -> u32 {
     match kind {
         LandmarkKind::Water => rgba(70, 176, 255, 235),
-        LandmarkKind::Food => rgba(240, 84, 136, 235),
+        LandmarkKind::Berries => rgba(240, 84, 136, 235),
         LandmarkKind::Wood => rgba(164, 104, 52, 235),
         LandmarkKind::Stone => rgba(176, 176, 170, 235),
         LandmarkKind::Shelter => rgba(255, 150, 40, 235),
+        LandmarkKind::Bitterberries => rgba(150, 90, 230, 235),
     }
 }
 
@@ -60,6 +61,7 @@ pub(super) const fn feature_color(kind: FeatureKind) -> u32 {
         FeatureKind::Tree => rgba(24, 72, 28, 255),
         FeatureKind::Rock => rgba(118, 116, 108, 255),
         FeatureKind::BerryBush => rgba(112, 42, 74, 255),
+        FeatureKind::BitterBush => rgba(78, 48, 104, 255),
     }
 }
 
@@ -77,6 +79,7 @@ pub(super) const fn summary_feature_color(kind: FeatureKind) -> u32 {
         FeatureKind::Tree => rgba(24, 72, 28, 230),
         FeatureKind::Rock => rgba(118, 116, 108, 230),
         FeatureKind::BerryBush => rgba(112, 42, 74, 230),
+        FeatureKind::BitterBush => rgba(78, 48, 104, 230),
     }
 }
 

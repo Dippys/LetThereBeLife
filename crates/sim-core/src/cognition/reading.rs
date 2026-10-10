@@ -8,6 +8,7 @@
 //! a record of why. Nothing here can see the sender's intent.
 
 use super::{Concept, GestureTopic, LandmarkKind, Mime, PublicSignal};
+use crate::Material;
 
 /// Candidates kept per reading.
 pub const READING_CANDIDATES: usize = 3;
@@ -57,20 +58,76 @@ pub(crate) struct ListenerContext {
     pub(crate) thirst: u16,
     pub(crate) hunger: u16,
     /// Place kinds the listener already remembers near the indicated spot.
-    pub(crate) remembered_near: [bool; 5],
+    pub(crate) remembered_near: [bool; LandmarkKind::COUNT],
+    /// What the listener believes each material is worth eating (`None` = no idea).
+    pub(crate) food: [Option<i16>; Material::COUNT],
 }
 
-/// How strongly a mime suggests each concept. Mimes are physical movements, so
-/// similar movements give similar evidence.
-const fn mime_evidence(mime: Mime) -> [(Concept, i32); 2] {
-    match mime {
-        Mime::Scoop => [(Concept::Water, 30), (Concept::Food, 20)],
-        Mime::PickAndChew => [(Concept::Food, 30), (Concept::Water, 20)],
-        Mime::Chop => [(Concept::Wood, 40), (Concept::Stone, 10)],
-        Mime::Strike => [(Concept::Stone, 40), (Concept::Wood, 10)],
-        Mime::RestHead => [(Concept::Home, 40), (Concept::Been, 0)],
-        Mime::Sweep => [(Concept::Been, 40), (Concept::Home, 0)],
+impl ListenerContext {
+    /// A listener with no word, needs, memories, or food beliefs.
+    #[cfg(test)]
+    pub(crate) const fn blank() -> Self {
+        Self {
+            word: None,
+            heard_word: false,
+            thirst: 0,
+            hunger: 0,
+            remembered_near: [false; LandmarkKind::COUNT],
+            food: [None; Material::COUNT],
+        }
     }
+}
+
+/// How strongly a mime suggests each concept, strongest first. Mimes are
+/// physical movements, so similar movements give similar evidence, and what an
+/// eating or retching mime suggests depends on what the listener believes is
+/// food or makes you sick.
+fn mime_evidence(mime: Mime, listener: &ListenerContext) -> [(Concept, i32); 3] {
+    let belief = |material: Material| listener.food[material as usize];
+    let eaten = |material: Material| match belief(material) {
+        Some(value) if value > 0 => 30,
+        Some(value) if value < 0 => 4,
+        _ => 14,
+    };
+    let sickening = |material: Material| match belief(material) {
+        Some(value) if value < 0 => 40,
+        Some(value) if value > 0 => 4,
+        _ => 14,
+    };
+    let mut evidence = match mime {
+        Mime::Scoop => [
+            (Concept::Water, 30),
+            (Concept::Berries, eaten(Material::Berries) * 2 / 3),
+            (
+                Concept::Bitterberries,
+                eaten(Material::Bitterberries) * 2 / 3,
+            ),
+        ],
+        Mime::PickAndChew => [
+            (Concept::Berries, eaten(Material::Berries)),
+            (Concept::Bitterberries, eaten(Material::Bitterberries)),
+            (Concept::Water, 20),
+        ],
+        Mime::Retch => [
+            (Concept::Bitterberries, sickening(Material::Bitterberries)),
+            (Concept::Berries, sickening(Material::Berries)),
+            (Concept::Water, 0),
+        ],
+        Mime::Chop => [
+            (Concept::Wood, 40),
+            (Concept::Stone, 10),
+            (Concept::Home, 0),
+        ],
+        Mime::Strike => [
+            (Concept::Stone, 40),
+            (Concept::Wood, 10),
+            (Concept::Home, 0),
+        ],
+        Mime::RestHead => [(Concept::Home, 40), (Concept::Been, 0), (Concept::Wood, 0)],
+        Mime::Sweep => [(Concept::Been, 40), (Concept::Home, 0), (Concept::Wood, 0)],
+    };
+    evidence.sort_by_key(|&(concept, weight)| (-weight, concept));
+    evidence
 }
 
 /// Evidence a known word adds: more for well-established readings.
@@ -93,10 +150,11 @@ const URGENCY_WEIGHT: i32 = 5;
 pub(crate) const fn concept_kind(concept: Concept) -> Option<LandmarkKind> {
     match concept {
         Concept::Water => Some(LandmarkKind::Water),
-        Concept::Food => Some(LandmarkKind::Food),
+        Concept::Berries => Some(LandmarkKind::Berries),
         Concept::Wood => Some(LandmarkKind::Wood),
         Concept::Stone => Some(LandmarkKind::Stone),
         Concept::Home => Some(LandmarkKind::Shelter),
+        Concept::Bitterberries => Some(LandmarkKind::Bitterberries),
         _ => None,
     }
 }
@@ -115,7 +173,7 @@ pub const fn concept_topic(concept: Concept) -> Option<GestureTopic> {
 /// Scores the candidates. Deterministic: ties break by concept order.
 pub(crate) fn read(signal: &PublicSignal, listener: ListenerContext) -> Reading {
     let mut scores = [0_i32; Concept::COUNT];
-    let mime = mime_evidence(signal.mime);
+    let mime = mime_evidence(signal.mime, &listener);
     for (concept, weight) in mime {
         scores[concept as usize] += weight;
     }
@@ -125,7 +183,15 @@ pub(crate) fn read(signal: &PublicSignal, listener: ListenerContext) -> Reading 
     let thirst = need_weight(listener.thirst);
     let hunger = need_weight(listener.hunger);
     scores[Concept::Water as usize] += thirst;
-    scores[Concept::Food as usize] += hunger;
+    // Hunger favors whatever the listener thinks is food.
+    for (material, concept) in [
+        (Material::Berries, Concept::Berries),
+        (Material::Bitterberries, Concept::Bitterberries),
+    ] {
+        if listener.food[material as usize].is_some_and(|value| value > 0) {
+            scores[concept as usize] += hunger;
+        }
+    }
     let mut memory_scores = [0_i32; Concept::COUNT];
     for concept in Concept::ALL {
         if let Some(kind) = concept_kind(concept)
@@ -138,7 +204,7 @@ pub(crate) fn read(signal: &PublicSignal, listener: ListenerContext) -> Reading 
     }
     if signal.tone.urgency >= 128 {
         scores[Concept::Water as usize] += URGENCY_WEIGHT;
-        scores[Concept::Food as usize] += URGENCY_WEIGHT;
+        scores[Concept::Berries as usize] += URGENCY_WEIGHT;
     }
 
     // Only gesture-able concepts with positive evidence are candidates.
@@ -170,7 +236,14 @@ pub(crate) fn read(signal: &PublicSignal, listener: ListenerContext) -> Reading 
     };
     let mut need_scores = [0_i32; Concept::COUNT];
     need_scores[Concept::Water as usize] = thirst;
-    need_scores[Concept::Food as usize] = hunger;
+    for (material, concept) in [
+        (Material::Berries, Concept::Berries),
+        (Material::Bitterberries, Concept::Bitterberries),
+    ] {
+        if listener.food[material as usize].is_some_and(|value| value > 0) {
+            need_scores[concept as usize] = hunger;
+        }
+    }
     let reasons = ReadingReasons {
         ambiguous_mime: mime[1].1 > 0 && mime[1].1 * 2 >= mime[0].1,
         unknown_word: listener.heard_word && listener.word.is_none(),
@@ -210,12 +283,16 @@ mod tests {
     }
 
     fn listener(word: Option<(Concept, i32)>, thirst: u16, hunger: u16) -> ListenerContext {
+        let mut food = [None; Material::COUNT];
+        food[Material::Berries as usize] = Some(118);
+        food[Material::Stone as usize] = Some(0);
         ListenerContext {
             word,
             heard_word: true,
             thirst,
             hunger,
-            remembered_near: [false; 5],
+            food,
+            ..ListenerContext::blank()
         }
     }
 
@@ -231,7 +308,7 @@ mod tests {
             "confident: {:?}",
             reading.candidates
         );
-        assert_eq!(reading.runner_up().map(|(c, _)| c), Some(Concept::Food));
+        assert_eq!(reading.runner_up().map(|(c, _)| c), Some(Concept::Berries));
         assert!(reading.reasons.ambiguous_mime);
         assert!(!reading.reasons.need_bias);
     }
@@ -239,7 +316,7 @@ mod tests {
     #[test]
     fn a_hungry_listener_who_doesnt_know_the_word_reads_scooping_as_food() {
         let reading = read(&signal(Mime::Scoop, 0), listener(None, 0, 255));
-        assert_eq!(reading.best().0, Concept::Food);
+        assert_eq!(reading.best().0, Concept::Berries);
         assert!(reading.reasons.unknown_word);
         assert!(reading.reasons.need_bias);
         assert!(reading.reasons.ambiguous_mime);
@@ -249,9 +326,9 @@ mod tests {
     fn a_misheld_word_can_override_an_ambiguous_mime() {
         let reading = read(
             &signal(Mime::Scoop, 0),
-            listener(Some((Concept::Food, 10)), 0, 0),
+            listener(Some((Concept::Berries, 10)), 0, 0),
         );
-        assert_eq!(reading.best().0, Concept::Food);
+        assert_eq!(reading.best().0, Concept::Berries);
         assert!(reading.reasons.word_disagrees);
     }
 
@@ -267,9 +344,9 @@ mod tests {
     #[test]
     fn memory_near_the_place_can_tip_an_ambiguous_reading() {
         let mut context = listener(None, 0, 0);
-        context.remembered_near[LandmarkKind::Food as usize] = true;
+        context.remembered_near[LandmarkKind::Berries as usize] = true;
         let reading = read(&signal(Mime::Scoop, 0), context);
-        assert_eq!(reading.best().0, Concept::Food);
+        assert_eq!(reading.best().0, Concept::Berries);
         assert!(reading.reasons.memory_bias);
     }
 

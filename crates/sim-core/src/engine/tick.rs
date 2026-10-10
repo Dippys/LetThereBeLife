@@ -30,6 +30,7 @@ impl Engine {
         self.signal_events.clear();
         self.interpretation_events.clear();
         self.hint_outcomes.clear();
+        self.meal_events.clear();
         self.lesson_events.clear();
         self.repair_events.clear();
         self.request_events.clear();

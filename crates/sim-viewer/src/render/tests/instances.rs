@@ -153,7 +153,7 @@ fn memory_markers_show_seen_places_solid_and_hints_as_search_outlines() {
         seen_second: 5,
     };
     let told = LandmarkView {
-        kind: LandmarkKind::Food,
+        kind: LandmarkKind::Berries,
         position: WorldPosition { x: -20, y: 6 },
         source: LandmarkSource::Told,
         confidence: 120,
@@ -178,7 +178,7 @@ fn memory_markers_show_seen_places_solid_and_hints_as_search_outlines() {
     assert!(
         outline
             .iter()
-            .all(|edge| edge.color == landmark_color(LandmarkKind::Food))
+            .all(|edge| edge.color == landmark_color(LandmarkKind::Berries))
     );
     assert_eq!(outline[0].position, [-28.0, -2.0]);
     assert_eq!(outline[0].size, [17.0, 0.5]);
@@ -285,7 +285,7 @@ fn gestures_draw_a_neutral_dotted_line_search_square_and_topic_dot() {
         watchers: 2,
         word: None,
         mime: sim_core::Mime::PickAndChew,
-        topic: sim_core::GestureTopic::Place(LandmarkKind::Food),
+        topic: sim_core::GestureTopic::Place(LandmarkKind::Berries),
     };
     let mut instances = Vec::new();
 
@@ -309,10 +309,10 @@ fn gestures_draw_a_neutral_dotted_line_search_square_and_topic_dot() {
     assert_eq!(instances[7].size, [0.5, 5.0]);
     assert_eq!(instances[8].position, [-0.125, -0.125]);
     assert_eq!(instances[8].size, [1.25, 1.25]);
-    assert_eq!(instances[8].color, landmark_color(LandmarkKind::Food));
+    assert_eq!(instances[8].color, landmark_color(LandmarkKind::Berries));
     assert_eq!(
-        gesture_topic_color(sim_core::GestureTopic::Place(LandmarkKind::Food)),
-        landmark_color(LandmarkKind::Food)
+        gesture_topic_color(sim_core::GestureTopic::Place(LandmarkKind::Berries)),
+        landmark_color(LandmarkKind::Berries)
     );
     assert_ne!(
         gesture_topic_color(sim_core::GestureTopic::Explored),

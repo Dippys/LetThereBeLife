@@ -1,7 +1,7 @@
 //! Public-API world queries used to select a deterministic, plausible settlement candidate.
 
 use sim_world::{
-    ResourceKind, TraversalKind, WaterSource, World, WorldConfig, WorldPosition, WorldRect,
+    Material, TraversalKind, WaterSource, World, WorldConfig, WorldPosition, WorldRect,
 };
 use std::collections::VecDeque;
 
@@ -25,9 +25,7 @@ fn inspect_candidate(world: &World, position: WorldPosition) -> Option<Candidate
         || world
             .resource_at(position)
             .expect("the scenario surveys only resident cells")
-            .is_some_and(|resource| {
-                matches!(resource.kind, ResourceKind::Wood | ResourceKind::Stone)
-            })
+            .is_some_and(|resource| matches!(resource.kind, Material::Wood | Material::Stone))
     {
         return None;
     }
@@ -84,9 +82,9 @@ fn inspect_candidate(world: &World, position: WorldPosition) -> Option<Candidate
                     .expect("the scenario surveys only resident cells")
                 {
                     let total = match resource.kind {
-                        ResourceKind::Food => &mut inputs.food,
-                        ResourceKind::Wood => &mut inputs.wood,
-                        ResourceKind::Stone => &mut inputs.stone,
+                        Material::Berries | Material::Bitterberries => &mut inputs.food,
+                        Material::Wood => &mut inputs.wood,
+                        Material::Stone => &mut inputs.stone,
                     };
                     *total += u32::from(resource.capacity);
                 }

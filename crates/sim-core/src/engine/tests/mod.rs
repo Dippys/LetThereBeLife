@@ -12,20 +12,21 @@ use crate::{
     AgentActivity, AgentId, AgentView, ChunkCoord, ChunkPresence, DeathCause, EAT_HUNGER_RELIEF,
     Engine, EngineCommand, EngineCommandOutcome, EngineConfig, ExplorationHeading,
     HEALTH_INCAPACITATION_THRESHOLD, HealthDiagnosticKind, INVENTORY_CAPACITY_PER_KIND,
-    InventoryView, MAX_ROUTE_EXPANSIONS, MAX_SIMULATION_SPEED, MoveRequestError,
+    InventoryView, MAX_ROUTE_EXPANSIONS, MAX_SIMULATION_SPEED, Material, MoveRequestError,
     MovementEventOutcome, MovementOutcomeKind, NeedKind, NeedThreshold, PerceptionError,
     PhysicalGoal, PolicyDiagnosticKind, PolicyFailureReason, PolicyReason, PopulationInit,
-    PopulationInitError, ResourceKind, RouteOutcomeKind, RouteRequest, RouteRequestError,
-    SHELTER_BUILD_TICKS, SHELTER_STONE_COST, SHELTER_WOOD_COST, SimTime, SleepQuality,
-    SleepRequestError, SpawnInvalidReason, SpawnKind, Standability, StructureDiagnosticKind,
-    StructureId, StructureState, TickOutcome, TraversalKind, TraversalStep, WORLD_HALF_EXTENT,
-    WaterSource, World, WorldConfig, WorldPosition, WorldRect,
+    PopulationInitError, RouteOutcomeKind, RouteRequest, RouteRequestError, SHELTER_BUILD_TICKS,
+    SHELTER_STONE_COST, SHELTER_WOOD_COST, SimTime, SleepQuality, SleepRequestError,
+    SpawnInvalidReason, SpawnKind, Standability, StructureDiagnosticKind, StructureId,
+    StructureState, TickOutcome, TraversalKind, TraversalStep, WORLD_HALF_EXTENT, WaterSource,
+    World, WorldConfig, WorldPosition, WorldRect,
 };
 use crate::{agent, needs, policy, resources, sleep, spatial, structures};
 
 mod actions;
 mod autonomy;
 mod cognition;
+mod food;
 mod health_sleep;
 mod lifecycle;
 mod measurements;

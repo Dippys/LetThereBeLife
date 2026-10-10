@@ -157,7 +157,7 @@ impl Engine {
                     continue;
                 };
                 let roll = scarcity_roll(self.config.seed, position);
-                if resource.kind == crate::ResourceKind::Food && roll >= u64::from(keep_percent) {
+                if resource.kind == crate::Material::Berries && roll >= u64::from(keep_percent) {
                     self.resource_deltas.strip(position);
                     stripped += 1;
                 }

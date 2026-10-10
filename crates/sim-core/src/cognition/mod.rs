@@ -3,6 +3,7 @@
 //! knowledge to each other through observable behavior. Beliefs live here;
 //! physical truth stays in the world, population, and resource stores.
 
+mod affordances;
 mod dialogue;
 mod gesture;
 mod lexicon;
@@ -12,6 +13,8 @@ mod reading;
 mod signal;
 mod social;
 
+pub(crate) use affordances::Affordances;
+pub use affordances::{AffordanceView, BELIEF_UNIT};
 pub use dialogue::{CONSEQUENCE_WEIGHT, REPAIR_WEIGHT};
 pub(crate) use dialogue::{Dialogue, PendingCorrection};
 pub use gesture::Gesture;
@@ -51,20 +54,44 @@ pub const SIGNAL_TICKS: u64 = 120;
 #[repr(u8)]
 pub enum LandmarkKind {
     Water = 0,
-    Food = 1,
+    Berries = 1,
     Wood = 2,
     Stone = 3,
     Shelter = 4,
+    Bitterberries = 5,
 }
 
 impl LandmarkKind {
-    pub const ALL: [Self; 5] = [
+    pub const COUNT: usize = 6;
+    pub const ALL: [Self; Self::COUNT] = [
         Self::Water,
-        Self::Food,
+        Self::Berries,
         Self::Wood,
         Self::Stone,
         Self::Shelter,
+        Self::Bitterberries,
     ];
+
+    /// The kind of place where `material` can be gathered.
+    pub const fn of_material(material: crate::Material) -> Self {
+        match material {
+            crate::Material::Berries => Self::Berries,
+            crate::Material::Bitterberries => Self::Bitterberries,
+            crate::Material::Wood => Self::Wood,
+            crate::Material::Stone => Self::Stone,
+        }
+    }
+
+    /// The material gathered at this kind of place, if any.
+    pub const fn material(self) -> Option<crate::Material> {
+        match self {
+            Self::Berries => Some(crate::Material::Berries),
+            Self::Bitterberries => Some(crate::Material::Bitterberries),
+            Self::Wood => Some(crate::Material::Wood),
+            Self::Stone => Some(crate::Material::Stone),
+            Self::Water | Self::Shelter => None,
+        }
+    }
 }
 
 /// How an agent came to believe in a place.
@@ -99,6 +126,8 @@ pub struct MentalMapView {
     pub explored_tiles: usize,
     /// A child of the band (started with no words) rather than a founder.
     pub child: bool,
+    /// What it believes materials are good for (only materials it has beliefs about).
+    pub affordances: Vec<AffordanceView>,
     pub acquaintances: Vec<AcquaintanceView>,
     /// What the agent believes words mean.
     pub lexicon: Vec<LexiconEntryView>,
@@ -219,6 +248,8 @@ pub struct RequestEvent {
     /// What the giver first took the request to be about (before any repair).
     pub read_as: Concept,
     pub response: RequestResponse,
+    /// What was handed over, if anything (the giver's idea of food).
+    pub given: Option<crate::Material>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -231,6 +262,20 @@ pub struct RepairEvent {
     /// The listener's own word for its guess, said with the question.
     pub listener_word: Option<VocalForm>,
     pub response: RepairResponse,
+}
+
+/// Someone ate something (latest tick, for logs and tools only). Eating and
+/// retching are visible, so `watchers` saw it and learned from it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MealEvent {
+    pub agent: AgentId,
+    pub at: SimTime,
+    pub material: crate::Material,
+    /// It made the eater sick (visibly).
+    pub retched: bool,
+    /// The eater had never tried it before.
+    pub first_taste: bool,
+    pub watchers: u16,
 }
 
 /// A hint that was checked by looking (latest tick, for logs and tools only).
@@ -280,10 +325,11 @@ impl GestureTopic {
     pub const fn concept(self) -> Concept {
         match self {
             Self::Place(LandmarkKind::Water) => Concept::Water,
-            Self::Place(LandmarkKind::Food) => Concept::Food,
+            Self::Place(LandmarkKind::Berries) => Concept::Berries,
             Self::Place(LandmarkKind::Wood) => Concept::Wood,
             Self::Place(LandmarkKind::Stone) => Concept::Stone,
             Self::Place(LandmarkKind::Shelter) => Concept::Home,
+            Self::Place(LandmarkKind::Bitterberries) => Concept::Bitterberries,
             Self::Explored => Concept::Been,
         }
     }
@@ -296,6 +342,8 @@ pub(crate) struct Mind {
     pub(crate) social: SocialMemory,
     pub(crate) lexicon: Lexicon,
     pub(crate) dialogue: Dialogue,
+    /// What it believes materials are good for.
+    pub(crate) affordances: Affordances,
     /// Born into the band rather than founding it: starts with no words, stays
     /// close to its parent, and asks readily.
     pub(crate) child: bool,
@@ -356,19 +404,37 @@ impl Minds {
     pub(crate) fn get_mut(&mut self, agent: AgentId) -> &mut Mind {
         let index = agent.get() as usize;
         while self.minds.len() <= index {
-            let id = self.minds.len() as u32;
-            let child = id >= self.founders;
-            self.minds.push(Mind {
-                lexicon: if child {
-                    Lexicon::default()
-                } else {
-                    Lexicon::founding(self.seed, AgentId::new(id))
-                },
-                child,
-                ..Mind::default()
-            });
+            let mind = self.newborn(AgentId::new(self.minds.len() as u32));
+            self.minds.push(mind);
         }
         &mut self.minds[index]
+    }
+
+    /// What `agent` believes materials are good for, whether or not its mind has
+    /// been created yet.
+    pub(crate) fn affordances(&self, agent: AgentId) -> Affordances {
+        self.get(agent)
+            .map_or_else(|| self.newborn(agent).affordances, |mind| mind.affordances)
+    }
+
+    /// The mind `agent` starts with: a founder inherits the seed's proto-language
+    /// and its family's food culture; a child starts with neither.
+    fn newborn(&self, agent: AgentId) -> Mind {
+        let child = agent.get() >= self.founders;
+        Mind {
+            lexicon: if child {
+                Lexicon::default()
+            } else {
+                Lexicon::founding(self.seed, agent)
+            },
+            affordances: if child {
+                Affordances::default()
+            } else {
+                Affordances::founding(self.seed, agent, FAMILY_SIZE)
+            },
+            child,
+            ..Mind::default()
+        }
     }
 }
 

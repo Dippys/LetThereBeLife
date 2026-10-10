@@ -304,15 +304,17 @@ fn initialize(
         engine
             .set_initial_inventory(
                 sim_core::AgentId::new(raw),
-                sim_core::InventoryView {
-                    food: initial_food_per_agent,
-                    wood: if raw < water_spawn_count {
-                        initial_wood_per_water_agent
-                    } else {
-                        0
-                    },
-                    ..sim_core::InventoryView::default()
-                },
+                sim_core::InventoryView::of(&[
+                    (sim_core::Material::Berries, initial_food_per_agent),
+                    (
+                        sim_core::Material::Wood,
+                        if raw < water_spawn_count {
+                            initial_wood_per_water_agent
+                        } else {
+                            0
+                        },
+                    ),
+                ]),
             )
             .map_err(|error| ScenarioError(format!("initial supplies failed: {error}")))?;
     }

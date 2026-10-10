@@ -16,9 +16,47 @@ pub(crate) use state::{PolicyPhase, PolicyState};
 
 use std::{error::Error, fmt};
 
-use crate::{AgentId, SimTime, WorldPosition};
+use crate::{AgentId, InventoryView, Material, SimTime, WorldPosition};
 
 pub const PHYSICAL_POLICY_RADIUS: u8 = 8;
+
+/// How much an agent wants to eat each material (indexed by `Material as usize`,
+/// in belief units): positive means "food, to me". Comes from the agent's beliefs,
+/// or from real properties for the mindless legacy policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FoodValues(pub(crate) [i16; Material::COUNT]);
+
+impl FoodValues {
+    /// What an all-knowing agent would value (the legacy policy has no beliefs).
+    pub(crate) fn truth() -> Self {
+        Self(Material::ALL.map(|material| {
+            let properties = material.properties();
+            let unit = crate::cognition::BELIEF_UNIT;
+            (properties.nutrition / unit) as i16 - 2 * (properties.toxicity / unit) as i16
+        }))
+    }
+
+    pub(crate) const fn is_food(self, material: Material) -> bool {
+        self.0[material as usize] > 0
+    }
+
+    /// Units carried of anything the agent considers food.
+    pub(crate) fn carried(self, inventory: InventoryView) -> u8 {
+        inventory
+            .carried()
+            .filter(|&(material, _)| self.is_food(material))
+            .fold(0_u8, |total, (_, amount)| total.saturating_add(amount))
+    }
+
+    /// The carried material the agent most wants to eat, if any is food to it.
+    pub(crate) fn best_carried(self, inventory: InventoryView) -> Option<Material> {
+        inventory
+            .carried()
+            .filter(|&(material, _)| self.is_food(material))
+            .max_by_key(|&(material, _)| (self.0[material as usize], std::cmp::Reverse(material)))
+            .map(|(material, _)| material)
+    }
+}
 
 pub const PHYSICAL_POLICY_ROUTE_BUDGET: u16 = 256;
 

@@ -240,6 +240,18 @@ impl NeedState {
         self.crossed = crossed_mask(self.values);
     }
 
+    /// Raises a need (sickness), capped at `NEED_MAX`.
+    pub(crate) fn worsen(&mut self, kind: NeedKind, amount: u16, now: SimTime) {
+        self.rebase(now);
+        let index = kind.index();
+        self.values[index] = self.values[index].saturating_add(amount).min(NEED_MAX);
+        if self.values[index] == NEED_MAX {
+            self.remainders[index] = 0;
+        }
+        self.generation = self.generation.wrapping_add(1);
+        self.crossed = crossed_mask(self.values);
+    }
+
     pub(crate) fn value_at(self, kind: NeedKind, now: SimTime) -> u16 {
         (self.numerator(kind, now) / u128::from(NEED_RATE_PERIOD_TICKS)) as u16
     }

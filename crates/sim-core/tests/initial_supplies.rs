@@ -28,18 +28,15 @@ fn initial_supplies_are_capped_pre_policy_setup_and_reset_cleanly() {
     assert_eq!(
         engine.set_initial_inventory(
             AgentId::new(0),
-            InventoryView {
-                food: 33,
-                ..InventoryView::default()
-            }
+            InventoryView::of(&[(sim_core::Material::Berries, 33)])
         ),
         Err(InitialInventoryError::AmountExceedsCapacity)
     );
-    let supplies = InventoryView {
-        food: 32,
-        wood: 8,
-        stone: 0,
-    };
+    let supplies = InventoryView::of(&[
+        (sim_core::Material::Berries, 32),
+        (sim_core::Material::Wood, 8),
+        (sim_core::Material::Stone, 0),
+    ]);
     engine
         .set_initial_inventory(AgentId::new(0), supplies)
         .unwrap();

@@ -5,8 +5,8 @@ use std::{cmp::Reverse, fmt::Write};
 use sim_core::{
     ACQUAINTANCE_SLOTS, AcquaintanceView, AgentActivity, BiomeType, ChunkPresence, Concept,
     DeathCause, ExplorationHeading, FRIEND_FAMILIARITY, FeatureKind, GenerateAreaError,
-    HealthStatus, LandmarkKind, LandmarkSource, Mime, NeedKind, Personality, PhysicalGoal,
-    PhysicalPolicyView, PolicyReason, PrevailingWind, ResourceKind, SleepQuality, SurfaceType,
+    HealthStatus, LandmarkKind, LandmarkSource, Material, Mime, NeedKind, Personality,
+    PhysicalGoal, PhysicalPolicyView, PolicyReason, PrevailingWind, SleepQuality, SurfaceType,
     VocalForm, World,
 };
 
@@ -241,7 +241,9 @@ pub(super) fn write_agent_text(output: &mut String, inspection: Option<AgentInsp
         writeln!(
             output,
             "INVENTORY F {}  W {}  S {}",
-            inventory.food, inventory.wood, inventory.stone
+            inventory.amount(Material::Berries),
+            inventory.amount(Material::Wood),
+            inventory.amount(Material::Stone)
         )
         .unwrap();
     }
@@ -292,7 +294,7 @@ fn write_memory(output: &mut String, memory: &MemoryInspection) {
         output,
         "MEMORY WATER {}  FOOD {}  WOOD {}  STONE {}",
         count(LandmarkKind::Water),
-        count(LandmarkKind::Food),
+        count(LandmarkKind::Berries),
         count(LandmarkKind::Wood),
         count(LandmarkKind::Stone),
     )
@@ -316,7 +318,7 @@ fn write_memory(output: &mut String, memory: &MemoryInspection) {
 /// Place concepts whose words the card lists, in display order.
 const PLACE_CONCEPTS: [(Concept, &str); 5] = [
     (Concept::Water, "WATER"),
-    (Concept::Food, "FOOD"),
+    (Concept::Berries, "FOOD"),
     (Concept::Wood, "WOOD"),
     (Concept::Stone, "STONE"),
     (Concept::Home, "HOME"),
@@ -463,6 +465,7 @@ const fn mime_label(mime: Mime) -> &'static str {
         Mime::Strike => "STRIKE",
         Mime::RestHead => "REST-HEAD",
         Mime::Sweep => "SWEEP",
+        Mime::Retch => "RETCH",
     }
 }
 
@@ -646,13 +649,15 @@ const fn feature_label(feature: FeatureKind) -> &'static str {
         FeatureKind::Tree => "TREE",
         FeatureKind::Rock => "ROCK",
         FeatureKind::BerryBush => "BERRY BUSH",
+        FeatureKind::BitterBush => "BITTER BUSH",
     }
 }
 
-const fn resource_label(resource: ResourceKind) -> &'static str {
+const fn resource_label(resource: Material) -> &'static str {
     match resource {
-        ResourceKind::Food => "FOOD",
-        ResourceKind::Wood => "WOOD",
-        ResourceKind::Stone => "STONE",
+        Material::Berries => "BERRIES",
+        Material::Bitterberries => "BITTERBERRIES",
+        Material::Wood => "WOOD",
+        Material::Stone => "STONE",
     }
 }
