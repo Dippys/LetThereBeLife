@@ -188,6 +188,56 @@ impl ViewerApp {
         self
     }
 
+    /// A world opened from a save: it's already lived in, so look at its people.
+    pub(crate) fn with_opened_world(mut self) -> Self {
+        self.population_status = PopulationStatus::Active;
+        self.initial_focus = self
+            .engine
+            .agent_views(usize::MAX)
+            .find(|view| view.activity != sim_core::AgentActivity::Dead)
+            .map(|view| view.position);
+        self
+    }
+
+    /// Writes the world to `path` (folders are made as needed).
+    pub(crate) fn save_world(
+        &self,
+        path: &std::path::Path,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(folder) = path.parent()
+            && !folder.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(folder)?;
+        }
+        self.engine.save(std::fs::File::create(path)?)?;
+        Ok(())
+    }
+
+    /// Replaces the running world with the one saved at `path`.
+    pub(crate) fn open_world(
+        &mut self,
+        path: &std::path::Path,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.engine = sim_core::Engine::load(std::fs::File::open(path)?)?;
+        self.feed.clear();
+        self.gestures.clear();
+        self.selected = None;
+        self.following = false;
+        self.accumulator = 0.0;
+        self.year_start = (0, self.engine.snapshot().death_count, 0);
+        self.population_status = PopulationStatus::Active;
+        let someone = self
+            .engine
+            .agent_views(usize::MAX)
+            .find(|view| view.activity != sim_core::AgentActivity::Dead)
+            .map(|view| view.position);
+        if let Some(position) = someone {
+            self.focus_on(position);
+        }
+        self.dirty = true;
+        Ok(())
+    }
+
     pub(crate) fn with_selected(mut self, agent: AgentId) -> Self {
         self.selected = Some(agent);
         self

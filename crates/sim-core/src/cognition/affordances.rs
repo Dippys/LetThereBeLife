@@ -17,7 +17,7 @@ const WATCHED_EVIDENCE_CAP: u8 = 5;
 const CULTURE_EVIDENCE: u8 = 4;
 
 /// One belief about a material. 3 bytes.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub(crate) struct Belief {
     /// Expected hunger relief per unit, in `BELIEF_UNIT`s.
@@ -39,7 +39,7 @@ pub struct AffordanceView {
     pub evidence: u8,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Affordances {
     beliefs: [Belief; Material::COUNT],
 }

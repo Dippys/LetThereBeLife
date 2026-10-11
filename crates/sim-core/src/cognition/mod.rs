@@ -439,7 +439,7 @@ pub struct HintOutcomeEvent {
 }
 
 /// Which cognitive features the autonomous policy uses.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PolicyOptions {
     /// Wander when nothing useful is in view (legacy viewer behavior).
     pub exploration: bool,
@@ -484,7 +484,7 @@ impl GestureTopic {
 }
 
 /// Everything one agent privately knows: places, people, and words.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Mind {
     pub(crate) map: MentalMap,
     pub(crate) social: SocialMemory,
@@ -516,7 +516,7 @@ pub(crate) struct Mind {
 
 /// Progress toward one destination: the closest it has been, and how many
 /// decisions since it last got closer.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Stall {
     pub(crate) target: Option<crate::agent::CompactPosition>,
     pub(crate) best: u16,
@@ -572,7 +572,7 @@ impl Mind {
 /// Minds for every agent, indexed by `AgentId`, grown on demand. Agents below
 /// `founders` inherit the seed's noisy proto-language; later ids are children
 /// who start with no words.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Minds {
     seed: u64,
     founders: u32,

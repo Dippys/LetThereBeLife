@@ -8,7 +8,7 @@ pub const SLEEP_HEALING: u16 = 1_500;
 const FLAG_SCHEDULED: u8 = 1;
 const FLAG_DETERIORATING: u8 = 2;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
 pub enum HealthStatus {
     Healthy = 0,
@@ -16,7 +16,9 @@ pub enum HealthStatus {
     Dead = 2,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[repr(u8)]
 pub enum DeathCause {
     Dehydration = 0,
@@ -76,7 +78,7 @@ pub struct HealthView {
     pub next_consequence: Option<SimTime>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DeathRecord {
     pub agent: AgentId,
     pub cause: DeathCause,
@@ -104,7 +106,7 @@ pub struct HealthDiagnostic {
     pub kind: HealthDiagnosticKind,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub(crate) struct HealthState {
     next_consequence: SimTime,

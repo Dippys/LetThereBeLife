@@ -8,6 +8,7 @@ mod errors;
 mod policy;
 mod requests;
 mod routes;
+mod save;
 mod setup;
 pub use setup::SimulationAdvanced;
 pub(crate) mod births;
@@ -40,7 +41,7 @@ use crate::{
 };
 
 /// Immutable settings used to construct or reset a simulation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EngineConfig {
     pub seed: u64,
     pub ticks_per_second: u32,

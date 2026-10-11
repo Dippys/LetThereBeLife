@@ -16,6 +16,10 @@ pub(super) struct LaunchOptions {
     pub(super) screenshot: Option<PathBuf>,
     /// A person whose panel starts open.
     pub(super) select: Option<u32>,
+    /// A saved world to open instead of starting a new one.
+    pub(super) load: Option<PathBuf>,
+    /// Where to save the world once `--advance` is done.
+    pub(super) save: Option<PathBuf>,
 }
 
 pub(super) fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Error>> {
@@ -26,6 +30,8 @@ pub(super) fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Erro
     let mut advance = 0;
     let mut screenshot = None;
     let mut select = None;
+    let mut load = None;
+    let mut save = None;
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
         match argument.as_str() {
@@ -55,6 +61,16 @@ pub(super) fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Erro
                         .parse()?,
                 );
             }
+            "--load" => {
+                load = Some(PathBuf::from(
+                    args.next().ok_or("--load requires a save file")?,
+                ));
+            }
+            "--save" => {
+                save = Some(PathBuf::from(
+                    args.next().ok_or("--save requires a file to write")?,
+                ));
+            }
             "--screenshot" => {
                 screenshot = Some(PathBuf::from(
                     args.next().ok_or("--screenshot requires a path")?,
@@ -62,7 +78,7 @@ pub(super) fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Erro
             }
             "--help" | "-h" => {
                 println!(
-                    "Usage: sim-viewer [--config PATH] [--smoke-frames NUMBER] [--pregenerate-world] [--valley] [--advance TICKS] [--select PERSON] [--screenshot PNG]"
+                    "Usage: sim-viewer [--config PATH] [--smoke-frames NUMBER] [--pregenerate-world] [--valley] [--advance TICKS] [--select PERSON] [--screenshot PNG] [--load SAVE] [--save SAVE]"
                 );
                 std::process::exit(0);
             }
@@ -80,6 +96,8 @@ pub(super) fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Erro
         advance,
         screenshot,
         select,
+        load,
+        save,
     })
 }
 

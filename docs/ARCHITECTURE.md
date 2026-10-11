@@ -14,8 +14,8 @@ sim-world ◄── sim-core ◄── sim-headless
 
 | Crate | Owns | Dependencies |
 |---|---|---|
-| `sim-world` | Terrain types, chunk storage (`World`), world generation, full-world archive format, `render_map` example | std, `rayon` (pure parallel derivation only) |
-| `sim-core` | All dynamic simulation truth: `Engine`, time, agents, scheduler, policy. Re-exports the `sim-world` public API, so clients only use `sim_core::…` | `sim-world` |
+| `sim-world` | Terrain types, chunk storage (`World`), world generation, full-world archive format, `render_map` example | std, `rayon` (pure parallel derivation only), `serde` (derives for saves) |
+| `sim-core` | All dynamic simulation truth: `Engine`, time, agents, scheduler, policy. Re-exports the `sim-world` public API, so clients only use `sim_core::…`. `Engine::save`/`load` (terrain regenerated from the seed) | `sim-world`, `serde`, `postcard` |
 | `sim-config` | Loading/validating `config/simulation.toml`; `build.rs` copies it next to built binaries | `sim-core`, `serde`, `toml` |
 | `sim-headless` | CLI runner, `ScenarioRunner`, canonical survival scenarios, versioned reports + hashes | `sim-core`, `sim-config` |
 | `sim-viewer` | Window, input, fixed-step driver, camera, interface (top bar, person panel, event feed, help), background chunk loading, `wgpu` rendering | `sim-core`, `sim-config`, `winit`, `wgpu`, `pollster`, `bytemuck`, `rayon` |

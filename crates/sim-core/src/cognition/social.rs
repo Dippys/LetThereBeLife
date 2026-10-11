@@ -58,7 +58,7 @@ impl Tie {
 const EMPTY: u32 = u32::MAX;
 
 /// One remembered person. Exactly 20 bytes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 struct Acquaintance {
     agent: u32,
@@ -142,7 +142,7 @@ pub(crate) struct Noticed {
     pub(crate) evicted: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub(crate) struct SocialMemory {
     slots: [Acquaintance; ACQUAINTANCE_SLOTS],

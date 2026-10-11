@@ -8,7 +8,7 @@ const PERSONALITY_SEED: u64 = 0x5045_5253_4f4e_414c;
 
 /// Four traits, each 0 (low) to 255 (high). Derived deterministically from the
 /// world seed and the agent's id, so a replay always gets the same people.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct Personality {
     /// Explores more often and farther; settles for less knowledge before exploring.
     pub curiosity: u8,

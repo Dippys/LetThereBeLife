@@ -9,4 +9,6 @@ rust-version.workspace = true
 path = "src/lib.rs"
 
 [dependencies]
+serde.workspace = true
+postcard.workspace = true
 sim-world.workspace = true

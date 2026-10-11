@@ -26,7 +26,7 @@ impl fmt::Display for InitialInventoryError {
 impl Error for InitialInventoryError {}
 
 /// What an agent carries: a count per material, indexed by `Material as usize`.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub struct InventoryView {
     pub items: [u8; Material::COUNT],
@@ -93,7 +93,9 @@ pub(crate) struct ResourceDelta {
     since: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 #[repr(C)]
 struct CompactFeaturePosition {
     x: i16,
@@ -110,7 +112,7 @@ impl CompactFeaturePosition {
 }
 
 /// What's left of one modified feature, and when that was last true.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct Delta {
     remaining: u16,
     /// Simulated second it was last gathered (regrowth counts from here).
@@ -120,7 +122,7 @@ struct Delta {
 /// Sparse depletion of generated features. Sources grow back lazily: what's
 /// left is computed from the last gathering and the material's regrowth time
 /// whenever someone looks, so nothing scans every bush every tick.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ResourceDeltas {
     remaining: BTreeMap<CompactFeaturePosition, Delta>,
     /// The engine's current time in seconds, advanced every tick.

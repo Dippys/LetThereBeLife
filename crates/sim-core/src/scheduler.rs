@@ -5,7 +5,9 @@ use crate::{AgentId, NeedKind, SimTime, agent::CompactPosition, policy::Physical
 /// Maximum number of due events one engine tick may apply.
 pub(crate) const MAX_DUE_EVENTS_PER_TICK: usize = 4_096;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 #[repr(u8)]
 pub(crate) enum EventClass {
     NeedThreshold = 0,
@@ -29,7 +31,7 @@ impl EventClass {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub(crate) struct ScheduledEvent {
     pub(crate) due: SimTime,
@@ -78,7 +80,7 @@ pub(crate) enum ScheduleError {
     SequenceExhausted,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Scheduler {
     events: BinaryHeap<ScheduledEvent>,
     next_sequence: u64,

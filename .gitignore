@@ -1,3 +1,6 @@
 /target/
 *.log
 
+
+# Worlds saved from the viewer (F5, --save)
+/saves/

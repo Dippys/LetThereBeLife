@@ -14,7 +14,7 @@ const CULTURE_EVIDENCE: u8 = 4;
 const THRESHOLD: u8 = 64;
 
 /// One belief about a species. 3 bytes.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub(crate) struct FaunaBelief {
     /// How worthwhile it seems to hunt (0–255).
@@ -33,7 +33,7 @@ pub struct FaunaView {
     pub evidence: u8,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Fauna {
     beliefs: [FaunaBelief; Species::COUNT],
 }

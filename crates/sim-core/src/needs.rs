@@ -3,7 +3,9 @@ use crate::{AgentActivity, AgentId, EventId, SimTime, SleepQuality};
 pub const NEED_MAX: u16 = 10_000;
 pub const NEED_RATE_PERIOD_TICKS: u16 = 60;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[repr(u8)]
 pub enum NeedKind {
     Hunger = 0,
@@ -85,7 +87,7 @@ const ACTIVITY_RATES: [[i8; 4]; 5] = [
 
 const THRESHOLDS: [u16; 4] = [7_000, 6_000, 8_000, 7_000];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub(crate) struct NeedState {
     reference_time: SimTime,

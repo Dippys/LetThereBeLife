@@ -18,7 +18,9 @@ pub const ELDER_AGE: u32 = 50;
 /// Children this young don't hunt.
 pub const HUNTING_AGE: u32 = 12;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[repr(u8)]
 pub enum Sex {
     Female = 0,
@@ -27,7 +29,9 @@ pub enum Sex {
 
 /// What someone is called: a two-syllable sound (1,024 of them), separate
 /// from the sounds used as words.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[repr(transparent)]
 pub struct Name(pub u16);
 
@@ -79,7 +83,7 @@ impl LifeStage {
 }
 
 /// Who someone is in body: sex and when they were born.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Life {
     /// Simulated second of birth (negative for people older than the run).
     pub(crate) born: i32,

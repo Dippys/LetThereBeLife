@@ -2,7 +2,7 @@ use std::{error::Error, fmt};
 
 use crate::{AgentId, SimTime, StructureId, WorldPosition};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
 pub enum SleepQuality {
     OpenGround = 0,
@@ -92,7 +92,7 @@ impl fmt::Display for SleepRequestError {
 
 impl Error for SleepRequestError {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub(crate) struct SleepState {
     pub(crate) started_at: SimTime,

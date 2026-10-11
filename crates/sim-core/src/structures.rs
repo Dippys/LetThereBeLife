@@ -69,7 +69,9 @@ pub const MAX_FUEL_SECONDS: u32 = 2 * 3_600;
 /// Cold relieved by one warm-up at a hearth.
 pub const HEARTH_WARMTH: u16 = 3_500;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[repr(transparent)]
 pub struct StructureId(u32);
 
@@ -79,7 +81,9 @@ impl StructureId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[repr(u8)]
 pub enum StructureKind {
     /// A lean-to: sleeping beside it keeps the cold off.
@@ -142,7 +146,7 @@ impl StructureKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
 pub enum StructureState {
     UnderConstruction = 0,
@@ -224,7 +228,7 @@ impl fmt::Display for BuildShelterError {
 
 impl Error for BuildShelterError {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub(crate) struct StructureRecord {
     started_at: SimTime,
@@ -255,7 +259,7 @@ impl StructureRecord {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct StructureStore {
     records: Vec<Option<StructureRecord>>,
     by_position: BTreeMap<(i16, i16), StructureId>,

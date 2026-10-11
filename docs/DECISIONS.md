@@ -703,3 +703,32 @@ before the harder world of D-102 halved it; it then sat at the average and faile
 **Consequences:** Over 10 years in valleys 1, 4, 9, 13: survivors 24, 30, 20, 23 against the
 script's 15, 30, 13, 22; deaths from cold 2, 1, 6, 0 against 9, 1, 11, 3. On 47 fresh valleys
 (seeds 79-158) episodes 48 in 25 valleys against the script's 50 in 22, survivors 917 against 875.
+
+## D-106: What the learning experiments showed (2026-10-11)
+
+**Decision:** Three follow-ups to phase 2 were tried and not merged (branches `copying`,
+`view-habits`): copying habits from people seen getting relief; showing each person's best habits in
+the panel; and learning only from choices made while a need presses.
+**Why it matters:** Habit slots fill with calm moments (resting, chatting, gathering with no need
+pressing), which bring no relief but are so frequent they evict the few that matter ("cold:
+sleeping helped"). So copied lessons found no room (no effect in 7 of 8 valleys) and the panel had
+nothing to show. Keeping only pressured choices retained the right memories but did worse over 10
+years in 8 valleys (177 survivors against 185; seed 9 lost 13 to cold against 6): with experience
+kept, people settle on sleeping and stop trying fires. Much of phase 2's gain came from curiosity
+trying varied options in situations nobody remembered, not from accurate values.
+**Next:** better credit for what a choice achieves (relief per time, relief that lasts, the
+need it was chosen for), so kept experience is trustworthy; then copying and the panel again.
+
+## D-107: Saving and opening worlds (2026-10-11)
+
+**Decision:** `Engine::save` writes everything the simulation changed (people, minds, the event
+schedule, families, animals, structures, resource levels, placed objects, deaths, counters) in the
+compact `postcard` format, with a version number first; `Engine::load` builds a new engine from the
+saved config, regenerates the terrain people live in from the seed, and restores the rest. Per-tick
+event lists and the route planner's scratch space aren't saved. The viewer opens saves with
+`--load FILE`, writes one after a fast-forward with `--save FILE`, and saves/opens a quick save with
+F5/F9 (`saves/quick.ltbl`, ignored by git). serde derives were added across sim-core and sim-world.
+**Why:** Long runs (100 or 1,000 years) take minutes to hours; now they're computed once.
+**Consequences:** A world saved and reopened continues identically (tested over 40,000 ticks on
+either side). A 5-year valley is a 30 KB file and opens in about a second. Saves from another
+layout are refused with a clear message; bump `SAVE_VERSION` when saved types change.

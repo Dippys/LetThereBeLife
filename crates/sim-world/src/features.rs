@@ -15,7 +15,9 @@ pub enum FeatureKind {
 
 /// A gatherable, carryable material. Behavior should depend on its
 /// [`MaterialProperties`], never on which material it is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[repr(u8)]
 pub enum Material {
     Berries,

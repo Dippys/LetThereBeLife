@@ -73,6 +73,14 @@ the stored food), with the credit decaying the longer that takes.
 - Valleys differ: different habits arise and persist in different bands (culture).
 - Episodes of misunderstanding stay common (the success test).
 
+## Lessons so far (D-106)
+
+- Calm moments crowd out the memories that matter; learning must keep the situations that press.
+- Judging a choice by the drop in discomfort until the next different choice misjudges options:
+  with experience kept, people settle on sleeping when cold and stop trying fires, and do worse.
+  Credit needs to account for time taken and how long relief lasts before copying or showing
+  habits is worth it.
+
 ## Costs and risks
 
 - Early generations make more mistakes and die more often, because they really must discover

@@ -161,8 +161,7 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 - **Intermittent viewer smoke crash.** `0xc0000409` with no panic message (WSL shows it as exit
   code 9): 1 in 19 runs on 2026-10-09, 2 in 14 on 2026-10-10, then 0 in 8, then 2 in 8 `--valley`
   smokes after M7, then 1 in 12 smokes after the living world. It happens with and without agents. Cause unknown, possibly GPU teardown.
-- **No save/load.** Simulation state can't be persisted. The world archive needs regenerating for
-  generator v2 (`--pregenerate-world`).
+- The world archive needs regenerating for generator v2 (`--pregenerate-world`).
 - **Minds are 912 B per agent** (mental map 372 B). That's fine at viewer scale; the spec's 10M
   agents would need ~8 GB, so compaction comes later.
 - **Greedy waypoints can pace around obstacles.** Agents no longer step straight back to where they
@@ -170,7 +169,8 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
-- 2026-10-11 (latest): learning what works, phase 2: cold and tiredness answered by experience
+- 2026-10-11 (latest): saving and opening worlds: `--save`, `--load`, F5/F9 (D-107).
+- 2026-10-11: learning what works, phase 2: cold and tiredness answered by experience
   (D-105); far fewer people freeze.
 - 2026-10-11: huts nobody lives in fall down after two years (D-104).
 - 2026-10-11: learning what works, phase 1: habits learned silently (D-103).
@@ -220,7 +220,6 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 1. **Learning what works** (docs/plans/LEARNING.md): phases 1-2 done (D-103, D-105: cold and
    tiredness). Next: copying others, then food, water and storage, then multi-step projects.
-2. **Save and load**, so a long run (e.g. 1,000 years) is computed once and opened instantly.
 3. **More speaker feedback**: speakers watching how listeners react, overhearing others.
 4. **Separated groups (continued)**: a lasting barrier or much longer isolation.
 5. **Episodic memory** (phase 3), so agents remember who misled, helped, or warned them.

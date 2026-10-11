@@ -52,8 +52,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     let archive = load_world_archive(engine_config.seed, &config);
-    let mut engine = Engine::new(engine_config);
-    let valley = options.valley.then(|| {
+    let loaded = match &options.load {
+        Some(path) => {
+            let started = Instant::now();
+            let engine = Engine::load(std::fs::File::open(path)?)?;
+            println!(
+                "opened {} (year {}, {} people) in {:.2?}",
+                path.display(),
+                engine.snapshot().simulated_seconds as i64 / sim_core::SECONDS_PER_YEAR + 1,
+                engine.snapshot().living_agent_count,
+                started.elapsed()
+            );
+            Some(engine)
+        }
+        None => None,
+    };
+    let opened_save = loaded.is_some();
+    let mut engine = loaded.unwrap_or_else(|| Engine::new(engine_config));
+    let valley = (options.valley && !opened_save).then(|| {
         let started = Instant::now();
         match startup::start_valley(&mut engine) {
             Ok(start) => {
@@ -82,6 +98,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(start) = valley.flatten() {
         app = app.with_valley(start);
     }
+    if opened_save {
+        app = app.with_opened_world();
+    }
     if options.advance > 0 {
         let started = Instant::now();
         app.advance(options.advance);
@@ -90,6 +109,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             options.advance,
             started.elapsed()
         );
+    }
+    if let Some(path) = &options.save {
+        app.save_world(path)?;
+        println!("saved the world to {}", path.display());
     }
     if let Some(person) = options.select {
         app = app.with_selected(sim_core::AgentId::new(person));

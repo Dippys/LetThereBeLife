@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 
 use crate::{AgentId, CHUNK_SIZE, WorldPosition, WorldRect};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 struct SpatialBucket {
     x: i16,
     y: i16,
@@ -23,7 +25,7 @@ impl SpatialBucket {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub(crate) struct CellOccupant {
     local_cell: u16,
@@ -39,7 +41,7 @@ pub(crate) enum TransferError {
 ///
 /// Entries are ordered by cell and then agent so multiple living agents can share a cell
 /// without losing deterministic perception or source-validated movement.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct SpatialIndex {
     buckets: BTreeMap<SpatialBucket, Vec<CellOccupant>>,
 }

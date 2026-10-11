@@ -83,7 +83,9 @@ impl fmt::Display for PolicyActivationError {
 
 impl Error for PolicyActivationError {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[repr(u8)]
 pub enum PhysicalGoal {
     SeekWater = 0,
@@ -117,7 +119,7 @@ pub enum PhysicalGoal {
     Drop = 19,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
 pub enum PolicyReason {
     InitialDecision,

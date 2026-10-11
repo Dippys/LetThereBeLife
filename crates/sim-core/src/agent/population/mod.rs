@@ -25,7 +25,7 @@ use crate::{
     structures::StructureStore,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub(crate) struct RouteState {
     destination: CompactPosition,
@@ -39,7 +39,7 @@ pub(crate) struct MovementEnvironment<'a> {
     pub(crate) structures: &'a StructureStore,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Population {
     records: Vec<AgentRecord>,
     movement_generations: Vec<u32>,

@@ -45,7 +45,7 @@ const NO_SEARCH: u16 = u16::MAX;
 
 /// One remembered place. Its kind is implied by its slot; `confidence == 0`
 /// marks an empty slot. Exactly 16 bytes.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub(crate) struct Landmark {
     x: i16,
@@ -170,7 +170,7 @@ impl Landmark {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub(crate) struct MentalMap {
     landmarks: [Landmark; LANDMARK_SLOTS],

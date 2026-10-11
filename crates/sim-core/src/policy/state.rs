@@ -17,7 +17,7 @@ pub(crate) enum PolicyPhase {
     Backoff,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(transparent)]
 pub(crate) struct PolicyNavigation(u8);
 
@@ -52,7 +52,7 @@ impl PolicyNavigation {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub(crate) struct PolicyState {
     pub(crate) target: CompactPosition,

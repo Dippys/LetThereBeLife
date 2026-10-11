@@ -11,7 +11,7 @@ const WATCHED_EVIDENCE_CAP: u8 = 5;
 const CULTURE_EVIDENCE: u8 = 4;
 
 /// 4 bytes.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub(crate) struct Crafts {
     /// How strongly it believes hearths warm (0–255).

@@ -43,7 +43,7 @@ pub struct EngineDiagnostics {
     pub capacity: EngineCapacityMetrics,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub(crate) struct RuntimeCounters {
     pub(crate) events_processed: u64,
     pub(crate) stale_events_processed: u64,

@@ -24,7 +24,9 @@ const CROWD_RADIUS: i64 = 4;
 /// This many people within `CROWD_RADIUS` count as a crowd.
 const CROWD_SIZE: usize = 3;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[repr(u8)]
 pub enum Species {
     Deer,
@@ -95,7 +97,7 @@ impl Species {
 }
 
 /// What an animal is doing, as anyone watching can see.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
 pub enum AnimalMode {
     Grazing,
@@ -150,7 +152,7 @@ pub enum WildlifeEvent {
 }
 
 /// One animal. 24 bytes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub(crate) struct Animal {
     pub(crate) next_act: u64,
@@ -173,7 +175,7 @@ impl Animal {
 }
 
 /// Meat lying where an animal fell. Spoils after `CARCASS_TICKS`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub(crate) struct Carcass {
     pub(crate) spoils_at: u64,
@@ -192,7 +194,7 @@ impl Carcass {
 }
 
 /// All animals and carcasses. Dead animals keep their slot (ids stay stable).
-#[derive(Debug, Default)]
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Wildlife {
     pub(crate) animals: Vec<Animal>,
     pub(crate) carcasses: Vec<Carcass>,

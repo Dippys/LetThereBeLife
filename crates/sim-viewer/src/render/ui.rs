@@ -1204,7 +1204,7 @@ fn help(painter: &mut Painter, width: f32, height: f32) {
          things. Words can be misunderstood, and both sides learn from what happens next.",
         column * 2 + 2,
     );
-    const CONTROLS: [(&str, &str); 14] = [
+    const CONTROLS: [(&str, &str); 15] = [
         ("Drag", "move the map"),
         ("Scroll", "zoom in and out"),
         ("Click", "pick a person"),
@@ -1213,6 +1213,7 @@ fn help(painter: &mut Painter, width: f32, height: f32) {
         ("Space", "pause or resume"),
         ("1-9  + -", "speed (+ goes past 256×)"),
         ("I", "valley info"),
+        ("F5  F9", "save the world, open it"),
         ("H", "this help"),
         ("Esc", "close what's open"),
         ("T", "add a person at the mouse"),

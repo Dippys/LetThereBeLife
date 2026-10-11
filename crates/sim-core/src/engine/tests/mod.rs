@@ -34,6 +34,7 @@ mod lifecycle;
 mod measurements;
 mod movement;
 mod requests;
+mod save;
 mod shelter;
 mod wildlife;
 

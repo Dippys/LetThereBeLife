@@ -6,7 +6,7 @@ use crate::{
 };
 
 /// Object kinds that an explicit simulation command can place into resident terrain.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
 pub enum SpawnKind {
     Tree,
@@ -63,7 +63,9 @@ impl fmt::Display for SpawnObjectError {
 
 impl Error for SpawnObjectError {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 #[repr(C)]
 struct CompactSpawnPosition {
     y: i16,
@@ -86,14 +88,14 @@ impl CompactSpawnPosition {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 struct SpawnedObject {
     remaining: u16,
     kind: SpawnKind,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct SpawnedObjects {
     objects: BTreeMap<CompactSpawnPosition, SpawnedObject>,
     revision: u64,

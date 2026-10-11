@@ -9,6 +9,7 @@ rust-version.workspace = true
 path = "src/lib.rs"
 
 [dependencies]
+serde.workspace = true
 rayon.workspace = true
 
 [[example]]

@@ -141,7 +141,7 @@ impl Choice {
 }
 
 /// One learned habit: 4 bytes.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 struct Habit {
     situation: u8,
@@ -162,7 +162,7 @@ pub struct HabitView {
 }
 
 /// The decision being tried, to judge once the next decision comes.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub(crate) struct Trial {
     situation: u8,
@@ -172,7 +172,7 @@ pub(crate) struct Trial {
 }
 
 /// 128 bytes of habits plus the trial in progress.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Habits {
     habits: [Habit; HABIT_SLOTS],
     trial: Trial,

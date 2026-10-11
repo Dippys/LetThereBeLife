@@ -25,7 +25,7 @@ const RECRUIT_COOLDOWN_SECONDS: u32 = 90;
 /// Something someone pointed out about an animal: what the listener took it to
 /// be, roughly where, until when it's worth acting on, and where the tip came
 /// from (so finding something else there can teach about the word).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Lead {
     pub(crate) signal: u64,
     pub(crate) speaker: AgentId,
@@ -51,7 +51,7 @@ const REFUSED_COOLDOWN_SECONDS: u32 = 600;
 /// What a listener plans to tell a speaker about a tip it followed up: after a
 /// misunderstanding, "not that, this" (`misread` differs from `actual`); after
 /// finding what it expected, a report of what it found (`misread == actual`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct PendingCorrection {
     pub(crate) speaker: AgentId,
     pub(crate) form: VocalForm,
@@ -70,7 +70,7 @@ impl PendingCorrection {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Dialogue {
     correction: Option<PendingCorrection>,
     /// Who the agent is about to ask for food, and where they stood.

@@ -32,13 +32,13 @@ const NEWCOMER_GAP_YEARS: u64 = 5;
 /// Most a child's trait strays from the average of its parents'.
 const TRAIT_VARIATION: i32 = 30;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Pregnancy {
     conceived: i32,
     father: AgentId,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Baby {
     born: i32,
     sex: Sex,
@@ -49,7 +49,7 @@ pub(crate) struct Baby {
 }
 
 /// Mothers' pregnancies and carried babies, and when each last weaned a child.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Families {
     pregnancies: BTreeMap<AgentId, Pregnancy>,
     babies: BTreeMap<AgentId, Baby>,

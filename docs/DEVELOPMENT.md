@@ -121,6 +121,7 @@ Compare minds before and after any behavior change. Current numbers are in [STAT
 | `Tab` / `F` | Next living person / follow the picked person |
 | `Esc` | Close help, then the build palette, then the person panel (it no longer quits) |
 | `Space`, `1`–`9`, `+`/`-` | Pause, speed 1×–256×, step the speed up to 4096× (also buttons in the top bar); past what the computer manages, the bar shows the speed reached |
+| `F5`, `F9` | Save the world to `saves/quick.ltbl`, open it again |
 | `I` | Valley info: weather, fires burning, how many are cold/hungry/thirsty/tired, births and deaths this year |
 | `T` | Add a person at the cursor |
 | `B` | Build palette: person, tree, berry bush, rock, water; click the map to place |
@@ -137,6 +138,8 @@ that went with them (uppercase when shouted), and a dotted line shows where the 
 For screenshots: `--valley --advance TICKS --select PERSON --smoke-frames N --screenshot out.png`.
 To open a world years ahead: `--valley --advance TICKS` (a year is 864,000 ticks; 100 years takes
 about 8 minutes). The console shows progress, a summary each year, and every birth and death.
+Add `--save saves/century.ltbl` to keep the result, then open it any time with
+`--load saves/century.ltbl`. In the viewer, F5 saves to `saves/quick.ltbl` and F9 opens it.
 renders hidden and saves the last frame.
 
 ## Tests

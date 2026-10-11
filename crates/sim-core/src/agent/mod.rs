@@ -29,7 +29,9 @@ use crate::WorldPosition;
 pub const MAX_POPULATION: u32 = 10_000_000;
 
 /// Stable dense population identity. IDs are allocated from zero in spawn order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[repr(transparent)]
 pub struct AgentId(u32);
 
@@ -51,7 +53,19 @@ impl fmt::Display for AgentId {
 }
 
 /// Authoritative simulation time measured in fixed engine ticks.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 #[repr(transparent)]
 pub struct SimTime(u64);
 
@@ -74,7 +88,7 @@ impl SimTime {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
 pub enum AgentActivity {
     Idle = 0,
@@ -99,7 +113,9 @@ pub struct AgentView {
     pub activity: AgentActivity,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[repr(C)]
 pub(crate) struct CompactPosition {
     pub(crate) x: i16,
@@ -122,7 +138,7 @@ impl CompactPosition {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub(crate) struct AgentRecord {
     position: CompactPosition,

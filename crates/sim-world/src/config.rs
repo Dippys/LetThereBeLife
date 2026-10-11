@@ -5,7 +5,7 @@ use std::{error::Error, fmt};
 use crate::{DEFAULT_INITIAL_WORLD_SIZE, MAX_INITIAL_CELLS, WORLD_SIDE_CELLS};
 
 /// Validated initial generation dimensions, not a maximum world extent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct WorldConfig {
     initial_width: u32,
     initial_height: u32,

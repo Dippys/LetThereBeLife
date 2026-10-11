@@ -19,6 +19,8 @@ const FOCUS_MIN_CELL_PIXELS: f64 = 3.0;
 /// Cells across the shorter screen axis after zooming in to focus.
 const FOCUS_SPAN_CELLS: f64 = 96.0;
 
+/// Where F5 saves the world and F9 opens it from.
+const QUICK_SAVE: &str = "saves/quick.ltbl";
 impl ViewerApp {
     pub(super) fn update_hover(&mut self) {
         let Some(window) = self.window.clone() else {
@@ -307,6 +309,20 @@ impl ViewerApp {
             KeyCode::Minus | KeyCode::NumpadSubtract => self.step_speed(-1),
             KeyCode::KeyH | KeyCode::F1 => self.help_open = !self.help_open,
             KeyCode::KeyI => self.info_open = !self.info_open,
+            KeyCode::F5 => {
+                let message = match self.save_world(std::path::Path::new(QUICK_SAVE)) {
+                    Ok(()) => format!("Saved the world to {QUICK_SAVE}"),
+                    Err(error) => format!("Couldn't save: {error}"),
+                };
+                self.show_toast(message);
+            }
+            KeyCode::F9 => {
+                let message = match self.open_world(std::path::Path::new(QUICK_SAVE)) {
+                    Ok(()) => "Opened the quick save".to_owned(),
+                    Err(error) => format!("Couldn't open the quick save: {error}"),
+                };
+                self.show_toast(message);
+            }
             KeyCode::F3 => self.details_open = !self.details_open,
             KeyCode::Escape => {
                 if self.help_open {

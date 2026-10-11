@@ -12,7 +12,9 @@ use crate::{AgentId, Material, Species, StructureKind};
 /// there", and every material, species, and kind of structure in the world (a
 /// new one becomes something to talk about without new code). Agents may come
 /// to link them to different forms.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum Concept {
     Water,
     /// "I've been over there."
@@ -72,7 +74,9 @@ impl Concept {
 }
 
 /// An observable sound. Only the id matters to agents; `name` makes logs readable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct VocalForm(pub u8);
 
 /// How many distinct forms exist (more than concepts, so variants can arise).
@@ -117,7 +121,7 @@ const SYNONYM_PERCENT: u64 = 6;
 
 /// One `form → concept` hypothesis. Exactly 12 bytes; `heard == 0` and
 /// `positive == 0` marks an empty slot.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 struct LexicalEntry {
     form: u8,
@@ -161,7 +165,7 @@ pub struct LexiconEntryView {
     pub failures: u16,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub(crate) struct Lexicon {
     entries: [LexicalEntry; LEXICON_SLOTS],
