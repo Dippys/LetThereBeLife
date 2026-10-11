@@ -37,8 +37,10 @@ pub(super) fn build_spawned_object_instances(
     {
         let inset = match object.kind {
             SpawnKind::Water => 0.0,
+            // A young tree is drawn smaller until it has grown.
+            SpawnKind::Tree if object.remaining.is_some_and(|wood| wood < SAPLING_GROWN) => 0.28,
             SpawnKind::Tree | SpawnKind::Rock => 0.08,
-            SpawnKind::BerryBush => 0.18,
+            SpawnKind::BerryBush | SpawnKind::BitterBush => 0.18,
         };
         output.push(Instance::new(
             object.position.x as f32 + inset,
@@ -47,6 +49,37 @@ pub(super) fn build_spawned_object_instances(
             1.0 - inset * 2.0,
             spawn_kind_color(object.kind),
         ));
+    }
+}
+
+/// Wood below which a tree is drawn as a sapling.
+const SAPLING_GROWN: u16 = 20;
+
+/// Ground drawn over generated plants that died or were felled, so they
+/// disappear from the static feature layer.
+pub(super) fn append_cleared_instances(
+    cleared: impl IntoIterator<Item = WorldPosition>,
+    world: &sim_core::World,
+    visible: WorldRect,
+    scale: f32,
+    output: &mut Vec<Instance>,
+) {
+    if scale < MIN_DYNAMIC_INSTANCE_PIXELS {
+        return;
+    }
+    for position in cleared
+        .into_iter()
+        .filter(|position| visible.contains(*position))
+    {
+        if let Some(cell) = world.cell(position) {
+            output.push(Instance::new(
+                position.x as f32,
+                position.y as f32,
+                1.0,
+                1.0,
+                super::colors::terrain_color(cell),
+            ));
+        }
     }
 }
 

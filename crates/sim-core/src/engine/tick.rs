@@ -21,6 +21,10 @@ impl Engine {
         };
         self.time = next_time;
         self.resource_deltas.advance(self.time);
+        if !self.resource_deltas.barren() {
+            self.spawned_objects
+                .advance((self.time.ticks() / 60) as u32);
+        }
         self.movement_outcomes.clear();
         self.route_outcomes.clear();
         self.need_outcomes.clear();
@@ -214,6 +218,7 @@ impl Engine {
         self.revive_due();
         self.turn_season();
         self.age_people();
+        self.grow_plants();
         self.tend_families();
         // Autonomous agents re-schedule constantly; without this, stale events
         // were only pruned on manual commands and piled up during long runs.

@@ -123,6 +123,7 @@ pub(super) const fn spawn_kind_color(kind: SpawnKind) -> u32 {
     match kind {
         SpawnKind::Tree => feature_color(FeatureKind::Tree),
         SpawnKind::BerryBush => feature_color(FeatureKind::BerryBush),
+        SpawnKind::BitterBush => feature_color(FeatureKind::BitterBush),
         SpawnKind::Rock => feature_color(FeatureKind::Rock),
         SpawnKind::Water => rgba(45, 132, 202, 235),
     }

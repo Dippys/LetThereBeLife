@@ -33,6 +33,7 @@ mod life;
 mod lifecycle;
 mod measurements;
 mod movement;
+mod plants;
 mod requests;
 mod save;
 mod shelter;

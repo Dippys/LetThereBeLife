@@ -131,22 +131,26 @@ pub(crate) struct ResourceDeltas {
     barren: bool,
 }
 
-/// `delta` grown back to `now`, capped at the generated capacity.
-fn regrown(delta: Delta, base: BaseResource, now: u32) -> u16 {
+/// `remaining` (last true at second `since`) grown back to `now`, capped at
+/// the generated capacity. A dead plant grows nothing.
+pub(crate) fn regrown(remaining: u16, since: u32, base: BaseResource, now: u32) -> u16 {
     let period = base.kind.properties().regrow_seconds;
-    if period == 0 {
-        return delta.remaining;
+    if period == 0 || since == DEAD {
+        return remaining;
     }
     let properties = base.kind.properties();
     let elapsed = if properties.seasonal {
-        crate::season::growing_seconds(delta.since, now)
+        crate::season::growing_seconds(since, now)
     } else {
-        now.saturating_sub(delta.since)
+        now.saturating_sub(since)
     };
     let grown = elapsed / period;
     let grown = u16::try_from(grown).unwrap_or(u16::MAX);
-    delta.remaining.saturating_add(grown).min(base.capacity)
+    remaining.saturating_add(grown).min(base.capacity)
 }
+
+/// `Delta::since` of a plant that died or was felled.
+const DEAD: u32 = u32::MAX;
 
 impl ResourceDeltas {
     /// Moves the clock regrowth is measured against. A barren world's clock
@@ -171,10 +175,9 @@ impl ResourceDeltas {
         };
         let key = CompactFeaturePosition::checked(position)
             .expect("resident world positions fit the finite-world compact envelope");
-        let remaining = self
-            .remaining
-            .get(&key)
-            .map_or(base.capacity, |delta| regrown(*delta, base, self.now));
+        let remaining = self.remaining.get(&key).map_or(base.capacity, |delta| {
+            regrown(delta.remaining, delta.since, base, self.now)
+        });
         Ok((remaining > 0).then_some(BaseResource {
             capacity: remaining,
             kind: base.kind,
@@ -196,11 +199,14 @@ impl ResourceDeltas {
         }
         let key = CompactFeaturePosition::checked(position)
             .expect("resident world positions fit the finite-world compact envelope");
+        let remaining = current.capacity - u16::from(gathered);
+        // A tree chopped down to nothing is felled: it doesn't grow back.
+        let felled = remaining == 0 && current.kind == Material::Wood;
         self.remaining.insert(
             key,
             Delta {
-                remaining: current.capacity - u16::from(gathered),
-                since: self.now,
+                remaining,
+                since: if felled { DEAD } else { self.now },
             },
         );
         Ok(Some((current.kind, gathered)))
@@ -223,6 +229,42 @@ impl ResourceDeltas {
         );
     }
 
+    /// The plant at `position` died: it bears nothing ever again.
+    pub(crate) fn kill(&mut self, position: WorldPosition) {
+        let key = CompactFeaturePosition::checked(position)
+            .expect("resident world positions fit the finite-world compact envelope");
+        self.remaining.insert(
+            key,
+            Delta {
+                remaining: 0,
+                since: DEAD,
+            },
+        );
+    }
+
+    /// Whether the generated plant at `position` has died or been felled.
+    pub(crate) fn is_dead(&self, position: WorldPosition) -> bool {
+        CompactFeaturePosition::checked(position)
+            .and_then(|key| self.remaining.get(&key))
+            .is_some_and(|delta| delta.since == DEAD)
+    }
+
+    /// Generated plants that have died or been felled.
+    pub(crate) fn dead(&self) -> impl Iterator<Item = WorldPosition> + '_ {
+        self.remaining
+            .iter()
+            .filter(|(_, delta)| delta.since == DEAD)
+            .map(|(position, _)| WorldPosition {
+                x: i64::from(position.x),
+                y: i64::from(position.y),
+            })
+    }
+
+    /// Whether nothing grows back (a famine valley).
+    pub(crate) const fn barren(&self) -> bool {
+        self.barren
+    }
+
     pub(crate) fn views<'a>(
         &'a self,
         world: &'a World,
@@ -238,7 +280,7 @@ impl ResourceDeltas {
             ResourceDeltaView {
                 position,
                 kind: resource.kind,
-                remaining: regrown(delta, resource, self.now),
+                remaining: regrown(delta.remaining, delta.since, resource, self.now),
             }
         })
     }

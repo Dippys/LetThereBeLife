@@ -261,6 +261,7 @@ pub const fn spawn_kind(kind: SpawnKind) -> &'static str {
     match kind {
         SpawnKind::Tree => "Tree",
         SpawnKind::BerryBush => "Berry bush",
+        SpawnKind::BitterBush => "Bitter bush",
         SpawnKind::Rock => "Rock",
         SpawnKind::Water => "Water",
     }

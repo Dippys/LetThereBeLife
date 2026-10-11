@@ -13,17 +13,22 @@ pub enum SpawnKind {
     BerryBush,
     Rock,
     Water,
+    BitterBush,
 }
 
 impl SpawnKind {
-    pub const ALL: [Self; 4] = [Self::Tree, Self::BerryBush, Self::Rock, Self::Water];
+    pub const ALL: [Self; 5] = [
+        Self::Tree,
+        Self::BerryBush,
+        Self::Rock,
+        Self::Water,
+        Self::BitterBush,
+    ];
 
     pub const fn resource(self) -> Option<BaseResource> {
-        match self {
-            Self::Tree => Some(FeatureKind::Tree.base_resource()),
-            Self::BerryBush => Some(FeatureKind::BerryBush.base_resource()),
-            Self::Rock => Some(FeatureKind::Rock.base_resource()),
-            Self::Water => None,
+        match self.feature() {
+            Some(feature) => Some(feature.base_resource()),
+            None => None,
         }
     }
 
@@ -31,8 +36,19 @@ impl SpawnKind {
         match self {
             Self::Tree => Some(FeatureKind::Tree),
             Self::BerryBush => Some(FeatureKind::BerryBush),
+            Self::BitterBush => Some(FeatureKind::BitterBush),
             Self::Rock => Some(FeatureKind::Rock),
             Self::Water => None,
+        }
+    }
+
+    /// The kind that grows from a plant of `feature` (none for rock).
+    pub const fn growing(feature: FeatureKind) -> Option<Self> {
+        match feature {
+            FeatureKind::Tree => Some(Self::Tree),
+            FeatureKind::BerryBush => Some(Self::BerryBush),
+            FeatureKind::BitterBush => Some(Self::BitterBush),
+            FeatureKind::Rock => None,
         }
     }
 }
@@ -91,22 +107,50 @@ impl CompactSpawnPosition {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 struct SpawnedObject {
+    /// Simulated second `remaining` was last true (growth counts from here).
+    since: u32,
     remaining: u16,
     kind: SpawnKind,
 }
 
+impl SpawnedObject {
+    /// What it holds at `now`: plants grow back as generated ones do.
+    fn remaining(self, now: u32) -> u16 {
+        self.kind.resource().map_or(0, |base| {
+            crate::resources::regrown(self.remaining, self.since, base, now)
+        })
+    }
+}
+
+/// Placed objects, and plants that grew by themselves.
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct SpawnedObjects {
     objects: BTreeMap<CompactSpawnPosition, SpawnedObject>,
     revision: u64,
+    /// The engine's current time in seconds, advanced every tick.
+    now: u32,
 }
 
 impl SpawnedObjects {
+    /// Places a full-grown object.
     pub(crate) fn insert(&mut self, position: WorldPosition, kind: SpawnKind) {
+        let remaining = kind.resource().map_or(0, |resource| resource.capacity);
+        self.plant(position, kind, remaining);
+    }
+
+    /// Places an object holding `remaining`, growing from now on.
+    pub(crate) fn plant(&mut self, position: WorldPosition, kind: SpawnKind, remaining: u16) {
         let key = CompactSpawnPosition::checked(position)
             .expect("validated finite-world positions fit the compact spawn envelope");
-        let remaining = kind.resource().map_or(0, |resource| resource.capacity);
-        let replaced = self.objects.insert(key, SpawnedObject { remaining, kind });
+        let since = self.now;
+        let replaced = self.objects.insert(
+            key,
+            SpawnedObject {
+                since,
+                remaining,
+                kind,
+            },
+        );
         debug_assert!(
             replaced.is_none(),
             "placement validation rejects replacement"
@@ -114,12 +158,26 @@ impl SpawnedObjects {
         self.revision = self.revision.saturating_add(1);
     }
 
+    /// Removes the object at `position` (a plant that died or was felled).
+    pub(crate) fn remove(&mut self, position: WorldPosition) {
+        if let Some(key) = CompactSpawnPosition::checked(position)
+            && self.objects.remove(&key).is_some()
+        {
+            self.revision = self.revision.saturating_add(1);
+        }
+    }
+
+    /// Moves the clock growth is measured against.
+    pub(crate) fn advance(&mut self, now: u32) {
+        self.now = now;
+    }
+
     pub(crate) fn at(&self, position: WorldPosition) -> Option<SpawnedObjectView> {
         let key = CompactSpawnPosition::checked(position)?;
         self.objects.get(&key).map(|object| SpawnedObjectView {
             position,
             kind: object.kind,
-            remaining: object.kind.resource().map(|_| object.remaining),
+            remaining: object.kind.resource().map(|_| object.remaining(self.now)),
         })
     }
 
@@ -143,9 +201,10 @@ impl SpawnedObjects {
         }
         Ok(match self.at(position).map(|object| object.kind) {
             Some(SpawnKind::Water) => Standability::BlockedByWater,
-            Some(SpawnKind::Tree | SpawnKind::BerryBush | SpawnKind::Rock) | None => {
-                Standability::Standable
-            }
+            Some(
+                SpawnKind::Tree | SpawnKind::BerryBush | SpawnKind::BitterBush | SpawnKind::Rock,
+            )
+            | None => Standability::Standable,
         })
     }
 
@@ -162,7 +221,10 @@ impl SpawnedObjects {
         match self.at(to).map(|object| object.kind) {
             // A placed pond is shallow: it can be waded, slowly.
             Some(SpawnKind::Water) => Ok(TraversalStep::wading(step.elevation_delta())),
-            Some(SpawnKind::Tree | SpawnKind::BerryBush | SpawnKind::Rock) | None => Ok(step),
+            Some(
+                SpawnKind::Tree | SpawnKind::BerryBush | SpawnKind::BitterBush | SpawnKind::Rock,
+            )
+            | None => Ok(step),
         }
     }
 
@@ -186,19 +248,27 @@ impl SpawnedObjects {
         (resource.capacity > 0).then_some(resource)
     }
 
+    /// Picks or chops up to `maximum` from the object at `position`. A tree
+    /// chopped down to nothing is felled and gone.
     pub(crate) fn gather(
         &mut self,
         position: WorldPosition,
         maximum: u8,
     ) -> Option<(Material, u8)> {
         let key = CompactSpawnPosition::checked(position)?;
+        let now = self.now;
         let object = self.objects.get_mut(&key)?;
         let resource = object.kind.resource()?;
-        let gathered = object.remaining.min(u16::from(maximum)) as u8;
+        let remaining = object.remaining(now);
+        let gathered = remaining.min(u16::from(maximum)) as u8;
         if gathered == 0 {
             return None;
         }
-        object.remaining -= u16::from(gathered);
+        object.remaining = remaining - u16::from(gathered);
+        object.since = now;
+        if object.remaining == 0 && object.kind == SpawnKind::Tree {
+            self.objects.remove(&key);
+        }
         self.revision = self.revision.saturating_add(1);
         Some((resource.kind, gathered))
     }
@@ -217,7 +287,7 @@ impl SpawnedObjects {
             .map(|(&position, object)| SpawnedObjectView {
                 position: position.world(),
                 kind: object.kind,
-                remaining: object.kind.resource().map(|_| object.remaining),
+                remaining: object.kind.resource().map(|_| object.remaining(self.now)),
             })
     }
 }
@@ -232,7 +302,7 @@ mod tests {
     fn spawned_object_payload_is_compact() {
         assert_eq!(size_of::<CompactSpawnPosition>(), 4);
         assert_eq!(align_of::<CompactSpawnPosition>(), 2);
-        assert_eq!(size_of::<SpawnedObject>(), 4);
-        assert_eq!(align_of::<SpawnedObject>(), 2);
+        assert_eq!(size_of::<SpawnedObject>(), 8);
+        assert_eq!(align_of::<SpawnedObject>(), 4);
     }
 }

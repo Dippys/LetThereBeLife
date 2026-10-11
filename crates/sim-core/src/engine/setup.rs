@@ -229,4 +229,14 @@ impl Engine {
         self.spawned_objects.insert(position, kind);
         Ok(())
     }
+
+    /// Whether a seedling could take root at `position`: open, standable
+    /// ground with nothing growing, built, or standing there.
+    pub(super) fn can_sprout_at(&self, position: WorldPosition) -> bool {
+        self.world.standability_at(position) == Ok(Standability::Standable)
+            && self.world.feature_at(position).is_none()
+            && self.spawned_objects.at(position).is_none()
+            && self.population.spatial().occupant(position).is_none()
+            && self.structures.structure_at(position).is_none()
+    }
 }

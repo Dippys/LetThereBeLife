@@ -775,3 +775,21 @@ comparison was a coin flip (305 against 303 on main; 326 against 327 with homes;
 against 263). The user chose to record it and fix helping later rather than hold homes.
 **Next:** make sharing matter again (spare food, food stored in huts), then restore the assertion.
 
+## D-111: Plants live, spread and die (2026-10-11)
+
+**Decision:** A tree chopped down to nothing is felled and gone; trees still grow wood back while
+standing. Once a year, at the start of spring, each bush dies with odds 1 in 8 (trees 1 in 60),
+and each living plant may seed a new one within 5 cells (bushes 1 in 2, trees 1 in 15), on open
+ground of the same biome, only where its 7x7 patch is less crowded than its parent's (so thickets
+refill and sparse ground stays sparse). Seedlings are placed objects that grow like generated
+plants: bushes fruit from their first growing season, saplings start with 2 wood. Placed objects
+gained a growth clock and bitter bushes. The viewer draws bare ground over dead generated plants
+and young trees smaller. Famine valleys (no regrowth) don't grow. `SAVE_VERSION` 4.
+**Why:** The user wanted food and wood to move around the valley over years rather than sit on
+fixed spots; bushes survive picking (picked bare, they fruit again next season) so a band can't
+wipe out its food in a season.
+**Consequences:** Over 10 years in 20 valleys, trees went from 311,332 to 341,643 and bushes from
+117,749 to 153,266. Survival 457 against 470 and deaths from cold 52 against 42, within the noise
+between two runs differing only in tree seeding (468 and 45). Valley 1 does consistently worse
+(7-11 survivors against 14) as bushes near its camp die off.
+

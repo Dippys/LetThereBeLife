@@ -42,10 +42,10 @@ and a `tests.rs` or `tests/` folder next to it. Every file starts with a `//!` l
 | `wildlife` | Animals without minds: species traits (`SpeciesTraits`), one shared rule set (`decide`), compact `Animal` (24 B) and `Carcass` (16 B) records. Engine glue in `engine/wildlife.rs`: release, stepping animals that are due, bites, births and immigration, hunting, and who witnesses what |
 | `routing` | Bounded A* with reusable scratch |
 | `spatial` | Sparse chunk-bucketed agent positions; multiple agents may share a cell |
-| `resources` | Inventories as a count per `Material` (5 B); sparse `BTreeMap` of depleted generated features that grow back lazily by each material's regrowth time |
+| `resources` | Inventories as a count per `Material` (5 B); sparse `BTreeMap` of depleted generated features that grow back lazily by each material's regrowth time, or are dead (felled trees, bushes that died) |
 | `sleep` | Sleep intervals, quality, wake/interrupt (`SleepState`, 24 B) |
 | `structures` | Sparse one-cell lean-to shelters, construction lifecycle |
-| `placements` | Sparse user-spawned trees/berries/rocks/water overlay |
+| `placements` | Sparse overlay of placed objects (trees, bushes, rocks, water) and plants that took root by themselves; plants grow back lazily like generated ones. `engine/plants.rs` runs the yearly die-and-seed step |
 | `diagnostics` | Copied work/capacity counters for reports |
 
 ## `sim-world` module map

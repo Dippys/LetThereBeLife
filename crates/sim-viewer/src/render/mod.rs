@@ -32,8 +32,8 @@ use colors::{rgba, selection_color};
 use details::write_details;
 use gpu::{CameraBinding, CameraUniform, Instance, InstanceBuffer, StaticInstanceBuffers};
 use instances::{
-    append_wildlife_instances, build_agent_instances, build_gesture_instances,
-    build_memory_marker_instances, build_relationship_marker_instances,
+    append_cleared_instances, append_wildlife_instances, build_agent_instances,
+    build_gesture_instances, build_memory_marker_instances, build_relationship_marker_instances,
     build_spawned_object_instances, build_structure_instances, chunk_outline, world_border,
 };
 use summary::{
@@ -707,6 +707,13 @@ impl Renderer {
         self.agents.write(&self.queue, &self.agent_instances);
         build_spawned_object_instances(
             engine.spawned_object_views(),
+            view.world_bounds(),
+            view.scale() as f32,
+            &mut self.spawned_object_instances,
+        );
+        append_cleared_instances(
+            engine.dead_plants(),
+            engine.world(),
             view.world_bounds(),
             view.scale() as f32,
             &mut self.spawned_object_instances,

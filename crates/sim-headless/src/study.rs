@@ -253,6 +253,10 @@ pub struct WildlifeStats {
     pub huts: u64,
     pub huts_fallen: u64,
     pub stored: u64,
+    /// Plants that took root and died of age; trees and bushes at the start and end.
+    pub sprouted: u64,
+    pub plants_died: u64,
+    pub plants: [(u64, u64); 2],
     /// Living people with a home, and the huts they live in, at the end.
     pub housed: u64,
     pub homes: u64,
@@ -407,7 +411,10 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     let mut shifts = 0_u64;
     let mut early_vocabulary = 0;
     let mut food = FoodStats::default();
-    let mut wildlife = WildlifeStats::default();
+    let mut wildlife = WildlifeStats {
+        plants: [engine.plant_census(), (0, 0)],
+        ..WildlifeStats::default()
+    };
     for tick in 1..=config.ticks {
         match engine.tick() {
             TickOutcome::Advanced { .. } => {
@@ -693,6 +700,8 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     report.food = food;
     wildlife.deer = engine.animal_count(sim_core::Species::Deer) as u64;
     wildlife.wolves = engine.animal_count(sim_core::Species::Wolf) as u64;
+    (wildlife.sprouted, wildlife.plants_died) = engine.plant_counts();
+    wildlife.plants[1] = engine.plant_census();
     let (stored, fetched) = engine.storage_counts();
     wildlife.stored = stored;
     wildlife.fetched = fetched;
@@ -1759,6 +1768,12 @@ impl fmt::Display for StudyReport {
             self.wildlife.stored,
             self.wildlife.fetched,
             self.wildlife.gave_up
+        )?;
+        let [(trees_before, bushes_before), (trees, bushes)] = self.wildlife.plants;
+        write!(
+            formatter,
+            "\n  plants: trees {trees_before} -> {trees}, bushes {bushes_before} -> {bushes}; sprouted {}, died of age {}",
+            self.wildlife.sprouted, self.wildlife.plants_died
         )?;
         if let Some((children, matching)) = self.children_vocabulary {
             write!(

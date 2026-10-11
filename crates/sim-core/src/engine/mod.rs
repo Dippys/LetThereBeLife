@@ -15,6 +15,7 @@ pub(crate) mod births;
 mod family;
 mod life;
 mod names;
+mod plants;
 mod shelter;
 mod tick;
 mod views;
@@ -150,6 +151,9 @@ pub struct Engine {
     craft_events: Vec<crate::CraftEvent>,
     /// Trips abandoned because the agent stopped getting closer (for tools).
     gave_up: u64,
+    /// Plants that took root, and that died of age.
+    plants_sprouted: u64,
+    plants_died: u64,
     /// Things put away in huts and food taken out (for tools).
     stored: u64,
     fetched: u64,
@@ -210,6 +214,8 @@ impl Engine {
             fire_events: Vec::new(),
             craft_events: Vec::new(),
             gave_up: 0,
+            plants_sprouted: 0,
+            plants_died: 0,
             stored: 0,
             fetched: 0,
             wildlife: crate::wildlife::Wildlife::default(),
@@ -274,6 +280,8 @@ impl Engine {
                 self.fire_events.clear();
                 self.craft_events.clear();
                 self.gave_up = 0;
+                self.plants_sprouted = 0;
+                self.plants_died = 0;
                 self.stored = 0;
                 self.fetched = 0;
                 self.wildlife = crate::wildlife::Wildlife::default();

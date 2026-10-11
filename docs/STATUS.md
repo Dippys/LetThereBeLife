@@ -175,7 +175,8 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
-- 2026-10-11 (latest): homes: people live in a hut they come back to; hut spam is gone (D-109).
+- 2026-10-11 (latest): plants live, spread and die; felled trees are gone (D-111).
+- 2026-10-11: homes: people live in a hut they come back to; hut spam is gone (D-109).
 - 2026-10-11: people learn what their choices bring about (a fire burning, a shelter)
   and value steps that lead to what helps (D-108).
 - 2026-10-11: the info box shows huts and the food stored in them; the feed notes huts
@@ -229,9 +230,8 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## What's next
 
-1. **Living plants, warm hearths:** bushes and trees that die and spread, felled trees gone; a
-   hut beside a burning fire is warmer, so settlements can gather around hearths (homes, D-109,
-   are done).
+1. **Warm hearths:** a hut beside a burning fire is warmer, so settlements can gather around
+   hearths (homes, D-109, and living plants, D-111, are done).
 2. **Learning what works** (docs/plans/LEARNING.md): phases 1-2 done, plus understanding what
    choices bring about (D-103, D-105, D-108). Next: how long steps take, copying others, food and
    water, multi-step projects.
