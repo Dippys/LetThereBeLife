@@ -41,6 +41,7 @@ pub(super) fn test_render_state(cursor_world: Option<WorldPosition>) -> RenderSt
         toast: None,
         help_open: false,
         info_open: false,
+        signs: true,
         reached_speed: None,
         details_open: false,
         build: None,

@@ -172,3 +172,19 @@ pub(super) const fn selection_color(valid: bool) -> u32 {
 pub(super) const fn rgba(red: u8, green: u8, blue: u8, alpha: u8) -> u32 {
     red as u32 | (green as u32) << 8 | (blue as u32) << 16 | (alpha as u32) << 24
 }
+
+/// A watcher's reading of a gesture: as meant, and mistaken.
+pub(super) const UI_READING: u32 = rgba(200, 228, 196, 230);
+pub(super) const UI_READING_WRONG: u32 = rgba(200, 60, 60, 235);
+/// Behind a sign over someone's head, so it reads on any ground.
+pub(super) const UI_SIGN_BACK: u32 = rgba(16, 18, 22, 190);
+/// Signs over people: asleep, building, by a fire, at water, eating,
+/// carrying or gathering, hunting, running from danger.
+pub(super) const SIGN_SLEEP: u32 = rgba(170, 196, 255, 255);
+pub(super) const SIGN_BUILD: u32 = rgba(222, 196, 140, 255);
+pub(super) const SIGN_FIRE: u32 = rgba(255, 150, 50, 255);
+pub(super) const SIGN_WATER: u32 = rgba(90, 170, 255, 255);
+pub(super) const SIGN_FOOD: u32 = rgba(235, 80, 120, 255);
+pub(super) const SIGN_WORK: u32 = rgba(196, 150, 100, 255);
+pub(super) const SIGN_HUNT: u32 = rgba(240, 210, 90, 255);
+pub(super) const SIGN_DANGER: u32 = rgba(255, 80, 70, 255);

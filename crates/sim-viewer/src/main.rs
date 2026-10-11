@@ -105,6 +105,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Wait);
     let mut app = ViewerApp::new(engine, archive, options.smoke_frames, options.screenshot);
+    if let Some(cells) = options.zoom {
+        app = app.with_view_span(cells);
+    }
     if let Some(start) = valley.flatten() {
         app = app.with_valley(start);
     }

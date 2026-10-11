@@ -22,6 +22,8 @@ pub(super) struct LaunchOptions {
     pub(super) save: Option<PathBuf>,
     /// The lives to replay; a new one from the clock when not given.
     pub(super) life_seed: Option<u64>,
+    /// Cells across the first view (zooms the start in or out).
+    pub(super) zoom: Option<f64>,
 }
 
 pub(super) fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Error>> {
@@ -35,6 +37,7 @@ pub(super) fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Erro
     let mut load = None;
     let mut save = None;
     let mut life_seed = None;
+    let mut zoom = None;
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
         match argument.as_str() {
@@ -81,6 +84,13 @@ pub(super) fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Erro
                         .parse()?,
                 );
             }
+            "--zoom" => {
+                zoom = Some(
+                    args.next()
+                        .ok_or("--zoom requires a number of cells across")?
+                        .parse()?,
+                );
+            }
             "--screenshot" => {
                 screenshot = Some(PathBuf::from(
                     args.next().ok_or("--screenshot requires a path")?,
@@ -88,7 +98,7 @@ pub(super) fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Erro
             }
             "--help" | "-h" => {
                 println!(
-                    "Usage: sim-viewer [--config PATH] [--smoke-frames NUMBER] [--pregenerate-world] [--valley] [--advance TICKS] [--select PERSON] [--screenshot PNG] [--load SAVE] [--save SAVE] [--life-seed NUMBER]"
+                    "Usage: sim-viewer [--config PATH] [--smoke-frames NUMBER] [--pregenerate-world] [--valley] [--advance TICKS] [--select PERSON] [--screenshot PNG] [--load SAVE] [--save SAVE] [--life-seed NUMBER] [--zoom CELLS]"
                 );
                 std::process::exit(0);
             }
@@ -109,6 +119,7 @@ pub(super) fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Erro
         load,
         save,
         life_seed,
+        zoom,
     })
 }
 

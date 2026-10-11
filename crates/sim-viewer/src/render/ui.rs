@@ -3,7 +3,7 @@
 
 use sim_core::{
     AgentActivity, Concept, HEALTH_INCAPACITATION_THRESHOLD, HEALTH_MAX, Material, NEED_MAX,
-    NeedLevelView, StructureState,
+    NeedLevelView, StructureState, WorldPosition,
 };
 
 use super::{
@@ -123,14 +123,27 @@ impl Painter<'_> {
     }
 }
 
+/// What's drawn over people on the map: words being said, what listeners
+/// made of them, and signs of what everyone is doing.
+pub(super) struct MapMarks<'a> {
+    pub(super) gestures: &'a [GestureMark],
+    pub(super) signs: &'a [super::PersonSign],
+    pub(super) readings: &'a [super::Reading],
+}
+
 pub(super) fn build_interface(
     out: &mut Vec<Instance>,
     hits: &mut Vec<Hit>,
     state: &RenderState,
     view: CameraView,
-    gestures: &[GestureMark],
+    marks: &MapMarks<'_>,
     details: Option<&str>,
 ) {
+    let MapMarks {
+        gestures,
+        signs,
+        readings,
+    } = *marks;
     let (width, height) = view.screen_size();
     out.clear();
     hits.clear();
@@ -142,7 +155,9 @@ pub(super) fn build_interface(
         cursor: state.cursor.map(|(x, y)| (x as f32, y as f32)),
     };
     let painter = &mut painter;
+    person_signs(painter, view, signs, gestures, readings);
     speech_bubbles(painter, view, gestures);
+    listener_readings(painter, view, readings);
     let bar = top_bar(painter, state, width);
     let palette_top = state
         .build
@@ -1149,6 +1164,44 @@ fn build_palette(painter: &mut Painter, selected: BuildTool, width: f32, height:
     y
 }
 
+/// A small sign over each person's head saying what they're doing (none over
+/// someone speaking: their bubble says it).
+fn person_signs(
+    painter: &mut Painter,
+    view: CameraView,
+    signs: &[super::PersonSign],
+    gestures: &[GestureMark],
+    readings: &[super::Reading],
+) {
+    let (width, height) = view.screen_size();
+    let scale = view.scale() as f32;
+    let [center_x, center_y] = view.center();
+    let px = painter.px;
+    for &(position, sign, color) in signs {
+        if gestures.iter().any(|gesture| gesture.origin == position)
+            || readings.iter().any(|reading| reading.0 == position)
+        {
+            continue;
+        }
+        let x =
+            (position.x as f32 + 0.5 - center_x) * scale + width / 2.0 - text_width("x", px) / 2.0;
+        let y = (position.y as f32 - center_y) * scale + height / 2.0 - painter.line() - px;
+        if x < 0.0 || y < 0.0 || x > width || y > height {
+            continue;
+        }
+        let mut text = [0_u8; 4];
+        let glyph = sign.encode_utf8(&mut text);
+        painter.rect(
+            x - px,
+            y,
+            text_width(glyph, px) + 2.0 * px,
+            painter.line() - px,
+            colors::UI_SIGN_BACK,
+        );
+        painter.text(glyph, x, y, color);
+    }
+}
+
 /// Words being said right now, over the speakers' heads.
 fn speech_bubbles(painter: &mut Painter, view: CameraView, gestures: &[GestureMark]) {
     let (width, height) = view.screen_size();
@@ -1210,6 +1263,40 @@ fn speech_bubbles(painter: &mut Painter, view: CameraView, gestures: &[GestureMa
     }
 }
 
+/// What watchers took the latest gestures to mean, in small bubbles over
+/// their heads: pale when they got it, red when they didn't.
+fn listener_readings(painter: &mut Painter, view: CameraView, readings: &[super::Reading]) {
+    let (width, height) = view.screen_size();
+    let scale = view.scale() as f32;
+    if scale < MIN_BUBBLE_CELL_PIXELS {
+        return;
+    }
+    let [center_x, center_y] = view.center();
+    let px = painter.px;
+    let mut drawn: Vec<WorldPosition> = Vec::new();
+    // Newest first, one per listener.
+    for (position, text, wrong) in readings.iter().rev() {
+        if drawn.contains(position) {
+            continue;
+        }
+        drawn.push(*position);
+        let w = text_width(text, px) + 4.0 * px;
+        let h = painter.line();
+        let x = (position.x as f32 + 0.5 - center_x) * scale + width / 2.0 - w / 2.0;
+        let y = (position.y as f32 - center_y) * scale + height / 2.0 - h - 2.0 * px;
+        if x + w < 0.0 || y + h < 0.0 || x > width || y > height {
+            continue;
+        }
+        let (back, ink) = if *wrong {
+            (colors::UI_READING_WRONG, colors::UI_TEXT)
+        } else {
+            (colors::UI_READING, rgba(20, 22, 26, 255))
+        };
+        painter.rect(x, y, w, h, back);
+        painter.text(text, x + 2.0 * px, y - px / 2.0, ink);
+    }
+}
+
 /// Cells must be at least this many pixels wide before words are drawn.
 const MIN_BUBBLE_CELL_PIXELS: f32 = 2.5;
 
@@ -1233,12 +1320,14 @@ fn help(painter: &mut Painter, width: f32, height: f32) {
          things. Words can be misunderstood, and both sides learn from what happens next.",
         column * 2 + 2,
     );
-    const CONTROLS: [(&str, &str); 15] = [
+    const CONTROLS: [(&str, &str); 17] = [
         ("Drag", "move the map"),
         ("Scroll", "zoom in and out"),
         ("Click", "pick a person"),
         ("Tab", "next person"),
         ("F", "follow the picked person"),
+        ("N", "jump to recent events in turn"),
+        ("S", "signs over people on or off"),
         ("Space", "pause or resume"),
         ("1-9  + -", "speed (+ goes past 256×)"),
         ("I", "valley info"),
@@ -1304,6 +1393,8 @@ fn help(painter: &mut Painter, width: f32, height: f32) {
         "Women's squares have notched corners; children are smaller; elders have a grey edge; a pink dot is a carried baby.",
         "Bitter berries look like food but make you sick.",
         "A bubble is a word being said, with the gesture that went with it. A dotted line is someone pointing.",
+        "Small bubbles over listeners show what they understood: red means they got it wrong.",
+        "Signs over heads (zoomed in): z asleep, ^ by a fire, ~ water, * food, = gathering or carrying, # building, ! hunting or running.",
     ]
     .iter()
     .flat_map(|note| wrap(note, column))

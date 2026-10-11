@@ -221,6 +221,18 @@ impl ViewerApp {
         }
     }
 
+    /// Jumps to the next recent event, newest first, then further back.
+    fn next_event(&mut self) {
+        let count = self.feed.entries().count();
+        if count == 0 {
+            self.show_toast("Nothing has happened yet");
+            return;
+        }
+        let back = self.event_cursor % count;
+        self.event_cursor = back + 1;
+        self.apply_ui_action(UiAction::FeedEntry(count - 1 - back));
+    }
+
     fn step_speed(&mut self, direction: isize) {
         let speed = self.engine.snapshot().speed;
         let current = SPEEDS
@@ -309,6 +321,15 @@ impl ViewerApp {
             KeyCode::Minus | KeyCode::NumpadSubtract => self.step_speed(-1),
             KeyCode::KeyH | KeyCode::F1 => self.help_open = !self.help_open,
             KeyCode::KeyI => self.info_open = !self.info_open,
+            KeyCode::KeyS => {
+                self.signs = !self.signs;
+                self.show_toast(if self.signs {
+                    "Signs over people on"
+                } else {
+                    "Signs over people off"
+                });
+            }
+            KeyCode::KeyN => self.next_event(),
             KeyCode::F5 => {
                 let message = match self.save_world(std::path::Path::new(QUICK_SAVE)) {
                     Ok(()) => format!("Saved the world to {QUICK_SAVE}"),

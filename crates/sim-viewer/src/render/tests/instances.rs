@@ -350,6 +350,7 @@ fn gestures_draw_a_neutral_dotted_line_and_an_end_square() {
         word: None,
         mime: sim_core::Mime::PickAndChew,
         loud: false,
+        meant: sim_core::Concept::Water,
     };
     let mut instances = Vec::new();
 

@@ -12,7 +12,6 @@ const LABEL_REFRESH: Duration = Duration::from_millis(500);
 
 use super::{PopulationStatus, ViewerApp};
 use crate::{
-    gestures::GestureMark,
     labels,
     startup::{reset, residency_ready, spawn_at},
 };
@@ -35,10 +34,7 @@ impl ViewerApp {
                 ticks += 1;
                 self.engine.tick();
                 // Engine event logs cover only the latest tick, so collect them per tick.
-                self.gestures.record(
-                    self.engine.signal_events().iter().map(GestureMark::from),
-                    now,
-                );
+                self.gestures.record_tick(&self.engine, now);
                 self.feed.record(&self.engine);
                 self.accumulator -= tick_seconds;
             }
@@ -75,10 +71,7 @@ impl ViewerApp {
         let mut progress = crate::progress::Progress::new(&self.engine, ticks);
         for done in 0..ticks {
             self.engine.tick();
-            self.gestures.record(
-                self.engine.signal_events().iter().map(GestureMark::from),
-                now,
-            );
+            self.gestures.record_tick(&self.engine, now);
             self.feed.record(&self.engine);
             progress.record(&self.engine, done + 1);
         }

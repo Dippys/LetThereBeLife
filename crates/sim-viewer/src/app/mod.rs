@@ -92,6 +92,10 @@ pub(crate) struct ViewerApp {
     following: bool,
     help_open: bool,
     info_open: bool,
+    /// Signs over people saying what they're doing (S).
+    signs: bool,
+    /// How far back N has jumped through the recent events.
+    event_cursor: usize,
     details_open: bool,
     /// The build palette's chosen tool while it is open.
     build: Option<BuildTool>,
@@ -99,6 +103,8 @@ pub(crate) struct ViewerApp {
     press: Option<((f64, f64), bool)>,
     shift: bool,
     initial_focus: Option<WorldPosition>,
+    /// Cells across the first view of the valley or a save.
+    view_span: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -172,16 +178,25 @@ impl ViewerApp {
             // Open the help on a normal launch so first-time viewers know what they see.
             help_open: smoke_frames.is_none(),
             info_open: false,
+            signs: true,
+            event_cursor: 0,
             details_open: false,
             build: None,
             press: None,
             shift: false,
             initial_focus: None,
+            view_span: VALLEY_VIEW_SPAN_CELLS,
         }
     }
 
     /// Opens on a band already started by `startup::start_valley`: running, with
     /// the camera on the camp once the window exists.
+    /// Starts the view `cells` across (for close-up screenshots).
+    pub(crate) fn with_view_span(mut self, cells: f64) -> Self {
+        self.view_span = cells;
+        self
+    }
+
     pub(crate) fn with_valley(mut self, start: ValleyStart) -> Self {
         self.population_status = PopulationStatus::Active;
         self.initial_focus = Some(start.camp);

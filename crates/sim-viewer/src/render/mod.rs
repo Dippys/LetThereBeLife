@@ -69,6 +69,8 @@ pub struct RenderState {
     pub feed: Vec<FeedEntry>,
     pub census: Census,
     pub season: sim_core::Season,
+    /// Show small signs over people saying what they're doing (when zoomed in).
+    pub signs: bool,
 }
 
 /// Head counts for the top bar.
@@ -831,12 +833,35 @@ impl Renderer {
         } else {
             self.details_text.clear();
         }
+        let signs = if state.signs && view.scale() as f32 >= MIN_SIGN_CELL_PIXELS {
+            people_signs(engine, view.world_bounds())
+        } else {
+            Vec::new()
+        };
+        // What each watcher took the latest gestures to mean, over their heads.
+        let readings: Vec<Reading> = gestures
+            .readings()
+            .filter_map(|reading| {
+                let listener = engine
+                    .agent_views(MAX_AGENT_INSTANCES)
+                    .find(|agent| agent.id == reading.receiver)?;
+                Some((
+                    listener.position,
+                    format!("{}?", crate::labels::concept(reading.understood)),
+                    reading.wrong,
+                ))
+            })
+            .collect();
         build_interface(
             &mut self.screen_overlay_instances,
             &mut self.hits,
             &state,
             view,
-            &recent_gestures,
+            &ui::MapMarks {
+                gestures: &recent_gestures,
+                signs: &signs,
+                readings: &readings,
+            },
             (!self.details_text.is_empty()).then_some(self.details_text.as_str()),
         );
         if self.screen_overlay_instances.len() > self.screen_overlay_capacity {
@@ -995,6 +1020,61 @@ const MAX_GESTURE_DOTS: usize = 16;
 /// Each recent gesture draws its dotted line and an end square.
 const MAX_GESTURE_MARKER_INSTANCES: usize = RECENT_GESTURE_CAPACITY * (MAX_GESTURE_DOTS + 1);
 const MIN_DYNAMIC_INSTANCE_PIXELS: f32 = 1.25;
+/// Cells must be at least this many pixels wide before signs over people show.
+const MIN_SIGN_CELL_PIXELS: f32 = 6.0;
+
+/// A small sign over someone's head saying what they're doing: where, the
+/// symbol, and its color.
+pub(super) type PersonSign = (sim_core::WorldPosition, char, u32);
+/// What a watcher took a gesture to mean: where it stands, the meaning, and
+/// whether that's not what the speaker meant.
+pub(super) type Reading = (sim_core::WorldPosition, String, bool);
+
+/// Signs for the living people in `bounds`: asleep, by a fire, at water,
+/// eating, carrying or gathering, building, hunting, running.
+fn people_signs(engine: &sim_core::Engine, bounds: sim_core::WorldRect) -> Vec<PersonSign> {
+    use sim_core::{AgentActivity, PhysicalGoal, PolicyReason};
+    engine
+        .agent_views(MAX_AGENT_INSTANCES)
+        .filter(|agent| bounds.contains(agent.position))
+        .filter_map(|agent| {
+            let sign = match agent.activity {
+                AgentActivity::Dead => return None,
+                AgentActivity::Sleeping => ('z', colors::SIGN_SLEEP),
+                AgentActivity::Building => ('#', colors::SIGN_BUILD),
+                _ => {
+                    let policy = engine.physical_policy(agent.id)?;
+                    match (policy.goal, policy.reason) {
+                        (_, PolicyReason::Fleeing) => ('!', colors::SIGN_DANGER),
+                        (PhysicalGoal::Hunt, _) | (_, PolicyReason::Hunting) => {
+                            ('!', colors::SIGN_HUNT)
+                        }
+                        (PhysicalGoal::WarmUp | PhysicalGoal::TendFire, _)
+                        | (_, PolicyReason::Warming | PolicyReason::Tending) => {
+                            ('^', colors::SIGN_FIRE)
+                        }
+                        (PhysicalGoal::SeekWater | PhysicalGoal::Drink, _) => {
+                            ('~', colors::SIGN_WATER)
+                        }
+                        (PhysicalGoal::Eat | PhysicalGoal::SeekFood, _) => ('*', colors::SIGN_FOOD),
+                        (
+                            PhysicalGoal::GatherMaterial
+                            | PhysicalGoal::Store
+                            | PhysicalGoal::Fetch
+                            | PhysicalGoal::Craft,
+                            _,
+                        ) => ('=', colors::SIGN_WORK),
+                        (PhysicalGoal::BuildShelter | PhysicalGoal::BuildHearth, _) => {
+                            ('#', colors::SIGN_BUILD)
+                        }
+                        _ => return None,
+                    }
+                }
+            };
+            Some((agent.position, sign.0, sign.1))
+        })
+        .collect()
+}
 const MIN_CHUNK_OUTLINE_PIXELS: f32 = 4.0;
 const MAX_CHUNK_OUTLINE_WORLD_WIDTH: f32 = 8.0;
 const MAX_WORLD_BORDER_WIDTH: f32 = 32.0;

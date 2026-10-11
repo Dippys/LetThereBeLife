@@ -368,7 +368,18 @@ fn interface(state: &crate::render::RenderState) -> Vec<Hit> {
     let view = state.camera.view(width, height, 64, 64);
     let mut instances = Vec::new();
     let mut hits = Vec::new();
-    build_interface(&mut instances, &mut hits, state, view, &[], None);
+    build_interface(
+        &mut instances,
+        &mut hits,
+        state,
+        view,
+        &crate::render::ui::MapMarks {
+            gestures: &[],
+            signs: &[],
+            readings: &[],
+        },
+        None,
+    );
     assert!(!instances.is_empty());
     hits
 }
@@ -518,4 +529,56 @@ fn the_info_box_tells_the_weather_and_how_people_are_doing() {
             "{expected}: {text:?}"
         );
     }
+}
+
+#[test]
+fn listeners_show_their_reading_red_when_mistaken_and_people_show_signs() {
+    let state = test_render_state(None);
+    let (width, height) = (1_280_u32, 800_u32);
+    let view = state.camera.view(width, height, 64, 64);
+    let [x, y] = view.center();
+    let here = sim_core::WorldPosition {
+        x: x as i64,
+        y: y as i64,
+    };
+    let there = sim_core::WorldPosition {
+        x: here.x + 4,
+        y: here.y,
+    };
+    let readings = [
+        (here, "water?".to_owned(), false),
+        (there, "berries?".to_owned(), true),
+    ];
+    let signs = [(
+        sim_core::WorldPosition {
+            x: here.x - 4,
+            y: here.y,
+        },
+        'z',
+        crate::render::colors::SIGN_SLEEP,
+    )];
+    let mut instances = Vec::new();
+    let mut hits = Vec::new();
+    build_interface(
+        &mut instances,
+        &mut hits,
+        &state,
+        view,
+        &crate::render::ui::MapMarks {
+            gestures: &[],
+            signs: &signs,
+            readings: &readings,
+        },
+        None,
+    );
+    let has = |color: u32| instances.iter().any(|instance| instance.color == color);
+    assert!(
+        has(crate::render::colors::UI_READING),
+        "an understood reading"
+    );
+    assert!(
+        has(crate::render::colors::UI_READING_WRONG),
+        "a mistaken one"
+    );
+    assert!(has(crate::render::colors::SIGN_SLEEP), "someone asleep");
 }

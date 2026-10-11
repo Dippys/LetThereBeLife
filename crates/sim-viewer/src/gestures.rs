@@ -5,7 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use sim_core::{AgentId, Mime, SignalEvent, VocalForm, WorldPosition};
+use sim_core::{AgentId, Concept, Engine, Mime, SignalEvent, VocalForm, WorldPosition};
 
 /// Recent gestures kept for drawing; older ones are dropped first.
 pub const RECENT_GESTURE_CAPACITY: usize = 32;
@@ -24,7 +24,21 @@ pub struct GestureMark {
     pub mime: Mime,
     /// Shouted (warnings and calls to hunt).
     pub loud: bool,
+    /// What the speaker meant (shown to the viewer, never to the watchers).
+    pub meant: Concept,
 }
+
+/// What one watcher took a gesture to mean, and whether that's what the
+/// speaker meant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReadingMark {
+    pub receiver: AgentId,
+    pub understood: Concept,
+    pub wrong: bool,
+}
+
+/// Recent readings kept for drawing.
+const RECENT_READING_CAPACITY: usize = 64;
 
 impl From<&SignalEvent> for GestureMark {
     fn from(event: &SignalEvent) -> Self {
@@ -36,6 +50,7 @@ impl From<&SignalEvent> for GestureMark {
             word: event.signal.vocal,
             mime: event.signal.mime,
             loud: event.signal.loud,
+            meant: event.intent.topic.concept(),
         }
     }
 }
@@ -44,13 +59,48 @@ impl From<&SignalEvent> for GestureMark {
 #[derive(Debug, Default)]
 pub struct GestureLog {
     recent: VecDeque<(GestureMark, Instant)>,
+    readings: VecDeque<(ReadingMark, Instant)>,
 }
 
 impl GestureLog {
     pub fn new() -> Self {
         Self {
             recent: VecDeque::with_capacity(RECENT_GESTURE_CAPACITY),
+            readings: VecDeque::with_capacity(RECENT_READING_CAPACITY),
         }
+    }
+
+    /// Records the latest tick's gestures, and what each watcher made of them.
+    pub fn record_tick(&mut self, engine: &Engine, now: Instant) {
+        self.record(engine.signal_events().iter().map(GestureMark::from), now);
+        for reading in engine.interpretation_events() {
+            let Some(meant) = self
+                .recent
+                .iter()
+                .rev()
+                .find(|(gesture, _)| gesture.id == reading.signal)
+                .map(|(gesture, _)| gesture.meant)
+            else {
+                continue;
+            };
+            if self.readings.len() == RECENT_READING_CAPACITY {
+                self.readings.pop_front();
+            }
+            let understood = reading.understood.concept();
+            self.readings.push_back((
+                ReadingMark {
+                    receiver: reading.receiver,
+                    understood,
+                    wrong: understood != meant,
+                },
+                now,
+            ));
+        }
+    }
+
+    /// Readings currently on display, oldest first.
+    pub fn readings(&self) -> impl Iterator<Item = &ReadingMark> {
+        self.readings.iter().map(|(reading, _)| reading)
     }
 
     /// Records one tick's completed gestures, shown from `now`.
@@ -65,6 +115,14 @@ impl GestureLog {
 
     /// Drops gestures shown for at least `GESTURE_DISPLAY_TIME`; returns whether any were dropped.
     pub fn expire(&mut self, now: Instant) -> bool {
+        let readings = self.readings.len();
+        while self
+            .readings
+            .front()
+            .is_some_and(|(_, shown)| now.saturating_duration_since(*shown) >= GESTURE_DISPLAY_TIME)
+        {
+            self.readings.pop_front();
+        }
         let before = self.recent.len();
         while self
             .recent
@@ -73,7 +131,7 @@ impl GestureLog {
         {
             self.recent.pop_front();
         }
-        self.recent.len() != before
+        self.recent.len() != before || self.readings.len() != readings
     }
 
     /// Gestures currently on display, oldest first.
@@ -88,6 +146,7 @@ impl GestureLog {
     /// Forgets everything (engine reset restarts gesture ids).
     pub fn clear(&mut self) {
         self.recent.clear();
+        self.readings.clear();
     }
 }
 
@@ -104,6 +163,7 @@ mod tests {
             word: Some(VocalForm(id as u8)),
             mime: Mime::Scoop,
             loud: false,
+            meant: Concept::Water,
         }
     }
 

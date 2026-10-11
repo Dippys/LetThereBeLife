@@ -9,7 +9,7 @@ use std::{
 use sim_core::{AgentId, Species, WorldArchive};
 use winit::{dpi::LogicalSize, event_loop::ActiveEventLoop, window::WindowAttributes};
 
-use super::{PopulationStatus, VALLEY_VIEW_SPAN_CELLS, ViewerApp, WORLD_SYNC_INTERVAL};
+use super::{PopulationStatus, ViewerApp, WORLD_SYNC_INTERVAL};
 use crate::{render, startup};
 
 impl ViewerApp {
@@ -32,8 +32,7 @@ impl ViewerApp {
         let size = self.window.as_ref().expect("window exists").inner_size();
         let viewport = self.viewport(size.width, size.height);
         if let Some(center) = self.initial_focus {
-            self.camera
-                .focus_on(center, VALLEY_VIEW_SPAN_CELLS, viewport);
+            self.camera.focus_on(center, self.view_span, viewport);
         } else if self.archive.is_some() {
             self.camera.show_full_world(viewport);
         }
@@ -167,6 +166,7 @@ impl ViewerApp {
                 toast: self.toast.as_ref().map(|(message, _)| message.clone()),
                 help_open: self.help_open,
                 info_open: self.info_open,
+                signs: self.signs,
                 reached_speed: self.shown_speed.map(|(speed, _)| speed),
                 details_open: self.details_open,
                 build: self.build,
