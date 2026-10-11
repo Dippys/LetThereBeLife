@@ -92,6 +92,16 @@ impl Engine {
                 .population
                 .apply_chill(&mut self.scheduler, self.time, agent, chill);
         }
+        // Huts nobody has lived in for long fall down.
+        for structure in self.structures.weather() {
+            self.structure_diagnostics.push(crate::StructureDiagnostic {
+                structure,
+                at: self.time,
+                kind: crate::StructureDiagnosticKind::Collapsed,
+                refunded_wood: 0,
+                refunded_stone: 0,
+            });
+        }
     }
 
     /// Once a year: the old may die of old age.

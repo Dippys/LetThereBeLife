@@ -676,3 +676,13 @@ still decides; the study reports the best-valued choices per need (`habits:`). M
 line). Habits form sensibly: thirsty, drinking +12; tired, sleeping +6; cold, sleeping +4 (seed 4),
 -5 where warming naps are cut short by thirst (seed 1). Judging every re-decision instead gave
 almost only zero relief (107 of 28,626 trials), so trials span a run of the same choice.
+
+## D-104: Huts nobody lives in fall down (2026-10-11)
+
+**Decision:** Each season, every finished hut nobody has slept in since ages by one; after eight
+seasons (two years) unused it falls down, with anything stored in it. Sleeping under a hut resets it.
+No repair action: lived-in homes last, abandoned ones go.
+**Why:** Huts never decayed, so the first year's burst of building stayed forever (37 in year one,
+51 by year four in the 100-year run).
+**Consequences:** Over 10 years in valleys 1, 4, 9: 53, 50, 55 huts built and 43, 30, 38 fell down,
+leaving about 10-20 standing; survivors 15, 30, 13 (15, 28, 14 without decay).

@@ -256,6 +256,7 @@ impl ScenarioRunner {
                 StructureDiagnosticKind::Cancelled => {
                     self.counters.actions.shelter_cancellations += 1;
                 }
+                StructureDiagnosticKind::Collapsed => {}
             }
         }
     }

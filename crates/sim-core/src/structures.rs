@@ -2,6 +2,8 @@ use std::{collections::BTreeMap, error::Error, fmt};
 
 use crate::{AgentId, SimTime, WorldPosition, agent::CompactPosition};
 
+/// Seasons a hut stands empty before it falls down (two years).
+pub const HUT_ABANDONED_SEASONS: u8 = 8;
 /// How many things one hut can hold.
 pub const HUT_STORE_CAPACITY: u8 = 48;
 /// A hut takes nearly a full load of wood and five minutes of hard work.
@@ -176,6 +178,8 @@ pub enum StructureDiagnosticKind {
     Started,
     Completed,
     Cancelled,
+    /// Left empty so long it fell down.
+    Collapsed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -229,6 +233,8 @@ pub(crate) struct StructureRecord {
     builder: AgentId,
     state: StructureState,
     kind: StructureKind,
+    /// Seasons since anyone slept in it (huts fall down when left long enough).
+    idle_seasons: u8,
     /// For a fire: the simulated second it burns out.
     fuel_until: u32,
 }
@@ -277,6 +283,47 @@ impl StructureStore {
             return Err(BuildShelterError::StructureLimit);
         }
         Ok(())
+    }
+
+    /// A season passes: every finished hut nobody has slept in for
+    /// `HUT_ABANDONED_SEASONS` falls down, with whatever was stored in it.
+    /// Returns what fell.
+    pub(crate) fn weather(&mut self) -> Vec<StructureView> {
+        let mut fallen = Vec::new();
+        for raw in 0..self.records.len() {
+            let Some(record) = self.records[raw].as_mut() else {
+                continue;
+            };
+            if record.kind != StructureKind::Shelter || record.state != StructureState::Complete {
+                continue;
+            }
+            record.idle_seasons = record.idle_seasons.saturating_add(1);
+            if record.idle_seasons < HUT_ABANDONED_SEASONS {
+                continue;
+            }
+            let record = *record;
+            let id = StructureId(raw as u32);
+            let view = self.with_stock(record.view(id));
+            let position = record.position;
+            self.records[raw] = None;
+            self.by_position.remove(&(position.y, position.x));
+            self.stocks.remove(&id);
+            self.live_count -= 1;
+            fallen.push(view);
+        }
+        fallen
+    }
+
+    /// Someone sleeps under the hut beside `position`: it stays lived in.
+    pub(crate) fn lived_in(&mut self, position: WorldPosition) {
+        for candidate in cardinal_neighbors(position) {
+            if let Some(id) = self.structure_at(candidate)
+                && let Some(record) = self.records.get_mut(id.0 as usize).and_then(Option::as_mut)
+                && record.kind == StructureKind::Shelter
+            {
+                record.idle_seasons = 0;
+            }
+        }
     }
 
     /// Whether `builder` has something under construction.
@@ -369,6 +416,7 @@ impl StructureStore {
             builder,
             state: StructureState::UnderConstruction,
             kind,
+            idle_seasons: 0,
             fuel_until: 0,
         };
         self.records.push(Some(record));
@@ -550,6 +598,43 @@ mod tests {
         assert_eq!(size_of::<StructureKind>(), 1);
         assert_eq!(size_of::<StructureState>(), 1);
         assert_eq!(size_of::<StructureRecord>(), 32);
+    }
+
+    #[test]
+    fn a_hut_left_empty_falls_down_and_a_lived_in_one_stands() {
+        let at = |x, y| WorldPosition { x, y };
+        let mut store = StructureStore::default();
+        for (builder, site) in [(0, at(0, 0)), (1, at(10, 0))] {
+            store
+                .start(
+                    AgentId::new(builder),
+                    site,
+                    StructureKind::Shelter,
+                    SimTime::ZERO,
+                    SimTime::from_ticks(1),
+                )
+                .unwrap();
+            store
+                .complete_for_builder(AgentId::new(builder), 0)
+                .unwrap();
+        }
+        let empty = store.structure_at(at(10, 0)).unwrap();
+        store.deposit(
+            empty,
+            crate::InventoryView::of(&[(crate::Material::Wood, 4)]),
+        );
+        for season in 1..HUT_ABANDONED_SEASONS {
+            store.lived_in(at(1, 0));
+            assert!(store.weather().is_empty(), "season {season}");
+        }
+        store.lived_in(at(1, 0));
+        let fallen = store.weather();
+        assert_eq!(fallen.len(), 1, "only the empty hut falls");
+        assert_eq!(fallen[0].position, at(10, 0));
+        assert_eq!(fallen[0].stored.amount(crate::Material::Wood), 4);
+        assert!(store.structure_at(at(10, 0)).is_none());
+        assert!(store.structure_at(at(0, 0)).is_some());
+        assert_eq!(store.len(), 1);
     }
 
     #[test]

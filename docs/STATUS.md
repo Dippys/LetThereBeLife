@@ -142,7 +142,6 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 ## Known problems and limitations
 
 - **Winter cold is the main killer** (D-102): fires mostly go out and people freeze near huts.
-- **Huts never decay**, so a burst of building in the first year stays forever.
 - **Stored food is rarely eaten:** people put food away in huts but seldom come back for it.
 - **Decisions are hand-written.** Agents learn facts (food, danger, words, crafts), but what to do
   about them is a script. Next: learning what works (docs/plans/LEARNING.md).
@@ -171,7 +170,8 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
-- 2026-10-11 (latest): learning what works, phase 1: habits learned silently (D-103).
+- 2026-10-11 (latest): huts nobody lives in fall down after two years (D-104).
+- 2026-10-11: learning what works, phase 1: habits learned silently (D-103).
 - 2026-10-11: a harder world: swimming, a 12-item load, hut storage, effort, learned
   huts, slower regrowth (D-102).
 - 2026-10-11: viewer speeds up to 4096× (a frame budget shows the speed reached), the

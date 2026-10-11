@@ -258,8 +258,11 @@ impl Engine {
                 ) {
                     Ok(sleep) => {
                         // A night under a roof shows how a hut is put together.
-                        if quality == crate::SleepQuality::Sheltered && self.policy_options.memory {
-                            self.minds.get_mut(agent).crafts.saw_building();
+                        if quality == crate::SleepQuality::Sheltered {
+                            self.structures.lived_in(target);
+                            if self.policy_options.memory {
+                                self.minds.get_mut(agent).crafts.saw_building();
+                            }
                         }
                         self.policy_diagnostics.push(PolicyDiagnostic {
                             agent,

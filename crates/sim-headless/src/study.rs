@@ -251,6 +251,7 @@ pub struct WildlifeStats {
     /// Huts finished; things put away in huts and food taken back out; trips
     /// given up after getting no closer.
     pub huts: u64,
+    pub huts_fallen: u64,
     pub stored: u64,
     pub fetched: u64,
     pub gave_up: u64,
@@ -474,6 +475,8 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                     wildlife.huts += u64::from(
                         completed && built.structure.kind == sim_core::StructureKind::Shelter,
                     );
+                    wildlife.huts_fallen +=
+                        u64::from(built.kind == sim_core::StructureDiagnosticKind::Collapsed);
                 }
                 for decision in engine.policy_diagnostics() {
                     wildlife.warm_ups += u64::from(
@@ -1712,8 +1715,12 @@ impl fmt::Display for StudyReport {
         )?;
         write!(
             formatter,
-            "\n  homes: huts built {}, things put away {}, food fetched {}; trips given up {}",
-            self.wildlife.huts, self.wildlife.stored, self.wildlife.fetched, self.wildlife.gave_up
+            "\n  homes: huts built {} ({} fell down empty), things put away {}, food fetched {}; trips given up {}",
+            self.wildlife.huts,
+            self.wildlife.huts_fallen,
+            self.wildlife.stored,
+            self.wildlife.fetched,
+            self.wildlife.gave_up
         )?;
         if let Some((children, matching)) = self.children_vocabulary {
             write!(
