@@ -86,11 +86,12 @@ fn reset_restores_runtime_state_but_preserves_config() {
 fn simulation_speed_accepts_the_viewer_ceiling_and_caps_above_it() {
     let mut engine = Engine::default();
     assert_eq!(
-        engine.command(EngineCommand::SetSpeed(4096.0)),
+        engine.command(EngineCommand::SetSpeed(MAX_SIMULATION_SPEED)),
         EngineCommandOutcome::Applied
     );
     assert_eq!(engine.snapshot().speed, MAX_SIMULATION_SPEED);
-    engine.command(EngineCommand::SetSpeed(8192.0));
+    assert_eq!(MAX_SIMULATION_SPEED, 14_400.0, "a year a second");
+    engine.command(EngineCommand::SetSpeed(2.0 * MAX_SIMULATION_SPEED));
     assert_eq!(engine.snapshot().speed, MAX_SIMULATION_SPEED);
 }
 

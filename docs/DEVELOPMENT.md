@@ -120,7 +120,7 @@ Compare minds before and after any behavior change. Current numbers are in [STAT
 | Click a person | Open their panel: what they're doing and why, need bars, what they carry, what they believe (eats, avoids, hunts, fears, fire), their words, and friends. The map shows their remembered places (solid = seen, outline = hint) and dotted lines to people they know |
 | `Tab` / `F` | Next living person / follow the picked person |
 | `Esc` | Close help, then the build palette, then the person panel (it no longer quits) |
-| `Space`, `1`–`9`, `+`/`-` | Pause, speed 1×–256×, step the speed up to 4096× (also buttons in the top bar); past what the computer manages, the bar shows the speed reached |
+| `Space`, `1`–`9`, `+`/`-` | Pause, speed 1×–256×, step the speed up to 8192× and then a year a second ("1yr/s", 14,400×) (also buttons in the top bar); past what the computer manages, the bar shows the speed reached |
 | `F5`, `F9` | Save the world to `saves/quick.ltbl`, open it again |
 | `I` | Valley info: weather, fires burning, how many are cold/hungry/thirsty/tired, births and deaths this year |
 | `T` | Add a person at the cursor |

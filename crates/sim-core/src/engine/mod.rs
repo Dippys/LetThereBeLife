@@ -53,7 +53,8 @@ pub struct EngineConfig {
     pub world: WorldConfig,
 }
 
-pub const MAX_SIMULATION_SPEED: f32 = 4096.0;
+/// A year a second: the fastest a run may be asked to go.
+pub const MAX_SIMULATION_SPEED: f32 = crate::SECONDS_PER_YEAR as f32;
 
 impl Default for EngineConfig {
     fn default() -> Self {

@@ -205,8 +205,22 @@ fn banner(painter: &mut Painter, text: &str, width: f32, y: f32, color: u32) {
 
 /// Speed steps the bar's buttons move between.
 /// Keys 1-9 pick the first nine; + and - step through all of them.
-pub const SPEEDS: [f32; 13] = [
-    1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0, 512.0, 1024.0, 2048.0, 4096.0,
+pub const SPEEDS: [f32; 15] = [
+    1.0,
+    2.0,
+    4.0,
+    8.0,
+    16.0,
+    32.0,
+    64.0,
+    128.0,
+    256.0,
+    512.0,
+    1024.0,
+    2048.0,
+    4096.0,
+    8192.0,
+    sim_core::MAX_SIMULATION_SPEED,
 ];
 
 /// Draws the top bar and returns its height.
@@ -256,7 +270,11 @@ fn top_bar(painter: &mut Painter, state: &RenderState, width: f32) -> f32 {
     );
     x += gap * 2.0;
     x += painter.button("-", x, button_y, UiAction::Slower, false) + gap;
-    let speed = format!("{}×", state.snapshot.speed);
+    let speed = if state.snapshot.speed >= sim_core::MAX_SIMULATION_SPEED {
+        "1yr/s".to_owned()
+    } else {
+        format!("{}×", state.snapshot.speed)
+    };
     let speed_x = x + (painter.chars(5) - text_width(&speed, px)) / 2.0;
     painter.text(&speed, speed_x, text_y, colors::UI_TEXT);
     x += painter.chars(5) + gap;
