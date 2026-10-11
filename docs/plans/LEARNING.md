@@ -80,6 +80,9 @@ the stored food), with the credit decaying the longer that takes.
   with experience kept, people settle on sleeping when cold and stop trying fires, and do worse.
   Credit needs to account for time taken and how long relief lasts before copying or showing
   habits is worth it.
+- Passing half of a good outcome back to the step before (feeding a fire, then warming up) plus
+  learning only under pressure: 182 survivors against 185 over 10 years in 8 valleys (branch
+  `credit`). It recovers most of what pressure-only learning lost (177) but isn't yet better.
 
 ## Costs and risks
 

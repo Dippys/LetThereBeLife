@@ -202,6 +202,19 @@ impl Feed {
             );
         }
 
+        for fallen in engine
+            .structure_diagnostics()
+            .iter()
+            .filter(|diagnostic| diagnostic.kind == sim_core::StructureDiagnosticKind::Collapsed)
+        {
+            self.push(
+                "An empty hut fell down".to_owned(),
+                Tone::Bad,
+                None,
+                fallen.structure.position,
+            );
+        }
+
         for fire in engine.fire_events().iter().filter(|fire| fire.relit) {
             self.push(
                 format!("{} relit a fire", name(engine, fire.agent)),

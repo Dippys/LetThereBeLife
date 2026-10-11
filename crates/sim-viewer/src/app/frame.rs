@@ -96,9 +96,20 @@ impl ViewerApp {
         }
         let now = (snapshot.tick / 60) as u32;
         for structure in self.engine.structure_views(usize::MAX) {
-            if structure.kind.burns() && structure.state == sim_core::StructureState::Complete {
+            if structure.state != sim_core::StructureState::Complete {
+                continue;
+            }
+            if structure.kind.burns() {
                 census.hearths += 1;
                 census.fires_burning += u32::from(structure.working(now));
+            } else {
+                census.huts += 1;
+                census.stored_food += structure
+                    .stored
+                    .carried()
+                    .filter(|(material, _)| material.properties().nutrition > 0)
+                    .map(|(_, amount)| u32::from(amount))
+                    .sum::<u32>();
             }
         }
         let (_, deaths, births) = self.year_start;

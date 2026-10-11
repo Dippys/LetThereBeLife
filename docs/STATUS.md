@@ -169,7 +169,9 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
-- 2026-10-11 (latest): saving and opening worlds: `--save`, `--load`, F5/F9 (D-107).
+- 2026-10-11 (latest): the info box shows huts and the food stored in them; the feed notes huts
+  that fall down empty.
+- 2026-10-11: saving and opening worlds: `--save`, `--load`, F5/F9 (D-107).
 - 2026-10-11: learning what works, phase 2: cold and tiredness answered by experience
   (D-105); far fewer people freeze.
 - 2026-10-11: huts nobody lives in fall down after two years (D-104).

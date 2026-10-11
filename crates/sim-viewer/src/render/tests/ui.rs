@@ -483,6 +483,7 @@ fn the_info_box_tells_the_weather_and_how_people_are_doing() {
         "Weather: Winter, freezing",
         "Bushes: bare, nothing grows back",
         "Fires: 1 burning of 3",
+        "Homes: 0 huts, 0 food stored in them",
         "Feeling: 4 cold, 0 hungry, 0 thirsty, 0 tired",
         "This year: 2 born, 0 died",
     ] {

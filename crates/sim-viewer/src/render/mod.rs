@@ -85,6 +85,9 @@ pub struct Census {
     pub tired: u32,
     /// Finished hearths, and how many are burning.
     pub hearths: u32,
+    /// Finished huts, and the food stored in them.
+    pub huts: u32,
+    pub stored_food: u32,
     pub fires_burning: u32,
     pub born_this_year: u32,
     pub died_this_year: u32,

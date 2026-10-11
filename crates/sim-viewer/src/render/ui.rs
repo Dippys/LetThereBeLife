@@ -925,6 +925,13 @@ pub(super) fn info_rows(state: &RenderState) -> Vec<(&'static str, String)> {
             format!("{} burning of {}", census.fires_burning, census.hearths),
         ),
         (
+            "Homes",
+            format!(
+                "{} huts, {} food stored in them",
+                census.huts, census.stored_food
+            ),
+        ),
+        (
             "Feeling",
             format!(
                 "{} cold, {} hungry, {} thirsty, {} tired",
