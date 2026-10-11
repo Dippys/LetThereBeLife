@@ -632,3 +632,33 @@ back over a tick later, and they lay down again: 14,000 naps in 15 minutes.
 **Consequences:** Late winter now costs the same as other seasons. Six 10-year valleys: 146
 survivors vs 139, deaths from cold 6 vs 11. Episodes 60 in 28 of the success test's valleys (86 in
 23 before).
+
+## D-102: A harder world: swimming, loads, storage, effort, learned huts (2026-10-11)
+
+**Decision:** One batch of world and body rules, at the user's request:
+- **Swimming:** lakes and rivers can be waded (6x a soil step) or swum (12x when deep); the sea
+  can't. Each step in water chills and tires. Perception's reach crosses water.
+- **Loads:** one shared carrying limit of 12 things (was 32 of each). People can set down what
+  they have no use for (`Drop`), keeping tools, wood or stone for what they can make, and a little
+  food.
+- **Storage:** a finished hut holds up to 48 things (`Store`, `Fetch`); the contents are visible to
+  anyone nearby. People unload at a hut in view and remember where they left food.
+- **Effort:** only grown, non-pregnant people build and chop wood; strength scales build time (80%
+  to 200%). A hut takes 10 wood and 5 minutes, a hearth 4 stone, 3 wood and 3 minutes. Builders
+  keep working through cold, hunger and tiredness; thirst stops them.
+- **Learned huts:** founders know how to build huts; children and newcomers learn by watching one go
+  up or sleeping in one. Huts aren't built within 96 cells of one already remembered.
+- **Scarcity:** berries regrow one per bush every 20 minutes (was 10), trees one every 2 hours (was
+  1); stone never regrows.
+- **Giving up:** a trip to a place someone pointed out is dropped after 16 decisions without
+  getting closer. Thirst past its threshold comes before cold and tiredness.
+- The viewer's `--advance` prints progress, yearly summaries, births and deaths to the console.
+**Why:** The world was too easy (people carried pantries; huts went up in seconds anywhere someone
+felt tired) and people could be stuck behind lakes.
+**Consequences:** Survivors in valleys 1, 4, 9, 13 after 1.4 years: 18, 20, 17, 20 (about 22
+before). A 100-year run of seed 1 survives with 14-25 people and about five generations. Most
+non-old-age deaths are winter cold; most fires are out; 37 huts go up in year one and never decay;
+stored food is rarely fetched. Children score 64% on the band's place words (75% before; berries
+and huts get pointed out less) and the success test finds 42 episodes in 22 valleys (86 before; it
+needs 40), so its margin is thin. Agent memory is 984 bytes. Decision rules were patched heavily in
+this batch; the next step replaces them with learning what works (docs/plans/LEARNING.md).

@@ -141,6 +141,11 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Known problems and limitations
 
+- **Winter cold is the main killer** (D-102): fires mostly go out and people freeze near huts.
+- **Huts never decay**, so a burst of building in the first year stays forever.
+- **Stored food is rarely eaten:** people put food away in huts but seldom come back for it.
+- **Decisions are hand-written.** Agents learn facts (food, danger, words, crafts), but what to do
+  about them is a script. Next: learning what works (docs/plans/LEARNING.md).
 - **Wolves are hard on loners.** Agents who wander off alone get bitten; wounded people now come
   round after 5 minutes, but some die of thirst while down or soon after.
 - **Helping matters only in famines.** With regrowth and game, nobody needs to ask for food; the M7
@@ -166,7 +171,9 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
-- 2026-10-11 (latest): viewer speeds up to 4096× (a frame budget shows the speed reached), the
+- 2026-10-11 (latest): a harder world: swimming, a 12-item load, hut storage, effort, learned
+  huts, slower regrowth (D-102).
+- 2026-10-11: viewer speeds up to 4096× (a frame budget shows the speed reached), the
   season's cold beside the year, and an info box (I) with fires, needs, births and deaths.
 - 2026-10-11: warming up in a hut lasts until well warmed, ending the late-winter
   slowdown (D-101).
@@ -208,12 +215,10 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## What's next
 
-1. **More speaker feedback** (D-097 added reporting back): speakers watching how listeners react
-   (approaching an animal they warned about), and overhearing others use their words differently.
-2. **Separated groups (continued)**: `--apart` starts each family in its own valley, but people
-   roam about a thousand cells within weeks, so the groups still meet early and converge. Real
-   divergence needs a lasting barrier or much longer isolation.
-3. **Episodic memory** (phase 3), so agents remember who misled, helped, or warned them.
-4. Generation leftovers: elders walking slower, late pregnancy slowing, names used in requests
-   and corrections.
-
+1. **Learning what works** (docs/plans/LEARNING.md): agents learn which actions relieve which needs
+   in which situations, from their own experience and by copying people doing well, replacing most
+   of the hand-written decision rules.
+2. **Save and load**, so a long run (e.g. 1,000 years) is computed once and opened instantly.
+3. **More speaker feedback**: speakers watching how listeners react, overhearing others.
+4. **Separated groups (continued)**: a lasting barrier or much longer isolation.
+5. **Episodic memory** (phase 3), so agents remember who misled, helped, or warned them.

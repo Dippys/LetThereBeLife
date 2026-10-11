@@ -206,8 +206,11 @@ pub(crate) fn deliberate(
     }
     let water_here = nearest_water_access(origin, perception);
     let food = mind.food;
+    // Only what it can actually gather: a child can't fell a tree to taste it.
     let food_here = nearest_resource_access(origin, perception, |kind| {
-        food.is_food(kind) && inventory.can_add(kind)
+        food.is_food(kind)
+            && inventory.can_add(kind)
+            && (mind.able || kind.properties().handling != crate::Handling::Chop)
     });
     match most_urgent(needs) {
         Some(NeedKind::Thirst) => water_here

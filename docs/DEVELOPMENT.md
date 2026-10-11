@@ -134,7 +134,9 @@ warnings, collapses and recoveries, corrections, and misunderstandings ("Person 
 "kani" for water (meant berries)"); click one to look. Words appear for 2.5 s as bubbles over the speaker with the gesture
 that went with them (uppercase when shouted), and a dotted line shows where the gesture pointed.
 
-For screenshots: `--valley --advance TICKS --select PERSON --smoke-frames N --screenshot out.png`
+For screenshots: `--valley --advance TICKS --select PERSON --smoke-frames N --screenshot out.png`.
+To open a world years ahead: `--valley --advance TICKS` (a year is 864,000 ticks; 100 years takes
+about 8 minutes). The console shows progress, a summary each year, and every birth and death.
 renders hidden and saves the last frame.
 
 ## Tests

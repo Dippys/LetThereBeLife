@@ -97,12 +97,7 @@ pub(crate) fn select_with_exploration(
 
 /// The need past its threshold with the highest relative urgency, if any.
 pub(super) fn most_urgent(needs: PhysicalNeedsView) -> Option<NeedKind> {
-    // Thirst kills fastest: once past its threshold it comes first, so nobody
-    // warms up or sleeps on while dying of thirst.
-    if needs.thirst.threshold_reached {
-        return Some(NeedKind::Thirst);
-    }
-    NeedKind::ALL
+    let most = NeedKind::ALL
         .into_iter()
         .filter_map(|kind| {
             let level = match kind {
@@ -118,7 +113,15 @@ pub(super) fn most_urgent(needs: PhysicalNeedsView) -> Option<NeedKind> {
             ))
         })
         .max_by_key(|&(score, tie, _)| (score, tie))
-        .map(|(_, _, kind)| kind)
+        .map(|(_, _, kind)| kind);
+    // Nobody sleeps or warms up on while dying of thirst: once thirst is past
+    // its threshold it comes before cold and tiredness.
+    match most {
+        Some(NeedKind::Rest | NeedKind::Exposure) if needs.thirst.threshold_reached => {
+            Some(NeedKind::Thirst)
+        }
+        other => other,
+    }
 }
 
 fn is_safe_anchor(origin: WorldPosition, perception: &PhysicalPerception) -> bool {

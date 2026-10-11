@@ -1,12 +1,13 @@
 //! The behavior study is a measurement tool, but two properties are guarded:
 //! it is deterministic, and agents with memory outlive mindless ones in the
-//! default seed's savanna.
+//! default seed's savanna (over half a year: with scarcer, slower-growing food
+//! everyone still lives through the first spring).
 
 use sim_core::PolicyOptions;
 use sim_headless::{StudyConfig, StudySpawn, run_study};
 
 fn study(mind: PolicyOptions) -> sim_headless::StudyReport {
-    let mut config = StudyConfig::new(1, 10, 150_000);
+    let mut config = StudyConfig::new(1, 10, 450_000);
     config.spawn = StudySpawn::Groups;
     config.mind = mind;
     run_study(config).expect("seed 1 has land for every group")

@@ -12,7 +12,8 @@
 //! gesture ids by the communication log: the listener must act on its reading
 //! before it learns better, and the speaker's lesson must concern the meaning
 //! at stake. Since listeners report back what they found (D-097) the valleys
-//! hold 79 episodes in 24 valleys; before, 3 in 2.
+//! held 79 episodes in 24 valleys (3 in 2 before); in the harder world of D-102,
+//! 42 in 22.
 //! Release-only: `cargo test --release -p sim-headless --test success -- --ignored`.
 
 use sim_core::{DesiredEffect, LessonCause};
