@@ -8,7 +8,7 @@ mod selection;
 mod state;
 
 pub use deliberate::HOME_RANGE;
-pub(crate) use deliberate::{MindInput, ParentInput, deliberate, heading_toward};
+pub(crate) use deliberate::{HUT_SPACING, MindInput, ParentInput, deliberate, heading_toward};
 #[cfg(test)]
 pub(crate) use selection::select;
 pub(crate) use selection::{PolicyAction, PolicySelection, select_with_exploration};
@@ -109,6 +109,12 @@ pub enum PhysicalGoal {
     TendFire = 15,
     /// Make something from carried materials (knap a blade).
     Craft = 16,
+    /// Put carried things away in the hut beside the agent.
+    Store = 17,
+    /// Take food out of the hut beside the agent.
+    Fetch = 18,
+    /// Set down what it doesn't need, to make room.
+    Drop = 19,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -156,6 +162,12 @@ pub enum PolicyReason {
     Tending,
     /// Making a tool.
     Crafting,
+    /// Putting things away in a hut.
+    Storing,
+    /// Getting food put away in a hut.
+    Fetching,
+    /// Setting things down to make room.
+    Unloading,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

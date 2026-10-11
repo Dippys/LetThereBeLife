@@ -140,9 +140,18 @@ fn inventory_capacity_is_enforced_without_heap_items() {
         std::mem::size_of::<InventoryView>(),
         sim_core::Material::COUNT
     );
-    assert_eq!(sim_core::INVENTORY_CAPACITY_PER_KIND, 32);
+    assert_eq!(sim_core::CARRY_CAPACITY, 12);
     assert_eq!(
         InventoryView::default().remaining_capacity(sim_core::Material::Stone),
-        32
+        12
+    );
+    let mixed = InventoryView::of(&[
+        (sim_core::Material::Wood, 5),
+        (sim_core::Material::Berries, 4),
+    ]);
+    assert_eq!(
+        mixed.remaining_capacity(sim_core::Material::Stone),
+        3,
+        "one load shared by every material"
     );
 }

@@ -94,6 +94,7 @@ fn mind(lexicon: Vec<LexiconEntryView>, acquaintances: Vec<AcquaintanceView>) ->
         ],
         knows_hearths: true,
         knows_knapping: true,
+        knows_huts: true,
         acquaintances,
         lexicon,
     }
@@ -183,12 +184,13 @@ fn the_person_panel_says_what_they_do_feel_and_believe_in_plain_words() {
         "Girl, 9 · curious · Person 7",
         "Looking for food",
         "Going where someone pointed",
-        "Carrying: 2 berries, 3 wood",
+        "Carrying: 2 berries, 3 wood (5 of 12)",
         "Eats: berries",
         "Avoids: bitter berries",
         "Hunts: deer",
         "Fears: wolves",
         "Knows how to make fire",
+        "Knows how to build huts",
         "Knows how to knap stone blades",
         "Family: Mata (parent)",
         "Friends: Person 9, Person 3",
@@ -268,6 +270,7 @@ fn the_dead_get_a_cause_and_nothing_else_and_the_unknowing_say_so() {
     view.fauna.clear();
     view.knows_hearths = false;
     view.knows_knapping = false;
+    view.knows_huts = false;
     blank.memory = Some(MemoryInspection::from_view(&view));
     let rows = person_rows(&blank);
     assert!(rows.contains(&Row::Text("Nothing yet".to_owned(), colors::UI_DIM)));
@@ -313,7 +316,8 @@ fn tooltips_name_what_is_under_the_mouse() {
         hover_lines(&Hover::Structure {
             kind: StructureKind::Hearth,
             state: StructureState::UnderConstruction,
-            burning: Some(600)
+            burning: Some(600),
+            stored: sim_core::InventoryView::default()
         }),
         ("Hearth".to_owned(), Some("being built".to_owned()))
     );

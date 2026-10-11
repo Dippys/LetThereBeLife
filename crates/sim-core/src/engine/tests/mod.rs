@@ -9,9 +9,9 @@ use crate::routing::RouteEnvironment;
 use crate::scheduler::{self, MAX_DUE_EVENTS_PER_TICK, Scheduler};
 use crate::structures::StructureStore;
 use crate::{
-    AgentActivity, AgentId, AgentView, ChunkCoord, ChunkPresence, DeathCause, EAT_HUNGER_RELIEF,
-    Engine, EngineCommand, EngineCommandOutcome, EngineConfig, HEALTH_INCAPACITATION_THRESHOLD,
-    HealthDiagnosticKind, INVENTORY_CAPACITY_PER_KIND, InventoryView, MAX_ROUTE_EXPANSIONS,
+    AgentActivity, AgentId, AgentView, CARRY_CAPACITY, ChunkCoord, ChunkPresence, DeathCause,
+    EAT_HUNGER_RELIEF, Engine, EngineCommand, EngineCommandOutcome, EngineConfig,
+    HEALTH_INCAPACITATION_THRESHOLD, HealthDiagnosticKind, InventoryView, MAX_ROUTE_EXPANSIONS,
     MAX_SIMULATION_SPEED, Material, MoveRequestError, MovementEventOutcome, MovementOutcomeKind,
     NeedKind, NeedThreshold, PerceptionError, PhysicalGoal, PolicyDiagnosticKind,
     PolicyFailureReason, PolicyReason, PopulationInit, PopulationInitError, RouteOutcomeKind,

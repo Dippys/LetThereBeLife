@@ -385,15 +385,20 @@ pub(super) fn hover_lines(hover: &Hover) -> (String, Option<String>) {
             kind,
             state,
             burning,
+            stored,
         } => (
             labels::structure(kind).to_owned(),
             if state == StructureState::UnderConstruction {
                 Some("being built".to_owned())
-            } else {
-                burning.map(|left| match left {
+            } else if let Some(left) = burning {
+                Some(match left {
                     0 => "gone out".to_owned(),
                     _ => format!("burning, {} left", labels::duration(f64::from(left))),
                 })
+            } else if stored.total() > 0 {
+                Some(format!("holds {}", labels::carried(stored)))
+            } else {
+                Some("empty".to_owned())
             },
         ),
         Hover::Resource { label, remaining } => (
@@ -524,21 +529,15 @@ pub(super) fn person_rows(agent: &AgentInspection) -> Vec<Row> {
         rows.push(Row::Text(carrying, colors::UI_TEXT));
     }
     if let Some(inventory) = agent.inventory {
-        let carried: Vec<String> = Material::ALL
-            .into_iter()
-            .filter(|material| inventory.amount(*material) > 0)
-            .map(|material| {
-                format!(
-                    "{} {}",
-                    inventory.amount(material),
-                    labels::material(material)
-                )
-            })
-            .collect();
-        let carried = if carried.is_empty() {
+        let carried = if inventory.total() == 0 {
             "nothing".to_owned()
         } else {
-            carried.join(", ")
+            format!(
+                "{} ({} of {})",
+                labels::carried(inventory),
+                inventory.total(),
+                sim_core::CARRY_CAPACITY
+            )
         };
         rows.push(Row::Pair("Carrying", carried));
     }
@@ -578,6 +577,12 @@ pub(super) fn person_rows(agent: &AgentInspection) -> Vec<Row> {
     if memory.knows_hearths {
         rows.push(Row::Text(
             "Knows how to make fire".to_owned(),
+            colors::UI_TEXT,
+        ));
+    }
+    if memory.knows_huts {
+        rows.push(Row::Text(
+            "Knows how to build huts".to_owned(),
             colors::UI_TEXT,
         ));
     }

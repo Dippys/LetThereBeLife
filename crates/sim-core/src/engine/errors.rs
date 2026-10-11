@@ -215,6 +215,7 @@ pub(super) fn build_failure(error: BuildShelterError) -> PolicyFailureReason {
         BuildShelterError::Water
         | BuildShelterError::BlockingFeature
         | BuildShelterError::WouldEnclose
+        | BuildShelterError::NotFit
         | BuildShelterError::NotCardinallyAdjacent => PolicyFailureReason::BuildSiteInvalid,
         BuildShelterError::MissingAgent
         | BuildShelterError::DeadAgent

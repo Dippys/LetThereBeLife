@@ -147,6 +147,11 @@ pub struct Engine {
     word_events: Vec<crate::WordEvent>,
     fire_events: Vec<crate::FireEvent>,
     craft_events: Vec<crate::CraftEvent>,
+    /// Trips abandoned because the agent stopped getting closer (for tools).
+    gave_up: u64,
+    /// Things put away in huts and food taken out (for tools).
+    stored: u64,
+    fetched: u64,
     wildlife: crate::wildlife::Wildlife,
     wildlife_events: Vec<crate::WildlifeEvent>,
     /// Sex and birth of people born during the run (others are derived from the seed).
@@ -203,6 +208,9 @@ impl Engine {
             word_events: Vec::new(),
             fire_events: Vec::new(),
             craft_events: Vec::new(),
+            gave_up: 0,
+            stored: 0,
+            fetched: 0,
             wildlife: crate::wildlife::Wildlife::default(),
             wildlife_events: Vec::new(),
             lives: Vec::new(),
@@ -264,6 +272,9 @@ impl Engine {
                 self.word_events.clear();
                 self.fire_events.clear();
                 self.craft_events.clear();
+                self.gave_up = 0;
+                self.stored = 0;
+                self.fetched = 0;
                 self.wildlife = crate::wildlife::Wildlife::default();
                 self.wildlife_events.clear();
                 self.lives.clear();

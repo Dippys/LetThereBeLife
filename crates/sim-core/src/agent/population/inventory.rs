@@ -23,11 +23,7 @@ impl Population {
         agent: AgentId,
         inventory: InventoryView,
     ) -> Result<(), InitialInventoryError> {
-        if inventory
-            .items
-            .iter()
-            .any(|&amount| amount > crate::INVENTORY_CAPACITY_PER_KIND)
-        {
+        if inventory.total() > crate::CARRY_CAPACITY {
             return Err(InitialInventoryError::AmountExceedsCapacity);
         }
         let slot = self

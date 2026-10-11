@@ -92,6 +92,12 @@ impl Engine {
         if !self.population.can_build(agent, kind) {
             return Err(BuildShelterError::InsufficientMaterials);
         }
+        if !self.fit_for_heavy_work(agent) {
+            return Err(BuildShelterError::NotFit);
+        }
+        // Stronger hands build faster; the old and the slight take longer.
+        let duration =
+            kind.build_ticks() * (100 - 3 * self.strength(agent)).clamp(80, 200) as u64 / 100;
         self.compact_scheduler_if_needed();
         let due = self
             .population
@@ -106,7 +112,7 @@ impl Engine {
                     },
                     target: site,
                     reason,
-                    duration: kind.build_ticks(),
+                    duration,
                 },
             )
             .map_err(map_build_schedule_error)?;
@@ -142,6 +148,24 @@ impl Engine {
             .structures
             .complete_for_builder(agent, now + built_in_fuel)
             .ok_or(PolicyFailureReason::InconsistentState)?;
+        if structure.kind == StructureKind::Shelter && self.policy_options.memory {
+            // Anyone who saw it go up now knows how it's done.
+            let watchers: Vec<AgentId> = self
+                .perceive_physical(agent, crate::PHYSICAL_POLICY_RADIUS)
+                .map(|perception| {
+                    perception
+                        .agents
+                        .iter()
+                        .filter(|other| super::cognition::can_watch(other.activity))
+                        .map(|other| other.id)
+                        .collect()
+                })
+                .unwrap_or_default();
+            self.minds.get_mut(agent).crafts.saw_building();
+            for watcher in watchers {
+                self.minds.get_mut(watcher).crafts.saw_building();
+            }
+        }
         self.structure_diagnostics.push(StructureDiagnostic {
             structure,
             at: self.time,

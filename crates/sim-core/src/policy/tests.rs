@@ -223,7 +223,7 @@ fn carried_food_turns_hunger_into_eating_and_idle_agents_gather_capacity() {
         PhysicalGoal::GatherMaterial
     );
     let full = InventoryView {
-        items: [crate::INVENTORY_CAPACITY_PER_KIND; Material::COUNT],
+        items: [crate::CARRY_CAPACITY; Material::COUNT],
     };
     // The only free neighbour, (1, 0), is on the lake shore: nobody builds there.
     assert_ne!(

@@ -11,6 +11,10 @@ use crate::{
     WorldQueryError,
 };
 
+/// Food kept on hand when putting things away in a hut.
+const KEPT_FOOD: u8 = 2;
+/// Most food taken out of a hut at once.
+const FETCHED_FOOD: u8 = 6;
 /// Cold and tiredness one step through water adds (more where it's deep).
 const SWIM_CHILL: u16 = 120;
 const SWIM_EFFORT: u16 = 60;
@@ -117,6 +121,9 @@ impl Engine {
             PhysicalGoal::WarmUp => self.apply_warm_up(event.agent),
             PhysicalGoal::TendFire => self.apply_tend_fire(event.agent),
             PhysicalGoal::Craft => self.apply_craft(event.agent),
+            PhysicalGoal::Store => self.apply_store(event.agent, target),
+            PhysicalGoal::Fetch => self.apply_fetch(event.agent, target),
+            PhysicalGoal::Drop => self.apply_drop(event.agent),
             PhysicalGoal::Signal => self.apply_signal(event.agent, target),
             PhysicalGoal::Hunt => self.apply_hunt(event.agent, target),
             PhysicalGoal::SeekShelter | PhysicalGoal::Incapacitated => {
@@ -341,6 +348,194 @@ impl Engine {
         Ok(())
     }
 
+    /// Puts everything carried into the hut at `hut` (beside the agent), except a
+    /// little food and any tool, as far as there's room.
+    pub(super) fn apply_store(
+        &mut self,
+        agent: AgentId,
+        hut: WorldPosition,
+    ) -> Result<(), PolicyFailureReason> {
+        let id = self.hut_beside(agent, hut)?;
+        let inventory = self
+            .population
+            .inventory(agent)
+            .ok_or(PolicyFailureReason::InconsistentState)?;
+        let food = self.food_values(agent);
+        let mut kept_food = 0_u8;
+        let mut offered = crate::InventoryView::default();
+        for (material, amount) in inventory.carried() {
+            let keep = if material.properties().cutting {
+                amount
+            } else if food.is_food(material) {
+                let keep = amount.min(KEPT_FOOD.saturating_sub(kept_food));
+                kept_food += keep;
+                keep
+            } else {
+                0
+            };
+            offered.items[material as usize] = amount - keep;
+        }
+        let moved = self.structures.deposit(id, offered);
+        if moved.total() == 0 {
+            return Err(PolicyFailureReason::TargetUnavailable);
+        }
+        for (material, amount) in moved.carried() {
+            self.population.take(agent, material, amount);
+        }
+        self.stored += u64::from(moved.total());
+        if moved.carried().any(|(material, _)| food.is_food(material)) {
+            self.minds.get_mut(agent).stored_food = crate::agent::CompactPosition::checked(hut);
+        }
+        Ok(())
+    }
+
+    /// Sets down whatever it has no use for, to make room: it keeps any tool,
+    /// the wood for a hut it can build (or a fire it keeps), stone for a
+    /// hearth or a blade, and a little food (less while a hut is waiting on wood).
+    pub(super) fn apply_drop(&mut self, agent: AgentId) -> Result<(), PolicyFailureReason> {
+        let position = self
+            .population
+            .view(agent)
+            .ok_or(PolicyFailureReason::InconsistentState)?
+            .position;
+        let inventory = self
+            .population
+            .inventory(agent)
+            .ok_or(PolicyFailureReason::InconsistentState)?;
+        let food = self.food_values(agent);
+        let crafts = self
+            .minds
+            .get(agent)
+            .map(|mind| mind.crafts)
+            .unwrap_or_default();
+        // Hut wood is worth keeping only for someone who can build one and has
+        // no hut nearby already.
+        let homeless = self.minds.get(agent).is_none_or(|mind| {
+            mind.map
+                .nearest_seen_distance(crate::cognition::LandmarkKind::SHELTER, position)
+                .is_none_or(|distance| distance > crate::policy::HUT_SPACING)
+        });
+        let builds_huts = crafts.knows_huts() && self.fit_for_heavy_work(agent) && homeless;
+        let wood_for_hut =
+            builds_huts && inventory.amount(Material::Wood) < crate::SHELTER_WOOD_COST;
+        let keep_wood = if builds_huts {
+            crate::SHELTER_WOOD_COST
+        } else if crafts.knows_hearths() {
+            crate::HEARTH_WOOD_COST + 1
+        } else {
+            0
+        };
+        let keep_stone = if wood_for_hut {
+            0
+        } else if crafts.knows_hearths() {
+            crate::HEARTH_STONE_COST
+        } else {
+            u8::from(crafts.knows_knapping())
+        };
+        let mut food_left = if wood_for_hut {
+            KEPT_FOOD
+        } else {
+            2 * KEPT_FOOD
+        };
+        let mut dropped = 0_u8;
+        for (material, amount) in inventory.carried() {
+            let keep = if material.properties().cutting {
+                amount
+            } else if food.is_food(material) {
+                let keep = amount.min(food_left);
+                food_left -= keep;
+                keep
+            } else {
+                match material {
+                    Material::Wood => amount.min(keep_wood),
+                    Material::Stone => amount.min(keep_stone),
+                    _ => 0,
+                }
+            };
+            dropped += self.population.take(agent, material, amount - keep);
+        }
+        if dropped == 0 {
+            return Err(PolicyFailureReason::TargetUnavailable);
+        }
+        Ok(())
+    }
+
+    /// Takes food out of the hut at `hut` (beside the agent): what it thinks is
+    /// food, as much as it can carry up to a few meals.
+    pub(super) fn apply_fetch(
+        &mut self,
+        agent: AgentId,
+        hut: WorldPosition,
+    ) -> Result<(), PolicyFailureReason> {
+        let id = self.hut_beside(agent, hut)?;
+        let food = self.food_values(agent);
+        let mut room = self
+            .population
+            .inventory(agent)
+            .ok_or(PolicyFailureReason::InconsistentState)?
+            .remaining_capacity(Material::Berries)
+            .min(FETCHED_FOOD);
+        let stored = self
+            .structures
+            .view(id)
+            .map(|view| view.stored)
+            .unwrap_or_default();
+        let mut taken = 0_u8;
+        for (material, _) in stored
+            .carried()
+            .filter(|(material, _)| food.is_food(*material))
+        {
+            let got = self.structures.withdraw(id, material, room);
+            self.population.add_inventory(agent, material, got);
+            room -= got;
+            taken += got;
+        }
+        let left = self.structures.view(id).is_some_and(|view| {
+            view.stored
+                .carried()
+                .any(|(material, _)| food.is_food(material))
+        });
+        if !left {
+            let mind = self.minds.get_mut(agent);
+            if mind.stored_food == crate::agent::CompactPosition::checked(hut) {
+                mind.stored_food = None;
+            }
+        }
+        if taken == 0 {
+            return Err(PolicyFailureReason::TargetUnavailable);
+        }
+        self.fetched += u64::from(taken);
+        Ok(())
+    }
+
+    /// The finished hut at `hut`, if the agent stands within a cell of it.
+    fn hut_beside(
+        &self,
+        agent: AgentId,
+        hut: WorldPosition,
+    ) -> Result<crate::StructureId, PolicyFailureReason> {
+        let position = self
+            .population
+            .view(agent)
+            .ok_or(PolicyFailureReason::InconsistentState)?
+            .position;
+        if position.x.abs_diff(hut.x).max(position.y.abs_diff(hut.y)) > 1 {
+            return Err(PolicyFailureReason::TargetUnavailable);
+        }
+        let id = self
+            .structures
+            .structure_at(hut)
+            .ok_or(PolicyFailureReason::TargetUnavailable)?;
+        self.structures
+            .view(id)
+            .filter(|view| {
+                view.kind == crate::StructureKind::Shelter
+                    && view.state == crate::StructureState::Complete
+            })
+            .map(|_| id)
+            .ok_or(PolicyFailureReason::TargetUnavailable)
+    }
+
     /// Makes the first thing the agent knows how to make from what it carries
     /// (a blade from a stone). Anyone watching sees how it's done.
     pub(super) fn apply_craft(&mut self, agent: AgentId) -> Result<(), PolicyFailureReason> {
@@ -461,6 +656,8 @@ impl Engine {
             .inventory(agent)
             .ok_or(PolicyFailureReason::InconsistentState)?;
         let food = self.food_values(agent);
+        // Chopping and breaking stone take a grown body; children just pick.
+        let heavy_work = self.fit_for_heavy_work(agent);
         let candidate = [
             WorldPosition {
                 x: position.x,
@@ -491,6 +688,11 @@ impl Engine {
                         && (reason != PolicyReason::ShelterMaterials
                             || (resource.kind == Material::Wood
                                 && inventory.amount(Material::Wood) < SHELTER_WOOD_COST))
+                        && (heavy_work
+                            || !matches!(
+                                resource.kind.properties().handling,
+                                crate::Handling::Chop | crate::Handling::Strike
+                            ))
                         && (reason != PolicyReason::HearthMaterials
                             || matches!(resource.kind, Material::Stone | Material::Wood))
                         && (reason != PolicyReason::Crafting

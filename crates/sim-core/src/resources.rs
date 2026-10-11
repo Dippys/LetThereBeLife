@@ -2,7 +2,8 @@ use std::{collections::BTreeMap, error::Error, fmt};
 
 use crate::{BaseResource, Material, World, WorldPosition, WorldQueryError};
 
-pub const INVENTORY_CAPACITY_PER_KIND: u8 = 32;
+/// How many things one person can carry in all (any mix of materials).
+pub const CARRY_CAPACITY: u8 = 12;
 pub const GATHER_YIELD: u8 = 4;
 pub const FOOD_CONSUMPTION: u8 = 1;
 pub const EAT_HUNGER_RELIEF: u16 = 4_000;
@@ -61,8 +62,20 @@ impl InventoryView {
             .filter(|&(_, amount)| amount > 0)
     }
 
-    pub const fn remaining_capacity(self, kind: Material) -> u8 {
-        INVENTORY_CAPACITY_PER_KIND.saturating_sub(self.amount(kind))
+    /// Everything carried, of every material.
+    pub const fn total(self) -> u8 {
+        let mut total = 0_u8;
+        let mut index = 0;
+        while index < Material::COUNT {
+            total = total.saturating_add(self.items[index]);
+            index += 1;
+        }
+        total
+    }
+
+    /// Room left for more of `kind`: the load is shared by every material.
+    pub const fn remaining_capacity(self, _kind: Material) -> u8 {
+        CARRY_CAPACITY.saturating_sub(self.total())
     }
 
     pub const fn can_add(self, kind: Material) -> bool {
@@ -245,11 +258,12 @@ mod tests {
     }
 
     #[test]
-    fn inventory_capacity_is_explicit_per_resource_kind() {
-        let inventory = InventoryView::of(&[(Material::Berries, 31), (Material::Wood, 32)]);
+    fn inventory_capacity_is_one_load_shared_by_every_material() {
+        let inventory = InventoryView::of(&[(Material::Berries, 7), (Material::Wood, 4)]);
+        assert_eq!(inventory.total(), 11);
         assert_eq!(inventory.remaining_capacity(Material::Berries), 1);
-        assert!(!inventory.can_add(Material::Wood));
-        assert_eq!(inventory.remaining_capacity(Material::Stone), 32);
+        assert_eq!(inventory.remaining_capacity(Material::Stone), 1);
+        assert!(!InventoryView::of(&[(Material::Wood, CARRY_CAPACITY)]).can_add(Material::Stone));
         assert_eq!(
             InventoryView::of(&[(Material::Berries, u8::MAX)])
                 .remaining_capacity(Material::Berries),

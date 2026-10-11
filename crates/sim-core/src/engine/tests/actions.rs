@@ -91,7 +91,7 @@ fn inventory_addition_clamps_at_the_per_kind_capacity() {
         engine
             .population
             .add_inventory(AgentId::new(0), crate::Material::Wood, u8::MAX),
-        INVENTORY_CAPACITY_PER_KIND
+        CARRY_CAPACITY
     );
     assert_eq!(
         engine
@@ -104,7 +104,7 @@ fn inventory_addition_clamps_at_the_per_kind_capacity() {
             .inventory(AgentId::new(0))
             .unwrap()
             .amount(crate::Material::Wood),
-        INVENTORY_CAPACITY_PER_KIND
+        CARRY_CAPACITY
     );
 }
 

@@ -248,6 +248,12 @@ pub struct WildlifeStats {
     /// Hearths finished, warm-ups at them, and (founders, children) who know
     /// hearths warm at the end.
     pub hearths: u64,
+    /// Huts finished; things put away in huts and food taken back out; trips
+    /// given up after getting no closer.
+    pub huts: u64,
+    pub stored: u64,
+    pub fetched: u64,
+    pub gave_up: u64,
     pub warm_ups: u64,
     pub know_fire: [u64; 2],
     /// Founders and children who know how to knap a blade, at the end.
@@ -458,9 +464,12 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                     }
                 }
                 for built in engine.structure_diagnostics() {
+                    let completed = built.kind == sim_core::StructureDiagnosticKind::Completed;
                     wildlife.hearths += u64::from(
-                        built.kind == sim_core::StructureDiagnosticKind::Completed
-                            && built.structure.kind == sim_core::StructureKind::Hearth,
+                        completed && built.structure.kind == sim_core::StructureKind::Hearth,
+                    );
+                    wildlife.huts += u64::from(
+                        completed && built.structure.kind == sim_core::StructureKind::Shelter,
                     );
                 }
                 for decision in engine.policy_diagnostics() {
@@ -646,6 +655,10 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     report.food = food;
     wildlife.deer = engine.animal_count(sim_core::Species::Deer) as u64;
     wildlife.wolves = engine.animal_count(sim_core::Species::Wolf) as u64;
+    let (stored, fetched) = engine.storage_counts();
+    wildlife.stored = stored;
+    wildlife.fetched = fetched;
+    wildlife.gave_up = engine.trips_given_up();
     report.wildlife = wildlife;
     Ok(report)
 }
@@ -1653,6 +1666,11 @@ impl fmt::Display for StudyReport {
             formatter,
             "\n  tools: blades made {} (watched {} times); know how to knap: founders {founders_knap}, children {children_knap}",
             self.wildlife.blades, self.wildlife.watched_crafts
+        )?;
+        write!(
+            formatter,
+            "\n  homes: huts built {}, things put away {}, food fetched {}; trips given up {}",
+            self.wildlife.huts, self.wildlife.stored, self.wildlife.fetched, self.wildlife.gave_up
         )?;
         if let Some((children, matching)) = self.children_vocabulary {
             write!(

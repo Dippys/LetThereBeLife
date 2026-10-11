@@ -145,7 +145,18 @@ fn construction_interruption_refunds_once_and_stale_completion_is_harmless() {
         engine.agent_views(1).next().unwrap().activity,
         AgentActivity::Idle
     );
+    // A long build: keep the builder alive while the stale completion comes due.
     while engine.snapshot().tick <= started.completes_at.ticks().max(cancelled_at) {
+        for need in [
+            crate::NeedKind::Hunger,
+            crate::NeedKind::Thirst,
+            crate::NeedKind::Rest,
+            crate::NeedKind::Exposure,
+        ] {
+            engine
+                .population
+                .set_need_value_for_test(AgentId::new(0), need, 0, engine.time);
+        }
         engine.tick();
     }
     assert_eq!(engine.snapshot().structure_count, 0);

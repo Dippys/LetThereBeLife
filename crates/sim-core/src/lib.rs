@@ -62,8 +62,8 @@ pub use policy::{
     PolicyDiagnostic, PolicyDiagnosticKind, PolicyFailureReason, PolicyReason,
 };
 pub use resources::{
-    DRINK_THIRST_RELIEF, EAT_HUNGER_RELIEF, FOOD_CONSUMPTION, GATHER_YIELD,
-    INVENTORY_CAPACITY_PER_KIND, InitialInventoryError, InventoryView, ResourceDeltaView,
+    CARRY_CAPACITY, DRINK_THIRST_RELIEF, EAT_HUNGER_RELIEF, FOOD_CONSUMPTION, GATHER_YIELD,
+    InitialInventoryError, InventoryView, ResourceDeltaView,
 };
 pub use routing::{MAX_ROUTE_EXPANSIONS, RouteRequest, RouteRequestError};
 pub use season::{SEASON_SECONDS, SEASON_TICKS, Season};
@@ -87,8 +87,9 @@ pub use sleep::{
 };
 pub use structures::{
     BuildShelterError, HEARTH_BUILD_TICKS, HEARTH_STONE_COST, HEARTH_WARMTH, HEARTH_WOOD_COST,
-    Purpose, SHELTER_BUILD_TICKS, SHELTER_STONE_COST, SHELTER_WOOD_COST, StructureDiagnostic,
-    StructureDiagnosticKind, StructureId, StructureKind, StructureState, StructureView,
+    HUT_STORE_CAPACITY, Purpose, SHELTER_BUILD_TICKS, SHELTER_STONE_COST, SHELTER_WOOD_COST,
+    StructureDiagnostic, StructureDiagnosticKind, StructureId, StructureKind, StructureState,
+    StructureView,
 };
 pub use wildlife::{
     AnimalMode, AnimalView, CARCASS_TICKS, Species, SpeciesTraits, VALLEY_DEER, VALLEY_WOLVES,

@@ -117,6 +117,7 @@ impl ViewerApp {
                     .kind
                     .burns()
                     .then(|| structure.fuel_until.saturating_sub(now)),
+                stored: structure.stored,
             });
         }
         let world = self.engine.world();

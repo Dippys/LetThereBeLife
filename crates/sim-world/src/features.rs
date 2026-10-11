@@ -92,7 +92,7 @@ impl Material {
                 nutrition: 4_000,
                 toxicity: 0,
                 builds: false,
-                regrow_seconds: 600,
+                regrow_seconds: 1_200,
             },
             Self::Bitterberries => MaterialProperties {
                 cutting: false,
@@ -104,7 +104,7 @@ impl Material {
                 nutrition: 1_200,
                 toxicity: 2_500,
                 builds: false,
-                regrow_seconds: 600,
+                regrow_seconds: 1_200,
             },
             Self::Wood => MaterialProperties {
                 cutting: false,
@@ -116,7 +116,7 @@ impl Material {
                 nutrition: 0,
                 toxicity: 0,
                 builds: true,
-                regrow_seconds: 3_600,
+                regrow_seconds: 2 * 3_600,
             },
             Self::Stone => MaterialProperties {
                 cutting: false,

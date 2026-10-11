@@ -25,7 +25,10 @@ fn builder_and_watcher() -> (Engine, WorldPosition) {
     engine
         .set_initial_inventory(
             AgentId::new(0),
-            InventoryView::of(&[(Material::Stone, 3), (Material::Wood, 2)]),
+            InventoryView::of(&[
+                (Material::Stone, crate::HEARTH_STONE_COST),
+                (Material::Wood, crate::HEARTH_WOOD_COST),
+            ]),
         )
         .unwrap();
     engine.policy_options = PolicyOptions::full();
@@ -117,10 +120,11 @@ fn a_fire_burns_out_and_someone_with_wood_relights_it() {
         .unwrap();
     engine.apply_build_completion(AgentId::new(0)).unwrap();
     let builder = engine.population.view(AgentId::new(0)).unwrap().position;
-    // Two wood went in: an hour of burning.
-    assert!(engine.structures.fire_beside(builder, 3_599));
-    assert!(!engine.structures.fire_beside(builder, 3_600), "burned out");
-    engine.time = SimTime::from_ticks(3_600 * 60);
+    // The wood that went in burns for half an hour a piece.
+    let out = u32::from(crate::HEARTH_WOOD_COST) * 1_800;
+    assert!(engine.structures.fire_beside(builder, out - 1));
+    assert!(!engine.structures.fire_beside(builder, out), "burned out");
+    engine.time = SimTime::from_ticks(u64::from(out) * 60);
     assert_eq!(
         engine.apply_warm_up(AgentId::new(0)),
         Err(PolicyFailureReason::TargetUnavailable),
@@ -132,7 +136,7 @@ fn a_fire_burns_out_and_someone_with_wood_relights_it() {
         .add_inventory(AgentId::new(0), Material::Wood, 1);
     engine.apply_tend_fire(AgentId::new(0)).unwrap();
     assert!(engine.fire_events()[0].relit);
-    assert!(engine.structures.fire_beside(builder, 3_600 + 1_799));
+    assert!(engine.structures.fire_beside(builder, out + 1_799));
     assert_eq!(
         engine
             .population
@@ -168,11 +172,74 @@ fn a_knapper_makes_a_blade_from_a_stone_and_a_watcher_learns_how() {
             carried.amount(Material::Stone),
             carried.amount(Material::Blade)
         ),
-        (2, 1)
+        (crate::HEARTH_STONE_COST - 1, 1)
     );
     assert_eq!(engine.craft_events()[0].made, Material::Blade);
     assert!(
         engine.minds.get_mut(watcher).crafts.knows_knapping(),
         "watching is enough to learn"
+    );
+}
+
+#[test]
+fn surplus_goes_into_a_hut_and_food_comes_back_out() {
+    let (mut engine, site) = builder_and_watcher();
+    let person = AgentId::new(0);
+    engine
+        .structures
+        .start(
+            person,
+            site,
+            StructureKind::Shelter,
+            SimTime::ZERO,
+            SimTime::from_ticks(1),
+        )
+        .unwrap();
+    engine.structures.complete_for_builder(person, 0).unwrap();
+    engine.population.take(person, Material::Stone, u8::MAX);
+    engine.population.take(person, Material::Wood, u8::MAX);
+    engine
+        .population
+        .add_inventory(person, Material::Berries, 6);
+    engine.population.add_inventory(person, Material::Wood, 4);
+
+    engine.apply_store(person, site).unwrap();
+    let carried = engine.population.inventory(person).unwrap();
+    assert_eq!(
+        (
+            carried.amount(Material::Berries),
+            carried.amount(Material::Wood)
+        ),
+        (2, 0),
+        "keeps a little food, puts the rest away"
+    );
+    let hut = engine.structures.structure_at(site).unwrap();
+    let stored = engine.structures.view(hut).unwrap().stored;
+    assert_eq!(
+        (
+            stored.amount(Material::Berries),
+            stored.amount(Material::Wood)
+        ),
+        (4, 4)
+    );
+    assert!(engine.minds.get_mut(person).stored_food.is_some());
+
+    engine.population.take(person, Material::Berries, u8::MAX);
+    engine.apply_fetch(person, site).unwrap();
+    assert_eq!(
+        engine
+            .population
+            .inventory(person)
+            .unwrap()
+            .amount(Material::Berries),
+        4
+    );
+    assert!(
+        engine.minds.get_mut(person).stored_food.is_none(),
+        "the hut has no food left"
+    );
+    assert_eq!(
+        engine.apply_fetch(person, site),
+        Err(PolicyFailureReason::TargetUnavailable)
     );
 }

@@ -645,6 +645,19 @@ impl MentalMap {
             .map(|(_, _, destination)| destination)
     }
 
+    /// Forgets places it was told about at `destination` after failing to get
+    /// any closer to them. Places it saw itself are kept: it knows they're real.
+    pub(crate) fn give_up(&mut self, destination: WorldPosition) {
+        for landmark in &mut self.landmarks {
+            if !landmark.is_empty()
+                && !landmark.is_first_hand()
+                && chebyshev(landmark.position(), destination) <= landmark.radius() + 2
+            {
+                *landmark = Landmark::default();
+            }
+        }
+    }
+
     /// Drops hints of `kind` around `position` (after learning they were misread).
     pub(crate) fn forget_hint(&mut self, kind: LandmarkKind, position: WorldPosition) {
         for slot in slot_range(kind) {

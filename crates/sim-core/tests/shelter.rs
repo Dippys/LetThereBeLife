@@ -54,7 +54,7 @@ fn autonomous_policy_gathers_builds_and_reset_clears_authoritative_shelter() {
         .unwrap();
     engine.activate_physical_policy().unwrap();
 
-    for _ in 0..20_000 {
+    for _ in 0..20_000 + sim_core::SHELTER_BUILD_TICKS {
         engine.tick();
         if engine
             .structure_views(1)

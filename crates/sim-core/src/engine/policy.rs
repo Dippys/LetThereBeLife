@@ -159,6 +159,9 @@ impl Engine {
                 | PhysicalGoal::WarmUp
                 | PhysicalGoal::TendFire
                 | PhysicalGoal::Craft
+                | PhysicalGoal::Store
+                | PhysicalGoal::Fetch
+                | PhysicalGoal::Drop
         ) {
             self.start_timed_action(agent, selection.goal, target, selection.reason);
             return;
@@ -254,6 +257,10 @@ impl Engine {
                     selection.reason,
                 ) {
                     Ok(sleep) => {
+                        // A night under a roof shows how a hut is put together.
+                        if quality == crate::SleepQuality::Sheltered && self.policy_options.memory {
+                            self.minds.get_mut(agent).crafts.saw_building();
+                        }
                         self.policy_diagnostics.push(PolicyDiagnostic {
                             agent,
                             at: self.time,

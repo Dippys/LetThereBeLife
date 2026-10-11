@@ -52,7 +52,10 @@ impl Engine {
             if event.class == EventClass::NeedThreshold {
                 let outcome = self.population.apply_need_threshold(event);
                 if outcome.outcome == NeedThresholdOutcomeKind::Reached {
-                    let construction_cancelled = self.cancel_construction(outcome.agent);
+                    // Builders keep at it through cold, hunger, and tiredness
+                    // (the roof is the answer to two of them); thirst stops them.
+                    let construction_cancelled = outcome.kind == crate::NeedKind::Thirst
+                        && self.cancel_construction(outcome.agent);
                     let sleeping = self.population.sleep_view(outcome.agent);
                     let interruption = interruption_for_need(outcome.kind);
                     if construction_cancelled {

@@ -83,7 +83,7 @@ fn mind_layout_is_bounded() {
     // Map 372, social 240, lexicon 192, dialogue 112, beliefs 15 + 6 + 2,
     // child flag, parent id, grief and loneliness timers, and padding.
     assert_eq!(size_of::<MentalMap>(), 372);
-    assert_eq!(size_of::<super::Mind>(), 960);
+    assert_eq!(size_of::<super::Mind>(), 984);
 }
 
 #[test]
@@ -533,4 +533,19 @@ fn a_worded_hint_is_judged_by_what_stands_at_the_spot() {
     map.observe(1, near, &view, 3, &mut |check| checks.push(check));
     assert_eq!(checks.len(), 1);
     assert!(checks[0].confirmed);
+}
+
+#[test]
+fn getting_no_closer_for_long_enough_gives_a_destination_up() {
+    let mut stall = super::Stall::default();
+    let lake_far_side = crate::WorldPosition { x: 40, y: 0 };
+    assert!(!stall.note(lake_far_side, 30));
+    assert!(!stall.note(lake_far_side, 25), "closer");
+    for _ in 1..super::STALL_DECISIONS {
+        assert!(!stall.note(lake_far_side, 26));
+    }
+    assert!(stall.note(lake_far_side, 26), "no closer for too long");
+    assert_eq!(stall, super::Stall::default());
+    // A new destination starts the count over.
+    assert!(!stall.note(crate::WorldPosition { x: 0, y: 9 }, 9));
 }

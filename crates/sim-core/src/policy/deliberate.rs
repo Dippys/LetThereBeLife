@@ -80,6 +80,10 @@ pub const HOME_RANGE: u64 = 200;
 const HEARTH_FROM_HOME: u64 = 16;
 /// Tiredness (out of 10,000) at which an agent sleeps wherever it can.
 const REST_CRITICAL: u16 = 8_800;
+/// Huts closer together than this aren't built: one home is enough nearby.
+pub(crate) const HUT_SPACING: u64 = 96;
+/// Carrying at least this much, a hut in view is worth stopping at to unload.
+const STORE_LOAD: u8 = 9;
 /// A fire with less than this much burning left (seconds) is worth feeding.
 const LOW_FUEL_SECONDS: u32 = 20 * 60;
 /// Idle agents go to look at places pointed out within this many cells.
@@ -153,6 +157,16 @@ pub(crate) struct MindInput<'a> {
     pub(crate) grieving: bool,
     /// Knows how to knap a blade from stone.
     pub(crate) knows_knapping: bool,
+    /// Knows how to build a hut.
+    pub(crate) knows_huts: bool,
+    /// Fit for heavy work (an adult, not pregnant, not worn out or starving):
+    /// building, chopping, breaking stone.
+    pub(crate) able: bool,
+    /// The hut it last put food away in.
+    pub(crate) stored_food: Option<WorldPosition>,
+    /// Set to where a trip is ultimately headed, so the engine can tell when
+    /// the agent stops getting any closer.
+    pub(crate) trip: &'a std::cell::Cell<Option<WorldPosition>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -210,6 +224,12 @@ pub(crate) fn deliberate(
         Some(NeedKind::Hunger) if food.carried(inventory) > 0 => {
             Deliberation::act(PhysicalGoal::Eat, origin, PolicyReason::HungerThreshold)
         }
+        Some(NeedKind::Hunger)
+            if inventory.total() >= crate::CARRY_CAPACITY
+                && let Some(drop) = planner.make_room(inventory) =>
+        {
+            drop
+        }
         Some(NeedKind::Hunger) => food_here
             .map(|target| {
                 Deliberation::act(
@@ -218,6 +238,7 @@ pub(crate) fn deliberate(
                     PolicyReason::HungerThreshold,
                 )
             })
+            .or_else(|| planner.fetch_food())
             .or_else(|| planner.hunt(inventory))
             .or_else(|| planner.travel_to_food(PhysicalGoal::SeekFood))
             .or_else(|| {
@@ -239,12 +260,7 @@ pub(crate) fn deliberate(
             planner.tend_fire(inventory).expect("checked")
         }
         Some(NeedKind::Exposure) => {
-            let reactive = shelter_selection(
-                origin,
-                inventory,
-                perception,
-                PolicyReason::ExposureThreshold,
-            );
+            let reactive = planner.shelter(inventory, PolicyReason::ExposureThreshold);
             if reactive.goal != PhysicalGoal::Wait {
                 return Deliberation {
                     selection: reactive,
@@ -306,12 +322,7 @@ impl Planner<'_> {
             return Deliberation::act(PhysicalGoal::Sleep, spot, reason);
         }
         // Too exposed to sleep in the open: a shelter is the only way to rest.
-        let reactive = shelter_selection(
-            self.origin,
-            inventory,
-            self.perception,
-            PolicyReason::ExposureThreshold,
-        );
+        let reactive = self.shelter(inventory, PolicyReason::ExposureThreshold);
         if reactive.goal != PhysicalGoal::Wait {
             return Deliberation {
                 selection: PolicySelection { reason, ..reactive },
@@ -322,6 +333,185 @@ impl Planner<'_> {
             .or_else(|| self.gather_known_wood(inventory))
             .or_else(|| self.explore(reason, false))
             .unwrap_or_else(|| Deliberation::wait(self.origin, reason))
+    }
+
+    /// Somewhere to shelter, or what to do toward building one, but only a
+    /// hut it may build: it must know how, be fit for the work, and have no
+    /// hut of its own within reach already.
+    fn shelter(&self, inventory: InventoryView, reason: PolicyReason) -> PolicySelection {
+        let selection = shelter_selection(self.origin, inventory, self.perception, reason);
+        let for_a_hut = selection.goal == PhysicalGoal::BuildShelter
+            || selection.reason == PolicyReason::ShelterMaterials;
+        // Idle gathering only of what it has a use for.
+        let unwanted = selection.goal == PhysicalGoal::GatherMaterial
+            && !for_a_hut
+            && selection.target.is_some_and(|target| {
+                self.perception
+                    .resources
+                    .iter()
+                    .filter(|resource| {
+                        manhattan(resource.position, target) <= 1 && resource.resource.capacity > 0
+                    })
+                    .all(|resource| {
+                        !self.wants(resource.resource.kind, inventory)
+                            || !self.can_handle(resource.resource.kind)
+                    })
+            });
+        if (for_a_hut && !self.may_build_hut()) || unwanted {
+            return PolicySelection {
+                goal: PhysicalGoal::Wait,
+                target: Some(self.origin),
+                reason,
+            };
+        }
+        selection
+    }
+
+    fn may_build_hut(&self) -> bool {
+        self.mind.knows_huts
+            && self.mind.able
+            && self
+                .mind
+                .map
+                .nearest_seen_distance(LandmarkKind::SHELTER, self.origin)
+                .is_none_or(|distance| distance > HUT_SPACING)
+    }
+
+    /// A full load while short of food or of the wood for its hut: set some down.
+    fn make_room(&self, inventory: InventoryView) -> Option<Deliberation> {
+        let full = inventory.total() >= crate::CARRY_CAPACITY;
+        let food = self.mind.food;
+        let short_of_food = food.carried(inventory) < self.temperament.food_reserve;
+        let short_of_wood =
+            self.may_build_hut() && inventory.amount(Material::Wood) < SHELTER_WOOD_COST;
+        (full && self.has_spare(inventory) && (short_of_food || short_of_wood))
+            .then(|| Deliberation::act(PhysicalGoal::Drop, self.origin, PolicyReason::Unloading))
+    }
+
+    /// Something it could set down: a thing it has no use for, or more food
+    /// than it keeps (the same limits setting things down uses).
+    fn has_spare(&self, inventory: InventoryView) -> bool {
+        let food = self.mind.food;
+        let short_of_wood =
+            self.may_build_hut() && inventory.amount(Material::Wood) < SHELTER_WOOD_COST;
+        inventory.carried().any(|(kind, _)| {
+            !kind.properties().cutting && !food.is_food(kind) && !self.keeps_all(kind, inventory)
+        }) || food.carried(inventory) > if short_of_wood { 2 } else { 4 }
+    }
+
+    /// Whether setting things down would keep all it carries of `kind`.
+    fn keeps_all(&self, kind: Material, inventory: InventoryView) -> bool {
+        let have = inventory.amount(kind);
+        let fire = self.mind.knows_hearths;
+        let builds = self.may_build_hut();
+        let short_of_wood = builds && inventory.amount(Material::Wood) < SHELTER_WOOD_COST;
+        let keep = match kind {
+            Material::Wood if builds => SHELTER_WOOD_COST,
+            Material::Wood if fire => crate::HEARTH_WOOD_COST + 1,
+            Material::Stone if short_of_wood => 0,
+            Material::Stone if fire => crate::HEARTH_STONE_COST,
+            Material::Stone => u8::from(self.mind.knows_knapping),
+            _ => 0,
+        };
+        have <= keep
+    }
+
+    /// Whether it has a use for more `kind`: a few meals' worth of food, wood
+    /// for a hut it may build or a fire it keeps, stone for a hearth or a blade.
+    fn wants(&self, kind: Material, inventory: InventoryView) -> bool {
+        let food = self.mind.food;
+        if food.is_food(kind) {
+            return food.carried(inventory) < self.temperament.food_reserve;
+        }
+        let have = inventory.amount(kind);
+        let fire = self.mind.knows_hearths;
+        match kind {
+            Material::Wood => {
+                let for_hut = if self.may_build_hut() {
+                    SHELTER_WOOD_COST
+                } else {
+                    0
+                };
+                let for_fire = if fire { crate::HEARTH_WOOD_COST + 1 } else { 0 };
+                have < for_hut.max(for_fire)
+            }
+            Material::Stone => {
+                let for_hearth = if fire { crate::HEARTH_STONE_COST } else { 0 };
+                let for_blade = u8::from(self.mind.knows_knapping);
+                have < for_hearth.max(for_blade)
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether it's fit to gather `kind`: chopping and breaking stone are
+    /// heavy work; anyone can pick.
+    fn can_handle(&self, kind: Material) -> bool {
+        self.mind.able
+            || !matches!(
+                kind.properties().handling,
+                crate::Handling::Chop | crate::Handling::Strike
+            )
+    }
+
+    /// The nearest finished hut in view, and whether the agent stands beside it.
+    fn hut_in_view(&self, wanted: impl Fn(InventoryView) -> bool) -> Option<WorldPosition> {
+        let origin = self.origin;
+        self.perception
+            .structures
+            .iter()
+            .filter(|structure| {
+                structure.kind == crate::StructureKind::Shelter
+                    && structure.state == crate::StructureState::Complete
+                    && wanted(structure.stored)
+            })
+            .min_by_key(|structure| (manhattan(origin, structure.position), structure.id.get()))
+            .map(|structure| structure.position)
+    }
+
+    /// Goes to `hut` and does `goal` there (beside it), for `reason`.
+    fn at_hut(
+        &self,
+        hut: WorldPosition,
+        goal: PhysicalGoal,
+        reason: PolicyReason,
+    ) -> Option<Deliberation> {
+        let origin = self.origin;
+        if origin.x.abs_diff(hut.x).max(origin.y.abs_diff(hut.y)) <= 1 {
+            return Some(Deliberation::act(goal, hut, reason));
+        }
+        let (waypoint, heading) = self.waypoint_toward(hut)?;
+        Some(Deliberation {
+            selection: PolicySelection {
+                goal: PhysicalGoal::Explore,
+                target: Some(waypoint),
+                reason,
+            },
+            heading: Some(heading),
+        })
+    }
+
+    /// Carrying a heavy load with a hut in view: put what it doesn't need away.
+    fn store(&self, inventory: InventoryView) -> Option<Deliberation> {
+        if inventory.total() < STORE_LOAD {
+            return None;
+        }
+        let hut = self.hut_in_view(|stored| stored.total() < crate::HUT_STORE_CAPACITY)?;
+        self.at_hut(hut, PhysicalGoal::Store, PolicyReason::Storing)
+    }
+
+    /// Hungry: food put away in a hut in view, or in the hut it last left food in.
+    fn fetch_food(&self) -> Option<Deliberation> {
+        let food = self.mind.food;
+        let has_food =
+            |stored: InventoryView| stored.carried().any(|(material, _)| food.is_food(material));
+        if let Some(hut) = self.hut_in_view(has_food) {
+            return self.at_hut(hut, PhysicalGoal::Fetch, PolicyReason::Fetching);
+        }
+        let hut = self.mind.stored_food?;
+        let trip = self.at_hut(hut, PhysicalGoal::Fetch, PolicyReason::Fetching)?;
+        self.mind.trip.set(Some(hut));
+        Some(trip)
     }
 
     fn home_is_near(&self) -> bool {
@@ -411,6 +601,10 @@ impl Planner<'_> {
         if self.needs.hunger.value >= temperament.top_up_hunger && food.carried(inventory) > 0 {
             return Deliberation::act(PhysicalGoal::Eat, origin, PolicyReason::PrepareTrip);
         }
+        // Full up but short of something it needs: set down what it doesn't.
+        if let Some(drop) = self.make_room(inventory) {
+            return drop;
+        }
         if food.carried(inventory) < temperament.food_reserve {
             if let Some(target) = food_here {
                 return Deliberation::act(
@@ -442,6 +636,10 @@ impl Planner<'_> {
         {
             return warm.with_reason(PolicyReason::PrepareTrip);
         }
+        // Loaded down with a hut in view: put the surplus away.
+        if let Some(store) = self.store(inventory) {
+            return store;
+        }
         // Someone who keeps fire feeds one that's burning low.
         if works && let Some(tend) = self.tend_fire(inventory) {
             return tend;
@@ -463,9 +661,9 @@ impl Planner<'_> {
             // Not in the mood for work: skip to friends, needed exploration, or rest.
         } else if !shelter_in_view && self.home_is_near() {
             // Already has a home nearby: gather what's around instead of building another.
-            if let Some(target) =
-                nearest_resource_access(origin, self.perception, |kind| inventory.can_add(kind))
-            {
+            if let Some(target) = nearest_resource_access(origin, self.perception, |kind| {
+                inventory.can_add(kind) && self.can_handle(kind) && self.wants(kind, inventory)
+            }) {
                 return Deliberation::act(
                     PhysicalGoal::GatherMaterial,
                     target,
@@ -473,23 +671,17 @@ impl Planner<'_> {
                 );
             }
         } else {
-            let reactive = shelter_selection(
-                origin,
-                inventory,
-                self.perception,
-                PolicyReason::NoUrgentNeed,
-            );
+            let reactive = self.shelter(inventory, PolicyReason::NoUrgentNeed);
             if reactive.goal != PhysicalGoal::Wait {
                 return Deliberation {
                     selection: reactive,
                     heading: None,
                 };
             }
-            if self.needs.exposure.value >= temperament.prepare_exposure
-                && self.mind.map.seen_count(LandmarkKind::SHELTER) == 0
-                && let Some(wood) = self.gather_known_wood(inventory)
-            {
-                return wood.with_reason(PolicyReason::PrepareTrip);
+            // Someone who means to build a hut fetches the wood for it from
+            // trees it remembers, in good time rather than once it's cold.
+            if let Some(wood) = self.gather_known_wood(inventory) {
+                return wood.with_reason(PolicyReason::ShelterMaterials);
             }
         }
         if let Some(ParentInput::Return(parent)) = self.mind.parent
@@ -712,6 +904,15 @@ impl Planner<'_> {
             .into_iter()
             .find(|&(material, amount)| inventory.amount(material) < amount)?
             .0;
+        if !self.can_handle(missing) {
+            return None;
+        }
+        // No room for it: set down what it doesn't need first.
+        if !inventory.can_add(missing) {
+            return self.has_spare(inventory).then(|| {
+                Deliberation::act(PhysicalGoal::Drop, self.origin, PolicyReason::Unloading)
+            });
+        }
         if let Some(target) = nearest_resource_access(self.origin, self.perception, |found| {
             found == missing && inventory.can_add(found)
         }) {
@@ -862,6 +1063,7 @@ impl Planner<'_> {
             crate::LandmarkSource::Told => PolicyReason::ToldPlace,
         };
         let (waypoint, heading) = self.waypoint_toward(destination)?;
+        self.mind.trip.set(Some(destination));
         Some(Deliberation {
             selection: PolicySelection {
                 goal,
@@ -873,10 +1075,12 @@ impl Planner<'_> {
     }
 
     fn gather_known_wood(&self, inventory: InventoryView) -> Option<Deliberation> {
-        (inventory.amount(Material::Wood) < SHELTER_WOOD_COST && inventory.can_add(Material::Wood))
-            .then(|| self.travel_to_known(LandmarkKind::WOOD, PhysicalGoal::GatherMaterial))
-            .flatten()
-            .map(|travel| travel.with_reason(PolicyReason::ShelterMaterials))
+        (self.may_build_hut()
+            && inventory.amount(Material::Wood) < SHELTER_WOOD_COST
+            && inventory.can_add(Material::Wood))
+        .then(|| self.travel_to_known(LandmarkKind::WOOD, PhysicalGoal::GatherMaterial))
+        .flatten()
+        .map(|travel| travel.with_reason(PolicyReason::ShelterMaterials))
     }
 
     /// The reachable cell in view closest to `destination`, or a detour around

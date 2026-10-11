@@ -172,6 +172,9 @@ pub const fn goal(goal: PhysicalGoal) -> &'static str {
         PhysicalGoal::WarmUp => "Warming up by a fire",
         PhysicalGoal::TendFire => "Putting wood on a fire",
         PhysicalGoal::Craft => "Knapping a stone blade",
+        PhysicalGoal::Store => "Putting things away in a hut",
+        PhysicalGoal::Fetch => "Getting food from a hut",
+        PhysicalGoal::Drop => "Setting things down",
     }
 }
 
@@ -204,6 +207,9 @@ pub const fn reason(reason: PolicyReason) -> Option<&'static str> {
         | PolicyReason::Warming
         | PolicyReason::Tending
         | PolicyReason::Crafting => return None,
+        PolicyReason::Storing => "Taking things home to put away",
+        PolicyReason::Fetching => "Going for food put away in a hut",
+        PolicyReason::Unloading => "Making room to carry what it needs",
     })
 }
 
@@ -321,6 +327,15 @@ pub fn year(seconds: f64) -> String {
 pub fn months_into_year(seconds: f64) -> f32 {
     let year = sim_core::SECONDS_PER_YEAR as f64;
     (seconds.max(0.0) % year / sim_core::MONTH_SECONDS as f64) as f32
+}
+
+/// A list of things carried or stored, like "3 berries, 2 wood".
+pub fn carried(inventory: sim_core::InventoryView) -> String {
+    inventory
+        .carried()
+        .map(|(kind, amount)| format!("{amount} {}", material(kind)))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// How cold the season is, as people feel it.

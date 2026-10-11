@@ -238,6 +238,16 @@ impl Engine {
         &self.policy_diagnostics
     }
 
+    /// Trips given up so far because the agent couldn't get any closer.
+    pub fn trips_given_up(&self) -> u64 {
+        self.gave_up
+    }
+
+    /// Things put away in huts, and food taken back out, so far.
+    pub fn storage_counts(&self) -> (u64, u64) {
+        (self.stored, self.fetched)
+    }
+
     /// Things made during the latest tick (for logs and tools).
     pub fn craft_events(&self) -> &[crate::CraftEvent] {
         &self.craft_events

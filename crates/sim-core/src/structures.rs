@@ -2,12 +2,16 @@ use std::{collections::BTreeMap, error::Error, fmt};
 
 use crate::{AgentId, SimTime, WorldPosition, agent::CompactPosition};
 
-pub const SHELTER_WOOD_COST: u8 = 8;
+/// How many things one hut can hold.
+pub const HUT_STORE_CAPACITY: u8 = 48;
+/// A hut takes nearly a full load of wood and ten minutes of hard work.
+pub const SHELTER_WOOD_COST: u8 = 10;
 pub const SHELTER_STONE_COST: u8 = 0;
-pub const SHELTER_BUILD_TICKS: u64 = 600;
-pub const HEARTH_STONE_COST: u8 = 3;
-pub const HEARTH_WOOD_COST: u8 = 2;
-pub const HEARTH_BUILD_TICKS: u64 = 300;
+pub const SHELTER_BUILD_TICKS: u64 = 10 * 60 * 60;
+/// A hearth: a ring of stones around wood, three minutes to lay.
+pub const HEARTH_STONE_COST: u8 = 4;
+pub const HEARTH_WOOD_COST: u8 = 3;
+pub const HEARTH_BUILD_TICKS: u64 = 3 * 60 * 60;
 /// How far around a building site `would_enclose` looks for a way out.
 const ENCLOSURE_RADIUS: i64 = 4;
 
@@ -154,6 +158,8 @@ pub struct StructureView {
     pub completes_at: SimTime,
     /// For a fire: the simulated second it burns out (0 if it never burned).
     pub fuel_until: u32,
+    /// What has been put down inside it (huts only; visible to anyone nearby).
+    pub stored: crate::InventoryView,
 }
 
 impl StructureView {
@@ -198,6 +204,8 @@ pub enum BuildShelterError {
     InsufficientMaterials,
     /// It would shut a walkable cell nearby off from everywhere else.
     WouldEnclose,
+    /// The builder isn't fit for heavy work (a child, or pregnant).
+    NotFit,
     TimeOverflow,
     RescheduleLimit,
     EventSequenceExhausted,
@@ -236,6 +244,7 @@ impl StructureRecord {
             started_at: self.started_at,
             completes_at: self.completes_at,
             fuel_until: self.fuel_until,
+            stored: crate::InventoryView::default(),
         }
     }
 }
@@ -246,6 +255,8 @@ pub(crate) struct StructureStore {
     by_position: BTreeMap<(i16, i16), StructureId>,
     by_builder: BTreeMap<AgentId, StructureId>,
     live_count: usize,
+    /// What is stored in each hut that holds anything.
+    stocks: BTreeMap<StructureId, crate::InventoryView>,
 }
 
 impl StructureStore {
@@ -278,7 +289,54 @@ impl StructureStore {
             .get(id.0 as usize)
             .copied()
             .flatten()
-            .map(|record| record.view(id))
+            .map(|record| self.with_stock(record.view(id)))
+    }
+
+    fn with_stock(&self, mut view: StructureView) -> StructureView {
+        view.stored = self.stocks.get(&view.id).copied().unwrap_or_default();
+        view
+    }
+
+    /// Puts as much of `inventory` as fits into the finished hut `id`; returns
+    /// what went in.
+    pub(crate) fn deposit(
+        &mut self,
+        id: StructureId,
+        inventory: crate::InventoryView,
+    ) -> crate::InventoryView {
+        let Some(view) = self.view(id) else {
+            return crate::InventoryView::default();
+        };
+        if view.kind != StructureKind::Shelter || view.state != StructureState::Complete {
+            return crate::InventoryView::default();
+        }
+        let stock = self.stocks.entry(id).or_default();
+        let mut moved = crate::InventoryView::default();
+        for (material, amount) in inventory.carried() {
+            let room = HUT_STORE_CAPACITY.saturating_sub(stock.total());
+            let put = amount.min(room);
+            stock.items[material as usize] += put;
+            moved.items[material as usize] = put;
+        }
+        moved
+    }
+
+    /// Takes up to `amount` of `material` out of hut `id`; returns how many.
+    pub(crate) fn withdraw(
+        &mut self,
+        id: StructureId,
+        material: crate::Material,
+        amount: u8,
+    ) -> u8 {
+        let Some(stock) = self.stocks.get_mut(&id) else {
+            return 0;
+        };
+        let taken = stock.amount(material).min(amount);
+        stock.items[material as usize] -= taken;
+        if stock.total() == 0 {
+            self.stocks.remove(&id);
+        }
+        taken
     }
 
     pub(crate) fn start(
@@ -354,6 +412,7 @@ impl StructureStore {
         self.by_position
             .remove(&(record.position.y, record.position.x));
         self.live_count -= 1;
+        self.stocks.remove(&id);
         Some(record.view(id))
     }
 
@@ -437,7 +496,9 @@ impl StructureStore {
         self.records
             .iter()
             .enumerate()
-            .filter_map(|(raw, record)| record.map(|record| record.view(StructureId(raw as u32))))
+            .filter_map(|(raw, record)| {
+                record.map(|record| self.with_stock(record.view(StructureId(raw as u32))))
+            })
             .take(limit)
     }
 

@@ -203,6 +203,8 @@ pub struct MentalMapView {
     pub knows_hearths: bool,
     /// Knows how to knap a stone blade.
     pub knows_knapping: bool,
+    /// Knows how to build a hut.
+    pub knows_huts: bool,
     pub acquaintances: Vec<AcquaintanceView>,
     /// What the agent believes words mean.
     pub lexicon: Vec<LexiconEntryView>,
@@ -494,6 +496,50 @@ pub(crate) struct Mind {
     pub(crate) grief_until: u32,
     /// Simulated second it last saw someone it could pair with.
     pub(crate) last_eligible_seen: u32,
+    /// The hut it last put food away in, until it finds it empty.
+    pub(crate) stored_food: Option<crate::agent::CompactPosition>,
+    /// How close it has got to where it's headed, to give up on places it
+    /// can't reach.
+    pub(crate) stall: Stall,
+}
+
+/// Progress toward one destination: the closest it has been, and how many
+/// decisions since it last got closer.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Stall {
+    pub(crate) target: Option<crate::agent::CompactPosition>,
+    pub(crate) best: u16,
+    pub(crate) since_closer: u8,
+}
+
+/// Decisions without getting closer before a destination is given up.
+pub(crate) const STALL_DECISIONS: u8 = 16;
+
+impl Stall {
+    /// Notes the distance to `target` now; true when it's time to give up on it.
+    pub(crate) fn note(&mut self, target: WorldPosition, distance: u64) -> bool {
+        let distance = u16::try_from(distance).unwrap_or(u16::MAX);
+        let compact = crate::agent::CompactPosition::checked(target);
+        if self.target != compact {
+            *self = Self {
+                target: compact,
+                best: distance,
+                since_closer: 0,
+            };
+            return false;
+        }
+        if distance < self.best {
+            self.best = distance;
+            self.since_closer = 0;
+            return false;
+        }
+        self.since_closer = self.since_closer.saturating_add(1);
+        if self.since_closer >= STALL_DECISIONS {
+            *self = Self::default();
+            return true;
+        }
+        false
+    }
 }
 
 impl Mind {

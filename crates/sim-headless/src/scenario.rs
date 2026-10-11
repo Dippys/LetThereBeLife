@@ -42,7 +42,7 @@ impl ScenarioConfig {
             population,
             driver_ticks: CANONICAL_TICKS,
             access_radius: PHYSICAL_POLICY_RADIUS,
-            initial_food_per_agent: sim_core::INVENTORY_CAPACITY_PER_KIND,
+            initial_food_per_agent: sim_core::CARRY_CAPACITY - sim_core::SHELTER_WOOD_COST,
             initial_wood_per_water_agent: sim_core::SHELTER_WOOD_COST,
         }
     }

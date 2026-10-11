@@ -212,7 +212,14 @@ impl Engine {
         self.check_leads(agent, perception, now);
         let (seen_danger, seen_prey, wary) = self.animals_of_interest(agent, origin, perception);
         // Young children don't hunt.
-        let hunts = self.age_of(agent) >= crate::HUNTING_AGE;
+        let pregnant = self
+            .motherhood(agent)
+            .is_some_and(|motherhood| motherhood.pregnant);
+        let hunts = self.age_of(agent) >= crate::HUNTING_AGE && !pregnant;
+        // Fit for heavy work: grown, not pregnant, not worn out or starving.
+        let able = self.fit_for_heavy_work(agent)
+            && !needs.rest.threshold_reached
+            && !needs.hunger.threshold_reached;
         let (alarm, quarry) = self.minds.get_mut(agent).dialogue.current_leads(now);
         let near = |place: WorldPosition, within: u64| {
             origin.x.abs_diff(place.x).max(origin.y.abs_diff(place.y)) <= within
@@ -316,7 +323,10 @@ impl Engine {
             parent,
             grief_until,
             last_eligible_seen: _,
+            stored_food,
+            stall: _,
         } = mind;
+        let stored_food = stored_food.map(crate::agent::CompactPosition::world);
         let grief_until = *grief_until;
         map.observe(
             agent.get(),
@@ -420,6 +430,7 @@ impl Engine {
                     .map_or(ParentInput::Stay, ParentInput::Return)
             }
         });
+        let trip = std::cell::Cell::new(None);
         let deliberation = deliberate(
             origin,
             needs,
@@ -447,9 +458,30 @@ impl Engine {
                 knows_knapping: crafts.knows_knapping(),
                 came_from: map.came_from(origin),
                 grieving: now < grief_until,
+                knows_huts: crafts.knows_huts(),
+                able,
+                stored_food,
+                trip: &trip,
             },
         );
         self.minds.get_mut(agent).map.mark_decision(origin);
+        // Getting no closer to where it's headed, decision after decision: it
+        // can't get there from here, so it stops trying.
+        let travelling = matches!(
+            deliberation.selection.reason,
+            PolicyReason::ToldPlace | PolicyReason::RememberedPlace | PolicyReason::Fetching
+        );
+        if let Some(destination) = trip.get().filter(|_| travelling) {
+            let distance = origin.x.abs_diff(destination.x) + origin.y.abs_diff(destination.y);
+            let mind = self.minds.get_mut(agent);
+            if mind.stall.note(destination, distance) {
+                mind.map.give_up(destination);
+                if mind.stored_food.map(crate::agent::CompactPosition::world) == Some(destination) {
+                    mind.stored_food = None;
+                }
+                self.gave_up += 1;
+            }
+        }
         match deliberation.selection.reason {
             PolicyReason::Warning | PolicyReason::Recruiting => {
                 let warning = deliberation.selection.reason == PolicyReason::Warning;
@@ -503,6 +535,7 @@ impl Engine {
             (PhysicalGoal::Hunt, _) => super::HUNT_TICKS,
             (PhysicalGoal::WarmUp | PhysicalGoal::TendFire, _) => WARM_UP_TICKS,
             (PhysicalGoal::Craft, _) => CRAFT_TICKS,
+            (PhysicalGoal::Store | PhysicalGoal::Fetch | PhysicalGoal::Drop, _) => WARM_UP_TICKS,
             // A warning is quick: a shout and a point.
             (_, PolicyReason::Warning) => WARNING_TICKS,
             _ => SIGNAL_TICKS,
@@ -1350,6 +1383,7 @@ impl Engine {
             fauna: mind.fauna.views().collect(),
             knows_hearths: mind.crafts.knows_hearths(),
             knows_knapping: mind.crafts.knows_knapping(),
+            knows_huts: mind.crafts.knows_huts(),
             acquaintances: mind.social.views().collect(),
             lexicon: mind.lexicon.views().collect(),
         })

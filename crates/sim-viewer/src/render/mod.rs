@@ -110,6 +110,8 @@ pub enum Hover {
         state: StructureState,
         /// For a fire: seconds of burning left (0 = out).
         burning: Option<u32>,
+        /// What a hut holds.
+        stored: sim_core::InventoryView,
     },
     Resource {
         label: &'static str,
@@ -200,6 +202,7 @@ pub struct MemoryInspection {
     pub fauna: [Option<(bool, bool)>; Species::COUNT],
     pub knows_hearths: bool,
     pub knows_knapping: bool,
+    pub knows_huts: bool,
 }
 
 impl MemoryInspection {
@@ -268,6 +271,7 @@ impl MemoryInspection {
             }),
             knows_hearths: view.knows_hearths,
             knows_knapping: view.knows_knapping,
+            knows_huts: view.knows_huts,
         }
     }
 

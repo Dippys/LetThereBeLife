@@ -62,6 +62,14 @@ impl Engine {
         sex - age_penalty
     }
 
+    /// Grown, and not pregnant: able to build, chop, and break stone.
+    pub(super) fn fit_for_heavy_work(&self, agent: AgentId) -> bool {
+        self.age_of(agent) >= ADULT_AGE
+            && !self
+                .motherhood(agent)
+                .is_some_and(|motherhood| motherhood.pregnant)
+    }
+
     /// The season now.
     pub fn season(&self) -> crate::Season {
         crate::Season::at(self.time)

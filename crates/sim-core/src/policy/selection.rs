@@ -97,6 +97,11 @@ pub(crate) fn select_with_exploration(
 
 /// The need past its threshold with the highest relative urgency, if any.
 pub(super) fn most_urgent(needs: PhysicalNeedsView) -> Option<NeedKind> {
+    // Thirst kills fastest: once past its threshold it comes first, so nobody
+    // warms up or sleeps on while dying of thirst.
+    if needs.thirst.threshold_reached {
+        return Some(NeedKind::Thirst);
+    }
     NeedKind::ALL
         .into_iter()
         .filter_map(|kind| {
