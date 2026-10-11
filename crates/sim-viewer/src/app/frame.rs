@@ -175,6 +175,7 @@ impl ViewerApp {
                 season: self.engine.season(),
             },
             &self.gestures,
+            &self.wear,
             allow_world_sync,
             self.pending_world_changes,
         );

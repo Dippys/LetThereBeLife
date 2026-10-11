@@ -1263,8 +1263,9 @@ fn speech_bubbles(painter: &mut Painter, view: CameraView, gestures: &[GestureMa
     }
 }
 
-/// What watchers took the latest gestures to mean, in small bubbles over
-/// their heads: pale when they got it, red when they didn't.
+/// What watchers took the latest gestures to mean, in small bubbles under
+/// their feet (speakers' words go over heads): pale when they got it, red
+/// when they didn't.
 fn listener_readings(painter: &mut Painter, view: CameraView, readings: &[super::Reading]) {
     let (width, height) = view.screen_size();
     let scale = view.scale() as f32;
@@ -1273,20 +1274,28 @@ fn listener_readings(painter: &mut Painter, view: CameraView, readings: &[super:
     }
     let [center_x, center_y] = view.center();
     let px = painter.px;
-    let mut drawn: Vec<WorldPosition> = Vec::new();
-    // Newest first, one per listener.
+    let mut listeners: Vec<WorldPosition> = Vec::new();
+    let mut drawn: Vec<(f32, f32, f32, f32)> = Vec::new();
+    // Newest first, one per listener, none on top of another.
     for (position, text, wrong) in readings.iter().rev() {
-        if drawn.contains(position) {
+        if listeners.contains(position) {
             continue;
         }
-        drawn.push(*position);
+        listeners.push(*position);
         let w = text_width(text, px) + 4.0 * px;
         let h = painter.line();
         let x = (position.x as f32 + 0.5 - center_x) * scale + width / 2.0 - w / 2.0;
-        let y = (position.y as f32 - center_y) * scale + height / 2.0 - h - 2.0 * px;
+        let y = (position.y as f32 + 1.0 - center_y) * scale + height / 2.0 + px;
         if x + w < 0.0 || y + h < 0.0 || x > width || y > height {
             continue;
         }
+        if drawn
+            .iter()
+            .any(|&(dx, dy, dw, dh)| x < dx + dw && dx < x + w && y < dy + dh && dy < y + h)
+        {
+            continue;
+        }
+        drawn.push((x, y, w, h));
         let (back, ink) = if *wrong {
             (colors::UI_READING_WRONG, colors::UI_TEXT)
         } else {
@@ -1393,7 +1402,8 @@ fn help(painter: &mut Painter, width: f32, height: f32) {
         "Women's squares have notched corners; children are smaller; elders have a grey edge; a pink dot is a carried baby.",
         "Bitter berries look like food but make you sick.",
         "A bubble is a word being said, with the gesture that went with it. A dotted line is someone pointing.",
-        "Small bubbles over listeners show what they understood: red means they got it wrong.",
+        "Small bubbles under listeners show what they understood: red means they got it wrong.",
+        "Winter frosts the land; fires glow; ground darkens where people walk often.",
         "Signs over heads (zoomed in): z asleep, ^ by a fire, ~ water, * food, = gathering or carrying, # building, ! hunting or running.",
     ]
     .iter()

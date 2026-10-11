@@ -188,3 +188,22 @@ pub(super) const SIGN_FOOD: u32 = rgba(235, 80, 120, 255);
 pub(super) const SIGN_WORK: u32 = rgba(196, 150, 100, 255);
 pub(super) const SIGN_HUNT: u32 = rgba(240, 210, 90, 255);
 pub(super) const SIGN_DANGER: u32 = rgba(255, 80, 70, 255);
+
+/// Ground worn by walking: darker the more it's trodden.
+pub(super) fn worn(wear: u16) -> u32 {
+    let alpha = (60 + u32::from(wear.min(300)) / 2).min(170) as u8;
+    rgba(58, 40, 22, alpha)
+}
+
+/// The season's light laid over the land (none in spring).
+pub(super) const fn season_tint(season: sim_core::Season) -> Option<u32> {
+    match season {
+        sim_core::Season::Spring => None,
+        sim_core::Season::Summer => Some(rgba(255, 236, 160, 22)),
+        sim_core::Season::Autumn => Some(rgba(230, 130, 50, 30)),
+        sim_core::Season::Winter => Some(rgba(205, 225, 255, 52)),
+    }
+}
+
+/// One ring of a fire's glow (rings stack toward the middle).
+pub(super) const FIRELIGHT: u32 = rgba(255, 160, 60, 34);

@@ -35,6 +35,7 @@ impl ViewerApp {
                 self.engine.tick();
                 // Engine event logs cover only the latest tick, so collect them per tick.
                 self.gestures.record_tick(&self.engine, now);
+                self.wear.record_tick(&self.engine);
                 self.feed.record(&self.engine);
                 self.accumulator -= tick_seconds;
             }
@@ -72,6 +73,7 @@ impl ViewerApp {
         for done in 0..ticks {
             self.engine.tick();
             self.gestures.record_tick(&self.engine, now);
+            self.wear.record_tick(&self.engine);
             self.feed.record(&self.engine);
             progress.record(&self.engine, done + 1);
         }
@@ -91,6 +93,7 @@ impl ViewerApp {
     pub(super) fn reset_population(&mut self) {
         reset(&mut self.engine);
         self.gestures.clear();
+        self.wear.clear();
         self.feed.clear();
         self.selected = None;
         self.following = false;

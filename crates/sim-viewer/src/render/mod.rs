@@ -352,6 +352,12 @@ pub struct Renderer {
     gesture_marker_instances: Vec<Instance>,
     world_overlay: InstanceBuffer,
     world_overlay_instances: Vec<Instance>,
+    /// Worn ground where people walk often.
+    paths: InstanceBuffer,
+    path_instances: Vec<Instance>,
+    /// The season's light over the land, and firelight.
+    atmosphere: InstanceBuffer,
+    atmosphere_instances: Vec<Instance>,
     screen_overlay: InstanceBuffer,
     screen_overlay_instances: Vec<Instance>,
     screen_overlay_capacity: usize,
@@ -518,6 +524,10 @@ impl Renderer {
                 WORLD_OVERLAY_CAPACITY,
             ),
             world_overlay_instances: Vec::with_capacity(WORLD_OVERLAY_CAPACITY),
+            paths: InstanceBuffer::dynamic(&device, "worn paths", MAX_PATH_INSTANCES),
+            path_instances: Vec::with_capacity(MAX_PATH_INSTANCES),
+            atmosphere: InstanceBuffer::dynamic(&device, "atmosphere", MAX_ATMOSPHERE_INSTANCES),
+            atmosphere_instances: Vec::with_capacity(MAX_ATMOSPHERE_INSTANCES),
             screen_overlay: InstanceBuffer::dynamic(
                 &device,
                 "screen overlay",
@@ -634,6 +644,7 @@ impl Renderer {
         engine: &Engine,
         state: RenderState,
         gestures: &GestureLog,
+        wear: &crate::paths::PathWear,
         allow_world_sync: bool,
         changed_bounds: Option<WorldRect>,
     ) -> Result<(), wgpu::SurfaceError> {
@@ -671,6 +682,28 @@ impl Renderer {
             ),
         );
 
+        self.path_instances.clear();
+        if view.scale() as f32 >= MIN_DYNAMIC_INSTANCE_PIXELS {
+            for (cell, worn) in wear.worn_in(view.world_bounds()).take(MAX_PATH_INSTANCES) {
+                self.path_instances.push(Instance::new(
+                    cell.x as f32,
+                    cell.y as f32,
+                    1.0,
+                    1.0,
+                    colors::worn(worn),
+                ));
+            }
+        }
+        self.paths.write(&self.queue, &self.path_instances);
+        build_atmosphere(
+            engine,
+            state.season,
+            view.world_bounds(),
+            (state.snapshot.tick / 60) as u32,
+            &mut self.atmosphere_instances,
+        );
+        self.atmosphere
+            .write(&self.queue, &self.atmosphere_instances);
         build_structure_instances(
             engine.structure_views(MAX_STRUCTURE_INSTANCES),
             view.world_bounds(),
@@ -903,9 +936,11 @@ impl Renderer {
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.world_camera.bind_group, &[]);
             self.terrain.draw(&mut pass);
+            self.paths.draw(&mut pass);
             self.features.draw(&mut pass);
             self.spawned_objects.draw(&mut pass);
             self.structures.draw(&mut pass);
+            self.atmosphere.draw(&mut pass);
             self.memory_markers.draw(&mut pass);
             self.relationship_markers.draw(&mut pass);
             self.gesture_markers.draw(&mut pass);
@@ -1020,6 +1055,58 @@ const MAX_GESTURE_DOTS: usize = 16;
 /// Each recent gesture draws its dotted line and an end square.
 const MAX_GESTURE_MARKER_INSTANCES: usize = RECENT_GESTURE_CAPACITY * (MAX_GESTURE_DOTS + 1);
 const MIN_DYNAMIC_INSTANCE_PIXELS: f32 = 1.25;
+/// Worn cells drawn at most.
+const MAX_PATH_INSTANCES: usize = 16_384;
+/// The season's tint plus fire glows drawn at most.
+const MAX_ATMOSPHERE_INSTANCES: usize = 1_024;
+/// How far firelight reaches, in cells, and in how many rings it fades.
+const FIRELIGHT_REACH: f32 = 7.0;
+const FIRELIGHT_RINGS: usize = 4;
+
+/// The season's light over everything in `bounds`, then a warm glow around
+/// every burning fire in view.
+fn build_atmosphere(
+    engine: &sim_core::Engine,
+    season: sim_core::Season,
+    bounds: sim_core::WorldRect,
+    now: u32,
+    out: &mut Vec<Instance>,
+) {
+    out.clear();
+    if let Some(tint) = colors::season_tint(season) {
+        out.push(Instance::new(
+            bounds.min.x as f32,
+            bounds.min.y as f32,
+            (bounds.max.x - bounds.min.x) as f32,
+            (bounds.max.y - bounds.min.y) as f32,
+            tint,
+        ));
+    }
+    let reach = FIRELIGHT_REACH as i64;
+    for fire in engine.structure_views(MAX_STRUCTURE_INSTANCES) {
+        let near = fire.position.x >= bounds.min.x - reach
+            && fire.position.x <= bounds.max.x + reach
+            && fire.position.y >= bounds.min.y - reach
+            && fire.position.y <= bounds.max.y + reach;
+        if !(fire.kind.burns() && fire.working(now) && near) {
+            continue;
+        }
+        for ring in 0..FIRELIGHT_RINGS {
+            if out.len() >= MAX_ATMOSPHERE_INSTANCES {
+                return;
+            }
+            let radius = FIRELIGHT_REACH * (ring + 1) as f32 / FIRELIGHT_RINGS as f32;
+            out.push(Instance::new(
+                fire.position.x as f32 + 0.5 - radius,
+                fire.position.y as f32 + 0.5 - radius,
+                2.0 * radius,
+                2.0 * radius,
+                colors::FIRELIGHT,
+            ));
+        }
+    }
+}
+
 /// Cells must be at least this many pixels wide before signs over people show.
 const MIN_SIGN_CELL_PIXELS: f32 = 6.0;
 

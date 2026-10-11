@@ -84,6 +84,8 @@ pub(crate) struct ViewerApp {
     screenshot: Option<PathBuf>,
     population_status: PopulationStatus,
     gestures: GestureLog,
+    /// Where people have walked lately (drawn as worn paths).
+    wear: crate::paths::PathWear,
     feed: Feed,
     /// A short message and when it was shown.
     toast: Option<(String, Instant)>,
@@ -171,6 +173,7 @@ impl ViewerApp {
                 PopulationStatus::WaitingForResidency
             },
             gestures: GestureLog::new(),
+            wear: crate::paths::PathWear::default(),
             feed: Feed::default(),
             toast: None,
             selected: None,
@@ -236,6 +239,7 @@ impl ViewerApp {
         self.engine = sim_core::Engine::load(std::fs::File::open(path)?)?;
         self.feed.clear();
         self.gestures.clear();
+        self.wear.clear();
         self.selected = None;
         self.following = false;
         self.accumulator = 0.0;
@@ -253,8 +257,16 @@ impl ViewerApp {
         Ok(())
     }
 
+    /// Starts with `agent`'s panel open and the view on them.
     pub(crate) fn with_selected(mut self, agent: AgentId) -> Self {
         self.selected = Some(agent);
+        if let Some(view) = self
+            .engine
+            .agent_views(usize::MAX)
+            .find(|view| view.id == agent)
+        {
+            self.initial_focus = Some(view.position);
+        }
         self
     }
 

@@ -542,7 +542,7 @@ fn listeners_show_their_reading_red_when_mistaken_and_people_show_signs() {
         y: y as i64,
     };
     let there = sim_core::WorldPosition {
-        x: here.x + 4,
+        x: here.x + 16,
         y: here.y,
     };
     let readings = [
@@ -551,7 +551,7 @@ fn listeners_show_their_reading_red_when_mistaken_and_people_show_signs() {
     ];
     let signs = [(
         sim_core::WorldPosition {
-            x: here.x - 4,
+            x: here.x - 16,
             y: here.y,
         },
         'z',
