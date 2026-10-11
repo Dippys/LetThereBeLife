@@ -487,6 +487,20 @@ impl StructureStore {
         })
     }
 
+    /// A burning fire within `reach` cells of `position` at simulated second `now`.
+    pub(crate) fn fire_within(&self, position: WorldPosition, now: u32, reach: i64) -> bool {
+        (-reach..=reach).any(|dy| {
+            (-reach..=reach).any(|dx| {
+                self.structure_at(WorldPosition {
+                    x: position.x + dx,
+                    y: position.y + dy,
+                })
+                .and_then(|id| self.view(id))
+                .is_some_and(|view| view.kind.burns() && view.working(now))
+            })
+        })
+    }
+
     /// A burning fire within one cell of `position` at simulated second `now`.
     pub(crate) fn fire_beside(&self, position: WorldPosition, now: u32) -> bool {
         self.structure_beside(position, |view| view.kind.burns() && view.working(now))
@@ -606,6 +620,30 @@ mod tests {
         assert_eq!(size_of::<StructureKind>(), 1);
         assert_eq!(size_of::<StructureState>(), 1);
         assert_eq!(size_of::<StructureRecord>(), 32);
+    }
+
+    #[test]
+    fn a_burning_fire_warms_huts_within_reach_until_it_burns_out() {
+        let at = |x, y| WorldPosition { x, y };
+        let mut store = StructureStore::default();
+        store
+            .start(
+                AgentId::new(0),
+                at(0, 0),
+                StructureKind::Hearth,
+                SimTime::ZERO,
+                SimTime::from_ticks(1),
+            )
+            .unwrap();
+        store.complete_for_builder(AgentId::new(0), 100).unwrap();
+        let reach = crate::FIRE_WARMTH_REACH;
+        assert!(store.fire_within(at(reach, -reach), 50, reach));
+        assert!(!store.fire_within(at(reach + 1, 0), 50, reach), "too far");
+        assert!(!store.fire_within(at(1, 0), 150, reach), "burnt out");
+        assert!(
+            crate::SleepQuality::Hearthside.exposure_rate_per_period()
+                < crate::SleepQuality::Sheltered.exposure_rate_per_period()
+        );
     }
 
     #[test]

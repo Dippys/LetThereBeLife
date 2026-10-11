@@ -237,7 +237,7 @@ impl Engine {
                     self.structures.is_sheltered_access(target),
                     self.structures.structure_at(target),
                 ) {
-                    Ok(quality) => quality,
+                    Ok(quality) => self.by_the_fire(quality, target),
                     Err(error) => {
                         self.schedule_policy_retry(
                             agent,
@@ -259,7 +259,7 @@ impl Engine {
                 ) {
                     Ok(sleep) => {
                         // A night under a roof shows how a hut is put together.
-                        if quality == crate::SleepQuality::Sheltered {
+                        if quality.sheltered() {
                             let hut = self.structures.lived_in(target);
                             if self.policy_options.memory {
                                 let mind = self.minds.get_mut(agent);

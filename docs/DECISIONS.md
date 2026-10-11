@@ -793,3 +793,19 @@ wipe out its food in a season.
 between two runs differing only in tree seeding (468 and 45). Valley 1 does consistently worse
 (7-11 survivors against 14) as bushes near its camp die off.
 
+## D-112: Huts by a fire are warmer, and hearths go beside home (2026-10-11)
+
+**Decision:** Sleeping under a roof with a burning fire within `FIRE_WARMTH_REACH` (6 cells) is
+`SleepQuality::Hearthside`: it warms twice as fast as a hut alone (exposure -8 per period
+against -4). A hearth is built within 4 cells of the builder's own home (D-109), instead of
+anywhere within 16 cells of a hut it knows; with the stone and wood in hand away from home, it
+walks back first. The study prints sleeps in the open, under a roof, and by a fire.
+**Why:** The user suggested huts gathered around hearths. The world now gives a reason (warmth)
+and people's choices learn it (sleeping where a shelter and a fire are in view eases more); the
+hearth goes where the builder lives rather than by a rule to cluster.
+**Consequences:** Over 10 years in 20 valleys: survivors 470 against 457 without warm huts,
+deaths from cold 47 against 52, sleeps by a fire 3,909 against none (2,398 with warm huts but
+hearths placed as before). Within noise, but nothing got worse; valley 1 recovered from 7 to 23.
+The check that talking brings words together now sums agreement over the 10 valleys among seeds
+1-16 (it rises in 7 of the first 8 valleys, by up to 11 points) instead of requiring it of seed 1
+alone, which dipped 65% to 64% with this change.

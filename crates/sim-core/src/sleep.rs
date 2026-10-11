@@ -7,13 +7,18 @@ use crate::{AgentId, SimTime, StructureId, WorldPosition};
 pub enum SleepQuality {
     OpenGround = 0,
     Sheltered = 1,
+    /// Under a roof with a burning fire close by: warms twice as fast.
+    Hearthside = 2,
 }
+
+/// How near a burning fire must be, in cells, to warm a hut's sleepers.
+pub const FIRE_WARMTH_REACH: i64 = 6;
 
 impl SleepQuality {
     pub(crate) const fn rest_recovery_per_period(self) -> u8 {
         match self {
             Self::OpenGround => 8,
-            Self::Sheltered => 12,
+            Self::Sheltered | Self::Hearthside => 12,
         }
     }
 
@@ -21,7 +26,13 @@ impl SleepQuality {
         match self {
             Self::OpenGround => 2,
             Self::Sheltered => -4,
+            Self::Hearthside => -8,
         }
+    }
+
+    /// Under a roof.
+    pub const fn sheltered(self) -> bool {
+        !matches!(self, Self::OpenGround)
     }
 }
 

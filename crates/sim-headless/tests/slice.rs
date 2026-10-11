@@ -126,3 +126,21 @@ fn people_keep_homes_instead_of_building_wherever_they_are() {
         "{built} huts went up for {living} people"
     );
 }
+
+/// Talking brings the band's words together: averaged over every valley among
+/// seeds 1-16, agreement on each place word is higher after 80,000 ticks than
+/// at the start (one valley alone can dip by a point, D-112).
+#[test]
+#[ignore = "release-only: run with --release --ignored (part of scripts/validate)"]
+fn talking_brings_the_band_s_words_together() {
+    let results = across_valleys(1..=16, |seed| {
+        Some(run_study(valley(seed, 80_000)).ok()?.vocabulary_agreement)
+    });
+    assert_eq!(results.len(), 10, "the valleys among the seeds changed");
+    let start: u64 = results.iter().map(|[start, _]| start).sum();
+    let end: u64 = results.iter().map(|[_, end]| end).sum();
+    assert!(
+        end > start,
+        "words diverge: summed agreement {start}% -> {end}%"
+    );
+}

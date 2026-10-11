@@ -7,8 +7,8 @@ use crate::scheduler::{self};
 use crate::{
     AgentId, DRINK_THIRST_RELIEF, Engine, GATHER_YIELD, Material, NeedKind, PhysicalGoal,
     PolicyDiagnostic, PolicyDiagnosticKind, PolicyFailureReason, PolicyReason, SHELTER_WOOD_COST,
-    SleepDiagnostic, SleepDiagnosticKind, SleepRequestError, SleepView, WorldPosition,
-    WorldQueryError,
+    SleepDiagnostic, SleepDiagnosticKind, SleepQuality, SleepRequestError, SleepView,
+    WorldPosition, WorldQueryError,
 };
 
 /// Food kept on hand when putting things away in a hut.
@@ -23,6 +23,24 @@ const SWIM_EFFORT: u16 = 60;
 const BLADE_WEAR_ODDS: u64 = 6;
 
 impl Engine {
+    /// Sleeping under a roof with a burning fire close by warms faster.
+    pub(super) fn by_the_fire(
+        &self,
+        quality: SleepQuality,
+        position: WorldPosition,
+    ) -> SleepQuality {
+        let now = crate::cognition::belief_seconds(self.time);
+        if quality == SleepQuality::Sheltered
+            && self
+                .structures
+                .fire_within(position, now, crate::FIRE_WARMTH_REACH)
+        {
+            SleepQuality::Hearthside
+        } else {
+            quality
+        }
+    }
+
     /// Starts one explicit sleep intent at the agent's current physical location.
     pub fn request_sleep(
         &mut self,
@@ -44,6 +62,7 @@ impl Engine {
             self.structures.is_sheltered_access(position),
             self.structures.structure_at(position),
         )?;
+        let quality = self.by_the_fire(quality, position);
         self.compact_scheduler_if_needed();
         let sleep = self.population.schedule_sleep(
             &mut self.scheduler,

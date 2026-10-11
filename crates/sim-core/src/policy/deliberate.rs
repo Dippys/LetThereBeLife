@@ -76,8 +76,9 @@ impl Temperament {
 /// A remembered shelter this close counts as home: tired agents walk back to it,
 /// and agents don't build another one.
 pub const HOME_RANGE: u64 = 200;
-/// A hearth is built only this close (cells) to the builder's home shelter.
-const HEARTH_FROM_HOME: u64 = 16;
+/// A hearth is built only this close (cells) to the builder's home, so it
+/// warms the hut (within `FIRE_WARMTH_REACH`).
+const HEARTH_FROM_HOME: u64 = 4;
 /// Tiredness (out of 10,000) at which an agent sleeps wherever it can.
 const REST_CRITICAL: u16 = 8_800;
 /// How much more an option listed one place earlier is worth, by instinct.
@@ -1059,21 +1060,30 @@ impl Planner<'_> {
         })
     }
 
-    /// Builds a hearth near home if it keeps fire and knows of none close by,
-    /// gathering stone and wood for it first.
+    /// Builds a hearth beside its home if it keeps fire and knows of none
+    /// close by, gathering stone and wood for it first.
     fn make_hearth(&self, inventory: InventoryView) -> Option<Deliberation> {
         let map = self.mind.map;
-        let at_home = map
-            .nearest_seen_distance(LandmarkKind::SHELTER, self.origin)
-            .is_some_and(|distance| distance <= HEARTH_FROM_HOME);
+        let home = self.mind.home?;
         if !self.mind.knows_hearths
-            || !at_home
-            || map.remembers_near(LandmarkKind::HEARTH, self.origin, HOME_RANGE)
+            || manhattan(home, self.origin) > HOME_RANGE
+            || map.remembers_near(LandmarkKind::HEARTH, home, HOME_RANGE)
         {
             return None;
         }
         let kind = crate::StructureKind::Hearth;
         if kind.affordable(inventory) {
+            if manhattan(home, self.origin) > HEARTH_FROM_HOME {
+                let (waypoint, heading) = self.waypoint_toward(home)?;
+                return Some(Deliberation {
+                    selection: PolicySelection {
+                        goal: PhysicalGoal::Explore,
+                        target: Some(waypoint),
+                        reason: PolicyReason::HearthMaterials,
+                    },
+                    heading: Some(heading),
+                });
+            }
             let site = nearest_build_site(self.origin, self.perception)?;
             return Some(Deliberation::act(
                 PhysicalGoal::BuildHearth,

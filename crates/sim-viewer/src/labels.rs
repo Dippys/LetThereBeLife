@@ -229,6 +229,7 @@ pub const fn sleep(quality: SleepQuality) -> &'static str {
     match quality {
         SleepQuality::OpenGround => "out in the open",
         SleepQuality::Sheltered => "under shelter",
+        SleepQuality::Hearthside => "under shelter by a fire",
     }
 }
 

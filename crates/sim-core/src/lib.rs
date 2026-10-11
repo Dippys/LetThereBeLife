@@ -83,8 +83,8 @@ pub use sim_world::{
     band_layout, camp_sites, family_camps, find_valley, find_valley_pair, score_square,
 };
 pub use sleep::{
-    REST_COLLAPSE, SleepDiagnostic, SleepDiagnosticKind, SleepInterruptionReason, SleepQuality,
-    SleepRequestError, SleepView,
+    FIRE_WARMTH_REACH, REST_COLLAPSE, SleepDiagnostic, SleepDiagnosticKind,
+    SleepInterruptionReason, SleepQuality, SleepRequestError, SleepView,
 };
 pub use structures::{
     BuildShelterError, HEARTH_BUILD_TICKS, HEARTH_STONE_COST, HEARTH_WARMTH, HEARTH_WOOD_COST,

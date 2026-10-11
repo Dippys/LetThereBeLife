@@ -253,6 +253,8 @@ pub struct WildlifeStats {
     pub huts: u64,
     pub huts_fallen: u64,
     pub stored: u64,
+    /// Sleeps begun in the open, under a roof, and under a roof by a fire.
+    pub sleeps: [u64; 3],
     /// Plants that took root and died of age; trees and bushes at the start and end.
     pub sprouted: u64,
     pub plants_died: u64,
@@ -490,6 +492,11 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                     );
                     wildlife.huts_fallen +=
                         u64::from(built.kind == sim_core::StructureDiagnosticKind::Collapsed);
+                }
+                for sleep in engine.sleep_diagnostics() {
+                    if sleep.kind == sim_core::SleepDiagnosticKind::Started {
+                        wildlife.sleeps[sleep.sleep.quality as usize] += 1;
+                    }
                 }
                 for decision in engine.policy_diagnostics() {
                     wildlife.warm_ups += u64::from(
@@ -1715,6 +1722,11 @@ impl fmt::Display for StudyReport {
             formatter,
             "\n  fire: hearths built {}, warm-ups {}, fuel added {} ({} relit); know hearths warm: founders {founders_fire}, children {children_fire}",
             self.wildlife.hearths, self.wildlife.warm_ups, self.wildlife.tends, self.wildlife.relit
+        )?;
+        let [open, sheltered, by_fire] = self.wildlife.sleeps;
+        write!(
+            formatter,
+            "\n  sleeps: in the open {open}, under a roof {sheltered}, under a roof by a fire {by_fire}"
         )?;
         // What people learned works: the choices that best eased each need.
         let mut learned = Vec::new();
