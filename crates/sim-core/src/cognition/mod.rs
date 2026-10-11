@@ -8,6 +8,7 @@ mod crafts;
 mod dialogue;
 mod fauna;
 mod gesture;
+mod habits;
 mod lexicon;
 mod map;
 mod personality;
@@ -24,6 +25,8 @@ pub(crate) use fauna::Fauna;
 pub use fauna::FaunaView;
 pub use gesture::Gesture;
 pub(crate) use gesture::reach_toward;
+pub use habits::{Choice, HABIT_SLOTS, HabitView, Situation};
+pub(crate) use habits::{Habits, discomfort};
 pub(crate) use lexicon::Lexicon;
 pub use lexicon::{Concept, FAMILY_SIZE, LEXICON_SLOTS, LexiconEntryView, VOCAL_FORMS, VocalForm};
 pub(crate) use map::{HintCheck, HintSource, MentalMap, spent_kinds, visible_kinds};
@@ -205,6 +208,8 @@ pub struct MentalMapView {
     pub knows_knapping: bool,
     /// Knows how to build a hut.
     pub knows_huts: bool,
+    /// How its own choices have gone, in each kind of situation.
+    pub habits: Vec<HabitView>,
     pub acquaintances: Vec<AcquaintanceView>,
     /// What the agent believes words mean.
     pub lexicon: Vec<LexiconEntryView>,
@@ -501,6 +506,8 @@ pub(crate) struct Mind {
     /// How close it has got to where it's headed, to give up on places it
     /// can't reach.
     pub(crate) stall: Stall,
+    /// How its own choices have gone (docs/plans/LEARNING.md).
+    pub(crate) habits: Habits,
 }
 
 /// Progress toward one destination: the closest it has been, and how many

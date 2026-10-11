@@ -171,7 +171,8 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
-- 2026-10-11 (latest): a harder world: swimming, a 12-item load, hut storage, effort, learned
+- 2026-10-11 (latest): learning what works, phase 1: habits learned silently (D-103).
+- 2026-10-11: a harder world: swimming, a 12-item load, hut storage, effort, learned
   huts, slower regrowth (D-102).
 - 2026-10-11: viewer speeds up to 4096× (a frame budget shows the speed reached), the
   season's cold beside the year, and an info box (I) with fires, needs, births and deaths.
@@ -215,9 +216,8 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## What's next
 
-1. **Learning what works** (docs/plans/LEARNING.md): agents learn which actions relieve which needs
-   in which situations, from their own experience and by copying people doing well, replacing most
-   of the hand-written decision rules.
+1. **Learning what works** (docs/plans/LEARNING.md): phase 1 (habits learned silently, D-103) is
+   done; next, phase 2 lets habits decide cold, shelter and storage.
 2. **Save and load**, so a long run (e.g. 1,000 years) is computed once and opened instantly.
 3. **More speaker feedback**: speakers watching how listeners react, overhearing others.
 4. **Separated groups (continued)**: a lasting barrier or much longer isolation.

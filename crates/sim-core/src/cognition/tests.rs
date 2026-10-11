@@ -83,7 +83,7 @@ fn mind_layout_is_bounded() {
     // Map 372, social 240, lexicon 192, dialogue 112, beliefs 15 + 6 + 2,
     // child flag, parent id, grief and loneliness timers, and padding.
     assert_eq!(size_of::<MentalMap>(), 372);
-    assert_eq!(size_of::<super::Mind>(), 984);
+    assert_eq!(size_of::<super::Mind>(), 1_112);
 }
 
 #[test]

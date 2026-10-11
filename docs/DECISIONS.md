@@ -662,3 +662,17 @@ stored food is rarely fetched. Children score 64% on the band's place words (75%
 and huts get pointed out less) and the success test finds 42 episodes in 22 valleys (86 before; it
 needs 40), so its margin is thin. Agent memory is 984 bytes. Decision rules were patched heavily in
 this batch; the next step replaces them with learning what works (docs/plans/LEARNING.md).
+
+## D-103: Learning what works, phase 1: habits learned silently (2026-10-11)
+
+**Decision:** Each mind keeps `Habits` (32 entries of 4 bytes): for a situation (needs past
+threshold, season, shelter or fire in view: one byte) and a kind of choice (18 kinds mapped from
+the policy's goal and reason), a moving average of the relief it brought. Relief is the drop in
+discomfort (how far each need is past half its threshold) between choosing and choosing something
+else; re-deciding the same thing in the same situation continues the trial. The scripted policy
+still decides; the study reports the best-valued choices per need (`habits:`). Mind 1,112 bytes.
+**Why:** docs/plans/LEARNING.md phase 1: see what people would learn before letting it decide.
+**Consequences:** Behaviour is unchanged (seed 1's report is identical to before apart from the new
+line). Habits form sensibly: thirsty, drinking +12; tired, sleeping +6; cold, sleeping +4 (seed 4),
+-5 where warming naps are cut short by thirst (seed 1). Judging every re-decision instead gave
+almost only zero relief (107 of 28,626 trials), so trials span a run of the same choice.

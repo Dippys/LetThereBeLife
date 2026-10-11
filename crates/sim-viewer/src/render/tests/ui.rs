@@ -95,6 +95,7 @@ fn mind(lexicon: Vec<LexiconEntryView>, acquaintances: Vec<AcquaintanceView>) ->
         knows_hearths: true,
         knows_knapping: true,
         knows_huts: true,
+        habits: Vec::new(),
         acquaintances,
         lexicon,
     }

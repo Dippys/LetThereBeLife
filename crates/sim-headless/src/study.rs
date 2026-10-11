@@ -258,6 +258,9 @@ pub struct WildlifeStats {
     pub know_fire: [u64; 2],
     /// Founders and children who know how to knap a blade, at the end.
     pub know_knapping: [u64; 2],
+    /// For each need (hungry, thirsty, tired, cold): each choice's summed
+    /// value times tries, and the tries, over every living mind's habits.
+    pub habits: [[(i64, u64); sim_core::Choice::COUNT]; 4],
     /// Blades knapped, and how many people watched it done.
     pub blades: u64,
     pub watched_crafts: u64,
@@ -651,6 +654,15 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
         wildlife.fear_wolves[usize::from(mind.child)] += u64::from(fears);
         wildlife.know_fire[usize::from(mind.child)] += u64::from(mind.knows_hearths);
         wildlife.know_knapping[usize::from(mind.child)] += u64::from(mind.knows_knapping);
+        for habit in &mind.habits {
+            for (need, flag) in HABIT_NEEDS.iter().enumerate() {
+                if habit.situation.has(flag.1) {
+                    let entry = &mut wildlife.habits[need][habit.choice as usize];
+                    entry.0 += i64::from(habit.value) * i64::from(habit.tries);
+                    entry.1 += u64::from(habit.tries);
+                }
+            }
+        }
     }
     report.food = food;
     wildlife.deer = engine.animal_count(sim_core::Species::Deer) as u64;
@@ -1359,6 +1371,14 @@ fn percent(part: u64, whole: u64) -> u64 {
     (part * 100).checked_div(whole).unwrap_or(0)
 }
 
+/// The needs habits are reported for, with their situation flag.
+const HABIT_NEEDS: [(&str, u8); 4] = [
+    ("hungry", sim_core::Situation::HUNGRY),
+    ("thirsty", sim_core::Situation::THIRSTY),
+    ("tired", sim_core::Situation::TIRED),
+    ("cold", sim_core::Situation::COLD),
+];
+
 /// Picks `population` distinct standable cells uniformly from the bootstrap area
 /// (optionally restricted to cells near fresh water).
 fn random_land_spawns(
@@ -1661,6 +1681,29 @@ impl fmt::Display for StudyReport {
             "\n  fire: hearths built {}, warm-ups {}, fuel added {} ({} relit); know hearths warm: founders {founders_fire}, children {children_fire}",
             self.wildlife.hearths, self.wildlife.warm_ups, self.wildlife.tends, self.wildlife.relit
         )?;
+        // What people learned works: the choices that best eased each need.
+        let mut learned = Vec::new();
+        for (need, (label, _)) in HABIT_NEEDS.iter().enumerate() {
+            let mut best: Vec<(i64, sim_core::Choice, u64)> = sim_core::Choice::ALL
+                .into_iter()
+                .filter_map(|choice| {
+                    let (sum, tries) = self.wildlife.habits[need][choice as usize];
+                    (tries >= 5).then(|| (sum / tries as i64, choice, tries))
+                })
+                .collect();
+            best.sort_by_key(|&(value, choice, _)| (-value, choice));
+            let top: Vec<String> = best
+                .iter()
+                .take(3)
+                .map(|(value, choice, tries)| format!("{choice:?} {value:+} ({tries})"))
+                .collect();
+            if !top.is_empty() {
+                learned.push(format!("{label}: {}", top.join(", ")));
+            }
+        }
+        if !learned.is_empty() {
+            write!(formatter, "\n  habits: {}", learned.join("; "))?;
+        }
         let [founders_knap, children_knap] = self.wildlife.know_knapping;
         write!(
             formatter,

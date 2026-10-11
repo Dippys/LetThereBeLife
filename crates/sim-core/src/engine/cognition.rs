@@ -325,6 +325,7 @@ impl Engine {
             last_eligible_seen: _,
             stored_food,
             stall: _,
+            habits: _,
         } = mind;
         let stored_food = stored_food.map(crate::agent::CompactPosition::world);
         let grief_until = *grief_until;
@@ -481,6 +482,42 @@ impl Engine {
                 }
                 self.gave_up += 1;
             }
+        }
+        // Learn from the last choice by how discomfort changed since, then
+        // start judging this one.
+        {
+            let now_seconds = now;
+            let shelter = perception.structures.iter().any(|structure| {
+                structure.kind == crate::StructureKind::Shelter
+                    && structure.state == crate::StructureState::Complete
+            });
+            let fire = perception
+                .structures
+                .iter()
+                .any(|structure| structure.kind.burns() && structure.working(now_seconds));
+            let situation = crate::cognition::Situation::new(
+                [
+                    needs.hunger.threshold_reached,
+                    needs.thirst.threshold_reached,
+                    needs.rest.threshold_reached,
+                    needs.exposure.threshold_reached,
+                ],
+                self.season(),
+                shelter,
+                fire,
+            );
+            let discomfort = crate::cognition::discomfort(
+                [needs.hunger, needs.thirst, needs.rest, needs.exposure]
+                    .map(|level| (level.value, level.threshold)),
+            );
+            let choice = crate::cognition::Choice::of(
+                deliberation.selection.goal,
+                deliberation.selection.reason,
+            );
+            self.minds
+                .get_mut(agent)
+                .habits
+                .decided(situation, choice, discomfort);
         }
         match deliberation.selection.reason {
             PolicyReason::Warning | PolicyReason::Recruiting => {
@@ -1384,6 +1421,7 @@ impl Engine {
             knows_hearths: mind.crafts.knows_hearths(),
             knows_knapping: mind.crafts.knows_knapping(),
             knows_huts: mind.crafts.knows_huts(),
+            habits: mind.habits.views().collect(),
             acquaintances: mind.social.views().collect(),
             lexicon: mind.lexicon.views().collect(),
         })

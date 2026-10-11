@@ -26,15 +26,16 @@ pub use agent::{
     RouteEventOutcome, RouteOutcomeKind, RouteScheduled, SimTime, SpawnInvalidReason,
 };
 pub use cognition::{
-    ACQUAINTANCE_SLOTS, AcquaintanceView, AffordanceView, CONSEQUENCE_WEIGHT, Concept, CoupleEvent,
-    CraftEvent, DEFAULT_TRUST, DISTRUST, DesiredEffect, FAMILY_SIZE, FRIEND_FAMILIARITY, FaunaView,
-    FireEvent, Gesture, GestureTopic, GriefEvent, HintOutcomeEvent, InterpretationEvent,
-    LANDMARK_SLOTS, LEXICON_SLOTS, LandmarkKind, LandmarkSource, LandmarkView, LeadFollowedEvent,
-    LessonCause, LessonEvent, LexiconEntryView, MERGE_RADIUS, MealEvent, MentalMapView, Mime,
-    Personality, PolicyOptions, PublicSignal, READING_CANDIDATES, REPAIR_WEIGHT, Reading,
-    ReadingReasons, RepairEvent, RepairResponse, RequestEvent, RequestResponse, SEARCH_SPACING,
-    SHARE_COOLDOWN_SECONDS, SIGNAL_TICKS, SignalEvent, Tie, Tone, Understanding, UtteranceIntent,
-    VISIT_TILE_SIZE, VISITED_TILE_SLOTS, VOCAL_FORMS, VocalForm, WordEvent, concept_topic,
+    ACQUAINTANCE_SLOTS, AcquaintanceView, AffordanceView, CONSEQUENCE_WEIGHT, Choice, Concept,
+    CoupleEvent, CraftEvent, DEFAULT_TRUST, DISTRUST, DesiredEffect, FAMILY_SIZE,
+    FRIEND_FAMILIARITY, FaunaView, FireEvent, Gesture, GestureTopic, GriefEvent, HABIT_SLOTS,
+    HabitView, HintOutcomeEvent, InterpretationEvent, LANDMARK_SLOTS, LEXICON_SLOTS, LandmarkKind,
+    LandmarkSource, LandmarkView, LeadFollowedEvent, LessonCause, LessonEvent, LexiconEntryView,
+    MERGE_RADIUS, MealEvent, MentalMapView, Mime, Personality, PolicyOptions, PublicSignal,
+    READING_CANDIDATES, REPAIR_WEIGHT, Reading, ReadingReasons, RepairEvent, RepairResponse,
+    RequestEvent, RequestResponse, SEARCH_SPACING, SHARE_COOLDOWN_SECONDS, SIGNAL_TICKS,
+    SignalEvent, Situation, Tie, Tone, Understanding, UtteranceIntent, VISIT_TILE_SIZE,
+    VISITED_TILE_SLOTS, VOCAL_FORMS, VocalForm, WordEvent, concept_topic,
 };
 pub use diagnostics::{EngineCapacityMetrics, EngineDiagnostics, EngineWorkMetrics};
 pub use engine::{

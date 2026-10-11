@@ -1,6 +1,6 @@
 # Plan: learning what works
 
-Status: proposed (2026-10-11). Replaces most hand-written decision rules with choices people learn
+Status: phase 1 done (D-103, 2026-10-11). Replaces most hand-written decision rules with choices people learn
 from their own experience and from watching others.
 
 ## Why
