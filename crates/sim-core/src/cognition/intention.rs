@@ -157,6 +157,9 @@ pub(crate) struct Abilities<'a> {
     pub(crate) can: &'a dyn Fn(Choice) -> bool,
     /// Seconds a trip to a remembered place where the fact holds would take.
     pub(crate) can_reach: &'a dyn Fn(u16) -> Option<u32>,
+    /// What an action has been worth, by experience, in the circumstances
+    /// given (as facts); none when it hasn't tried it there.
+    pub(crate) worth: &'a dyn Fn(Choice, u16) -> Option<i32>,
 }
 
 /// A way to bring something about: its steps, expected seconds, and chance
@@ -166,6 +169,8 @@ struct Way {
     steps: Vec<Step>,
     seconds: u32,
     chance: u32,
+    /// What it expects to hold once it's done.
+    facts: u16,
 }
 
 impl Way {
@@ -173,6 +178,7 @@ impl Way {
         self.steps.extend(other.steps);
         self.seconds += other.seconds;
         self.chance = self.chance * other.chance / 1_000;
+        self.facts |= other.facts;
         self
     }
 }
@@ -190,17 +196,24 @@ pub(crate) fn plan(
 ) -> Option<Intention> {
     let mut best: Option<(u64, Way)> = None;
     for choice in Choice::ALL {
-        let relief = i32::from(model.relief(choice, need));
-        if relief <= 0 || !(abilities.can)(choice) {
+        if !(abilities.can)(choice) {
             continue;
         }
         let Some(before) = prepare(model, facts, model.needs(choice).0, abilities, 2) else {
             continue;
         };
+        // What easing the need this way is worth where the plan leads: by
+        // experience there if it has any, else by what it believes.
+        let relief = (abilities.worth)(choice, before.facts)
+            .unwrap_or_else(|| i32::from(model.relief(choice, need)));
+        if relief <= 0 {
+            continue;
+        }
         let last = Way {
             steps: vec![Step::new(choice, None)],
             seconds: duration(model, choice),
             chance: 1_000,
+            facts: 0,
         };
         let way = before.then(last);
         if way.steps.len() > PLAN_STEPS || way.seconds > LONGEST_PLAN_SECONDS {
@@ -248,6 +261,7 @@ fn prepare(
         steps: Vec::new(),
         seconds: 0,
         chance: 1_000,
+        facts: facts.0,
     };
     let mut have = facts.0;
     for fact in EFFECTS {
@@ -287,6 +301,7 @@ fn achieve(
             steps: vec![Step::new(Choice::Travel, Some(fact))],
             seconds,
             chance: 800,
+            facts: fact,
         });
     }
     if depth > 0 && fact & FOUND == 0 {
@@ -307,6 +322,7 @@ fn achieve(
                 steps: vec![Step::new(choice, Some(fact))],
                 seconds: duration(model, choice),
                 chance: u32::from(hits) * 1_000 / (u32::from(tries) + 1),
+                facts: fact,
             }));
         }
     }
@@ -332,6 +348,7 @@ mod tests {
         let abilities = Abilities {
             can: &|_| true,
             can_reach: &|fact| (fact == Facts::WOOD_NEAR).then_some(60),
+            worth: &|_, _| None,
         };
         let steps = |intention: Intention| -> Vec<(Option<Choice>, Option<u16>)> {
             intention
@@ -379,6 +396,7 @@ mod tests {
         let abilities = Abilities {
             can: &|_| true,
             can_reach: &|_| None,
+            worth: &|_, _| None,
         };
         assert!(plan(&model, Facts(Facts::COLD), 3, &abilities, 0, 0).is_none());
         let plan = plan(&model, Facts(Facts::THIRSTY), 1, &abilities, 0, 0);

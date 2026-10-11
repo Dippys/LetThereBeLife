@@ -882,3 +882,19 @@ someone living die and seed.
 the plant step was quadratic in the plants loaded, and the viewer loads far more than a valley.
 **Consequences:** A valley year runs in 4.1 s instead of 6.2 s (perception 2.8 s to 0.9 s).
 
+## D-118: Plans for cold on: instinct first, plans when it has nothing good (2026-10-12)
+
+**Decision:** A pressing need is first met by what instinct and habit would do; if experience
+vouches for that option here (tried twice or more in this situation, value 3 or more), the person
+does it and drops any plan it held. Only otherwise does it plan, judging the last step by its
+experience in the situation the plan leads to (by a fire, in a hut, this season). Every walk now
+carries where it's headed: once the person stops getting closer it gives up and keeps clear of
+that place for 10 minutes (`Avoid`, also on for everyone), and a trip ends on arrival, so a plan
+that expected a burning fire where it had gone out is rethought from what's in view. Plans for cold
+are on in `PolicyOptions::full()`.
+**Why:** Plans lost to instinct (D-116) because they judged relief without context, replaced
+instinct's better nearby options, and people circled fires they couldn't reach or that had gone out.
+**Consequences:** Over 10 years in 20 valleys: 482 survivors with plans for cold against 480 without,
+deaths from cold 33 against 34; 1,372 plans formed, 585 completed, 783 given up (mostly rethought on
+arrival or for a better option). Without plans, the fixes alone took survival from 470 to 480.
+

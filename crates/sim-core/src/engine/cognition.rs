@@ -341,6 +341,7 @@ impl Engine {
             home,
             model,
             intention,
+            avoid,
         } = mind;
         model.know_how(
             crafts.knows_hearths(),
@@ -477,7 +478,6 @@ impl Engine {
                 fire,
             )
         };
-        let trip = std::cell::Cell::new(None);
         let deliberation = deliberate(
             origin,
             needs,
@@ -509,7 +509,7 @@ impl Engine {
                 able,
                 stored_food,
                 home,
-                trip: &trip,
+                avoid: avoid.place(now),
                 habits: self.policy_options.learned.then_some((&*habits, situation)),
                 model: &*model,
                 plans: self.policy_options.plans,
@@ -530,17 +530,14 @@ impl Engine {
         }
         self.minds.get_mut(agent).map.mark_decision(origin);
         // Getting no closer to where it's headed, decision after decision: it
-        // can't get there from here, so it stops trying.
-        let travelling = matches!(
-            deliberation.selection.reason,
-            PolicyReason::ToldPlace | PolicyReason::RememberedPlace | PolicyReason::Fetching
-        ) || deliberation.selection.goal == PhysicalGoal::SeekShelter
-            || deliberation.trip;
-        if let Some(destination) = trip.get().filter(|_| travelling) {
+        // can't get there from here, so it stops trying and keeps clear of
+        // that place for a while.
+        if let Some(destination) = deliberation.toward {
             let distance = origin.x.abs_diff(destination.x) + origin.y.abs_diff(destination.y);
             let mind = self.minds.get_mut(agent);
             if mind.stall.note(destination, distance) {
                 mind.map.give_up(destination);
+                mind.avoid = crate::cognition::Avoid::of(destination, now);
                 if mind.stored_food.map(crate::agent::CompactPosition::world) == Some(destination) {
                     mind.stored_food = None;
                 }

@@ -505,7 +505,7 @@ impl PolicyOptions {
             social: true,
             helping: true,
             learned: true,
-            plans: 0,
+            plans: 1 << crate::NeedKind::Exposure as u8,
         }
     }
 }
@@ -556,6 +556,34 @@ pub(crate) struct Mind {
     pub(crate) model: Model,
     /// What it is set on doing.
     pub(crate) intention: Intention,
+    /// A place it recently couldn't get to.
+    pub(crate) avoid: Avoid,
+}
+
+/// Seconds a place it couldn't get to is kept clear of.
+pub const AVOID_SECONDS: u32 = 600;
+
+/// A place an agent recently couldn't get to, and until when it keeps clear.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct Avoid {
+    place: Option<crate::agent::CompactPosition>,
+    until: u32,
+}
+
+impl Avoid {
+    pub(crate) fn of(place: WorldPosition, now: u32) -> Self {
+        Self {
+            place: crate::agent::CompactPosition::checked(place),
+            until: now.saturating_add(AVOID_SECONDS),
+        }
+    }
+
+    /// The place, while it's still avoided at `now`.
+    pub(crate) fn place(self, now: u32) -> Option<WorldPosition> {
+        self.place
+            .filter(|_| now < self.until)
+            .map(crate::agent::CompactPosition::world)
+    }
 }
 
 /// The most nights of attachment a home builds up.

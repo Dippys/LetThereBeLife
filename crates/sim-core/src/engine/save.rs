@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::Engine;
 
 /// Bumped whenever the saved layout changes; older saves are refused.
-const SAVE_VERSION: u32 = 5;
+const SAVE_VERSION: u32 = 6;
 
 /// What a save holds, borrowed from a running engine.
 #[derive(Serialize)]

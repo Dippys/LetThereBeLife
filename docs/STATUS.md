@@ -170,14 +170,16 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
   code 9): 1 in 19 runs on 2026-10-09, 2 in 14 on 2026-10-10, then 0 in 8, then 2 in 8 `--valley`
   smokes after M7, then 1 in 12 smokes after the living world. It happens with and without agents. Cause unknown, possibly GPU teardown.
 - The world archive needs regenerating for generator v2 (`--pregenerate-world`).
-- **Minds are 1,752 B per agent** (mental map 372 B). That's fine at viewer scale; the spec's 10M
+- **Minds are 1,760 B per agent** (mental map 372 B). That's fine at viewer scale; the spec's 10M
   agents would need ~8 GB, so compaction comes later.
 - **Greedy waypoints can pace around obstacles.** Agents no longer step straight back to where they
   were and collapse into sleep when exhausted, but longer cycles are possible.
 
 ## Recent changes
 
-- 2026-10-11 (latest): a cause-and-effect model per person (D-115); plans and intentions, built
+- 2026-10-12 (latest): plans for cold on: instinct first, plans when it has nothing good;
+  walks give up and avoid places they can't reach (D-118).
+- 2026-10-11: a cause-and-effect model per person (D-115); plans and intentions, built
   but off (D-116); perception a third faster, no spring stall (D-117); world and life seeds (D-114).
 - 2026-10-11: huts by a burning fire are warmer; hearths go beside home (D-112).
 - 2026-10-11: plants live, spread and die; felled trees are gone (D-111).
@@ -235,8 +237,8 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## What's next
 
-1. **Thinking agents** (docs/plans/THINKING.md): T0-T1 done; T2 plans for cold are built but
-   still cost lives against instinct (D-116). Next: make them at least level, then T3-T6.
+1. **Thinking agents** (docs/plans/THINKING.md): T0-T2 done; plans for cold are on (D-118).
+   Next: T3 hunger and thirst, T4 calm time, T5 anticipation, T6 other minds.
 2. **Settlements:** homes (D-109), living plants (D-111) and warm hearths (D-112) are in. Next:
    people knowing whose hut is whose, and families sharing a home.
 3. **Learning what works** (docs/plans/LEARNING.md): phases 1-2 done, plus understanding what

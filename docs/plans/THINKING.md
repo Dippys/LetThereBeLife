@@ -1,6 +1,6 @@
 # Plan: agents that think, and lives that aren't predetermined
 
-Status: T0 done (D-114); T1 done (D-115); T2 built but off, worse than instinct so far (D-116), 2026-10-11. Follows [`LEARNING.md`](LEARNING.md) (habits, D-103 to
+Status: T0 (D-114), T1 (D-115) and T2 (D-116, D-118: plans for cold, on) done, 2026-10-12.
 D-108) and answers the owner's brief: agents react instead of thinking, and every run of a seed
 replays the same lives.
 
