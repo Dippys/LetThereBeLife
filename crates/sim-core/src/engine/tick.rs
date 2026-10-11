@@ -54,8 +54,9 @@ impl Engine {
                 if outcome.outcome == NeedThresholdOutcomeKind::Reached {
                     // Builders keep at it through cold, hunger, and tiredness
                     // (the roof is the answer to two of them); thirst stops them.
-                    let construction_cancelled = outcome.kind == crate::NeedKind::Thirst
-                        && self.cancel_construction(outcome.agent);
+                    let thirst = outcome.kind == crate::NeedKind::Thirst;
+                    let construction_cancelled = thirst && self.cancel_construction(outcome.agent);
+                    let still_building = self.structures.is_building(outcome.agent);
                     let sleeping = self.population.sleep_view(outcome.agent);
                     let interruption = interruption_for_need(outcome.kind);
                     if construction_cancelled {
@@ -95,6 +96,7 @@ impl Engine {
                             });
                         }
                     } else if self.policy_active
+                        && !still_building
                         && self
                             .population
                             .interrupt_for_policy_decision(

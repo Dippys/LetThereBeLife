@@ -160,7 +160,7 @@ pub(crate) struct MindInput<'a> {
     /// Knows how to build a hut.
     pub(crate) knows_huts: bool,
     /// Fit for heavy work (an adult, not pregnant, not worn out or starving):
-    /// building, chopping, breaking stone.
+    /// building and chopping wood.
     pub(crate) able: bool,
     /// The hut it last put food away in.
     pub(crate) stored_food: Option<WorldPosition>,
@@ -444,14 +444,10 @@ impl Planner<'_> {
         }
     }
 
-    /// Whether it's fit to gather `kind`: chopping and breaking stone are
-    /// heavy work; anyone can pick.
+    /// Whether it's fit to gather `kind`: chopping wood is heavy work; anyone
+    /// can pick things up.
     fn can_handle(&self, kind: Material) -> bool {
-        self.mind.able
-            || !matches!(
-                kind.properties().handling,
-                crate::Handling::Chop | crate::Handling::Strike
-            )
+        self.mind.able || kind.properties().handling != crate::Handling::Chop
     }
 
     /// The nearest finished hut in view, and whether the agent stands beside it.
@@ -605,7 +601,10 @@ impl Planner<'_> {
         if let Some(drop) = self.make_room(inventory) {
             return drop;
         }
-        if food.carried(inventory) < temperament.food_reserve {
+        // Stocking up needs room to carry it; a full load goes to its use first.
+        if food.carried(inventory) < temperament.food_reserve
+            && inventory.can_add(Material::Berries)
+        {
             if let Some(target) = food_here {
                 return Deliberation::act(
                     PhysicalGoal::SeekFood,

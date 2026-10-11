@@ -4,10 +4,10 @@ use crate::{AgentId, SimTime, WorldPosition, agent::CompactPosition};
 
 /// How many things one hut can hold.
 pub const HUT_STORE_CAPACITY: u8 = 48;
-/// A hut takes nearly a full load of wood and ten minutes of hard work.
+/// A hut takes nearly a full load of wood and five minutes of hard work.
 pub const SHELTER_WOOD_COST: u8 = 10;
 pub const SHELTER_STONE_COST: u8 = 0;
-pub const SHELTER_BUILD_TICKS: u64 = 10 * 60 * 60;
+pub const SHELTER_BUILD_TICKS: u64 = 5 * 60 * 60;
 /// A hearth: a ring of stones around wood, three minutes to lay.
 pub const HEARTH_STONE_COST: u8 = 4;
 pub const HEARTH_WOOD_COST: u8 = 3;
@@ -277,6 +277,11 @@ impl StructureStore {
             return Err(BuildShelterError::StructureLimit);
         }
         Ok(())
+    }
+
+    /// Whether `builder` has something under construction.
+    pub(crate) fn is_building(&self, builder: AgentId) -> bool {
+        self.by_builder.contains_key(&builder)
     }
 
     pub(crate) fn structure_at(&self, position: WorldPosition) -> Option<StructureId> {

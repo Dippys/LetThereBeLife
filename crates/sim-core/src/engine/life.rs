@@ -62,7 +62,7 @@ impl Engine {
         sex - age_penalty
     }
 
-    /// Grown, and not pregnant: able to build, chop, and break stone.
+    /// Grown, and not pregnant: able to build and chop wood.
     pub(super) fn fit_for_heavy_work(&self, agent: AgentId) -> bool {
         self.age_of(agent) >= ADULT_AGE
             && !self

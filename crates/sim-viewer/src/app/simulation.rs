@@ -72,14 +72,17 @@ impl ViewerApp {
     /// Runs `ticks` ticks at once (for `--advance`), keeping the feed and gestures.
     pub(crate) fn advance(&mut self, ticks: u64) {
         let now = Instant::now();
-        for _ in 0..ticks {
+        let mut progress = crate::progress::Progress::new(&self.engine, ticks);
+        for done in 0..ticks {
             self.engine.tick();
             self.gestures.record(
                 self.engine.signal_events().iter().map(GestureMark::from),
                 now,
             );
             self.feed.record(&self.engine);
+            progress.record(&self.engine, done + 1);
         }
+        progress.finish(&self.engine);
     }
 
     pub(super) fn update_residency_status(&mut self) {

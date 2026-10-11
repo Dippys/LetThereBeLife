@@ -656,7 +656,7 @@ impl Engine {
             .inventory(agent)
             .ok_or(PolicyFailureReason::InconsistentState)?;
         let food = self.food_values(agent);
-        // Chopping and breaking stone take a grown body; children just pick.
+        // Felling and chopping wood takes a grown body; anyone can pick things up.
         let heavy_work = self.fit_for_heavy_work(agent);
         let candidate = [
             WorldPosition {
@@ -689,10 +689,7 @@ impl Engine {
                             || (resource.kind == Material::Wood
                                 && inventory.amount(Material::Wood) < SHELTER_WOOD_COST))
                         && (heavy_work
-                            || !matches!(
-                                resource.kind.properties().handling,
-                                crate::Handling::Chop | crate::Handling::Strike
-                            ))
+                            || resource.kind.properties().handling != crate::Handling::Chop)
                         && (reason != PolicyReason::HearthMaterials
                             || matches!(resource.kind, Material::Stone | Material::Wood))
                         && (reason != PolicyReason::Crafting
