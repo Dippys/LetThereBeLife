@@ -96,6 +96,7 @@ fn mind(lexicon: Vec<LexiconEntryView>, acquaintances: Vec<AcquaintanceView>) ->
         knows_knapping: true,
         knows_huts: true,
         habits: Vec::new(),
+        effects: Vec::new(),
         acquaintances,
         lexicon,
     }

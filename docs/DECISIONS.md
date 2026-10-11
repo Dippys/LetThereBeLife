@@ -732,3 +732,21 @@ F5/F9 (`saves/quick.ltbl`, ignored by git). serde derives were added across sim-
 **Consequences:** A world saved and reopened continues identically (tested over 40,000 ticks on
 either side). A 5-year valley is a 30 KB file and opens in about a second. Saves from another
 layout are refused with a clear message; bump `SAVE_VERSION` when saved types change.
+
+## D-108: People learn what their choices bring about (2026-10-11)
+
+**Decision:** Besides how much each choice eased them, people note what each kind of choice
+brought about that wasn't so before: a burning fire in view, or a shelter at hand (72 bytes per
+mind: how often, out of how many tries). When choosing, an option also earns half of how much
+better they've fared once that was so, weighted by how often the choice brought it about. So
+feeding a dead fire, which eases nothing by itself, is worth it because a burning fire is where
+warming up has helped. Walking over to a fire now counts as part of feeding it or warming at it.
+`SAVE_VERSION` 2.
+**Why:** The user chose real understanding over passing credit back (D-106's `credit` branch):
+people hold a belief ("feeding a fire makes it burn") and combine it with what helps.
+**Consequences:** People learn the links quickly (feeding fire lights it 14 times in 15; building
+gives a shelter 614 in 618). Survival over 10 years in 20 valleys is unchanged within chance:
+474 survivors against 462, deaths from cold 34 against 31; each half alone gave 458 and 467. It
+doesn't yet weigh how long a step takes, so building a hut while freezing looks as good as warming
+at a fire. Mind size 1,184 bytes.
+

@@ -262,6 +262,9 @@ pub struct WildlifeStats {
     /// For each need (hungry, thirsty, tired, cold): each choice's summed
     /// value times tries, and the tries, over every living mind's habits.
     pub habits: [[(i64, u64); sim_core::Choice::COUNT]; 4],
+    /// For each choice and each thing it can bring about: the summed times
+    /// it did, and the tries, over every living mind.
+    pub effects: [[(u64, u64); sim_core::EFFECTS.len()]; sim_core::Choice::COUNT],
     /// Blades knapped, and how many people watched it done.
     pub blades: u64,
     pub watched_crafts: u64,
@@ -664,6 +667,16 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                     entry.0 += i64::from(habit.value) * i64::from(habit.tries);
                     entry.1 += u64::from(habit.tries);
                 }
+            }
+        }
+        for effect in &mind.effects {
+            if let Some(index) = sim_core::EFFECTS
+                .iter()
+                .position(|&flag| flag == effect.effect)
+            {
+                let entry = &mut wildlife.effects[effect.choice as usize][index];
+                entry.0 += u64::from(effect.hits);
+                entry.1 += u64::from(effect.tries);
             }
         }
     }
@@ -1706,6 +1719,19 @@ impl fmt::Display for StudyReport {
         }
         if !learned.is_empty() {
             write!(formatter, "\n  habits: {}", learned.join("; "))?;
+        }
+        // What people saw their choices bring about, where that happened often.
+        let mut understood = Vec::new();
+        for choice in sim_core::Choice::ALL {
+            for (index, label) in ["fire", "shelter"].into_iter().enumerate() {
+                let (hits, tries) = self.wildlife.effects[choice as usize][index];
+                if tries >= 5 && hits * 5 >= tries {
+                    understood.push(format!("{choice:?} -> {label} {hits}/{tries}"));
+                }
+            }
+        }
+        if !understood.is_empty() {
+            write!(formatter, "\n  understanding: {}", understood.join(", "))?;
         }
         let [founders_knap, children_knap] = self.wildlife.know_knapping;
         write!(

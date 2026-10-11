@@ -1426,6 +1426,7 @@ impl Engine {
             knows_knapping: mind.crafts.knows_knapping(),
             knows_huts: mind.crafts.knows_huts(),
             habits: mind.habits.views().collect(),
+            effects: mind.habits.effect_views().collect(),
             acquaintances: mind.social.views().collect(),
             lexicon: mind.lexicon.views().collect(),
         })

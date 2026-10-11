@@ -1,6 +1,6 @@
 # Plan: learning what works
 
-Status: phases 1-2 done (D-103, D-105, 2026-10-11). Replaces most hand-written decision rules with choices people learn
+Status: phases 1-2 done (D-103, D-105), people learn what choices bring about (D-108), 2026-10-11. Replaces most hand-written decision rules with choices people learn
 from their own experience and from watching others.
 
 ## Why
@@ -83,6 +83,10 @@ the stored food), with the credit decaying the longer that takes.
 - Passing half of a good outcome back to the step before (feeding a fire, then warming up) plus
   learning only under pressure: 182 survivors against 185 over 10 years in 8 valleys (branch
   `credit`). It recovers most of what pressure-only learning lost (177) but isn't yet better.
+
+- Understanding what a choice brings about (D-108): people learn that feeding a fire lights it and
+  that building gives a shelter, and value those steps by what the result is worth. Survival is
+  unchanged within chance (474 against 462 over 20 valleys). Next: weigh how long a step takes.
 
 ## Costs and risks
 

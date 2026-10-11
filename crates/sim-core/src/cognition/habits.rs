@@ -1,7 +1,8 @@
 //! What an agent has learned about its own choices (docs/plans/LEARNING.md):
 //! how well each kind of choice has gone in each kind of situation, judged by
-//! how much discomfort it felt before and after. Phase 1 only learns; the
-//! scripted policy still decides.
+//! how much discomfort it felt before and after, and what each kind of choice
+//! tends to bring about (a fire burning, a shelter at hand), so it can see
+//! that one step leads to another that helps.
 
 use crate::{PhysicalGoal, PolicyReason};
 
@@ -120,12 +121,13 @@ impl Choice {
             PhysicalGoal::Drop => Self::Unload,
             PhysicalGoal::Signal => Self::Company,
             PhysicalGoal::Explore => match reason {
+                // Walking over to a fire is part of feeding it or warming at it.
+                PolicyReason::Tending => Self::TendFire,
+                PolicyReason::Warming => Self::WarmUp,
                 PolicyReason::RememberedPlace
                 | PolicyReason::ToldPlace
                 | PolicyReason::Fetching
                 | PolicyReason::Storing
-                | PolicyReason::Tending
-                | PolicyReason::Warming
                 | PolicyReason::HearthMaterials
                 | PolicyReason::ShelterMaterials => Self::Travel,
                 PolicyReason::Visiting | PolicyReason::Following | PolicyReason::Begging => {
@@ -161,6 +163,29 @@ pub struct HabitView {
     pub tries: u8,
 }
 
+/// Changes in its circumstances a choice can bring about, as its situation
+/// shows them.
+pub const EFFECTS: [u8; 2] = [Situation::FIRE_IN_VIEW, Situation::SHELTER_IN_VIEW];
+
+/// How often a kind of choice brought something about: of the `tries` that
+/// started without it, `hits` ended with it.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[repr(C)]
+struct Effect {
+    hits: u8,
+    tries: u8,
+}
+
+/// What a kind of choice tends to bring about, as tools and the viewer see it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EffectView {
+    pub choice: Choice,
+    /// The situation flag it brought about (one of [`EFFECTS`]).
+    pub effect: u8,
+    pub hits: u8,
+    pub tries: u8,
+}
+
 /// The decision being tried, to judge once the next decision comes.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
@@ -171,11 +196,13 @@ pub(crate) struct Trial {
     discomfort: u16,
 }
 
-/// 128 bytes of habits plus the trial in progress.
+/// 128 bytes of habits, the trial in progress, and 72 bytes of what choices
+/// bring about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Habits {
     habits: [Habit; HABIT_SLOTS],
     trial: Trial,
+    effects: [[Effect; EFFECTS.len()]; Choice::COUNT],
 }
 
 impl Default for Habits {
@@ -183,6 +210,7 @@ impl Default for Habits {
         Self {
             habits: [Habit::default(); HABIT_SLOTS],
             trial: Trial::default(),
+            effects: [[Effect::default(); EFFECTS.len()]; Choice::COUNT],
         }
     }
 }
@@ -202,6 +230,7 @@ impl Habits {
         if self.trial.choice != 0 {
             let relief = (i32::from(self.trial.discomfort) - i32::from(discomfort)) / RELIEF_SCALE;
             self.learn(self.trial.situation, self.trial.choice, relief);
+            self.notice(self.trial.situation, self.trial.choice, situation.0);
         }
         self.trial = Trial {
             situation: situation.0,
@@ -239,6 +268,51 @@ impl Habits {
         habit.tries = habit.tries.saturating_add(1);
     }
 
+    /// Notes what the choice tried from `before` brought about by `after`.
+    fn notice(&mut self, before: u8, choice: u8, after: u8) {
+        let effects = &mut self.effects[usize::from(choice - 1) % Choice::COUNT];
+        for (effect, flag) in effects.iter_mut().zip(EFFECTS) {
+            if before & flag != 0 {
+                continue;
+            }
+            if effect.tries == u8::MAX {
+                // Keep the proportion, let new experience count.
+                effect.tries /= 2;
+                effect.hits /= 2;
+            }
+            effect.tries += 1;
+            effect.hits += u8::from(after & flag != 0);
+        }
+    }
+
+    /// What it expects `choice` to lead to in `situation`: for each thing the
+    /// choice has brought about before, how much better it has fared once
+    /// that was so, by how often the choice brought it about. Halved, as the
+    /// benefit comes a step later.
+    pub(crate) fn foresight(&self, situation: Situation, choice: Choice) -> i32 {
+        let effects = &self.effects[choice as usize];
+        effects
+            .iter()
+            .zip(EFFECTS)
+            .filter(|&(effect, flag)| effect.hits > 0 && !situation.has(flag))
+            .map(|(effect, flag)| {
+                let gain = self.worth(Situation(situation.0 | flag)) - self.worth(situation);
+                gain.max(0) * i32::from(effect.hits) / (i32::from(effect.tries) + 1) / 2
+            })
+            .sum()
+    }
+
+    /// How well it can do in `situation`: the best it has fared there.
+    fn worth(&self, situation: Situation) -> i32 {
+        self.habits
+            .iter()
+            .filter(|habit| habit.choice != 0 && habit.situation == situation.0)
+            .map(|habit| i32::from(habit.value))
+            .max()
+            .unwrap_or(0)
+            .max(0)
+    }
+
     /// How `choice` has gone in `situation`: its value and how often it was tried.
     pub(crate) fn value(&self, situation: Situation, choice: Choice) -> (i8, u8) {
         self.habits
@@ -257,6 +331,21 @@ impl Habits {
                 value: habit.value,
                 tries: habit.tries,
             })
+    }
+
+    pub(crate) fn effect_views(&self) -> impl Iterator<Item = EffectView> + '_ {
+        Choice::ALL.into_iter().flat_map(move |choice| {
+            self.effects[choice as usize]
+                .iter()
+                .zip(EFFECTS)
+                .filter(|(effect, _)| effect.tries > 0)
+                .map(move |(effect, flag)| EffectView {
+                    choice,
+                    effect: flag,
+                    hits: effect.hits,
+                    tries: effect.tries,
+                })
+        })
     }
 }
 
@@ -306,7 +395,49 @@ mod tests {
         );
         assert!(cold.has(Situation::COLD) && cold.has(Situation::SHELTER_IN_VIEW));
         assert_eq!(cold.season(), crate::Season::Winter);
-        assert_eq!(std::mem::size_of::<Habits>(), 4 * HABIT_SLOTS + 4);
+        assert_eq!(
+            std::mem::size_of::<Habits>(),
+            4 * HABIT_SLOTS + 4 + 2 * EFFECTS.len() * Choice::COUNT
+        );
+    }
+
+    #[test]
+    fn a_step_that_brings_about_what_helps_is_worth_taking() {
+        let mut habits = Habits::default();
+        let cold = Situation::new(
+            [false, false, false, true],
+            crate::Season::Winter,
+            false,
+            false,
+        );
+        let by_fire = Situation(cold.0 | Situation::FIRE_IN_VIEW);
+        for _ in 0..6 {
+            // Feeding the dead fire eases nothing by itself, but gets it
+            // burning; warming at it then eases the cold. Wandering off does neither.
+            habits.decided(cold, Choice::TendFire, 200);
+            habits.decided(by_fire, Choice::WarmUp, 200);
+            habits.decided(cold, Choice::Explore, 120);
+            habits.decided(cold, Choice::Rest, 200);
+        }
+        assert!(
+            habits.value(cold, Choice::TendFire).0 <= 0,
+            "no relief by itself"
+        );
+        assert!(
+            habits.foresight(cold, Choice::TendFire) > 4,
+            "it leads to a fire that warms"
+        );
+        assert_eq!(habits.foresight(cold, Choice::Explore), 0);
+        assert_eq!(
+            habits.foresight(by_fire, Choice::TendFire),
+            0,
+            "already burning: nothing more to bring about"
+        );
+        let fire = habits
+            .effect_views()
+            .find(|view| view.choice == Choice::TendFire && view.effect == Situation::FIRE_IN_VIEW)
+            .expect("noticed");
+        assert_eq!((fire.hits, fire.tries), (6, 6));
     }
 
     #[test]

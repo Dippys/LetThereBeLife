@@ -589,8 +589,8 @@ impl Planner<'_> {
     }
 
     /// The option worth most: an instinctive lean toward those listed first,
-    /// plus how that kind of choice has gone in this situation, plus a
-    /// curiosity bonus for kinds it has hardly tried. Ties go to the earlier.
+    /// plus how that kind of choice has gone in this situation and what it
+    /// expects it to lead to, plus a curiosity bonus for kinds it has hardly tried. Ties go to the earlier.
     fn pick(&self, options: Vec<Deliberation>) -> Option<Deliberation> {
         let (habits, situation) = self.mind.habits?;
         let count = options.len() as i32;
@@ -605,7 +605,11 @@ impl Planner<'_> {
                 let instinct = INSTINCT_STEP * (count - rank as i32);
                 let novel = tries < CURIOUS_TRIES
                     && i32::from(self.roll(0x4355_5249 ^ choice as u64)) < curiosity / 2;
-                let score = instinct + i32::from(value) + if novel { CURIOSITY_BONUS } else { 0 };
+                let foresight = habits.foresight(situation, choice);
+                let score = instinct
+                    + i32::from(value)
+                    + foresight
+                    + if novel { CURIOSITY_BONUS } else { 0 };
                 (score, -(rank as i32), option)
             })
             .max_by_key(|&(score, rank, _)| (score, rank))

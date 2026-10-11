@@ -25,7 +25,7 @@ pub(crate) use fauna::Fauna;
 pub use fauna::FaunaView;
 pub use gesture::Gesture;
 pub(crate) use gesture::reach_toward;
-pub use habits::{Choice, HABIT_SLOTS, HabitView, Situation};
+pub use habits::{Choice, EFFECTS, EffectView, HABIT_SLOTS, HabitView, Situation};
 pub(crate) use habits::{Habits, discomfort};
 pub(crate) use lexicon::Lexicon;
 pub use lexicon::{Concept, FAMILY_SIZE, LEXICON_SLOTS, LexiconEntryView, VOCAL_FORMS, VocalForm};
@@ -210,6 +210,8 @@ pub struct MentalMapView {
     pub knows_huts: bool,
     /// How its own choices have gone, in each kind of situation.
     pub habits: Vec<HabitView>,
+    /// What it has seen its kinds of choice bring about.
+    pub effects: Vec<EffectView>,
     pub acquaintances: Vec<AcquaintanceView>,
     /// What the agent believes words mean.
     pub lexicon: Vec<LexiconEntryView>,
