@@ -36,11 +36,11 @@ fn bitter_berries_make_the_eater_sick_and_everyone_watching_learns() {
     // The eater was raised to think they're fine; the watcher has no idea.
     engine.minds.set_founders(0);
     engine.minds.get_mut(AgentId::new(0)).affordances =
-        crate::cognition::Affordances::founding(engine.config.seed, AgentId::new(0), 8);
+        crate::cognition::Affordances::founding(engine.config.life_seed, AgentId::new(0), 8);
     if value(&mut engine, 0, Material::Bitterberries).is_none_or(|value| value <= 0) {
         // This seed's first family avoids them; the test needs a believer.
         engine.minds.get_mut(AgentId::new(0)).affordances =
-            crate::cognition::Affordances::founding(engine.config.seed, AgentId::new(8), 8);
+            crate::cognition::Affordances::founding(engine.config.life_seed, AgentId::new(8), 8);
     }
     assert!(value(&mut engine, 0, Material::Bitterberries).unwrap() > 0);
     engine.population.set_need_value_for_test(

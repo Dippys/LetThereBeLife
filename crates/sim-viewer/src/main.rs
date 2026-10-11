@@ -24,11 +24,14 @@ use launch::{launch_options, load_world_archive};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let options = launch_options()?;
     let config = AppConfig::load(&options.config_path)?;
-    let engine_config = config.engine_config()?;
+    let mut engine_config = config.engine_config()?;
+    engine_config.life_seed = options.life_seed.unwrap_or_else(launch::fresh_life_seed);
     if options.pregenerate_world {
         let mut last_reported = 0;
-        let stats =
-            WorldArchive::bake_full(engine_config.seed, &config.world_cache.path, |progress| {
+        let stats = WorldArchive::bake_full(
+            engine_config.world_seed,
+            &config.world_cache.path,
+            |progress| {
                 if progress.completed_chunks == progress.total_chunks
                     || progress.completed_chunks.saturating_sub(last_reported) >= 16_384
                 {
@@ -40,10 +43,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     );
                     last_reported = progress.completed_chunks;
                 }
-            })?;
+            },
+        )?;
         println!(
             "pre-generated complete seed {} world to {}: {} chunks, {:.2} GiB in {:.2?}",
-            engine_config.seed,
+            engine_config.world_seed,
             config.world_cache.path,
             stats.chunks,
             stats.bytes as f64 / 1024_f64.powi(3),
@@ -51,7 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         return Ok(());
     }
-    let archive = load_world_archive(engine_config.seed, &config);
+    let archive = load_world_archive(engine_config.world_seed, &config);
     let loaded = match &options.load {
         Some(path) => {
             let started = Instant::now();
@@ -69,6 +73,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let opened_save = loaded.is_some();
     let mut engine = loaded.unwrap_or_else(|| Engine::new(engine_config));
+    println!(
+        "world seed {}, life seed {} (replay with --life-seed {})",
+        engine.config().world_seed,
+        engine.config().life_seed,
+        engine.config().life_seed
+    );
     let valley = (options.valley && !opened_save).then(|| {
         let started = Instant::now();
         match startup::start_valley(&mut engine) {

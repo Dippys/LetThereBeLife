@@ -19,7 +19,11 @@ pub const STUDY_TILE_SIZE: i64 = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StudyConfig {
+    /// The world (terrain, and which valley).
     pub seed: u64,
+    /// The lives lived in it; by default derived from the world seed, so two
+    /// versions of the code compared on the same seeds live the same histories.
+    pub life_seed: u64,
     pub world_side: u32,
     pub population: u32,
     pub ticks: u64,
@@ -88,6 +92,7 @@ impl StudyConfig {
     pub const fn new(seed: u64, population: u32, ticks: u64) -> Self {
         Self {
             seed,
+            life_seed: seed,
             world_side: 2_048,
             population,
             ticks,
@@ -725,7 +730,8 @@ fn prepare_world(config: StudyConfig) -> Result<Start, ScenarioError> {
         config.world_side
     };
     let mut engine = Engine::new(EngineConfig {
-        seed: config.seed,
+        world_seed: config.seed,
+        life_seed: config.life_seed,
         ticks_per_second: 60,
         world: WorldConfig::new(side, side)
             .map_err(|error| ScenarioError(format!("invalid study world: {error}")))?,
@@ -1559,8 +1565,9 @@ impl fmt::Display for StudyReport {
         };
         writeln!(
             formatter,
-            "study seed={} world={}x{} agents={} ticks={} spawn={:?} mind={}",
+            "study seed={} life seed={} world={}x{} agents={} ticks={} spawn={:?} mind={}",
             config.seed,
+            config.life_seed,
             config.world_side,
             config.world_side,
             config.population,

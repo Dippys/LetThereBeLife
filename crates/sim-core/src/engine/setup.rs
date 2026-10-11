@@ -113,7 +113,7 @@ impl Engine {
         self.death_records.clear();
         self.policy_active = false;
         self.policy_options = PolicyOptions::default();
-        self.minds = Minds::new(self.config.seed);
+        self.minds = Minds::new(self.config.life_seed);
         self.route_outcomes.clear();
         self.route_planner = RoutePlanner::default();
         self.runtime_counters = RuntimeCounters::default();
@@ -162,7 +162,7 @@ impl Engine {
                 let Some(resource) = self.world.base_resource_at(position) else {
                     continue;
                 };
-                let roll = scarcity_roll(self.config.seed, position);
+                let roll = scarcity_roll(self.config.life_seed, position);
                 if resource.kind == crate::Material::Berries && roll >= u64::from(keep_percent) {
                     self.resource_deltas.strip(position);
                     stripped += 1;

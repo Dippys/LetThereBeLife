@@ -41,7 +41,7 @@ impl Engine {
                 .map(|species| species.traits().birth_ticks / MIN_BREEDERS as u64),
             ..Wildlife::default()
         };
-        let seed = self.config.seed;
+        let seed = self.config.life_seed;
         let herds = 3_u16;
         let mut placed = 0;
         let mut spot = 0_u64;
@@ -119,7 +119,7 @@ impl Engine {
         let id = self.wildlife.animals.len() as u64;
         self.wildlife.animals.push(Animal {
             // Spread first moves out so the herd doesn't step in lockstep.
-            next_act: now + mix(self.config.seed ^ id) % species.traits().calm_step_ticks,
+            next_act: now + mix(self.config.life_seed ^ id) % species.traits().calm_step_ticks,
             fed_until: 0,
             x,
             y,
@@ -189,7 +189,7 @@ impl Engine {
                 people: &people,
                 animals: &animals,
                 now,
-                seed: self.config.seed,
+                seed: self.config.life_seed,
             };
             let choice = decide(index, animal, &senses, &|cell| self.animal_can_stand(cell));
             self.apply_animal_move(index, choice);
@@ -296,7 +296,7 @@ impl Engine {
             {
                 continue;
             }
-            let parent = living[(mix(self.config.seed ^ now) % living.len() as u64) as usize];
+            let parent = living[(mix(self.config.life_seed ^ now) % living.len() as u64) as usize];
             let at = self.wildlife.animals[parent].position();
             if let Some(cell) = crate::wildlife::cardinal(at)
                 .into_iter()
@@ -380,7 +380,7 @@ impl Engine {
             return;
         };
         for attempt in 0..64_u64 {
-            let roll = mix(self.config.seed ^ now ^ attempt.wrapping_mul(0x2545_f491));
+            let roll = mix(self.config.life_seed ^ now ^ attempt.wrapping_mul(0x2545_f491));
             let along = (roll >> 8) as i64;
             let width = (area.max.x - area.min.x).max(1);
             let height = (area.max.y - area.min.y).max(1);
@@ -542,7 +542,7 @@ impl Engine {
             (STRIKE_CHANCE + HELPER_CHANCE * helpers + u64::from(edge.is_some()) * EDGE_CHANCE)
                 .saturating_add_signed(self.strength(hunter))
                 .clamp(5, 95);
-        let roll = mix(self.config.seed
+        let roll = mix(self.config.life_seed
             ^ 0x4855_4e54
             ^ (u64::from(hunter.get()) << 40)
             ^ self.time.ticks());

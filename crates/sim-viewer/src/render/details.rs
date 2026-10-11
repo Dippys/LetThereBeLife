@@ -14,10 +14,11 @@ pub(super) fn write_details(output: &mut String, world: &World, state: &RenderSt
     let snapshot = &state.snapshot;
     writeln!(
         output,
-        "TICK {}  CLOCK {}  SEED {}  CHUNKS {}  REV {}",
+        "TICK {}  CLOCK {}  WORLD {}  LIFE {}  CHUNKS {}  REV {}",
         snapshot.tick,
         crate::labels::duration(snapshot.simulated_seconds),
-        snapshot.seed,
+        snapshot.world_seed,
+        snapshot.life_seed,
         world.loaded_chunk_count(),
         world.revision()
     )

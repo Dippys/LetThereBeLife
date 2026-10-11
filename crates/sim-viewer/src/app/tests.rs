@@ -12,7 +12,8 @@ use sim_core::{
 
 fn engine_with_world(width: u32, height: u32) -> Engine {
     Engine::new(EngineConfig {
-        seed: 7,
+        world_seed: 7,
+        life_seed: 7,
         ticks_per_second: 60,
         world: WorldConfig::new(width, height).expect("small test world is valid"),
     })
@@ -56,7 +57,7 @@ fn bootstrap_pager_materializes_once_then_releases_its_queue() {
             .contains_rect(request.bounds())
     }));
 
-    let seed = app.engine.config().seed;
+    let seed = app.engine.config().world_seed;
     let loads = requests
         .into_iter()
         .map(|request| World::generate_chunk_load(seed, request))

@@ -822,3 +822,15 @@ own beliefs, and one intention they follow and revise. The scripted order become
 same lives. No neural network or language model: minds stay readable, compact and grounded.
 **Consequences:** Built in phases T0-T6, each measured before it's switched on.
 
+## D-114: World seed and life seed (2026-10-11)
+
+**Decision:** `EngineConfig` has a `world_seed` (terrain and generated features only) and a
+`life_seed` (every roll in the engine and minds). The viewer draws a new life seed from the clock
+each run and prints it; `--life-seed N` replays a run, in the viewer and headless. Saves, the
+snapshot, F3 details, study and scenario reports carry both. Headless runs default the life seed
+to the world seed so comparisons stay paired; `config/simulation.toml`'s `seed` is the world seed.
+Rule 3 in AGENTS.md now reads: the world is fixed; lives are not predetermined, but replayable.
+**Why:** The owner's brief (D-113, T0): the same seed replayed the same lives every run.
+**Consequences:** Seed 1 with life seeds 1, 2, 3 gives different histories in the same valley.
+Valley spawn positions still come from the world seed.
+

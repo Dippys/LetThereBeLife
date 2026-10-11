@@ -162,7 +162,8 @@ fn drinking_rejects_ocean_only_and_unloaded_access() {
         },
     };
     let mut ocean_engine = Engine::new(EngineConfig {
-        seed: 1,
+        world_seed: 1,
+        life_seed: 1,
         world: WorldConfig::new(64, 64).unwrap(),
         ..EngineConfig::default()
     });

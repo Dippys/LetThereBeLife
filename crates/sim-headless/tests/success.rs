@@ -73,7 +73,7 @@ fn agents_misunderstand_act_and_both_sides_learn_from_what_they_observe() {
         if let Some(first) = episodes.first() {
             println!(
                 "seed {}: {} episode(s); first:\n{}",
-                report.config.seed,
+                report.config.life_seed,
                 episodes.len(),
                 report.comms.describe_episode(*first)
             );

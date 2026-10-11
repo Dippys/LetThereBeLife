@@ -118,7 +118,7 @@ impl Error for ValleyStartError {}
 /// band (two families of founders, each with children) at its camps with the whole valley as the active area. Requires
 /// an engine with no population yet.
 pub fn start_valley(engine: &mut Engine) -> Result<ValleyStart, ValleyStartError> {
-    let seed = engine.config().seed;
+    let seed = engine.config().world_seed;
     let valley = find_valley(seed, VALLEY_SIDE).ok_or(ValleyStartError::NotFound(seed))?;
     let loads = engine
         .world()
@@ -188,7 +188,8 @@ mod tests {
 
     fn engine() -> Engine {
         Engine::new(EngineConfig {
-            seed: 7,
+            world_seed: 7,
+            life_seed: 7,
             ticks_per_second: 60,
             world: WorldConfig::new(64, 64).unwrap(),
         })
@@ -294,7 +295,8 @@ mod tests {
     #[test]
     fn first_spawn_depends_only_on_cursor_residency() {
         let mut engine = Engine::new(EngineConfig {
-            seed: 7,
+            world_seed: 7,
+            life_seed: 7,
             ticks_per_second: 60,
             world: WorldConfig::new(TEST_SIMULATION_SIDE as u32 + 64, 64).unwrap(),
         });
@@ -337,7 +339,8 @@ mod tests {
     #[test]
     fn valley_preset_starts_the_band_inside_the_valley_with_full_minds() {
         let mut engine = Engine::new(EngineConfig {
-            seed: 1,
+            world_seed: 1,
+            life_seed: 1,
             ticks_per_second: 60,
             world: WorldConfig::new(64, 64).unwrap(),
         });

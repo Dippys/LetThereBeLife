@@ -768,8 +768,9 @@ impl Engine {
         let accepted = self.population.add_inventory(agent, kind, gathered);
         debug_assert_eq!(accepted, gathered);
         if let Some(blade) = edge
-            && crate::wildlife::mix(self.config.seed ^ self.time.ticks() ^ u64::from(agent.get()))
-                % BLADE_WEAR_ODDS
+            && crate::wildlife::mix(
+                self.config.life_seed ^ self.time.ticks() ^ u64::from(agent.get()),
+            ) % BLADE_WEAR_ODDS
                 == 0
         {
             self.population.take(agent, blade, 1);

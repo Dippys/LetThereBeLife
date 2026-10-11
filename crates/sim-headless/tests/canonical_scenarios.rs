@@ -3,7 +3,8 @@ use sim_headless::{ScenarioConfig, ScenarioRunner};
 
 fn fast_config(population: u32) -> ScenarioConfig {
     let mut config = ScenarioConfig::canonical(population);
-    config.engine.seed = 42;
+    config.engine.world_seed = 42;
+    config.engine.life_seed = 42;
     config.engine.world = WorldConfig::new(512, 512).unwrap();
     config.driver_ticks = 1_200;
     config

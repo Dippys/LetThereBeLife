@@ -34,7 +34,8 @@ impl ScenarioConfig {
     pub fn canonical(population: u32) -> Self {
         Self {
             engine: EngineConfig {
-                seed: CANONICAL_SEED,
+                world_seed: CANONICAL_SEED,
+                life_seed: CANONICAL_SEED,
                 ticks_per_second: 60,
                 world: WorldConfig::new(CANONICAL_WORLD_SIDE, CANONICAL_WORLD_SIDE)
                     .expect("canonical world dimensions are valid"),

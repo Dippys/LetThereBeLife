@@ -8,7 +8,8 @@ use sim_core::{
 
 fn engine_with_positions(count: u32) -> (Engine, Vec<WorldPosition>) {
     let mut engine = Engine::new(EngineConfig {
-        seed: 42,
+        world_seed: 42,
+        life_seed: 42,
         ticks_per_second: 60,
         world: WorldConfig::new(128, 128).unwrap(),
     });
@@ -56,7 +57,8 @@ fn river_engine_with_positions(count: u32) -> (Engine, Vec<WorldPosition>) {
         },
     };
     let mut engine = Engine::new(EngineConfig {
-        seed: 1,
+        world_seed: 1,
+        life_seed: 1,
         ticks_per_second: 60,
         world: WorldConfig::new(64, 64).unwrap(),
     });

@@ -44,7 +44,11 @@ use crate::{
 /// Immutable settings used to construct or reset a simulation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EngineConfig {
-    pub seed: u64,
+    /// Drives world generation only: the same world seed gives the same terrain.
+    pub world_seed: u64,
+    /// Drives everything that lives: people, personalities, animals, plants'
+    /// lives, and every roll. The same life seed (and commands) replays a run.
+    pub life_seed: u64,
     pub ticks_per_second: u32,
     pub world: WorldConfig,
 }
@@ -54,7 +58,8 @@ pub const MAX_SIMULATION_SPEED: f32 = 4096.0;
 impl Default for EngineConfig {
     fn default() -> Self {
         Self {
-            seed: 1,
+            world_seed: 1,
+            life_seed: 1,
             ticks_per_second: 60,
             world: WorldConfig::default(),
         }
@@ -106,7 +111,8 @@ pub struct SimulationSnapshot {
     pub simulated_seconds: f64,
     pub paused: bool,
     pub speed: f32,
-    pub seed: u64,
+    pub world_seed: u64,
+    pub life_seed: u64,
     pub agent_count: u32,
     pub living_agent_count: u32,
     pub active_agent_count: u32,
@@ -182,7 +188,7 @@ impl Engine {
     /// main-thread insertion boundary.
     pub fn new(config: EngineConfig) -> Self {
         Self {
-            world: World::new(config.seed, config.world),
+            world: World::new(config.world_seed, config.world),
             config,
             time: SimTime::ZERO,
             paused: false,
@@ -199,7 +205,7 @@ impl Engine {
             death_records: Vec::new(),
             policy_active: false,
             policy_options: PolicyOptions::default(),
-            minds: Minds::new(config.seed),
+            minds: Minds::new(config.life_seed),
             signal_events: Vec::new(),
             interpretation_events: Vec::new(),
             hint_outcomes: Vec::new(),
@@ -265,7 +271,7 @@ impl Engine {
                 self.death_records.clear();
                 self.policy_active = false;
                 self.policy_options = PolicyOptions::default();
-                self.minds = Minds::new(self.config.seed);
+                self.minds = Minds::new(self.config.life_seed);
                 self.signal_events.clear();
                 self.interpretation_events.clear();
                 self.hint_outcomes.clear();

@@ -21,6 +21,7 @@ pub(crate) fn semantic_hash(
     let mut hash = SemanticHasher::new();
     hash.u16(report.format_version);
     hash.u64(report.seed);
+    hash.u64(report.life_seed);
     hash.u32(report.world_width);
     hash.u32(report.world_height);
     hash.u32(report.population);

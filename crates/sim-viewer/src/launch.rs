@@ -20,6 +20,8 @@ pub(super) struct LaunchOptions {
     pub(super) load: Option<PathBuf>,
     /// Where to save the world once `--advance` is done.
     pub(super) save: Option<PathBuf>,
+    /// The lives to replay; a new one from the clock when not given.
+    pub(super) life_seed: Option<u64>,
 }
 
 pub(super) fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Error>> {
@@ -32,6 +34,7 @@ pub(super) fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Erro
     let mut select = None;
     let mut load = None;
     let mut save = None;
+    let mut life_seed = None;
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
         match argument.as_str() {
@@ -71,6 +74,13 @@ pub(super) fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Erro
                     args.next().ok_or("--save requires a file to write")?,
                 ));
             }
+            "--life-seed" => {
+                life_seed = Some(
+                    args.next()
+                        .ok_or("--life-seed requires a number")?
+                        .parse()?,
+                );
+            }
             "--screenshot" => {
                 screenshot = Some(PathBuf::from(
                     args.next().ok_or("--screenshot requires a path")?,
@@ -78,7 +88,7 @@ pub(super) fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Erro
             }
             "--help" | "-h" => {
                 println!(
-                    "Usage: sim-viewer [--config PATH] [--smoke-frames NUMBER] [--pregenerate-world] [--valley] [--advance TICKS] [--select PERSON] [--screenshot PNG] [--load SAVE] [--save SAVE]"
+                    "Usage: sim-viewer [--config PATH] [--smoke-frames NUMBER] [--pregenerate-world] [--valley] [--advance TICKS] [--select PERSON] [--screenshot PNG] [--load SAVE] [--save SAVE] [--life-seed NUMBER]"
                 );
                 std::process::exit(0);
             }
@@ -98,7 +108,16 @@ pub(super) fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Erro
         select,
         load,
         save,
+        life_seed,
     })
+}
+
+/// A life seed for a new run: different every time, from the clock.
+pub(super) fn fresh_life_seed() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(1, |elapsed| elapsed.as_nanos() as u64)
+        % 1_000_000_000
 }
 
 pub(super) fn load_world_archive(seed: u64, app: &AppConfig) -> Option<WorldArchive> {

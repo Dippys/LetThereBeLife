@@ -18,7 +18,7 @@ impl Engine {
             .copied()
             .flatten()
             .unwrap_or_else(|| {
-                Life::starting(self.config.seed, agent, !self.minds.is_founder(agent))
+                Life::starting(self.config.life_seed, agent, !self.minds.is_founder(agent))
             })
     }
 
@@ -27,7 +27,7 @@ impl Engine {
     pub(super) fn innate_personality(&self, agent: AgentId) -> crate::Personality {
         self.life_of(agent)
             .inherited
-            .unwrap_or_else(|| crate::Personality::of(self.config.seed, agent))
+            .unwrap_or_else(|| crate::Personality::of(self.config.life_seed, agent))
     }
 
     /// Years of age of `agent` now.
@@ -120,7 +120,8 @@ impl Engine {
             .collect();
         for agent in living {
             let risk = old_age_risk(self.age_of(agent));
-            let roll = mix(self.config.seed ^ 0x4f4c_4441 ^ year ^ u64::from(agent.get()) << 32);
+            let roll =
+                mix(self.config.life_seed ^ 0x4f4c_4441 ^ year ^ u64::from(agent.get()) << 32);
             if roll % 1_000 >= risk {
                 continue;
             }

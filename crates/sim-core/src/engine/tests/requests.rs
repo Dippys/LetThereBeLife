@@ -138,7 +138,7 @@ fn a_parent_feeds_its_child_and_a_misread_request_is_repaired() {
     // has its family's.
     engine.minds.set_founders(0);
     engine.minds.get_mut(AgentId::new(1)).affordances =
-        crate::cognition::Affordances::founding(engine.config.seed, AgentId::new(1), 8);
+        crate::cognition::Affordances::founding(engine.config.life_seed, AgentId::new(1), 8);
     assert!(engine.bond(AgentId::new(0), AgentId::new(1)));
     // The child has no words, and the parent is thirsty: it first takes the
     // eating mime for a request about water.

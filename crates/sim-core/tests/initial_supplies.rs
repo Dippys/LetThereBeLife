@@ -8,7 +8,8 @@ use sim_core::{
 #[test]
 fn initial_supplies_are_capped_pre_policy_setup_and_reset_cleanly() {
     let mut engine = Engine::new(EngineConfig {
-        seed: 1,
+        world_seed: 1,
+        life_seed: 1,
         world: WorldConfig::new(64, 64).unwrap(),
         ..EngineConfig::default()
     });

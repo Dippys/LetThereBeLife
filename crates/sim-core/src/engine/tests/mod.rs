@@ -41,7 +41,8 @@ mod wildlife;
 
 fn resident_engine(size: u32) -> Engine {
     let mut engine = Engine::new(EngineConfig {
-        seed: 42,
+        world_seed: 42,
+        life_seed: 42,
         world: WorldConfig::new(size, size).unwrap(),
         ..EngineConfig::default()
     });

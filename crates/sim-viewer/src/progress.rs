@@ -32,8 +32,9 @@ impl Progress {
         println!("  Let There Be Life");
         println!("  -----------------");
         println!(
-            "  Fast-forwarding {years:.1} years (seed {}). The window opens when it's done;",
-            engine.snapshot().seed
+            "  Fast-forwarding {years:.1} years (world {}, life {}). The window opens when it's done;",
+            engine.snapshot().world_seed,
+            engine.snapshot().life_seed
         );
         println!("  closing this console stops it.");
         println!();

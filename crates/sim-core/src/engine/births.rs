@@ -122,8 +122,10 @@ impl Engine {
         if needs.hunger.value * 2 > needs.hunger.threshold || needs.rest.threshold_reached {
             return;
         }
-        let roll =
-            mix(self.config.seed ^ 0x4255_5254 ^ u64::from(mother.get()) << 32 ^ self.time.ticks());
+        let roll = mix(self.config.life_seed
+            ^ 0x4255_5254
+            ^ u64::from(mother.get()) << 32
+            ^ self.time.ticks());
         if roll % CONCEPTION_ODDS != 0 {
             return;
         }
@@ -166,7 +168,7 @@ impl Engine {
                 continue;
             }
             self.families.pregnancies.remove(&mother);
-            let roll = mix(self.config.seed
+            let roll = mix(self.config.life_seed
                 ^ 0x4249_5254
                 ^ u64::from(mother.get()) << 32
                 ^ self.time.ticks());
@@ -311,7 +313,7 @@ impl Engine {
             return;
         };
         for attempt in 0..64_u64 {
-            let roll = mix(self.config.seed ^ 0x4e45_5743 ^ year << 8 ^ attempt);
+            let roll = mix(self.config.life_seed ^ 0x4e45_5743 ^ year << 8 ^ attempt);
             let along = (roll >> 8) as i64;
             let width = (area.max.x - area.min.x).max(4);
             let height = (area.max.y - area.min.y).max(4);
@@ -367,7 +369,7 @@ impl Engine {
         if self.lives.len() <= index {
             self.lives.resize(index + 1, None);
         }
-        let starting = Life::starting(self.config.seed, woman, false);
+        let starting = Life::starting(self.config.life_seed, woman, false);
         self.lives[index] = Some(Life {
             sex: Sex::Female,
             ..starting
@@ -382,7 +384,7 @@ impl Engine {
             if self.lives.len() <= index {
                 self.lives.resize(index + 1, None);
             }
-            let starting = Life::starting(self.config.seed, agent, false);
+            let starting = Life::starting(self.config.life_seed, agent, false);
             self.lives[index] = Some(Life { sex, ..starting });
         }
         for (from, to) in [(woman, man), (man, woman)] {

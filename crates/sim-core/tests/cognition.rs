@@ -19,7 +19,8 @@ fn watered_engine() -> (Engine, WorldRect) {
         },
     };
     let mut engine = Engine::new(EngineConfig {
-        seed: 1,
+        world_seed: 1,
+        life_seed: 1,
         ticks_per_second: 60,
         world: WorldConfig::new(64, 64).unwrap(),
     });

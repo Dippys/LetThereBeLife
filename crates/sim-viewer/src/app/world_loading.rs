@@ -198,7 +198,7 @@ impl ViewerApp {
         self.next_generation_id = self.next_generation_id.saturating_add(1).max(1);
         let job = GenerationJob {
             id,
-            seed: self.engine.config().seed,
+            seed: self.engine.config().world_seed,
             requests,
             archive: self.archive.clone(),
         };

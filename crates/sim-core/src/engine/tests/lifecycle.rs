@@ -68,7 +68,8 @@ fn pause_prevents_time_advancing() {
 #[test]
 fn reset_restores_runtime_state_but_preserves_config() {
     let config = EngineConfig {
-        seed: 42,
+        world_seed: 42,
+        life_seed: 42,
         ticks_per_second: 20,
         ..EngineConfig::default()
     };
@@ -96,11 +97,13 @@ fn simulation_speed_accepts_the_viewer_ceiling_and_caps_above_it() {
 #[test]
 fn equal_seeds_generate_equal_worlds() {
     let left = Engine::new(EngineConfig {
-        seed: 99,
+        world_seed: 99,
+        life_seed: 99,
         ..EngineConfig::default()
     });
     let right = Engine::new(EngineConfig {
-        seed: 99,
+        world_seed: 99,
+        life_seed: 99,
         ..EngineConfig::default()
     });
 
@@ -110,7 +113,8 @@ fn equal_seeds_generate_equal_worlds() {
 #[test]
 fn engine_construction_is_deferred_and_headless_materialization_is_explicit() {
     let config = EngineConfig {
-        seed: 99,
+        world_seed: 99,
+        life_seed: 99,
         world: WorldConfig::new(96, 64).unwrap(),
         ..EngineConfig::default()
     };
@@ -123,7 +127,7 @@ fn engine_construction_is_deferred_and_headless_materialization_is_explicit() {
             .area_is_generated(engine.world().initial_bounds())
     );
     engine.materialize_initial_area().unwrap();
-    let eager = World::generate(config.seed, config.world);
+    let eager = World::generate(config.life_seed, config.world);
     assert_eq!(
         engine.world().cells().collect::<Vec<_>>(),
         eager.cells().collect::<Vec<_>>()
@@ -137,7 +141,8 @@ fn engine_construction_is_deferred_and_headless_materialization_is_explicit() {
 #[test]
 fn terrain_materialization_does_not_change_fixed_tick_progression() {
     let config = EngineConfig {
-        seed: 99,
+        world_seed: 99,
+        life_seed: 99,
         world: WorldConfig::new(96, 64).unwrap(),
         ..EngineConfig::default()
     };
@@ -148,7 +153,7 @@ fn terrain_materialization_does_not_change_fixed_tick_progression() {
         .missing_chunk_load_requests(resident.world().initial_bounds())
         .unwrap()
         .into_iter()
-        .map(|request| World::generate_chunk_load(config.seed, request))
+        .map(|request| World::generate_chunk_load(config.life_seed, request))
         .collect();
 
     assert_eq!(resident.apply_world_chunk_loads(loads), Ok(4));
@@ -164,7 +169,8 @@ fn terrain_materialization_does_not_change_fixed_tick_progression() {
 #[test]
 fn generate_initial_area_command_uses_bootstrap_batching() {
     let config = EngineConfig {
-        seed: 99,
+        world_seed: 99,
+        life_seed: 99,
         world: WorldConfig::new(128, 64).unwrap(),
         ..EngineConfig::default()
     };
@@ -180,13 +186,14 @@ fn generate_initial_area_command_uses_bootstrap_batching() {
 #[test]
 fn applied_chunks_remain_engine_owned_and_deduplicated() {
     let config = EngineConfig {
-        seed: 9,
+        world_seed: 9,
+        life_seed: 9,
         world: WorldConfig::new(64, 64).unwrap(),
         ..EngineConfig::default()
     };
     let mut engine = Engine::new(config);
     let coord = ChunkCoord { x: -1, y: 0 };
-    let chunk = World::generate_chunk_at(config.seed, coord).unwrap();
+    let chunk = World::generate_chunk_at(config.life_seed, coord).unwrap();
 
     assert_eq!(engine.apply_world_chunks(vec![chunk.clone()]), Ok(1));
     let revision = engine.world().revision();
@@ -205,7 +212,8 @@ fn applied_chunks_remain_engine_owned_and_deduplicated() {
 #[test]
 fn population_initialization_is_explicit_atomic_and_deterministic() {
     let config = EngineConfig {
-        seed: 42,
+        world_seed: 42,
+        life_seed: 42,
         world: WorldConfig::new(64, 64).unwrap(),
         ..EngineConfig::default()
     };

@@ -237,7 +237,7 @@ fn personalities_are_stable_per_agent_and_average_without_social() {
     let innate = engine.personality(AgentId::new(0)).unwrap();
     assert_eq!(
         innate,
-        crate::Personality::of(engine.config.seed, AgentId::new(0))
+        crate::Personality::of(engine.config.life_seed, AgentId::new(0))
     );
     engine.policy_options = PolicyOptions {
         social: false,

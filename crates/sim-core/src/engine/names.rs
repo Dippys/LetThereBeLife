@@ -68,7 +68,7 @@ impl Engine {
             if !awake {
                 continue;
             }
-            let roll = mix(self.config.seed
+            let roll = mix(self.config.life_seed
                 ^ 0x4e41_4d45
                 ^ u64::from(listener.get()) << 32
                 ^ self.time.ticks());

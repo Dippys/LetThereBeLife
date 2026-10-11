@@ -30,7 +30,7 @@ impl Engine {
             return;
         }
         let year = now / crate::TICKS_PER_YEAR;
-        let seed = self.config.seed;
+        let seed = self.config.life_seed;
         let roll = |position: WorldPosition, salt: u64| {
             crate::wildlife::mix(
                 seed ^ salt

@@ -22,7 +22,7 @@ on it, and both sides update using only observable evidence.*
 | `crates/sim-config` | Loads `config/simulation.toml` for the binaries. |
 | `crates/sim-headless` | CLI runner + canonical survival scenarios and reports. |
 | `crates/sim-viewer` | `winit` + `wgpu` window: camera, interface (person panel, event feed, help), spawning, background chunk loading. Read-only view of the sim. |
-| `config/simulation.toml` | Seed, tick rate, bootstrap area, world-archive path. |
+| `config/simulation.toml` | World seed, tick rate, bootstrap area, world-archive path. |
 | `docs/` | Living docs: status, architecture, development guide, active plans. |
 | `docs/archive/` | Historical, very detailed docs from the first build-out. Useful for deep dives; may be stale. |
 | `InitialDocumentation/` | Original design spec (vision → 10M agents). **Read-only.** |
@@ -53,7 +53,11 @@ The toolchain is installed on Windows. From WSL, call `cargo.exe` (e.g.
    the validate scripts fail if it changes. Put new knowledge in `docs/`.
 2. **`sim-core` stays headless.** No windowing, rendering, UI, or OS-lifecycle dependencies.
    The viewer only reads engine state and mutates it through `EngineCommand` / explicit `Engine` methods.
-3. **Determinism is the foundation.** Same seed + same inputs ⇒ identical results.
+3. **The world is fixed; lives are not predetermined, but replayable.** The world seed alone
+   decides terrain and generated features, strictly. The life seed decides everything that lives
+   (people, personalities, animals, plants' lives, every roll); the viewer draws a new one each
+   run, and saves, reports and `--life-seed N` let any run be replayed. Same world seed, life
+   seed and inputs ⇒ identical results, so:
    - Simulation advances only by fixed ticks / scheduled events, never by frame time.
    - Iteration that affects outcomes uses ordered collections (`BTreeMap`, sorted `Vec`).
      `HashMap` is fine for keyed lookup only, never for iteration order.

@@ -50,7 +50,8 @@ impl AppConfig {
         let world = WorldConfig::new(self.world.initial_width, self.world.initial_height)
             .map_err(ConfigError::InvalidWorld)?;
         Ok(EngineConfig {
-            seed: self.simulation.seed,
+            world_seed: self.simulation.seed,
+            life_seed: self.simulation.seed,
             ticks_per_second: self.simulation.ticks_per_second,
             world,
         })
@@ -70,7 +71,7 @@ impl Default for SimulationConfig {
     fn default() -> Self {
         let config = EngineConfig::default();
         Self {
-            seed: config.seed,
+            seed: config.world_seed,
             ticks_per_second: config.ticks_per_second,
         }
     }
@@ -127,7 +128,7 @@ mod tests {
         )
         .unwrap();
         let engine = config.engine_config().unwrap();
-        assert_eq!(engine.seed, 42);
+        assert_eq!(engine.world_seed, 42);
         assert_eq!(engine.ticks_per_second, 20);
         assert_eq!(engine.world.initial_width(), 640);
         assert_eq!(engine.world.initial_height(), 480);

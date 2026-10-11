@@ -73,6 +73,10 @@ Engine::new(config)                         // empty world + empty population, O
 
 - **Time:** `tick()` advances integer `SimTime` by one (unless paused) and processes due events.
   An idle tick only peeks at the heap root; nothing scans the whole population.
+- **Seeds:** `EngineConfig::world_seed` feeds only `World::new` (terrain and generated
+  features, strictly deterministic). `EngineConfig::life_seed` feeds every roll in the engine and
+  minds (personalities, founding words and beliefs, births, animals, plant death and spread). A
+  run is reproducible from both seeds plus its commands; saves carry both.
 - **Event order** (the determinism contract): `(due time, event class, AgentId, event detail, sequence)`.
   Need thresholds come before health, wake, action completion, movement, then decisions.
   Cancellation is lazy: each agent carries a generation counter, so stale events are skipped.

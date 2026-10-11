@@ -737,7 +737,10 @@ impl Engine {
                 179,
             ) as u8;
             let shifts = self.age_of(watcher.id) < crate::ADULT_AGE
-                && mix(self.config.seed ^ 0x5348_4946 ^ u64::from(watcher.id.get()) << 32 ^ id)
+                && mix(self.config.life_seed
+                    ^ 0x5348_4946
+                    ^ u64::from(watcher.id.get()) << 32
+                    ^ id)
                     % SOUND_SHIFT_ODDS
                     == 0;
             let mind = self.minds.get_mut(watcher.id);
@@ -1374,8 +1377,10 @@ impl Engine {
     /// people more often) and says it.
     fn coin_word(&mut self, agent: AgentId, concept: Concept) -> Option<VocalForm> {
         let curiosity = self.personality_in_use(agent).curiosity;
-        let roll =
-            mix(self.config.seed ^ 0x434f_494e ^ u64::from(agent.get()) << 32 ^ self.time.ticks());
+        let roll = mix(self.config.life_seed
+            ^ 0x434f_494e
+            ^ u64::from(agent.get()) << 32
+            ^ self.time.ticks());
         if roll % 256 >= Personality::scale(curiosity, 16, 112) as u64 {
             return None;
         }

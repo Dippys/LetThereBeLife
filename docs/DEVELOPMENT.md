@@ -26,7 +26,7 @@ fixed water/wood spawn cohorts with starting supplies. It prints a versioned rep
 
 | Key | Meaning |
 |---|---|
-| `simulation.seed` | World + simulation seed |
+| `simulation.seed` | World seed (terrain). The life seed is new every viewer run (printed at start; `--life-seed N` replays it); headless runs use the world seed unless given `--life-seed N` |
 | `simulation.ticks_per_second` | Fixed tick rate (60) |
 | `world.initial_width/height` | Bootstrap area loaded at start (4,096²). Not the world size (65,536²). |
 | `world_cache.enabled/path` | Optional full-world archive (see below) |
@@ -167,12 +167,13 @@ Release harnesses and soaks are `#[ignore]`d. Run them explicitly:
 cargo test --release -p sim-headless --test canonical_scenarios -- --ignored --nocapture --test-threads=1
 ```
 
-Determinism fingerprints (last verified 2026-10-10, world generator v2). If one changes,
-simulation behavior changed. Canonical runs use the legacy policy; the study covers the mind.
+Determinism fingerprints (world generator v2; the smoke run re-verified 2026-10-11 after the life
+seed, D-114, the canonical ones last on 2026-10-10). If one changes, simulation behavior changed.
+Canonical runs use the legacy policy; the study covers the mind.
 
 | Run | Hash |
 |---|---|
-| `sim-headless --ticks 600 --seed 42` (20 agents) | `561a5ca41553db95` |
+| `sim-headless --ticks 600 --seed 42` (20 agents) | `b0fc5ebe5aa8fa38` |
 | `sim-headless --canonical --agents 20` (600,000 ticks) | `358092051ec6b444` |
 | `sim-headless --canonical --agents 100` (600,000 ticks) | `e4842c31783f1ea1` |
 

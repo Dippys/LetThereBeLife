@@ -77,6 +77,7 @@ pub struct SoakEvidence {
 pub struct ScenarioReport {
     pub format_version: u16,
     pub seed: u64,
+    pub life_seed: u64,
     pub world_width: u32,
     pub world_height: u32,
     pub population: u32,
@@ -112,10 +113,11 @@ impl fmt::Display for ScenarioReport {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
-            "physical-agent-report-v{} hash={:016x} seed={} world={}x{} population={} water/fallback={}/{} supplies={}/{} driver_ticks={} final_tick={} living={} active={} deaths={}/{}/{}/{} moves={} routes={}/{} gather={} eat={} drink={} sleep={}/{}/{} shelters={}/{} failures={} blocked={} depletion={} resources={}:{} events={}/{} stale={}/{} peak_queue={} retries={}:{} soak_samples={} invariant_violations={}",
+            "physical-agent-report-v{} hash={:016x} seed={} life_seed={} world={}x{} population={} water/fallback={}/{} supplies={}/{} driver_ticks={} final_tick={} living={} active={} deaths={}/{}/{}/{} moves={} routes={}/{} gather={} eat={} drink={} sleep={}/{}/{} shelters={}/{} failures={} blocked={} depletion={} resources={}:{} events={}/{} stale={}/{} peak_queue={} retries={}:{} soak_samples={} invariant_violations={}",
             self.format_version,
             self.semantic_hash,
             self.seed,
+            self.life_seed,
             self.world_width,
             self.world_height,
             self.population,
@@ -222,7 +224,8 @@ pub(crate) fn build_report(
     let spawn_hash = hash_positions(spawns);
     let mut report = ScenarioReport {
         format_version: REPORT_FORMAT_VERSION,
-        seed: snapshot.seed,
+        seed: snapshot.world_seed,
+        life_seed: snapshot.life_seed,
         world_width: engine.world().width(),
         world_height: engine.world().height(),
         population: config.population,

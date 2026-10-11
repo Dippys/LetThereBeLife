@@ -4,6 +4,7 @@ use sim_headless::{CANONICAL_TICKS, ScenarioConfig, ScenarioRunner, StudyConfig,
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut ticks = None;
     let mut seed = None;
+    let mut life_seed: Option<u64> = None;
     let mut agent_count = None;
     let mut batch_size = 1_000_u64;
     let mut canonical = false;
@@ -76,12 +77,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ticks = Some(parse_next::<u64>(&mut args, "--years") * sim_core::TICKS_PER_YEAR)
             }
             "--seed" => seed = Some(parse_next(&mut args, "--seed")),
+            "--life-seed" => life_seed = Some(parse_next(&mut args, "--life-seed")),
             "--agents" => agent_count = Some(parse_next(&mut args, "--agents")),
             "--batch-size" => batch_size = parse_next(&mut args, "--batch-size"),
             "--config" => config_path = parse_next(&mut args, "--config"),
             "--help" | "-h" => {
                 println!(
-                    "Usage: sim-headless [--canonical | --study [--near-water | --groups | --valley | --apart] [--mind legacy|memory|sharing|full] [--no-help] [--scripted] [--no-wildlife] [--no-regrowth] [--food PERCENT] [--verbose] [--trace AGENT] [--comms N] [--misreads N] [--successes N] [--lessons N] [--explain AGENT]] [--config PATH] [--ticks NUMBER | --years NUMBER] [--seed NUMBER] [--agents NUMBER] [--batch-size NUMBER]"
+                    "Usage: sim-headless [--canonical | --study [--near-water | --groups | --valley | --apart] [--mind legacy|memory|sharing|full] [--no-help] [--scripted] [--no-wildlife] [--no-regrowth] [--food PERCENT] [--verbose] [--trace AGENT] [--comms N] [--misreads N] [--successes N] [--lessons N] [--explain AGENT]] [--config PATH] [--ticks NUMBER | --years NUMBER] [--seed NUMBER] [--life-seed NUMBER] [--agents NUMBER] [--batch-size NUMBER]"
                 );
                 return Ok(());
             }
@@ -99,6 +101,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             20
         });
         let mut config = StudyConfig::new(seed.unwrap_or(1), population, ticks.unwrap_or(600_000));
+        if let Some(life_seed) = life_seed {
+            config.life_seed = life_seed;
+        }
         config.mind = sim_core::PolicyOptions {
             helping: mind.helping && !no_help,
             learned: mind.learned && !scripted,
@@ -210,7 +215,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     scenario.driver_ticks = ticks.unwrap_or(if canonical { CANONICAL_TICKS } else { 600 });
     if let Some(seed) = seed {
-        scenario.engine.seed = seed;
+        scenario.engine.world_seed = seed;
+        scenario.engine.life_seed = seed;
+    }
+    if let Some(life_seed) = life_seed {
+        scenario.engine.life_seed = life_seed;
     }
 
     let report = ScenarioRunner::new(scenario)?.run(batch_size)?;
