@@ -22,6 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut mind = sim_core::PolicyOptions::full();
     let mut food_percent = 100_u8;
     let mut no_help = false;
+    let mut scripted = false;
     let mut no_wildlife = false;
     let mut no_regrowth = false;
     let mut config_path = DEFAULT_CONFIG_PATH.to_owned();
@@ -38,6 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--apart" => apart = true,
             "--food" => food_percent = parse_next(&mut args, "--food"),
             "--no-help" => no_help = true,
+            "--scripted" => scripted = true,
             "--no-wildlife" => no_wildlife = true,
             "--no-regrowth" => no_regrowth = true,
             "--trace" => trace = Some(parse_next(&mut args, "--trace")),
@@ -79,7 +81,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--config" => config_path = parse_next(&mut args, "--config"),
             "--help" | "-h" => {
                 println!(
-                    "Usage: sim-headless [--canonical | --study [--near-water | --groups | --valley | --apart] [--mind legacy|memory|sharing|full] [--no-help] [--no-wildlife] [--no-regrowth] [--food PERCENT] [--verbose] [--trace AGENT] [--comms N] [--misreads N] [--successes N] [--lessons N] [--explain AGENT]] [--config PATH] [--ticks NUMBER | --years NUMBER] [--seed NUMBER] [--agents NUMBER] [--batch-size NUMBER]"
+                    "Usage: sim-headless [--canonical | --study [--near-water | --groups | --valley | --apart] [--mind legacy|memory|sharing|full] [--no-help] [--scripted] [--no-wildlife] [--no-regrowth] [--food PERCENT] [--verbose] [--trace AGENT] [--comms N] [--misreads N] [--successes N] [--lessons N] [--explain AGENT]] [--config PATH] [--ticks NUMBER | --years NUMBER] [--seed NUMBER] [--agents NUMBER] [--batch-size NUMBER]"
                 );
                 return Ok(());
             }
@@ -99,6 +101,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut config = StudyConfig::new(seed.unwrap_or(1), population, ticks.unwrap_or(600_000));
         config.mind = sim_core::PolicyOptions {
             helping: mind.helping && !no_help,
+            learned: mind.learned && !scripted,
             ..mind
         };
         config.food_percent = food_percent.min(100);

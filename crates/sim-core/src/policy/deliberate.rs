@@ -80,6 +80,11 @@ pub const HOME_RANGE: u64 = 200;
 const HEARTH_FROM_HOME: u64 = 16;
 /// Tiredness (out of 10,000) at which an agent sleeps wherever it can.
 const REST_CRITICAL: u16 = 8_800;
+/// How much more an option listed one place earlier is worth, by instinct.
+const INSTINCT_STEP: i32 = 3;
+/// Kinds of choice tried fewer times than this may get a curiosity bonus.
+const CURIOUS_TRIES: u8 = 3;
+const CURIOSITY_BONUS: i32 = 8;
 /// Huts closer together than this aren't built: one home is enough nearby.
 pub(crate) const HUT_SPACING: u64 = 96;
 /// Carrying at least this much, a hut in view is worth stopping at to unload.
@@ -167,6 +172,8 @@ pub(crate) struct MindInput<'a> {
     /// Set to where a trip is ultimately headed, so the engine can tell when
     /// the agent stops getting any closer.
     pub(crate) trip: &'a std::cell::Cell<Option<WorldPosition>>,
+    /// Its habits and situation, when choices are learned (phase 2).
+    pub(crate) habits: Option<(&'a crate::cognition::Habits, crate::cognition::Situation)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -252,6 +259,8 @@ pub(crate) fn deliberate(
             })
             .or_else(|| planner.explore(PolicyReason::HungerThreshold, true))
             .unwrap_or_else(|| Deliberation::wait(origin, PolicyReason::HungerThreshold)),
+        Some(NeedKind::Rest) if mind.habits.is_some() => planner.learned_rest(inventory),
+        Some(NeedKind::Exposure) if mind.habits.is_some() => planner.learned_warmth(inventory),
         Some(NeedKind::Rest) => planner.rest(inventory),
         Some(NeedKind::Exposure) if mind.knows_hearths && planner.warm_up().is_some() => {
             planner.warm_up().expect("checked")
@@ -511,6 +520,96 @@ impl Planner<'_> {
         let trip = self.at_hut(hut, PhysicalGoal::Fetch, PolicyReason::Fetching)?;
         self.mind.trip.set(Some(hut));
         Some(trip)
+    }
+
+    /// Cold: what it could do about it, in its instinctive order, picked by
+    /// what has worked for it before.
+    fn learned_warmth(&self, inventory: InventoryView) -> Deliberation {
+        let reason = PolicyReason::ExposureThreshold;
+        let mut options = Vec::new();
+        if self.mind.knows_hearths {
+            options.extend(self.warm_up());
+            options.extend(self.tend_fire(inventory));
+        }
+        let reactive = self.shelter(inventory, reason);
+        if reactive.goal != PhysicalGoal::Wait {
+            options.push(Deliberation {
+                selection: reactive,
+                heading: None,
+            });
+        }
+        options.extend(self.travel_to_known(LandmarkKind::SHELTER, PhysicalGoal::SeekShelter));
+        if self.mind.knows_hearths {
+            options.extend(
+                self.travel_to_known(LandmarkKind::HEARTH, PhysicalGoal::Explore)
+                    .map(|trip| trip.with_reason(PolicyReason::Warming)),
+            );
+        }
+        options.extend(self.gather_known_wood(inventory));
+        options.extend(self.explore(reason, true));
+        self.pick(options)
+            .unwrap_or_else(|| Deliberation::wait(self.origin, reason))
+    }
+
+    /// Tired: about to collapse, it sleeps where it stands (a reflex);
+    /// otherwise it picks among what it could do by what has worked before.
+    fn learned_rest(&self, inventory: InventoryView) -> Deliberation {
+        let reason = PolicyReason::RestThreshold;
+        if self.needs.rest.value >= crate::REST_COLLAPSE
+            && let Some(spot) = self.free_sleeping_spot()
+        {
+            return Deliberation::act(PhysicalGoal::Sleep, spot, reason);
+        }
+        let mut options = Vec::new();
+        options.extend(
+            self.sleepable_shelter_access()
+                .map(|access| Deliberation::act(PhysicalGoal::Sleep, access, reason)),
+        );
+        options.extend(
+            self.travel_to_known(LandmarkKind::SHELTER, PhysicalGoal::SeekShelter)
+                .map(|home| home.with_reason(reason)),
+        );
+        if !self.needs.exposure.threshold_reached {
+            options.extend(
+                self.free_sleeping_spot()
+                    .map(|spot| Deliberation::act(PhysicalGoal::Sleep, spot, reason)),
+            );
+        }
+        let reactive = self.shelter(inventory, PolicyReason::ExposureThreshold);
+        if reactive.goal != PhysicalGoal::Wait {
+            options.push(Deliberation {
+                selection: PolicySelection { reason, ..reactive },
+                heading: None,
+            });
+        }
+        options.extend(self.gather_known_wood(inventory));
+        options.extend(self.explore(reason, false));
+        self.pick(options)
+            .unwrap_or_else(|| Deliberation::wait(self.origin, reason))
+    }
+
+    /// The option worth most: an instinctive lean toward those listed first,
+    /// plus how that kind of choice has gone in this situation, plus a
+    /// curiosity bonus for kinds it has hardly tried. Ties go to the earlier.
+    fn pick(&self, options: Vec<Deliberation>) -> Option<Deliberation> {
+        let (habits, situation) = self.mind.habits?;
+        let count = options.len() as i32;
+        let curiosity = i32::from(self.mind.personality.curiosity);
+        options
+            .into_iter()
+            .enumerate()
+            .map(|(rank, option)| {
+                let choice =
+                    crate::cognition::Choice::of(option.selection.goal, option.selection.reason);
+                let (value, tries) = habits.value(situation, choice);
+                let instinct = INSTINCT_STEP * (count - rank as i32);
+                let novel = tries < CURIOUS_TRIES
+                    && i32::from(self.roll(0x4355_5249 ^ choice as u64)) < curiosity / 2;
+                let score = instinct + i32::from(value) + if novel { CURIOSITY_BONUS } else { 0 };
+                (score, -(rank as i32), option)
+            })
+            .max_by_key(|&(score, rank, _)| (score, rank))
+            .map(|(_, _, option)| option)
     }
 
     fn home_is_near(&self) -> bool {

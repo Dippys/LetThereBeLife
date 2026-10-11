@@ -686,3 +686,20 @@ No repair action: lived-in homes last, abandoned ones go.
 51 by year four in the 100-year run).
 **Consequences:** Over 10 years in valleys 1, 4, 9: 53, 50, 55 huts built and 43, 30, 38 fell down,
 leaving about 10-20 standing; survivors 15, 30, 13 (15, 28, 14 without decay).
+
+## D-105: Learning what works, phase 2: being cold or tired is answered by experience (2026-10-11)
+
+**Decision:** When cold or tired, the planner lists what the agent could do (warm up at a fire, feed
+one, sleep in a hut in view or a remembered one, build or gather toward a hut, head for a hearth,
+fetch wood, explore, or sleep in the open when mild) and picks by an instinctive lean toward the
+old order (3 points per place), plus that choice's learned value in this situation, plus a
+curiosity bonus (8) for choices tried fewer than 3 times (a deterministic roll against curiosity).
+About to collapse, an agent still sleeps where it stands (a reflex). `PolicyOptions::learned`
+(on in `full()`); `--scripted` turns it off in the study.
+The success test now spans seeds 1-158 (87 valleys) and needs 40 episodes in 20 valleys, about
+half of the 84 in 41 measured. Its old bar (40 in 40 valleys) was set at half the rate of D-097,
+before the harder world of D-102 halved it; it then sat at the average and failed on chance.
+**Why:** docs/plans/LEARNING.md phase 2: replace the decision rules that had been patched most.
+**Consequences:** Over 10 years in valleys 1, 4, 9, 13: survivors 24, 30, 20, 23 against the
+script's 15, 30, 13, 22; deaths from cold 2, 1, 6, 0 against 9, 1, 11, 3. On 47 fresh valleys
+(seeds 79-158) episodes 48 in 25 valleys against the script's 50 in 22, survivors 917 against 875.

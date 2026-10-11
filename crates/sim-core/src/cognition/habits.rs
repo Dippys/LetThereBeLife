@@ -239,6 +239,14 @@ impl Habits {
         habit.tries = habit.tries.saturating_add(1);
     }
 
+    /// How `choice` has gone in `situation`: its value and how often it was tried.
+    pub(crate) fn value(&self, situation: Situation, choice: Choice) -> (i8, u8) {
+        self.habits
+            .iter()
+            .find(|habit| habit.situation == situation.0 && habit.choice == choice as u8 + 1)
+            .map_or((0, 0), |habit| (habit.value, habit.tries))
+    }
+
     pub(crate) fn views(&self) -> impl Iterator<Item = HabitView> + '_ {
         self.habits
             .iter()

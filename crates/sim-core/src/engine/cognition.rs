@@ -197,6 +197,7 @@ impl Engine {
         inventory: InventoryView,
         perception: &PhysicalPerception,
     ) -> (PolicySelection, Option<ExplorationHeading>) {
+        let season = self.season();
         self.pair_up(agent, perception);
         let now = belief_seconds(self.time);
         let heading = self
@@ -325,7 +326,7 @@ impl Engine {
             last_eligible_seen: _,
             stored_food,
             stall: _,
-            habits: _,
+            habits,
         } = mind;
         let stored_food = stored_food.map(crate::agent::CompactPosition::world);
         let grief_until = *grief_until;
@@ -431,6 +432,28 @@ impl Engine {
                     .map_or(ParentInput::Stay, ParentInput::Return)
             }
         });
+        // How it is now: needs past threshold, season, shelter or fire in view.
+        let situation = {
+            let shelter = perception.structures.iter().any(|structure| {
+                structure.kind == crate::StructureKind::Shelter
+                    && structure.state == crate::StructureState::Complete
+            });
+            let fire = perception
+                .structures
+                .iter()
+                .any(|structure| structure.kind.burns() && structure.working(now));
+            crate::cognition::Situation::new(
+                [
+                    needs.hunger.threshold_reached,
+                    needs.thirst.threshold_reached,
+                    needs.rest.threshold_reached,
+                    needs.exposure.threshold_reached,
+                ],
+                season,
+                shelter,
+                fire,
+            )
+        };
         let trip = std::cell::Cell::new(None);
         let deliberation = deliberate(
             origin,
@@ -463,6 +486,7 @@ impl Engine {
                 able,
                 stored_food,
                 trip: &trip,
+                habits: self.policy_options.learned.then_some((&*habits, situation)),
             },
         );
         self.minds.get_mut(agent).map.mark_decision(origin);
@@ -486,26 +510,6 @@ impl Engine {
         // Learn from the last choice by how discomfort changed since, then
         // start judging this one.
         {
-            let now_seconds = now;
-            let shelter = perception.structures.iter().any(|structure| {
-                structure.kind == crate::StructureKind::Shelter
-                    && structure.state == crate::StructureState::Complete
-            });
-            let fire = perception
-                .structures
-                .iter()
-                .any(|structure| structure.kind.burns() && structure.working(now_seconds));
-            let situation = crate::cognition::Situation::new(
-                [
-                    needs.hunger.threshold_reached,
-                    needs.thirst.threshold_reached,
-                    needs.rest.threshold_reached,
-                    needs.exposure.threshold_reached,
-                ],
-                self.season(),
-                shelter,
-                fire,
-            );
             let discomfort = crate::cognition::discomfort(
                 [needs.hunger, needs.thirst, needs.rest, needs.exposure]
                     .map(|level| (level.value, level.threshold)),

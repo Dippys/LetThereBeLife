@@ -453,6 +453,9 @@ pub struct PolicyOptions {
     pub social: bool,
     /// Hungry agents ask others for food, who may give some (requires `social`).
     pub helping: bool,
+    /// Being cold or tired is answered by the choice that has worked best
+    /// before (docs/plans/LEARNING.md phase 2), not a fixed order (requires `memory`).
+    pub learned: bool,
 }
 
 impl PolicyOptions {
@@ -464,6 +467,7 @@ impl PolicyOptions {
             sharing: true,
             social: true,
             helping: true,
+            learned: true,
         }
     }
 }

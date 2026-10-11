@@ -7,24 +7,25 @@
 //! Any change to behavior reshuffles which runs have episodes, so this does not
 //! pin one.
 //! It runs the standard band (two families, with children) for 1.2M ticks in
-//! every livable valley among seeds 1-78 (40 valleys, in parallel) and requires
+//! every livable valley among seeds 1-158 (87 valleys, in parallel) and requires
 //! at least `MIN_EPISODES` complete episodes in total, each traced through
 //! gesture ids by the communication log: the listener must act on its reading
 //! before it learns better, and the speaker's lesson must concern the meaning
-//! at stake. Since listeners report back what they found (D-097) the valleys
-//! held 79 episodes in 24 valleys (3 in 2 before); in the harder world of D-102,
-//! 42 in 22.
+//! at stake. Since listeners report back what they found (D-097) seeds 1-78
+//! held 79 episodes in 24 valleys (3 in 2 before); in the harder world of D-102
+//! about one per valley, so since D-105 the test spans seeds 1-158: 84 episodes
+//! in 41 of 87 valleys when widened.
 //! Release-only: `cargo test --release -p sim-headless --test success -- --ignored`.
 
 use sim_core::{DesiredEffect, LessonCause};
 use sim_headless::{StudyConfig, StudyReport, StudySpawn, SuccessEpisode, run_study};
 
-/// Seeds scanned for valleys (40 of them are livable).
-const SEEDS: std::ops::RangeInclusive<u64> = 1..=78;
-/// About half of the 79 episodes in 24 valleys measured, so ordinary behavior
+/// Seeds scanned for valleys (87 of them are livable).
+const SEEDS: std::ops::RangeInclusive<u64> = 1..=158;
+/// About half of the 84 episodes in 41 valleys measured, so ordinary behavior
 /// changes don't break it but losing the speaker's feedback would.
 const MIN_EPISODES: usize = 40;
-const MIN_VALLEYS: usize = 12;
+const MIN_VALLEYS: usize = 20;
 const TICKS: u64 = 1_200_000;
 
 #[test]
@@ -56,7 +57,7 @@ fn agents_misunderstand_act_and_both_sides_learn_from_what_they_observe() {
     });
     assert_eq!(
         reports.len(),
-        40,
+        87,
         "the livable valleys among the seeds changed"
     );
 

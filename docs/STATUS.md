@@ -141,10 +141,10 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Known problems and limitations
 
-- **Winter cold is the main killer** (D-102): fires mostly go out and people freeze near huts.
+- **Winter cold is still the main killer**, though learned choices (D-105) roughly halved it.
 - **Stored food is rarely eaten:** people put food away in huts but seldom come back for it.
-- **Decisions are hand-written.** Agents learn facts (food, danger, words, crafts), but what to do
-  about them is a script. Next: learning what works (docs/plans/LEARNING.md).
+- **Most decisions are still hand-written.** Cold and tiredness are answered by learned habits
+  (D-105); food, water, storage and social choices are still a script.
 - **Wolves are hard on loners.** Agents who wander off alone get bitten; wounded people now come
   round after 5 minutes, but some die of thirst while down or soon after.
 - **Helping matters only in famines.** With regrowth and game, nobody needs to ask for food; the M7
@@ -170,7 +170,9 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
-- 2026-10-11 (latest): huts nobody lives in fall down after two years (D-104).
+- 2026-10-11 (latest): learning what works, phase 2: cold and tiredness answered by experience
+  (D-105); far fewer people freeze.
+- 2026-10-11: huts nobody lives in fall down after two years (D-104).
 - 2026-10-11: learning what works, phase 1: habits learned silently (D-103).
 - 2026-10-11: a harder world: swimming, a 12-item load, hut storage, effort, learned
   huts, slower regrowth (D-102).
@@ -216,8 +218,8 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## What's next
 
-1. **Learning what works** (docs/plans/LEARNING.md): phase 1 (habits learned silently, D-103) is
-   done; next, phase 2 lets habits decide cold, shelter and storage.
+1. **Learning what works** (docs/plans/LEARNING.md): phases 1-2 done (D-103, D-105: cold and
+   tiredness). Next: copying others, then food, water and storage, then multi-step projects.
 2. **Save and load**, so a long run (e.g. 1,000 years) is computed once and opened instantly.
 3. **More speaker feedback**: speakers watching how listeners react, overhearing others.
 4. **Separated groups (continued)**: a lasting barrier or much longer isolation.
