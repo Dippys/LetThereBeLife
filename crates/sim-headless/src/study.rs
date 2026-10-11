@@ -1808,9 +1808,16 @@ impl fmt::Display for StudyReport {
             .take(4)
             .map(|(shape, count)| format!("{shape} ({count})"))
             .collect();
+        let readying: u64 = self
+            .wildlife
+            .plan_shapes
+            .iter()
+            .filter(|(shape, _)| shape.starts_with("ready"))
+            .map(|(_, count)| count)
+            .sum();
         write!(
             formatter,
-            "\n  plans: formed {formed}, completed {completed}, given up {revised}; most often: {}",
+            "\n  plans: formed {formed} ({readying} getting ready), completed {completed}, given up {revised}; most often: {}",
             common.join("; ")
         )?;
         let [open, sheltered, by_fire] = self.wildlife.sleeps;
@@ -1969,7 +1976,12 @@ impl fmt::Display for StudyAgentLine {
 
 /// A plan in a few words: "cold: Travel wood at hand > Gather > TendFire > WarmUp".
 pub fn plan_text(intention: &sim_core::IntentionView) -> String {
-    let need = ["hungry", "thirsty", "tired", "cold"][intention.need.min(3)];
+    let need = match intention.goal {
+        sim_core::Goal::Need(need) => {
+            ["hungry", "thirsty", "tired", "cold"][need.min(3)].to_owned()
+        }
+        sim_core::Goal::Ready(fact) => format!("ready ({})", sim_core::Facts::name(fact)),
+    };
     let steps: Vec<String> = intention
         .steps
         .iter()

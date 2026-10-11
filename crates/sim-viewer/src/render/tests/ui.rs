@@ -251,10 +251,10 @@ fn the_person_panel_says_what_they_do_feel_and_believe_in_plain_words() {
 
 #[test]
 fn someone_holding_a_plan_shows_what_is_left_of_it() {
-    use sim_core::{Choice, Facts, IntentionView, Step};
+    use sim_core::{Choice, Facts, Goal, IntentionView, Step};
     let mut agent = person();
     agent.intention = Some(IntentionView {
-        need: 3,
+        goal: Goal::Need(3),
         steps: [
             Step::new(Choice::Travel, Some(Facts::WOOD_NEAR)),
             Step::new(Choice::Gather, Some(Facts::HAS_WOOD)),

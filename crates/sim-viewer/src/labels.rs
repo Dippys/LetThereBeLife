@@ -368,7 +368,7 @@ pub fn duration(seconds: f64) -> String {
 }
 
 /// What's left of a plan, in words: "Plan: gather wood, then feed the fire,
-/// then warm up".
+/// then warm up", or "Getting ready: go to a hut" before a hard season.
 pub fn plan(intention: sim_core::IntentionView) -> Option<String> {
     let steps: Vec<&str> = intention
         .steps
@@ -376,7 +376,11 @@ pub fn plan(intention: sim_core::IntentionView) -> Option<String> {
         .skip(intention.step)
         .filter_map(|step| Some(plan_step(step.choice()?, step.fact())))
         .collect();
-    (!steps.is_empty()).then(|| format!("Plan: {}", steps.join(", then ")))
+    let label = match intention.goal {
+        sim_core::Goal::Need(_) => "Plan",
+        sim_core::Goal::Ready(_) => "Getting ready",
+    };
+    (!steps.is_empty()).then(|| format!("{label}: {}", steps.join(", then ")))
 }
 
 fn plan_step(choice: sim_core::Choice, fact: Option<u16>) -> &'static str {

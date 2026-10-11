@@ -34,25 +34,16 @@ fn memory_outlives_reactive_agents() {
     assert!(full.mean_known_places > 0);
 }
 
+/// Sociable people spend more time in company than loners. Whether social
+/// minds as a whole keep more company than minds without social features is
+/// no longer asserted: families, homes and camps keep everyone together
+/// anyway (D-122).
 #[test]
-fn social_minds_keep_company_and_sociability_matters() {
-    let run = |mind: PolicyOptions| {
-        let mut config = StudyConfig::new(1, 20, 120_000);
-        config.spawn = StudySpawn::Groups;
-        config.mind = mind;
-        run_study(config).expect("seed 1 has land for every group")
-    };
-    let sharing = run(PolicyOptions {
-        social: false,
-        ..PolicyOptions::full()
-    });
-    let social = run(PolicyOptions::full());
-    assert!(
-        social.company_percent > sharing.company_percent,
-        "company {}% vs {}%",
-        social.company_percent,
-        sharing.company_percent
-    );
+fn sociability_matters() {
+    let mut config = StudyConfig::new(1, 20, 120_000);
+    config.spawn = StudySpawn::Groups;
+    config.mind = PolicyOptions::full();
+    let social = run_study(config).expect("seed 1 has land for every group");
     let (_, _, loners, sociable) = social
         .trait_effects
         .iter()

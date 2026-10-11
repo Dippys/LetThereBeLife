@@ -153,6 +153,8 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
   over 20 valley-decades).
 - **Wolves are hard on loners.** Agents who wander off alone get bitten; wounded people now come
   round after 5 minutes, but some die of thirst while down or soon after.
+- **Social features no longer add company** (D-122): families, homes and camps keep people
+  together anyway; visiting and following hints mostly pull them apart.
 - **Asking for food no longer matters** (D-110). Even famine valleys (`--no-regrowth
   --no-wildlife --food 5`) are mild since storage and huts, and where people ask, nobody has food
   to spare: 6-11 gifts across 20 valleys, survival unchanged. The test now only checks that asking
@@ -170,14 +172,16 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
   code 9): 1 in 19 runs on 2026-10-09, 2 in 14 on 2026-10-10, then 0 in 8, then 2 in 8 `--valley`
   smokes after M7, then 1 in 12 smokes after the living world. It happens with and without agents. Cause unknown, possibly GPU teardown.
 - The world archive needs regenerating for generator v2 (`--pregenerate-world`).
-- **Minds are 1,760 B per agent** (mental map 372 B). That's fine at viewer scale; the spec's 10M
+- **Minds are 1,768 B per agent** (mental map 372 B). That's fine at viewer scale; the spec's 10M
   agents would need ~8 GB, so compaction comes later.
 - **Greedy waypoints can pace around obstacles.** Agents no longer step straight back to where they
   were and collapse into sleep when exhausted, but longer cycles are possible.
 
 ## Recent changes
 
-- 2026-10-12 (latest): plans for cold on: instinct first, plans when it has nothing good;
+- 2026-10-12 (latest): plans for hunger and thirst (D-119); people show others places they
+  don't know (D-121); getting ready for hard seasons built, off (D-120).
+- 2026-10-12: plans for cold on: instinct first, plans when it has nothing good;
   walks give up and avoid places they can't reach (D-118).
 - 2026-10-11: a cause-and-effect model per person (D-115); plans and intentions, built
   but off (D-116); perception a third faster, no spring stall (D-117); world and life seeds (D-114).
@@ -237,8 +241,9 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## What's next
 
-1. **Thinking agents** (docs/plans/THINKING.md): T0-T2 done; plans for cold are on (D-118).
-   Next: T3 hunger and thirst, T4 calm time, T5 anticipation, T6 other minds.
+1. **Thinking agents** (docs/plans/THINKING.md): plans for cold, hunger and thirst on (D-118,
+   D-119); people show others what they don't know (D-121). Getting ready for hard seasons is
+   built but off (D-120). Next: T4 calm time by plans, readiness by stocking, not staying.
 2. **Settlements:** homes (D-109), living plants (D-111) and warm hearths (D-112) are in. Next:
    people knowing whose hut is whose, and families sharing a home.
 3. **Learning what works** (docs/plans/LEARNING.md): phases 1-2 done, plus understanding what

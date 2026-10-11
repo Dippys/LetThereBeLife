@@ -1,6 +1,6 @@
 # Plan: agents that think, and lives that aren't predetermined
 
-Status: T0 (D-114), T1 (D-115) and T2 (D-116, D-118: plans for cold, on) done, 2026-10-12.
+Status: T0-T3 and T6 done (D-114 to D-119, D-121); T5 readiness built but off (D-120); T4 (calm time by plans) not started, 2026-10-12.
 D-108) and answers the owner's brief: agents react instead of thinking, and every run of a seed
 replays the same lives.
 

@@ -281,6 +281,10 @@ impl Engine {
                         greetings.push(other.id);
                     }
                     if let Some(slot) = mind.notice(other.id, other.position, now) {
+                        // Seen right at a place: they know it's there.
+                        for kind in places_beside(perception, other.position, now) {
+                            mind.social.credit_knowing(slot, kind);
+                        }
                         // Founders know the names of their own family's founders.
                         if let Some(name) = founder_names
                             .iter()
@@ -342,7 +346,30 @@ impl Engine {
             model,
             intention,
             avoid,
+            seasons,
         } = mind;
+        // How hard this season is, and what to get ready if the next one was
+        // hard last time it came round: being where a hut is if it was cold,
+        // having food on hand if it was hungry (in the last month before it).
+        let level =
+            |need: crate::NeedLevelView| crate::cognition::need_level(need.value, need.threshold);
+        seasons.felt(season as usize, level(needs.exposure), level(needs.hunger));
+        // Only in the last month of the season before: the rest of it is for
+        // the season's own work.
+        let late = u64::from(now) % crate::season::SEASON_SECONDS
+            >= crate::season::SEASON_SECONDS - crate::MONTH_SECONDS as u64;
+        let ready = {
+            let [cold, hungry] = seasons.remembered((season as usize + 1) % 4);
+            if !late {
+                None
+            } else if cold >= 100 {
+                Some(crate::cognition::Facts::SHELTER)
+            } else if hungry >= 100 {
+                Some(crate::cognition::Facts::HAS_FOOD)
+            } else {
+                None
+            }
+        };
         model.know_how(
             crafts.knows_hearths(),
             crafts.knows_huts(),
@@ -427,11 +454,23 @@ impl Engine {
             .then(|| dialogue.correction(now))
             .flatten()
             .and_then(|pending| people.whereabouts(pending.speaker));
+        // The kinds of place someone around isn't believed to know (strangers
+        // are believed to know nothing).
+        let unknown = perception
+            .agents
+            .iter()
+            .filter(|other| other.id != agent && can_watch(other.activity))
+            .fold(0_u8, |unknown, other| {
+                unknown
+                    | !people
+                        .slot_of(other.id)
+                        .map_or(0, |slot| people.knows(slot))
+            });
         let share = correction
             .map(|correction| (correction.place, u8::MAX))
             .or_else(|| {
                 (self.policy_options.sharing && company && map.share_ready(now, cooldown))
-                    .then(|| map.shareable(perception.area))
+                    .then(|| map.shareable(perception.area, unknown))
                     .flatten()
             });
         // Visit friends only when alone, or a partner who is out of sight;
@@ -510,6 +549,7 @@ impl Engine {
                 stored_food,
                 home,
                 avoid: avoid.place(now),
+                ready,
                 habits: self.policy_options.learned.then_some((&*habits, situation)),
                 model: &*model,
                 plans: self.policy_options.plans,
@@ -788,6 +828,12 @@ impl Engine {
                 food: mind.affordances.food_values(),
             };
             let understanding = understand(public, listener);
+            // Whoever points a place out (as it reads the gesture) knows it.
+            if let GestureTopic::Place(kind) = understanding.topic
+                && let Some(slot) = mind.social.slot_of(public.sender)
+            {
+                mind.social.credit_knowing(slot, kind);
+            }
             // Words are learned from the listener's own reading, right or wrong.
             if let Some(form) = public.vocal {
                 let heard_as = understanding.topic.concept();
@@ -1458,20 +1504,22 @@ impl Engine {
             }
         };
         let replaced =
-            before.goal().is_some() && after.goal().is_some() && before.formed != after.formed;
-        let ended = before.goal().is_some() && after.goal().is_none();
+            before.aim().is_some() && after.aim().is_some() && before.formed != after.formed;
+        let ended = before.aim().is_some() && after.aim().is_none();
         if replaced || ended {
-            let eased = before
-                .goal()
-                .is_some_and(|need| !facts.has(Facts::NEEDS[need]));
-            let kind = if eased && !replaced {
+            let achieved = match before.aim() {
+                Some(crate::cognition::Goal::Need(need)) => !facts.has(Facts::NEEDS[need]),
+                Some(crate::cognition::Goal::Ready(fact)) => facts.has(fact),
+                None => false,
+            };
+            let kind = if achieved && !replaced {
                 PlanEventKind::Completed
             } else {
                 PlanEventKind::Revised
             };
             log(kind, before);
         }
-        if after.goal().is_some() && (before.goal().is_none() || before.formed != after.formed) {
+        if after.aim().is_some() && (before.aim().is_none() || before.formed != after.formed) {
             log(PlanEventKind::Formed, after);
         }
     }
@@ -1625,4 +1673,35 @@ impl Engine {
     pub fn hint_outcomes(&self) -> &[HintOutcomeEvent] {
         &self.hint_outcomes
     }
+}
+
+/// The kinds of place right beside `position` in `perception`: water, a
+/// gatherable source, or a finished structure, within 2 cells.
+fn places_beside(
+    perception: &crate::PhysicalPerception,
+    position: WorldPosition,
+    now: u32,
+) -> impl Iterator<Item = LandmarkKind> + '_ {
+    let near =
+        move |at: WorldPosition| at.x.abs_diff(position.x).max(at.y.abs_diff(position.y)) <= 2;
+    let water = perception
+        .drinkable_water
+        .iter()
+        .any(|water| near(water.position))
+        .then_some(LandmarkKind::Water);
+    let sources = perception
+        .resources
+        .iter()
+        .filter(move |resource| near(resource.position))
+        .filter_map(|resource| LandmarkKind::of_material(resource.resource.kind));
+    let built = perception
+        .structures
+        .iter()
+        .filter(move |structure| {
+            near(structure.position)
+                && structure.state == crate::StructureState::Complete
+                && (structure.kind != crate::StructureKind::Hearth || structure.working(now))
+        })
+        .map(|structure| LandmarkKind::Structure(structure.kind));
+    water.into_iter().chain(sources).chain(built)
 }

@@ -719,10 +719,11 @@ impl MentalMap {
     }
 
     /// Next first-hand place worth pointing out to someone nearby: outside the
-    /// current view (they could see it themselves otherwise), rotating through
-    /// memories so repeated encounters share different places. Returns the place
-    /// and its rotation rank for `mark_shared`.
-    pub(crate) fn shareable(&self, view: WorldRect) -> Option<(WorldPosition, u8)> {
+    /// current view (they could see it themselves otherwise), of a kind
+    /// someone around isn't believed to know (`unknown`, a bit per kind) if it
+    /// has one, else rotating through memories so repeated encounters share
+    /// different places. Returns the place and its rotation rank for `mark_shared`.
+    pub(crate) fn shareable(&self, view: WorldRect, unknown: u8) -> Option<(WorldPosition, u8)> {
         let order = [
             LandmarkKind::Water,
             LandmarkKind::BERRIES,
@@ -732,15 +733,24 @@ impl MentalMap {
             LandmarkKind::BITTERBERRIES,
             LandmarkKind::STONE,
         ];
+        let known_here = |slot: usize| {
+            let landmark = self.landmarks[slot];
+            !landmark.is_empty() && landmark.is_first_hand() && !contains(view, landmark.position())
+        };
+        // Something the others around don't know: that's worth showing first.
+        if let Some((rank, slot)) = order
+            .iter()
+            .flat_map(|&kind| slot_range(kind))
+            .filter(|&slot| known_here(slot))
+            .enumerate()
+            .find(|&(_, slot)| unknown & (1 << kind_of_slot(slot).index()) != 0)
+        {
+            return Some((self.landmarks[slot].position(), rank as u8));
+        }
         let mut candidates = order
             .iter()
             .flat_map(|&kind| slot_range(kind))
-            .filter(|&slot| {
-                let landmark = self.landmarks[slot];
-                !landmark.is_empty()
-                    && landmark.is_first_hand()
-                    && !contains(view, landmark.position())
-            })
+            .filter(|&slot| known_here(slot))
             .map(|slot| self.landmarks[slot].position())
             .chain(self.recent_explored_markers(view))
             .enumerate()

@@ -29,8 +29,8 @@ pub use gesture::Gesture;
 pub(crate) use gesture::reach_toward;
 pub use habits::{Choice, EFFECTS, EffectView, HABIT_SLOTS, HabitView, Situation};
 pub(crate) use habits::{Habits, discomfort};
-pub(crate) use intention::{Abilities, Intention, plan};
-pub use intention::{IntentionView, PLAN_STEPS, Step};
+pub(crate) use intention::{Abilities, Intention, plan, plan_ready};
+pub use intention::{Goal, IntentionView, PLAN_STEPS, Step};
 pub(crate) use lexicon::Lexicon;
 pub use lexicon::{Concept, FAMILY_SIZE, LEXICON_SLOTS, LexiconEntryView, VOCAL_FORMS, VocalForm};
 pub(crate) use map::{HintCheck, HintSource, MentalMap, spent_kinds, visible_kinds};
@@ -491,7 +491,8 @@ pub struct PolicyOptions {
     pub learned: bool,
     /// The needs met by planning (docs/plans/THINKING.md): bit `1 << NeedKind
     /// index` set means that need is eased by a plan from the agent's own
-    /// cause-and-effect model, held as an intention (requires `memory`).
+    /// cause-and-effect model, held as an intention; bit 4 gets ready for a
+    /// hard season it remembers coming (requires `memory`).
     pub plans: u8,
 }
 
@@ -505,7 +506,10 @@ impl PolicyOptions {
             social: true,
             helping: true,
             learned: true,
-            plans: 1 << crate::NeedKind::Exposure as u8,
+            // Getting ready for hard seasons (bit 4) is built but off (D-120).
+            plans: 1 << crate::NeedKind::Hunger as u8
+                | 1 << crate::NeedKind::Thirst as u8
+                | 1 << crate::NeedKind::Exposure as u8,
         }
     }
 }
@@ -558,6 +562,39 @@ pub(crate) struct Mind {
     pub(crate) intention: Intention,
     /// A place it recently couldn't get to.
     pub(crate) avoid: Avoid,
+    /// How hard each season was, the last time it lived through it.
+    pub(crate) seasons: SeasonMemory,
+}
+
+/// How cold and how hungry it got in each season the last time it came round
+/// (hundredths of the need's threshold, so 100 means it pressed), and this
+/// season so far.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct SeasonMemory {
+    last: [[u8; 2]; 4],
+    this: [u8; 2],
+    /// The season `this` is about, + 1 (0 before it has felt any).
+    season: u8,
+}
+
+impl SeasonMemory {
+    /// It feels `cold` and `hungry` (need levels) in `season` (index).
+    pub(crate) fn felt(&mut self, season: usize, cold: u8, hungry: u8) {
+        let season = season as u8 % 4 + 1;
+        if self.season != season {
+            if self.season != 0 {
+                self.last[usize::from(self.season - 1)] = self.this;
+            }
+            self.this = [0, 0];
+            self.season = season;
+        }
+        self.this = [self.this[0].max(cold), self.this[1].max(hungry)];
+    }
+
+    /// How cold and how hungry `season` (index) got last time.
+    pub(crate) fn remembered(self, season: usize) -> [u8; 2] {
+        self.last[season % 4]
+    }
 }
 
 /// Seconds a place it couldn't get to is kept clear of.

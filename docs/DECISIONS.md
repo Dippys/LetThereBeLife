@@ -898,3 +898,45 @@ instinct's better nearby options, and people circled fires they couldn't reach o
 deaths from cold 33 against 34; 1,372 plans formed, 585 completed, 783 given up (mostly rethought on
 arrival or for a better option). Without plans, the fixes alone took survival from 470 to 480.
 
+## D-119: Plans for hunger and thirst on (2026-10-12)
+
+**Decision:** Hunger and thirst are met by the same planner as cold (D-118): instinct first, a
+plan when experience vouches for nothing at hand ("go to the bushes I remember, pick, eat").
+**Why:** THINKING.md T3. Instinct already handles food and water well, so this matters where it
+has nothing: food stored in a hut, a remembered spring.
+**Consequences:** Neutral on survival (480 against 482 over 10 years in 20 valleys), as expected.
+
+## D-120: Getting ready for hard seasons, built but off (2026-10-12)
+
+**Decision:** Each mind remembers how cold and hungry each season got last time it came round (11
+bytes). With the readiness bit (`--plans 27`), a calm person whose next season was hard last time
+forms an intention to get something ready (`Goal::Ready`): be where a hut is if it was cold, have
+food on hand if it was hungry, only in the last month before it. Shown as "Getting ready: ...".
+Off by default.
+**Why:** THINKING.md T5, anticipation from lived seasons.
+**Consequences:** Over 10 years in 20 valleys, readiness all through autumn did worse (460
+survivors against 482: pulled home, people skipped autumn's work of wood, food and hearths); in
+the last month only, neutral (487 against 493, cold deaths 27 both). Next: get ready by stocking,
+not by staying, once storing and fetching are worth it.
+
+## D-121: People believe what others know, and show them what they don't (2026-10-12)
+
+**Decision:** Each acquaintance record keeps the kinds of place the person believes they know (the
+byte that was spare): seen standing right at water, a source or a hut, or seen pointing one out.
+When sharing, a person shows first a place of a kind someone around isn't believed to know
+(strangers know nothing), and otherwise rotates through its places as before.
+**Why:** THINKING.md T6: "she doesn't know where the water is, so I'll show her."
+**Consequences:** Over 10 years in 20 valleys: 493 survivors against 480, deaths from cold 27
+against 33; receptions that told the listener something new rose from 380,000 to 691,000 (20% to
+30% of receptions), spread over every kind of place instead of mostly water.
+
+## D-122: Social minds no longer keep more company than others (2026-10-12)
+
+**Decision:** The study test keeps only "sociable people spend more time in company than
+loners"; it no longer asserts that social minds keep more company than minds without social
+features. The user chose to record it and keep the part that still holds.
+**Why:** With D-121 the one seed it checked flipped (29% against 30%), and across seeds the claim
+had already stopped holding (seed 5: 25% against 62% before D-121): families, homes and shared
+camps now keep everyone together, so visiting friends and following hints mostly pull people
+apart. Informative pointing-out (D-121) sends listeners off to see places they didn't know.
+

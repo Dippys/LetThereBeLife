@@ -215,7 +215,7 @@ fn explored_gestures_mark_ground_for_watchers() {
         .get(AgentId::new(0))
         .unwrap()
         .map
-        .shareable(perception.area)
+        .shareable(perception.area, 0)
         .expect("far explored tile is shareable");
     let before = engine
         .mental_map(AgentId::new(1))

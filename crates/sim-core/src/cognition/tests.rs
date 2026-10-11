@@ -81,10 +81,10 @@ fn mind_layout_is_bounded() {
     assert_eq!(size_of::<super::PendingCorrection>(), 32);
     assert_eq!(size_of::<super::Dialogue>(), 112);
     // Map 372, social 240, lexicon 192, habits 204, dialogue 112, home 8, model 536,
-    // intention 20, avoid 12, beliefs 15 + 6 + 2,
+    // intention 20, avoid 12, seasons 11, beliefs 15 + 6 + 2,
     // child flag, parent id, grief and loneliness timers, and padding.
     assert_eq!(size_of::<MentalMap>(), 372);
-    assert_eq!(size_of::<super::Mind>(), 1_760);
+    assert_eq!(size_of::<super::Mind>(), 1_768);
 }
 
 #[test]
@@ -267,7 +267,7 @@ fn sharing_rotates_through_places_outside_the_view() {
         );
     }
     let here = view_around(at(0, 0)).area;
-    let (first, rank) = map.shareable(here).expect("far lake is shareable");
+    let (first, rank) = map.shareable(here, 0).expect("far lake is shareable");
     assert_eq!(
         first,
         at(200, 0),
@@ -277,9 +277,9 @@ fn sharing_rotates_through_places_outside_the_view() {
     assert!(!map.share_ready(30, SHARE_COOLDOWN_SECONDS));
     assert!(map.share_ready(65, SHARE_COOLDOWN_SECONDS));
     let elsewhere = view_around(at(1_000, 1_000)).area;
-    let (first, first_rank) = map.shareable(elsewhere).unwrap();
+    let (first, first_rank) = map.shareable(elsewhere, 0).unwrap();
     map.mark_shared(70, first_rank);
-    let (second, _) = map.shareable(elsewhere).unwrap();
+    let (second, _) = map.shareable(elsewhere, 0).unwrap();
     assert_ne!(first, second, "the next encounter shares a different place");
 }
 
@@ -372,7 +372,7 @@ fn explored_ground_can_be_shared_and_marked() {
     observe(&mut map, 1, at(500, 500), &view_around(at(500, 500)), 1);
     let here = view_around(at(0, 0)).area;
     let (marker, _) = map
-        .shareable(here)
+        .shareable(here, 0)
         .expect("explored tile far away is shareable");
     assert!(map.is_explored_marker(marker));
     let mut watcher = MentalMap::default();
@@ -577,4 +577,39 @@ fn a_home_holds_through_nights_away_until_attachment_wears_off() {
     assert!(home.far_from(at(40, 400)) && !home.far_from(at(41, 4)));
     home.lost();
     assert_eq!(home.hut(), None);
+}
+
+#[test]
+fn someone_is_shown_the_kind_of_place_they_are_not_believed_to_know() {
+    let mut map = MentalMap::default();
+    let lake = at(200, 0);
+    observe(
+        &mut map,
+        1,
+        lake,
+        &with_water(view_around(lake), &[lake]),
+        1,
+    );
+    let bushes = at(0, 200);
+    let mut seen = view_around(bushes);
+    seen.resources.push(PerceivedResource {
+        position: bushes,
+        resource: BaseResource {
+            capacity: 12,
+            kind: Material::Berries,
+        },
+    });
+    observe(&mut map, 1, bushes, &seen, 2);
+    let here = view_around(at(1_000, 1_000)).area;
+    // They're believed to know the water already, not the berries.
+    let mut social = SocialMemory::default();
+    let slot = social.notice(AgentId::new(7), at(0, 0), 3).unwrap().slot;
+    social.credit_knowing(slot, LandmarkKind::Water);
+    let unknown = !social.knows(slot);
+    let (place, _) = map.shareable(here, unknown).unwrap();
+    assert_eq!(
+        place, bushes,
+        "the water they know isn't worth showing first"
+    );
+    assert_eq!(map.shareable(here, 0).unwrap().0, lake, "otherwise in turn");
 }

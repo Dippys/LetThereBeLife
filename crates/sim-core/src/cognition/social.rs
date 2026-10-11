@@ -77,7 +77,9 @@ struct Acquaintance {
     name: u16,
     /// How many times in a row it has heard them called something else.
     name_doubt: u8,
-    _reserved: u8,
+    /// The kinds of place it believes they know (a bit per `LandmarkKind`
+    /// index): it saw them there, or they pointed one out.
+    knows: u8,
 }
 
 const NO_NAME: u16 = u16::MAX;
@@ -97,7 +99,7 @@ impl Default for Acquaintance {
             ties: 0,
             name: NO_NAME,
             name_doubt: 0,
-            _reserved: 0,
+            knows: 0,
         }
     }
 }
@@ -313,6 +315,16 @@ impl SocialMemory {
         self.slots
             .iter()
             .any(|known| known.agent != EMPTY && known.name == name.0)
+    }
+
+    /// It has reason to think they know places of `kind`.
+    pub(crate) fn credit_knowing(&mut self, slot: u8, kind: super::LandmarkKind) {
+        self.slots[usize::from(slot)].knows |= 1 << kind.index();
+    }
+
+    /// The kinds of place it believes they know (a bit per `LandmarkKind` index).
+    pub(crate) fn knows(&self, slot: u8) -> u8 {
+        self.slots[usize::from(slot)].knows
     }
 
     pub(crate) fn last_seen(&self, slot: u8) -> u32 {

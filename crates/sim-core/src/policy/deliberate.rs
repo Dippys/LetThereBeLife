@@ -183,6 +183,8 @@ pub(crate) struct MindInput<'a> {
     pub(crate) home: Option<WorldPosition>,
     /// A place it recently couldn't get to, avoided for now.
     pub(crate) avoid: Option<WorldPosition>,
+    /// Something to get ready for a hard season it remembers coming.
+    pub(crate) ready: Option<u16>,
     /// Its habits and situation, when choices are learned (phase 2).
     pub(crate) habits: Option<(&'a crate::cognition::Habits, crate::cognition::Situation)>,
     /// Its cause-and-effect model, and the needs it meets by planning (a bit
@@ -242,20 +244,37 @@ pub(crate) fn deliberate(
             && (mind.able || kind.properties().handling != crate::Handling::Chop)
     });
     let urgent = most_urgent(needs);
-    // An intention whose need has eased is done; with nothing pressing, it
-    // starts afresh (plans that failed are forgiven).
-    if urgent.is_none()
-        || mind
-            .intention
-            .get()
-            .goal()
-            .is_some_and(|goal| !mind.facts.has(crate::cognition::Facts::NEEDS[goal]))
-    {
+    // An intention is done once its need has eased (with nothing pressing,
+    // plans that failed are forgiven), or what it was getting ready holds or
+    // no longer matters.
+    let done = match mind.intention.get().aim() {
+        Some(crate::cognition::Goal::Need(need)) => {
+            urgent.is_none() || !mind.facts.has(crate::cognition::Facts::NEEDS[need])
+        }
+        Some(crate::cognition::Goal::Ready(fact)) => {
+            mind.facts.has(fact) || mind.ready != Some(fact)
+        }
+        None => urgent.is_none(),
+    };
+    if done {
         mind.intention.set(crate::cognition::Intention::default());
     }
     let instinctive = instinct(&planner, urgent, inventory, water_here, food_here);
     // About to collapse, it sleeps where it stands (a reflex, not a plan).
     let collapsing = needs.rest.value >= crate::REST_COLLAPSE;
+    // Nothing pressing, and a hard season coming that it remembers: get ready.
+    if urgent.is_none()
+        && mind.plans & PLANS_READY != 0
+        && let Some(fact) = mind.ready
+        && let Some(readying) = planner.planned(
+            crate::cognition::Goal::Ready(fact),
+            inventory,
+            water_here,
+            food_here,
+        )
+    {
+        return readying;
+    }
     let Some(need) = urgent.filter(|&need| {
         mind.plans & (1 << need as u8) != 0 && !(need == NeedKind::Rest && collapsing)
     }) else {
@@ -268,7 +287,12 @@ pub(crate) fn deliberate(
         return instinctive;
     }
     planner
-        .planned(need as usize, inventory, water_here, food_here)
+        .planned(
+            crate::cognition::Goal::Need(need as usize),
+            inventory,
+            water_here,
+            food_here,
+        )
         .unwrap_or(instinctive)
 }
 
@@ -617,26 +641,26 @@ impl Planner<'_> {
         })
     }
 
-    /// Eases `need` by its intention: follows the step it's on, or forms a
-    /// plan from its own beliefs if it has none for this need. A step it
-    /// can't take (and what it lacked) is noted, and it thinks again once.
+    /// Works toward `goal` by its intention: follows the step it's on, or
+    /// forms a plan from its own beliefs if it has none for this goal. A step
+    /// it can't take (and what it lacked) is noted, and it thinks again once.
     /// None when it can think of no plan: instinct then decides.
     fn planned(
         &self,
-        need: usize,
+        goal: crate::cognition::Goal,
         inventory: InventoryView,
         water_here: Option<WorldPosition>,
         food_here: Option<WorldPosition>,
     ) -> Option<Deliberation> {
-        use crate::cognition::{Abilities, Intention, plan};
+        use crate::cognition::{Abilities, Goal, Intention, plan, plan_ready};
         let cell = self.mind.intention;
         let mut intention = cell.get();
         let now = (self.needs.at.ticks() / 60) as u32;
-        if intention.goal() != Some(need) && intention.revisions == 0 {
+        if intention.aim() != Some(goal) && intention.revisions == 0 {
             intention = Intention::default();
         }
-        // Plans for this need keep failing: leave it to instinct until it eases.
-        if intention.goal().is_none() && intention.revisions >= GIVE_UP_PLANNING {
+        // Plans for this keep failing: leave it to instinct until it's over.
+        if intention.aim().is_none() && intention.revisions >= GIVE_UP_PLANNING {
             cell.set(intention);
             return None;
         }
@@ -660,31 +684,34 @@ impl Planner<'_> {
             can_reach: &can_reach,
             worth: &worth,
         };
-        // Something much better than the plan it holds has turned up: think again.
-        if intention.goal().is_some()
-            && let Some(fresh) = plan(
+        let think = |revisions: u8| match goal {
+            Goal::Need(need) => plan(
                 self.mind.model,
                 self.mind.facts,
                 need,
                 &abilities,
-                intention.revisions,
+                revisions,
                 now,
-            )
+            ),
+            Goal::Ready(fact) => plan_ready(
+                self.mind.model,
+                self.mind.facts,
+                fact,
+                &abilities,
+                revisions,
+                now,
+            ),
+        };
+        // Something much better than the plan it holds has turned up: think again.
+        if intention.aim().is_some()
+            && let Some(fresh) = think(intention.revisions)
             && intention.outdone_by(&fresh)
         {
             intention = fresh;
         }
         for _ in 0..2 {
-            if intention.goal().is_none() {
-                let revisions = intention.revisions;
-                let Some(fresh) = plan(
-                    self.mind.model,
-                    self.mind.facts,
-                    need,
-                    &abilities,
-                    revisions,
-                    now,
-                ) else {
+            if intention.aim().is_none() {
+                let Some(fresh) = think(intention.revisions) else {
                     break;
                 };
                 intention = fresh;
@@ -695,7 +722,10 @@ impl Planner<'_> {
                 continue;
             };
             let choice = step.choice()?;
-            let reason = need_reason(need);
+            let reason = match goal {
+                Goal::Need(need) => need_reason(need),
+                Goal::Ready(_) => PolicyReason::NoUrgentNeed,
+            };
             let done = match self.carry_out(
                 choice,
                 step.fact(),
@@ -1782,6 +1812,9 @@ impl Deliberation {
         self
     }
 }
+
+/// The `MindInput::plans` bit for getting ready for hard seasons.
+pub(crate) const PLANS_READY: u8 = 1 << 4;
 
 /// Cells from a trip's destination that count as there.
 const ARRIVED: u64 = 2;

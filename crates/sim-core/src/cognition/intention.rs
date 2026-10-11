@@ -72,7 +72,9 @@ pub(crate) struct Intention {
     /// Simulated second it was formed.
     pub(crate) formed: u32,
     steps: [Step; PLAN_STEPS],
-    /// The need it eases (`NeedKind` index) + 1; 0 when it intends nothing.
+    /// What it's for: a need it eases (`NeedKind` index + 1), or something
+    /// to get ready (`FACT_GOAL` + index into `EFFECTS`); 0 when it intends
+    /// nothing.
     goal: u8,
     /// The step it's on.
     step: u8,
@@ -84,11 +86,22 @@ pub(crate) struct Intention {
     score: u32,
 }
 
+/// What an intention is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Goal {
+    /// Easing a pressing need (`NeedKind` index).
+    Need(usize),
+    /// Getting something ready before it's needed (a fact, see `Facts`).
+    Ready(u16),
+}
+
+/// `Intention::goal` values from here on are facts to get ready.
+const FACT_GOAL: u8 = 16;
+
 /// An intention as tools and the viewer see it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IntentionView {
-    /// The need it eases, in `NeedKind` order.
-    pub need: usize,
+    pub goal: Goal,
     pub steps: [Step; PLAN_STEPS],
     /// The step it's on.
     pub step: usize,
@@ -104,11 +117,14 @@ impl Intention {
         }
     }
 
-    pub(crate) const fn goal(self) -> Option<usize> {
-        if self.goal == 0 {
-            None
-        } else {
-            Some(self.goal as usize - 1)
+    /// What it's for, if anything.
+    pub(crate) fn aim(self) -> Option<Goal> {
+        match self.goal {
+            0 => None,
+            goal if goal >= FACT_GOAL => EFFECTS
+                .get(usize::from(goal - FACT_GOAL))
+                .map(|&fact| Goal::Ready(fact)),
+            goal => Some(Goal::Need(usize::from(goal - 1))),
         }
     }
 
@@ -143,7 +159,7 @@ impl Intention {
 
     pub(crate) fn view(self) -> Option<IntentionView> {
         Some(IntentionView {
-            need: self.goal()?,
+            goal: self.aim()?,
             steps: self.steps,
             step: usize::from(self.step),
             formed: self.formed,
@@ -232,6 +248,44 @@ pub(crate) fn plan(
         formed: now,
         steps,
         goal: need as u8 + 1,
+        step: 0,
+        tries: 0,
+        revisions,
+        score: score.min(u64::from(u32::MAX)) as u32,
+    })
+}
+
+/// The longest plan to get something ready, in expected seconds.
+const LONGEST_READYING_SECONDS: u32 = 900;
+
+/// Searches `model` for the best short plan to bring `fact` about from
+/// `facts`, before it's needed: a trip, or actions believed to produce it.
+pub(crate) fn plan_ready(
+    model: &Model,
+    facts: Facts,
+    fact: u16,
+    abilities: &Abilities<'_>,
+    revisions: u8,
+    now: u32,
+) -> Option<Intention> {
+    if facts.has(fact) {
+        return None;
+    }
+    let way = achieve(model, facts, fact, abilities, 2)?;
+    if way.steps.is_empty()
+        || way.steps.len() > PLAN_STEPS
+        || way.seconds > LONGEST_READYING_SECONDS
+    {
+        return None;
+    }
+    let index = EFFECTS.iter().position(|&effect| effect == fact)?;
+    let mut steps = [Step::default(); PLAN_STEPS];
+    steps[..way.steps.len()].copy_from_slice(&way.steps);
+    let score = u64::from(way.chance) * 60 / u64::from(way.seconds.max(1));
+    Some(Intention {
+        formed: now,
+        steps,
+        goal: FACT_GOAL + index as u8,
         step: 0,
         tries: 0,
         revisions,
