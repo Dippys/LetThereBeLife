@@ -340,6 +340,12 @@ impl Engine {
         {
             return Err(PolicyFailureReason::TargetUnavailable);
         }
+        if self.policy_options.memory {
+            self.minds.get_mut(agent).model.used(
+                crate::cognition::Choice::TendFire,
+                crate::cognition::Facts::HAS_WOOD,
+            );
+        }
         self.fire_events.push(crate::FireEvent {
             agent,
             at: fire,
@@ -347,6 +353,7 @@ impl Engine {
         });
         if self.policy_options.memory {
             self.minds.get_mut(agent).crafts.saw_warming();
+            let relit = !was_burning;
             let watchers: Vec<AgentId> = self
                 .perceive_physical(agent, crate::PHYSICAL_POLICY_RADIUS)
                 .map(|perception| {
@@ -361,7 +368,16 @@ impl Engine {
                 })
                 .unwrap_or_default();
             for watcher in watchers {
-                self.minds.get_mut(watcher).crafts.saw_warming();
+                let mind = self.minds.get_mut(watcher);
+                mind.crafts.saw_warming();
+                // Seen fed back to life, a fire shows what fuel does for it.
+                if relit {
+                    mind.model.saw(
+                        crate::cognition::Choice::TendFire,
+                        crate::cognition::Facts::HAS_WOOD | crate::cognition::Facts::DEAD_FIRE,
+                        crate::cognition::Facts::FIRE,
+                    );
+                }
             }
         }
         Ok(())
@@ -579,6 +595,12 @@ impl Engine {
         if self.population.take(agent, input, amount) < amount {
             return Err(PolicyFailureReason::InconsistentState);
         }
+        if self.policy_options.memory {
+            self.minds.get_mut(agent).model.used(
+                crate::cognition::Choice::Craft,
+                crate::cognition::Facts::HAS_STONE,
+            );
+        }
         self.population.add_inventory(agent, made, 1);
         let watchers: Vec<AgentId> = self
             .perceive_physical(agent, crate::PHYSICAL_POLICY_RADIUS)
@@ -596,7 +618,13 @@ impl Engine {
         if self.policy_options.memory {
             self.minds.get_mut(agent).crafts.saw_knapping();
             for &watcher in &watchers {
-                self.minds.get_mut(watcher).crafts.saw_knapping();
+                let mind = self.minds.get_mut(watcher);
+                mind.crafts.saw_knapping();
+                mind.model.saw(
+                    crate::cognition::Choice::Craft,
+                    crate::cognition::Facts::HAS_STONE,
+                    crate::cognition::Facts::HAS_BLADE,
+                );
             }
         }
         self.craft_events.push(crate::CraftEvent {
@@ -628,6 +656,10 @@ impl Engine {
         }
         let retched = properties.toxicity > 0;
         let eater = self.minds.get_mut(agent);
+        eater.model.used(
+            crate::cognition::Choice::Eat,
+            crate::cognition::Facts::HAS_FOOD,
+        );
         let first_taste = !eater.affordances.knows(material);
         eater.affordances.felt(material, properties);
         let watchers: Vec<AgentId> = self

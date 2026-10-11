@@ -184,6 +184,24 @@ impl ResourceDeltas {
         }))
     }
 
+    /// What's left of the generated feature `base` at `position` (already
+    /// looked up), grown back to now.
+    pub(crate) fn remaining_of(
+        &self,
+        position: WorldPosition,
+        base: BaseResource,
+    ) -> Option<BaseResource> {
+        let remaining = CompactFeaturePosition::checked(position)
+            .and_then(|key| self.remaining.get(&key))
+            .map_or(base.capacity, |delta| {
+                regrown(delta.remaining, delta.since, base, self.now)
+            });
+        (remaining > 0).then_some(BaseResource {
+            capacity: remaining,
+            kind: base.kind,
+        })
+    }
+
     pub(crate) fn gather(
         &mut self,
         world: &World,

@@ -98,6 +98,7 @@ fn mind(lexicon: Vec<LexiconEntryView>, acquaintances: Vec<AcquaintanceView>) ->
         habits: Vec::new(),
         effects: Vec::new(),
         home: None,
+        beliefs: Vec::new(),
         acquaintances,
         lexicon,
     }
@@ -148,6 +149,7 @@ fn person() -> AgentInspection {
             stage: sim_core::LifeStage::Child,
         }),
         motherhood: None,
+        intention: None,
         memory: Some(MemoryInspection::from_view(&mind(
             vec![
                 word(1, Concept::Water, 9, 1),
@@ -245,6 +247,28 @@ fn the_person_panel_says_what_they_do_feel_and_believe_in_plain_words() {
         "halfway from threshold to the limit"
     );
     assert_eq!(bar("Tiredness").2, colors::UI_NEED);
+}
+
+#[test]
+fn someone_holding_a_plan_shows_what_is_left_of_it() {
+    use sim_core::{Choice, Facts, IntentionView, Step};
+    let mut agent = person();
+    agent.intention = Some(IntentionView {
+        need: 3,
+        steps: [
+            Step::new(Choice::Travel, Some(Facts::WOOD_NEAR)),
+            Step::new(Choice::Gather, Some(Facts::HAS_WOOD)),
+            Step::new(Choice::TendFire, Some(Facts::FIRE)),
+            Step::new(Choice::WarmUp, None),
+        ],
+        step: 1,
+        formed: 0,
+    });
+    let rows = person_rows(&agent);
+    assert!(rows.contains(&Row::Status {
+        doing: "Looking for food".to_owned(),
+        why: Some("Plan: gather wood, then feed the fire, then warm up".to_owned()),
+    }));
 }
 
 #[test]

@@ -834,3 +834,51 @@ Rule 3 in AGENTS.md now reads: the world is fixed; lives are not predetermined, 
 **Consequences:** Seed 1 with life seeds 1, 2, 3 gives different histories in the same valley.
 Valley spawn positions still come from the world seed.
 
+## D-115: A cause-and-effect model per person (2026-10-11)
+
+**Decision:** Each mind holds a `Model` (536 bytes): for each of the 18 kinds of action, what it
+brought about that didn't hold before (counts per fact), how much it eased each need, how long it
+takes, and what it needs. Facts are 16 bits a person perceives: its pressing needs, what's at hand
+(water, food it believes edible, wood, stone, a burning fire, a fire gone out, a hut, stored food)
+and what it carries. What an action needs is learned only from evidence: using something up (felt
+when fuel, wood, stone or food leave its hands), finding it couldn't do it without something, or
+watching others (a fire relit, a hut finished, a blade knapped); never from what happened to be
+around, which made coincidences (water by every camp) look like needs. Trips to remembered places
+count as travel, not as the action at the end (habits keep their own classification). Everyone
+starts with instincts (drink at water, eat what you carry, pick food, sleep, gather wood); knowing a
+craft adds its know-how. Mind 1,752 bytes.
+**Why:** docs/plans/THINKING.md T1: what agents do should come from what they know.
+**Consequences:** After two years, people believe drinking needs water at hand, picking food gets
+food, building needs wood and gives a hut, knapping needs stone and gives a blade, feeding a fire
+needs a fire gone out and wood. No behaviour change.
+
+## D-116: Plans and one intention, off until they're better (2026-10-11)
+
+**Decision:** `PolicyOptions::plans` (a bit per need; `--plans MASK` in the study) lets a pressing
+need be eased by a plan: a backward search through the person's own model, up to 4 steps, each a
+trip (costed by the distance to the remembered place) or an action believed to bring the next fact
+about at least half the time, scored by relief per minute and its chance; plans over 7 minutes
+aren't started. The person holds one `Intention` (20 bytes) and follows it step by step with the
+existing actions, notes what it lacked when a step can't be done, changes its mind when a different
+plan looks twice as good, and after two failed plans for a need leaves it to instinct until it
+eases. Plans show in the person panel ("Plan: gather wood, then feed the fire, then warm up"), in
+`--trace`, and in the study. Off by default.
+Fixes found on the way, on for everyone: every trip to an out-of-view place is given up when the
+person stops getting closer (trips relabelled as warming used to loop until the person froze), and
+a fire nobody can get beside isn't chosen for warming or feeding.
+**Why:** THINKING.md T2 (cold first), measured before switching on.
+**Consequences:** Over 3 years in 8 valleys, without plans: 156 survivors, 2 cold deaths (the two
+fixes; 153 and 6 before). With plans for cold: 148 and 11; 98 plans formed, 51 completed, 39 given
+up. Plans are mostly "go to a fire, warm up", "go to a hut, sleep", "feed the fire, warm up".
+
+## D-117: Faster perception; plants' spring step near people only (2026-10-11)
+
+**Decision:** Perception looks up each cell's terrain and feature once, chunk by chunk
+(`World::visit_area`), instead of about a dozen separate lookups per cell; results are identical.
+The yearly plant step counts a seedling's patch with a sorted index of living plants instead of
+scanning every feature in the world twice per seedling, and only plants within 512 cells of
+someone living die and seed.
+**Why:** The user asked for faster runs, and reported a stall at the turn of spring in the viewer:
+the plant step was quadratic in the plants loaded, and the viewer loads far more than a valley.
+**Consequences:** A valley year runs in 4.1 s instead of 6.2 s (perception 2.8 s to 0.9 s).
+

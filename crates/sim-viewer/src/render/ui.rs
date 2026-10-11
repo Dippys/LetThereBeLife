@@ -682,6 +682,10 @@ fn doing(agent: &AgentInspection) -> (String, Option<String>) {
         _ => {}
     }
     match agent.policy {
+        // Holding a plan, the plan is the why: what's left of it.
+        Some(policy) if let Some(plan) = agent.intention.and_then(labels::plan) => {
+            (labels::goal(policy.goal).to_owned(), Some(plan))
+        }
         Some(policy) => (
             labels::goal(policy.goal).to_owned(),
             labels::reason(policy.reason).map(capitalized),

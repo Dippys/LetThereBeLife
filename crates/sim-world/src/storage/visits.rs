@@ -103,6 +103,55 @@ impl World {
         }
     }
 
+    /// Visits every resident cell in `bounds` with the feature on it, if any,
+    /// looking each chunk up once (chunk by chunk, row-major within each).
+    pub fn visit_area(
+        &self,
+        bounds: WorldRect,
+        mut visitor: impl FnMut(WorldPosition, TerrainCell, Option<Feature>),
+    ) {
+        if bounds.max.x <= bounds.min.x || bounds.max.y <= bounds.min.y {
+            return;
+        }
+        let first = ChunkCoord::from_world_position(bounds.min);
+        let last = ChunkCoord::from_world_position(WorldPosition {
+            x: bounds.max.x - 1,
+            y: bounds.max.y - 1,
+        });
+        for chunk_y in first.y..=last.y {
+            for chunk_x in first.x..=last.x {
+                let coord = ChunkCoord {
+                    x: chunk_x,
+                    y: chunk_y,
+                };
+                let Some(chunk) = self.chunks.get(&coord) else {
+                    continue;
+                };
+                let Some(clipped) = intersection(chunk.bounds(coord), bounds) else {
+                    continue;
+                };
+                let features = chunk.features();
+                for y in clipped.min.y..clipped.max.y {
+                    let mut next = features.partition_point(|feature| {
+                        (feature.position.y, feature.position.x) < (y, clipped.min.x)
+                    });
+                    for x in clipped.min.x..clipped.max.x {
+                        let position = WorldPosition { x, y };
+                        let feature = features
+                            .get(next)
+                            .filter(|feature| feature.position == position)
+                            .copied();
+                        next += usize::from(feature.is_some());
+                        let cell = chunk
+                            .cell(coord, position)
+                            .expect("loaded chunk coverage must contain visited cells");
+                        visitor(position, cell, feature);
+                    }
+                }
+            }
+        }
+    }
+
     /// Visits every resident cell in one known chunk without scanning other entries.
     pub fn visit_cells_in_chunk(
         &self,

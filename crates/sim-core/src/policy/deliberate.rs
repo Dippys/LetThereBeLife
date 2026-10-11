@@ -91,7 +91,7 @@ pub(crate) const HUT_SPACING: u64 = 96;
 /// Carrying at least this much, a hut in view is worth stopping at to unload.
 const STORE_LOAD: u8 = 9;
 /// A fire with less than this much burning left (seconds) is worth feeding.
-const LOW_FUEL_SECONDS: u32 = 20 * 60;
+pub(crate) const LOW_FUEL_SECONDS: u32 = 20 * 60;
 /// Idle agents go to look at places pointed out within this many cells.
 const NOSY_RANGE: u64 = 48;
 /// Exploration never shrinks the round-trip range below this many cells.
@@ -102,6 +102,9 @@ pub(crate) struct Deliberation {
     pub(crate) selection: PolicySelection,
     /// New persistent exploration heading when the agent explores or travels.
     pub(crate) heading: Option<ExplorationHeading>,
+    /// A trip to a place out of view (remembered, pointed out, or home),
+    /// whatever it's for: the cause-and-effect model counts it as travel.
+    pub(crate) trip: bool,
 }
 
 impl Deliberation {
@@ -113,6 +116,7 @@ impl Deliberation {
                 reason,
             },
             heading: None,
+            trip: false,
         }
     }
 
@@ -177,6 +181,17 @@ pub(crate) struct MindInput<'a> {
     pub(crate) trip: &'a std::cell::Cell<Option<WorldPosition>>,
     /// Its habits and situation, when choices are learned (phase 2).
     pub(crate) habits: Option<(&'a crate::cognition::Habits, crate::cognition::Situation)>,
+    /// Its cause-and-effect model, and the needs it meets by planning (a bit
+    /// per `NeedKind`).
+    pub(crate) model: &'a crate::cognition::Model,
+    pub(crate) plans: u8,
+    /// What it perceives of its circumstances now.
+    pub(crate) facts: crate::cognition::Facts,
+    /// What it's set on doing; updated as it plans, follows and revises.
+    pub(crate) intention: &'a std::cell::Cell<crate::cognition::Intention>,
+    /// Set when a plan step couldn't be done for want of something: what it
+    /// tried, and what it lacked.
+    pub(crate) lacked: &'a std::cell::Cell<Option<(crate::cognition::Choice, u16)>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -222,7 +237,28 @@ pub(crate) fn deliberate(
             && inventory.can_add(kind)
             && (mind.able || kind.properties().handling != crate::Handling::Chop)
     });
-    match most_urgent(needs) {
+    let urgent = most_urgent(needs);
+    // An intention whose need has eased is done; with nothing pressing, it
+    // starts afresh (plans that failed are forgiven).
+    if urgent.is_none()
+        || mind
+            .intention
+            .get()
+            .goal()
+            .is_some_and(|goal| !mind.facts.has(crate::cognition::Facts::NEEDS[goal]))
+    {
+        mind.intention.set(crate::cognition::Intention::default());
+    }
+    // About to collapse, it sleeps where it stands (a reflex, not a plan).
+    let collapsing = needs.rest.value >= crate::REST_COLLAPSE;
+    if let Some(need) = urgent
+        && mind.plans & (1 << need as u8) != 0
+        && !(need == NeedKind::Rest && collapsing)
+        && let Some(planned) = planner.planned(need as usize, inventory, water_here, food_here)
+    {
+        return planned;
+    }
+    match urgent {
         Some(NeedKind::Thirst) => water_here
             .map(|target| {
                 Deliberation::act(
@@ -280,6 +316,7 @@ pub(crate) fn deliberate(
                 return Deliberation {
                     selection: reactive,
                     heading: None,
+                    trip: false,
                 };
             }
             planner
@@ -342,6 +379,7 @@ impl Planner<'_> {
             return Deliberation {
                 selection: PolicySelection { reason, ..reactive },
                 heading: None,
+                trip: false,
             };
         }
         self.travel_to_known(LandmarkKind::SHELTER, PhysicalGoal::SeekShelter)
@@ -519,6 +557,7 @@ impl Planner<'_> {
                 reason,
             },
             heading: Some(heading),
+            trip: false,
         })
     }
 
@@ -542,7 +581,241 @@ impl Planner<'_> {
         let hut = self.mind.stored_food?;
         let trip = self.at_hut(hut, PhysicalGoal::Fetch, PolicyReason::Fetching)?;
         self.mind.trip.set(Some(hut));
-        Some(trip)
+        Some(Deliberation {
+            trip: trip.heading.is_some(),
+            ..trip
+        })
+    }
+
+    /// Eases `need` by its intention: follows the step it's on, or forms a
+    /// plan from its own beliefs if it has none for this need. A step it
+    /// can't take (and what it lacked) is noted, and it thinks again once.
+    /// None when it can think of no plan: instinct then decides.
+    fn planned(
+        &self,
+        need: usize,
+        inventory: InventoryView,
+        water_here: Option<WorldPosition>,
+        food_here: Option<WorldPosition>,
+    ) -> Option<Deliberation> {
+        use crate::cognition::{Abilities, Intention, plan};
+        let cell = self.mind.intention;
+        let mut intention = cell.get();
+        let now = (self.needs.at.ticks() / 60) as u32;
+        if intention.goal() != Some(need) && intention.revisions == 0 {
+            intention = Intention::default();
+        }
+        // Plans for this need keep failing: leave it to instinct until it eases.
+        if intention.goal().is_none() && intention.revisions >= GIVE_UP_PLANNING {
+            cell.set(intention);
+            return None;
+        }
+        // Probing where it could go mustn't leave a trip behind; each place
+        // is probed once.
+        let trip = self.mind.trip.get();
+        let probed: std::cell::Cell<[Option<Option<u32>>; 16]> = std::cell::Cell::new([None; 16]);
+        let can = |choice: crate::cognition::Choice| self.can(choice);
+        let can_reach = |fact: u16| {
+            let index = fact.trailing_zeros() as usize % 16;
+            let mut known = probed.get();
+            let seconds = *known[index].get_or_insert_with(|| {
+                self.mind.trip.set(None);
+                self.go_for(fact)?;
+                let there = self.mind.trip.get()?;
+                // About a second a cell, with detours.
+                Some(manhattan(self.origin, there).min(u64::from(u32::MAX)) as u32)
+            });
+            probed.set(known);
+            seconds
+        };
+        let abilities = Abilities {
+            can: &can,
+            can_reach: &can_reach,
+        };
+        // Something much better than the plan it holds has turned up: think again.
+        if intention.goal().is_some()
+            && let Some(fresh) = plan(
+                self.mind.model,
+                self.mind.facts,
+                need,
+                &abilities,
+                intention.revisions,
+                now,
+            )
+            && intention.outdone_by(&fresh)
+        {
+            intention = fresh;
+        }
+        for _ in 0..2 {
+            if intention.goal().is_none() {
+                let revisions = intention.revisions;
+                let Some(fresh) = plan(
+                    self.mind.model,
+                    self.mind.facts,
+                    need,
+                    &abilities,
+                    revisions,
+                    now,
+                ) else {
+                    break;
+                };
+                intention = fresh;
+            }
+            self.mind.trip.set(trip);
+            intention.advance(self.mind.facts);
+            let Some(step) = intention.current() else {
+                intention = Intention::default();
+                continue;
+            };
+            let choice = step.choice()?;
+            let reason = need_reason(need);
+            let done = match self.carry_out(
+                choice,
+                step.fact(),
+                reason,
+                inventory,
+                water_here,
+                food_here,
+            ) {
+                Ok(deliberation) if intention.persist() => {
+                    cell.set(intention);
+                    return Some(deliberation);
+                }
+                Ok(_) => None,
+                Err(lacked) => lacked,
+            };
+            self.mind.lacked.set(done.map(|fact| (choice, fact)));
+            // That plan failed: think again from what it now believes.
+            intention = Intention::none(intention.revisions.saturating_add(1));
+        }
+        self.mind.trip.set(trip);
+        cell.set(intention);
+        None
+    }
+
+    /// Whether it knows how to do `choice` as a step of a plan.
+    fn can(&self, choice: crate::cognition::Choice) -> bool {
+        use crate::cognition::Choice;
+        match choice {
+            Choice::Build => self.may_build_hut(),
+            Choice::TendFire | Choice::WarmUp => self.mind.knows_hearths,
+            Choice::Craft => self.mind.knows_knapping,
+            Choice::Drink
+            | Choice::Eat
+            | Choice::Forage
+            | Choice::Gather
+            | Choice::Store
+            | Choice::Fetch
+            | Choice::Sleep => true,
+            Choice::Hunt
+            | Choice::Travel
+            | Choice::Company
+            | Choice::Explore
+            | Choice::Flee
+            | Choice::Unload
+            | Choice::Rest => false,
+        }
+    }
+
+    /// A trip to a remembered place where `fact` would hold.
+    fn go_for(&self, fact: u16) -> Option<Deliberation> {
+        use crate::cognition::Facts;
+        let trip = match fact {
+            Facts::WATER_NEAR => self.travel_to_known(LandmarkKind::Water, PhysicalGoal::SeekWater),
+            Facts::FOOD_NEAR => self.travel_to_food(PhysicalGoal::SeekFood),
+            Facts::WOOD_NEAR => {
+                self.travel_to_known(LandmarkKind::WOOD, PhysicalGoal::GatherMaterial)
+            }
+            Facts::STONE_NEAR => {
+                self.travel_to_known(LandmarkKind::STONE, PhysicalGoal::GatherMaterial)
+            }
+            Facts::FIRE | Facts::DEAD_FIRE => self
+                .travel_to_known(LandmarkKind::HEARTH, PhysicalGoal::Explore)
+                .map(|trip| trip.with_reason(PolicyReason::Warming)),
+            Facts::SHELTER => self
+                .go_home(PolicyReason::ExposureThreshold)
+                .filter(|home| home.trip)
+                .or_else(|| self.travel_to_known(LandmarkKind::SHELTER, PhysicalGoal::SeekShelter)),
+            Facts::STORE_NEAR => self.fetch_food().filter(|fetch| fetch.trip),
+            _ => None,
+        }?;
+        Some(Deliberation { trip: true, ..trip })
+    }
+
+    /// Does `choice` toward `fact` (or, with no fact, the last step that
+    /// eases the need), or says what it lacked.
+    fn carry_out(
+        &self,
+        choice: crate::cognition::Choice,
+        fact: Option<u16>,
+        reason: PolicyReason,
+        inventory: InventoryView,
+        water_here: Option<WorldPosition>,
+        food_here: Option<WorldPosition>,
+    ) -> Result<Deliberation, Option<u16>> {
+        use crate::cognition::{Choice, Facts};
+        let origin = self.origin;
+        let has = |fact: u16| self.mind.facts.has(fact);
+        let lacking = |fact: u16| if has(fact) { None } else { Some(fact) };
+        match choice {
+            Choice::Travel => fact.and_then(|fact| self.go_for(fact)).ok_or(None),
+            Choice::Gather => {
+                let material = match fact {
+                    Some(Facts::HAS_STONE) => Material::Stone,
+                    _ => Material::Wood,
+                };
+                nearest_resource_access(origin, self.perception, |kind| {
+                    kind == material && inventory.can_add(kind) && self.can_handle(kind)
+                })
+                .map(|target| Deliberation::act(PhysicalGoal::GatherMaterial, target, reason))
+                .ok_or(Some(if material == Material::Stone {
+                    Facts::STONE_NEAR
+                } else {
+                    Facts::WOOD_NEAR
+                }))
+            }
+            Choice::Forage => food_here
+                .map(|target| Deliberation::act(PhysicalGoal::SeekFood, target, reason))
+                .ok_or(Some(Facts::FOOD_NEAR)),
+            Choice::Drink => water_here
+                .map(|target| Deliberation::act(PhysicalGoal::SeekWater, target, reason))
+                .ok_or(Some(Facts::WATER_NEAR)),
+            Choice::Eat => (self.mind.food.carried(inventory) > 0)
+                .then(|| Deliberation::act(PhysicalGoal::Eat, origin, reason))
+                .ok_or(Some(Facts::HAS_FOOD)),
+            Choice::TendFire => self
+                .tend_fire(inventory)
+                .ok_or_else(|| lacking(Facts::HAS_WOOD).or(lacking(Facts::DEAD_FIRE))),
+            Choice::WarmUp => self.warm_up().ok_or(Some(Facts::FIRE)),
+            Choice::Sleep => self
+                .go_home(reason)
+                .filter(|home| !home.trip)
+                .or_else(|| {
+                    self.sleepable_shelter_access()
+                        .map(|access| Deliberation::act(PhysicalGoal::Sleep, access, reason))
+                })
+                .or_else(|| {
+                    (!self.needs.exposure.threshold_reached)
+                        .then(|| self.free_sleeping_spot())
+                        .flatten()
+                        .map(|spot| Deliberation::act(PhysicalGoal::Sleep, spot, reason))
+                })
+                .ok_or(Some(Facts::SHELTER)),
+            Choice::Build => {
+                let selection = self.shelter(inventory, reason);
+                (selection.goal == PhysicalGoal::BuildShelter)
+                    .then_some(Deliberation {
+                        selection,
+                        heading: None,
+                        trip: false,
+                    })
+                    .ok_or(lacking(Facts::HAS_WOOD))
+            }
+            Choice::Fetch => self.fetch_food().ok_or(Some(Facts::STORE_NEAR)),
+            Choice::Store => self.store(inventory).ok_or(Some(Facts::SHELTER)),
+            Choice::Craft => self.make_tool(inventory).ok_or(lacking(Facts::HAS_STONE)),
+            _ => Err(None),
+        }
     }
 
     /// Cold: what it could do about it, in its instinctive order, picked by
@@ -560,6 +833,7 @@ impl Planner<'_> {
             options.push(Deliberation {
                 selection: reactive,
                 heading: None,
+                trip: false,
             });
         }
         options.extend(self.travel_to_known(LandmarkKind::SHELTER, PhysicalGoal::SeekShelter));
@@ -605,6 +879,7 @@ impl Planner<'_> {
             options.push(Deliberation {
                 selection: PolicySelection { reason, ..reactive },
                 heading: None,
+                trip: false,
             });
         }
         options.extend(self.gather_known_wood(inventory));
@@ -705,6 +980,7 @@ impl Planner<'_> {
                     reason,
                 },
                 heading: Some(heading),
+                trip: false,
             });
         }
         if in_view {
@@ -720,6 +996,7 @@ impl Planner<'_> {
                 reason,
             },
             heading: Some(heading),
+            trip: true,
         })
     }
 
@@ -859,6 +1136,7 @@ impl Planner<'_> {
                 return Deliberation {
                     selection: reactive,
                     heading: None,
+                    trip: false,
                 };
             }
             // Someone who means to build a hut fetches the wood for it from
@@ -877,6 +1155,7 @@ impl Planner<'_> {
                     reason: PolicyReason::Following,
                 },
                 heading: Some(heading),
+                trip: false,
             };
         }
         // Someone needs setting straight: go and find them.
@@ -890,6 +1169,7 @@ impl Planner<'_> {
                     reason: PolicyReason::Visiting,
                 },
                 heading: Some(heading),
+                trip: false,
             };
         }
         if let Some(friend) = self.mind.friend_target
@@ -903,6 +1183,7 @@ impl Planner<'_> {
                     reason: PolicyReason::Visiting,
                 },
                 heading: Some(heading),
+                trip: false,
             };
         }
         let map = self.mind.map;
@@ -934,6 +1215,7 @@ impl Planner<'_> {
                         reason: PolicyReason::ToldPlace,
                     },
                     heading: Some(heading),
+                    trip: false,
                 };
             }
             if let Some(explore) = self.explore(PolicyReason::NoUrgentNeed, true) {
@@ -955,6 +1237,7 @@ impl Planner<'_> {
                     reason: PolicyReason::ToldPlace,
                 },
                 heading: Some(heading),
+                trip: false,
             };
         }
         Deliberation::wait(origin, PolicyReason::NoUrgentNeed)
@@ -962,6 +1245,19 @@ impl Planner<'_> {
 
     /// Warms up at the hearth in view: right away if it's beside the agent,
     /// otherwise walks over.
+    /// Whether it stands beside `position`, or can reach a cell that is.
+    fn can_get_beside(&self, position: WorldPosition) -> bool {
+        let beside = |cell: WorldPosition| {
+            cell != position && cell.x.abs_diff(position.x).max(cell.y.abs_diff(position.y)) <= 1
+        };
+        beside(self.origin)
+            || self
+                .perception
+                .reachable_cells
+                .iter()
+                .any(|&cell| beside(cell))
+    }
+
     fn warm_up(&self) -> Option<Deliberation> {
         let origin = self.origin;
         let now = (self.needs.at.ticks() / 60) as u32;
@@ -969,7 +1265,11 @@ impl Planner<'_> {
             .perception
             .structures
             .iter()
-            .filter(|structure| structure.kind.burns() && structure.working(now))
+            .filter(|structure| {
+                structure.kind.burns()
+                    && structure.working(now)
+                    && self.can_get_beside(structure.position)
+            })
             .min_by_key(|structure| (manhattan(origin, structure.position), structure.id.get()))?
             .position;
         if origin.x.abs_diff(hearth.x).max(origin.y.abs_diff(hearth.y)) <= 1 {
@@ -987,6 +1287,7 @@ impl Planner<'_> {
                 reason: PolicyReason::Warming,
             },
             heading: Some(heading),
+            trip: false,
         })
     }
 
@@ -1039,6 +1340,7 @@ impl Planner<'_> {
                 structure.kind.burns()
                     && structure.state == crate::StructureState::Complete
                     && structure.fuel_until < now + LOW_FUEL_SECONDS
+                    && self.can_get_beside(structure.position)
             })
             .min_by_key(|structure| (manhattan(origin, structure.position), structure.id.get()))?
             .position;
@@ -1057,6 +1359,7 @@ impl Planner<'_> {
                 reason: PolicyReason::Tending,
             },
             heading: Some(heading),
+            trip: false,
         })
     }
 
@@ -1082,6 +1385,7 @@ impl Planner<'_> {
                         reason: PolicyReason::HearthMaterials,
                     },
                     heading: Some(heading),
+                    trip: false,
                 });
             }
             let site = nearest_build_site(self.origin, self.perception)?;
@@ -1138,6 +1442,7 @@ impl Planner<'_> {
                 reason: PolicyReason::Fleeing,
             },
             heading: Some(heading_toward(origin, cell)),
+            trip: false,
         })
     }
 
@@ -1191,6 +1496,7 @@ impl Planner<'_> {
                 reason: PolicyReason::Hunting,
             },
             heading: Some(heading),
+            trip: false,
         })
     }
 
@@ -1263,6 +1569,7 @@ impl Planner<'_> {
                 reason,
             },
             heading: Some(heading),
+            trip: true,
         })
     }
 
@@ -1340,6 +1647,7 @@ impl Planner<'_> {
                     reason,
                 },
                 heading: Some(heading),
+                trip: false,
             });
         }
         let map = self.mind.map;
@@ -1371,6 +1679,7 @@ impl Planner<'_> {
                 reason,
             },
             heading: Some(heading),
+            trip: false,
         })
     }
 }
@@ -1383,6 +1692,19 @@ impl Deliberation {
             self.selection.reason = reason;
         }
         self
+    }
+}
+
+/// Plans given up for one need before instinct takes over until it eases.
+const GIVE_UP_PLANNING: u8 = 2;
+
+/// The policy reason a plan step for `need` (`NeedKind` index) shows.
+const fn need_reason(need: usize) -> PolicyReason {
+    match need {
+        0 => PolicyReason::HungerThreshold,
+        1 => PolicyReason::ThirstThreshold,
+        2 => PolicyReason::RestThreshold,
+        _ => PolicyReason::ExposureThreshold,
     }
 }
 

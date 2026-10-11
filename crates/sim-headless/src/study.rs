@@ -258,6 +258,10 @@ pub struct WildlifeStats {
     pub huts: u64,
     pub huts_fallen: u64,
     pub stored: u64,
+    /// Plans formed, completed, and given up; and how often each plan (its
+    /// steps, as text) was formed.
+    pub plans: [u64; 3],
+    pub plan_shapes: std::collections::BTreeMap<String, u64>,
     /// Sleeps begun in the open, under a roof, and under a roof by a fire.
     pub sleeps: [u64; 3],
     /// Plants that took root and died of age; trees and bushes at the start and end.
@@ -279,6 +283,9 @@ pub struct WildlifeStats {
     /// For each choice and each thing it can bring about: the summed times
     /// it did, and the tries, over every living mind.
     pub effects: [[(u64, u64); sim_core::EFFECTS.len()]; sim_core::Choice::COUNT],
+    /// What living people believe each kind of action needs (each needs mask
+    /// and how many hold it) and brings about (fact, hits, tries summed).
+    pub beliefs: Vec<BeliefSummary>,
     /// Blades knapped, and how many people watched it done.
     pub blades: u64,
     pub watched_crafts: u64,
@@ -498,6 +505,20 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                     wildlife.huts_fallen +=
                         u64::from(built.kind == sim_core::StructureDiagnosticKind::Collapsed);
                 }
+                for event in engine.plan_events() {
+                    let kind = match event.kind {
+                        sim_core::PlanEventKind::Formed => 0,
+                        sim_core::PlanEventKind::Completed => 1,
+                        sim_core::PlanEventKind::Revised => 2,
+                    };
+                    wildlife.plans[kind] += 1;
+                    if kind == 0 {
+                        *wildlife
+                            .plan_shapes
+                            .entry(plan_text(&event.intention))
+                            .or_default() += 1;
+                    }
+                }
                 for sleep in engine.sleep_diagnostics() {
                     if sleep.kind == sim_core::SleepDiagnosticKind::Started {
                         wildlife.sleeps[sleep.sleep.quality as usize] += 1;
@@ -701,6 +722,35 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                 entry.1 += u64::from(effect.tries);
             }
         }
+    }
+    for choice in sim_core::Choice::ALL {
+        let mut needs: std::collections::BTreeMap<u16, u64> = std::collections::BTreeMap::new();
+        let mut makes: std::collections::BTreeMap<u16, (u64, u64)> =
+            std::collections::BTreeMap::new();
+        for (_, mind) in &living {
+            for belief in mind.beliefs.iter().filter(|belief| belief.choice == choice) {
+                *needs.entry(belief.needs.0).or_default() += 1;
+                for &(fact, hits, tries) in &belief.produces {
+                    let entry = makes.entry(fact).or_default();
+                    entry.0 += u64::from(hits);
+                    entry.1 += u64::from(tries);
+                }
+            }
+        }
+        if needs.is_empty() && makes.is_empty() {
+            continue;
+        }
+        let mut needs: Vec<(u16, u64)> = needs.into_iter().collect();
+        needs.sort_by_key(|&(mask, people)| (std::cmp::Reverse(people), mask));
+        let makes = makes
+            .into_iter()
+            .map(|(fact, (hits, tries))| (fact, hits, tries))
+            .collect();
+        wildlife.beliefs.push(BeliefSummary {
+            choice,
+            needs,
+            makes,
+        });
     }
     let homes: std::collections::BTreeSet<_> =
         living.iter().filter_map(|(_, mind)| mind.home).collect();
@@ -925,6 +975,16 @@ fn record_trace(engine: &Engine, agent: AgentId, trace: &mut std::collections::V
                 diagnostic.reason,
                 diagnostic.target.map(|target| (target.x, target.y)),
                 diagnostic.failure,
+            ));
+        }
+    }
+    for event in engine.plan_events() {
+        if event.agent == agent {
+            lines.push(format!(
+                "t={now} plan {:?} [{}] step {}",
+                event.kind,
+                plan_text(&event.intention),
+                event.intention.step
             ));
         }
     }
@@ -1419,6 +1479,16 @@ fn percent(part: u64, whole: u64) -> u64 {
     (part * 100).checked_div(whole).unwrap_or(0)
 }
 
+/// What living people believe one kind of action needs and brings about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BeliefSummary {
+    pub choice: sim_core::Choice,
+    /// Each needs mask believed, with how many hold it, most held first.
+    pub needs: Vec<(u16, u64)>,
+    /// Each fact brought about, with hits and tries summed.
+    pub makes: Vec<(u16, u64, u64)>,
+}
+
 /// The needs habits are reported for, with their situation flag.
 const HABIT_NEEDS: [(&str, u8); 4] = [
     ("hungry", sim_core::Situation::HUNGRY),
@@ -1730,6 +1800,19 @@ impl fmt::Display for StudyReport {
             "\n  fire: hearths built {}, warm-ups {}, fuel added {} ({} relit); know hearths warm: founders {founders_fire}, children {children_fire}",
             self.wildlife.hearths, self.wildlife.warm_ups, self.wildlife.tends, self.wildlife.relit
         )?;
+        let [formed, completed, revised] = self.wildlife.plans;
+        let mut shapes: Vec<(&String, &u64)> = self.wildlife.plan_shapes.iter().collect();
+        shapes.sort_by_key(|&(shape, count)| (std::cmp::Reverse(*count), shape.clone()));
+        let common: Vec<String> = shapes
+            .iter()
+            .take(4)
+            .map(|(shape, count)| format!("{shape} ({count})"))
+            .collect();
+        write!(
+            formatter,
+            "\n  plans: formed {formed}, completed {completed}, given up {revised}; most often: {}",
+            common.join("; ")
+        )?;
         let [open, sheltered, by_fire] = self.wildlife.sleeps;
         write!(
             formatter,
@@ -1757,6 +1840,45 @@ impl fmt::Display for StudyReport {
         }
         if !learned.is_empty() {
             write!(formatter, "\n  habits: {}", learned.join("; "))?;
+        }
+        // What people believe their actions need and bring about.
+        let mut believed = Vec::new();
+        for BeliefSummary {
+            choice,
+            needs,
+            makes,
+        } in &self.wildlife.beliefs
+        {
+            let names = |mask: u16| {
+                let named: Vec<&str> = (0..16)
+                    .map(|bit| 1_u16 << bit)
+                    .filter(|fact| mask & fact != 0)
+                    .map(sim_core::Facts::name)
+                    .collect();
+                if named.is_empty() {
+                    "nothing".to_owned()
+                } else {
+                    named.join("+")
+                }
+            };
+            let mut line = format!("{choice:?}");
+            if let Some(&(mask, people)) = needs.first() {
+                line.push_str(&format!(" needs {} ({people})", names(mask)));
+            }
+            let made: Vec<String> = makes
+                .iter()
+                .filter(|&&(_, hits, tries)| tries >= 5 && hits * 4 >= tries)
+                .map(|&(fact, hits, tries)| {
+                    format!("{} {}%", sim_core::Facts::name(fact), hits * 100 / tries)
+                })
+                .collect();
+            if !made.is_empty() {
+                line.push_str(&format!(" -> {}", made.join(", ")));
+            }
+            believed.push(line);
+        }
+        if !believed.is_empty() {
+            write!(formatter, "\n  beliefs: {}", believed.join("; "))?;
         }
         // What people saw their choices bring about, where that happened often.
         let mut understood = Vec::new();
@@ -1843,4 +1965,23 @@ impl fmt::Display for StudyAgentLine {
             self.personality.diligence
         )
     }
+}
+
+/// A plan in a few words: "cold: Travel wood at hand > Gather > TendFire > WarmUp".
+pub fn plan_text(intention: &sim_core::IntentionView) -> String {
+    let need = ["hungry", "thirsty", "tired", "cold"][intention.need.min(3)];
+    let steps: Vec<String> = intention
+        .steps
+        .iter()
+        .filter_map(|step| {
+            let choice = step.choice()?;
+            Some(match (choice, step.fact()) {
+                (sim_core::Choice::Travel, Some(fact)) => {
+                    format!("go to {}", sim_core::Facts::name(fact))
+                }
+                _ => format!("{choice:?}"),
+            })
+        })
+        .collect();
+    format!("{need}: {}", steps.join(" > "))
 }

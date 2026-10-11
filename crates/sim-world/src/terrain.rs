@@ -154,6 +154,13 @@ impl WaterSource {
     }
 }
 
+impl TerrainCell {
+    /// The open water on this cell, if any.
+    pub fn water(self) -> Option<WaterSource> {
+        water_source(self)
+    }
+}
+
 pub(crate) fn water_source(cell: TerrainCell) -> Option<WaterSource> {
     match cell.biome() {
         BiomeType::Ocean => Some(WaterSource::Ocean),

@@ -21,6 +21,9 @@ const SEED_REACH: i64 = 5;
 const PATCH_REACH: i64 = 3;
 /// Wood a sapling starts with (it grows like any tree).
 const SAPLING_WOOD: u16 = 2;
+/// Plants live, die and seed only this close (cells) to someone living:
+/// beyond, nobody would see it, and the yearly step stays small.
+const PLANT_REACH: u64 = 512;
 
 impl Engine {
     /// Once a year, at the turn of spring: plants die and seed.
@@ -39,10 +42,22 @@ impl Engine {
                     ^ (position.y as u64 & 0xffff_ffff),
             )
         };
+        let people: Vec<WorldPosition> = self
+            .population
+            .views(usize::MAX)
+            .filter(|view| view.activity != crate::AgentActivity::Dead)
+            .map(|view| view.position)
+            .collect();
+        let near_people = |position: WorldPosition| {
+            people.iter().any(|person| {
+                person.x.abs_diff(position.x) <= PLANT_REACH
+                    && person.y.abs_diff(position.y) <= PLANT_REACH
+            })
+        };
         let mut plants: Vec<(WorldPosition, FeatureKind, bool)> = self
             .world
             .all_features()
-            .filter(|feature| feature.kind != FeatureKind::Rock)
+            .filter(|feature| feature.kind != FeatureKind::Rock && near_people(feature.position))
             .filter(|feature| !self.resource_deltas.is_dead(feature.position))
             .map(|feature| (feature.position, feature.kind, false))
             .collect();
@@ -50,7 +65,7 @@ impl Engine {
             let feature = object
                 .kind
                 .feature()
-                .filter(|kind| *kind != FeatureKind::Rock)?;
+                .filter(|kind| *kind != FeatureKind::Rock && near_people(object.position))?;
             Some((object.position, feature, true))
         }));
         plants.sort_unstable_by_key(|&(position, kind, placed)| {
@@ -74,6 +89,21 @@ impl Engine {
                 living.push((position, kind));
             }
         }
+        // Where living plants stand, row by row, for counting a patch quickly.
+        let mut standing: std::collections::BTreeSet<(i64, i64)> = living
+            .iter()
+            .map(|&(position, _)| (position.y, position.x))
+            .collect();
+        let neighbours = |standing: &std::collections::BTreeSet<(i64, i64)>, at: WorldPosition| {
+            (-PATCH_REACH..=PATCH_REACH)
+                .map(|dy| {
+                    let row = at.y + dy;
+                    standing
+                        .range((row, at.x - PATCH_REACH)..=(row, at.x + PATCH_REACH))
+                        .count()
+                })
+                .sum::<usize>()
+        };
         for &(parent, kind) in &living {
             let odds = if kind == FeatureKind::Tree {
                 TREE_SEEDING_ODDS
@@ -97,7 +127,7 @@ impl Engine {
             };
             if !self.can_sprout_at(spot)
                 || !same_ground(parent, spot)
-                || self.neighbours(spot) >= self.neighbours(parent)
+                || neighbours(&standing, spot) >= neighbours(&standing, parent)
             {
                 continue;
             }
@@ -110,39 +140,9 @@ impl Engine {
                 0
             };
             self.spawned_objects.plant(spot, sprout, start);
+            standing.insert((spot.y, spot.x));
             self.plants_sprouted += 1;
         }
-    }
-
-    /// Living plants in the patch around `position`.
-    fn neighbours(&self, position: WorldPosition) -> usize {
-        let patch = crate::WorldRect::from_inclusive_points(
-            WorldPosition {
-                x: position.x - PATCH_REACH,
-                y: position.y - PATCH_REACH,
-            },
-            WorldPosition {
-                x: position.x + PATCH_REACH,
-                y: position.y + PATCH_REACH,
-            },
-        );
-        let generated = self
-            .world
-            .features_in(patch)
-            .filter(|feature| !self.resource_deltas.is_dead(feature.position))
-            .count();
-        let placed = (-PATCH_REACH..=PATCH_REACH)
-            .flat_map(|dy| (-PATCH_REACH..=PATCH_REACH).map(move |dx| (dx, dy)))
-            .filter(|&(dx, dy)| {
-                self.spawned_objects
-                    .at(WorldPosition {
-                        x: position.x + dx,
-                        y: position.y + dy,
-                    })
-                    .is_some()
-            })
-            .count();
-        generated + placed
     }
 
     /// Plants that took root, and that died of age, since the start.

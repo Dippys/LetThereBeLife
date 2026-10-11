@@ -148,6 +148,7 @@ pub struct Engine {
     meal_events: Vec<crate::MealEvent>,
     lead_events: Vec<crate::LeadFollowedEvent>,
     grief_events: Vec<crate::GriefEvent>,
+    plan_events: Vec<crate::cognition::PlanEvent>,
     couple_events: Vec<crate::CoupleEvent>,
     families: births::Families,
     family_events: Vec<FamilyEvent>,
@@ -212,6 +213,7 @@ impl Engine {
             meal_events: Vec::new(),
             lead_events: Vec::new(),
             grief_events: Vec::new(),
+            plan_events: Vec::new(),
             couple_events: Vec::new(),
             families: births::Families::default(),
             family_events: Vec::new(),
@@ -278,6 +280,7 @@ impl Engine {
                 self.meal_events.clear();
                 self.lead_events.clear();
                 self.grief_events.clear();
+                self.plan_events.clear();
                 self.couple_events.clear();
                 self.families = births::Families::default();
                 self.family_events.clear();

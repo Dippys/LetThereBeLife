@@ -3,7 +3,7 @@
 use super::Population;
 use super::init::reachable_cells;
 use crate::{
-    BaseResource, Standability, World, WorldPosition, WorldQueryError, WorldRect,
+    BaseResource, SpawnKind, World, WorldPosition, WorldRect,
     agent::{
         AgentId, MAX_PERCEPTION_CELLS, MAX_PERCEPTION_RADIUS, PerceivedResource, PerceivedWater,
         PerceptionError, PhysicalPerception,
@@ -140,45 +140,65 @@ impl Population {
         elevations
             .try_reserve_exact(cell_count)
             .map_err(|_| PerceptionError::AllocationFailed)?;
+        // Each cell is looked up once: its terrain and generated feature
+        // (chunk by chunk), then anything placed or grown there, and any structure.
+        let width_cells = width as usize;
+        let mut terrain: Vec<Option<(crate::TerrainCell, Option<crate::Feature>)>> = Vec::new();
+        terrain
+            .try_reserve_exact(cell_count)
+            .map_err(|_| PerceptionError::AllocationFailed)?;
+        terrain.resize(cell_count, None);
+        world.visit_area(area, |position, cell, feature| {
+            let index = (position.y - area.min.y) as usize * width_cells
+                + (position.x - area.min.x) as usize;
+            terrain[index] = Some((cell, feature));
+        });
         for y in area.min.y..area.max.y {
             for x in area.min.x..area.max.x {
                 let position = WorldPosition { x, y };
-                elevations.push(
-                    world
-                        .cell(position)
-                        .ok_or(PerceptionError::Unloaded)?
-                        .elevation,
-                );
-                match spawned_objects
-                    .standability_at(world, position)
-                    .map_err(map_perception_query_error)?
-                {
-                    Standability::Standable if structures.structure_at(position).is_none() => {
-                        traversable_cells.push(position)
-                    }
-                    Standability::Standable => {}
-                    Standability::BlockedByWater | Standability::BlockedByFeature => {}
+                if !crate::WORLD_GENERATION_BOUNDS.contains(position) {
+                    return Err(PerceptionError::OutsideWorld);
                 }
-                if spawned_objects.reserves_exclusive_use_at(world, position) {
+                let index = (y - area.min.y) as usize * width_cells + (x - area.min.x) as usize;
+                let (cell, feature) = terrain[index].ok_or(PerceptionError::Unloaded)?;
+                elevations.push(cell.elevation);
+                let object = spawned_objects.at(position);
+                let placed_water = object.is_some_and(|object| object.kind == SpawnKind::Water);
+                let water = cell
+                    .water()
+                    .or_else(|| placed_water.then_some(crate::WaterSource::Lake));
+                if cell.water().is_none()
+                    && !placed_water
+                    && structures.structure_at(position).is_none()
+                {
+                    traversable_cells.push(position);
+                }
+                let blocks = |kind: crate::FeatureKind| {
+                    matches!(kind, crate::FeatureKind::Tree | crate::FeatureKind::Rock)
+                };
+                if feature.is_some_and(|feature| blocks(feature.kind))
+                    || object
+                        .and_then(|object| object.kind.feature())
+                        .is_some_and(blocks)
+                {
                     try_push(&mut reserved_cells, position)?;
                 }
-                if let Some(source) = spawned_objects
-                    .water_at(world, position)
-                    .map_err(map_perception_query_error)?
+                if let Some(source) = water
                     && source.is_drinkable()
                 {
                     try_push(&mut drinkable_water, PerceivedWater { position, source })?;
                 }
-                let resource = if let Some(resource) = spawned_objects.resource_at(position) {
-                    Some(resource)
-                } else {
-                    resource_deltas
-                        .resource_at(world, position)
-                        .map_err(map_perception_query_error)?
-                };
+                let base = feature.map(crate::Feature::base_resource);
+                let placed = object.and_then(|object| {
+                    let mut resource = object.kind.resource()?;
+                    resource.capacity = object.remaining?;
+                    (resource.capacity > 0).then_some(resource)
+                });
+                let resource = placed
+                    .or_else(|| base.and_then(|base| resource_deltas.remaining_of(position, base)));
                 if let Some(resource) = resource {
                     try_push(&mut resources, PerceivedResource { position, resource })?;
-                } else if let Some(base) = world.base_resource_at(position) {
+                } else if let Some(base) = base {
                     let spent = BaseResource {
                         capacity: 0,
                         kind: base.kind,
@@ -217,14 +237,6 @@ impl Population {
             spent_resources,
             animals: Vec::new(),
         })
-    }
-}
-
-fn map_perception_query_error(error: WorldQueryError) -> PerceptionError {
-    match error {
-        WorldQueryError::OutsideWorldBounds => PerceptionError::OutsideWorld,
-        WorldQueryError::Unloaded => PerceptionError::Unloaded,
-        WorldQueryError::NonCardinalStep => unreachable!("point queries are not movement steps"),
     }
 }
 

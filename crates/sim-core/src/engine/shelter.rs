@@ -2,6 +2,7 @@
 //! cancellation with material refunds.
 
 use super::errors::map_build_schedule_error;
+use crate::cognition::{Choice, Facts};
 use crate::policy::PolicyAction;
 use crate::{
     AgentActivity, AgentId, BuildShelterError, Engine, PhysicalGoal, PolicyFailureReason,
@@ -123,6 +124,17 @@ impl Engine {
         self.population
             .consume_build_materials(agent, kind)
             .expect("recipe was prevalidated");
+        if self.policy_options.memory {
+            let model = &mut self.minds.get_mut(agent).model;
+            for &(material, amount) in &kind.cost() {
+                match material {
+                    _ if amount == 0 => {}
+                    crate::Material::Wood => model.used(Choice::Build, Facts::HAS_WOOD),
+                    crate::Material::Stone => model.used(Choice::Build, Facts::HAS_STONE),
+                    _ => {}
+                }
+            }
+        }
         self.structure_diagnostics.push(StructureDiagnostic {
             structure,
             at: self.time,
@@ -163,7 +175,10 @@ impl Engine {
                 .unwrap_or_default();
             self.minds.get_mut(agent).crafts.saw_building();
             for watcher in watchers {
-                self.minds.get_mut(watcher).crafts.saw_building();
+                let mind = self.minds.get_mut(watcher);
+                mind.crafts.saw_building();
+                mind.model
+                    .saw(Choice::Build, Facts::HAS_WOOD, Facts::SHELTER);
             }
         }
         self.structure_diagnostics.push(StructureDiagnostic {

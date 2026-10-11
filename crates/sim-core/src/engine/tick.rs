@@ -38,6 +38,7 @@ impl Engine {
         self.meal_events.clear();
         self.lead_events.clear();
         self.grief_events.clear();
+        self.plan_events.clear();
         self.couple_events.clear();
         self.family_events.clear();
         self.name_events.clear();

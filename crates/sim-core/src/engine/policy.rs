@@ -65,6 +65,7 @@ impl Engine {
             social: options.memory && options.social,
             helping: options.memory && options.social && options.helping,
             learned: options.memory && options.learned,
+            plans: if options.memory { options.plans } else { 0 },
         };
         Ok(())
     }

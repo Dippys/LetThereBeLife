@@ -9,8 +9,10 @@ mod dialogue;
 mod fauna;
 mod gesture;
 mod habits;
+mod intention;
 mod lexicon;
 mod map;
+mod model;
 mod personality;
 mod reading;
 mod signal;
@@ -27,10 +29,14 @@ pub use gesture::Gesture;
 pub(crate) use gesture::reach_toward;
 pub use habits::{Choice, EFFECTS, EffectView, HABIT_SLOTS, HabitView, Situation};
 pub(crate) use habits::{Habits, discomfort};
+pub(crate) use intention::{Abilities, Intention, plan};
+pub use intention::{IntentionView, PLAN_STEPS, Step};
 pub(crate) use lexicon::Lexicon;
 pub use lexicon::{Concept, FAMILY_SIZE, LEXICON_SLOTS, LexiconEntryView, VOCAL_FORMS, VocalForm};
 pub(crate) use map::{HintCheck, HintSource, MentalMap, spent_kinds, visible_kinds};
 pub use map::{LANDMARK_SLOTS, MERGE_RADIUS, SEARCH_SPACING, VISIT_TILE_SIZE, VISITED_TILE_SLOTS};
+pub use model::{BeliefView, Facts};
+pub(crate) use model::{Model, need_level};
 pub use personality::Personality;
 pub(crate) use reading::ListenerContext;
 pub use reading::{READING_CANDIDATES, Reading, ReadingReasons, concept_topic};
@@ -214,6 +220,8 @@ pub struct MentalMapView {
     pub effects: Vec<EffectView>,
     /// The hut it lives in.
     pub home: Option<WorldPosition>,
+    /// What it believes its kinds of action need and bring about.
+    pub beliefs: Vec<BeliefView>,
     pub acquaintances: Vec<AcquaintanceView>,
     /// What the agent believes words mean.
     pub lexicon: Vec<LexiconEntryView>,
@@ -416,6 +424,27 @@ pub struct GriefEvent {
     pub at: crate::SimTime,
 }
 
+/// What became of someone's intention this decision (latest tick, for logs,
+/// the viewer and tools).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanEventKind {
+    /// It thought of a plan.
+    Formed,
+    /// The need it was for eased.
+    Completed,
+    /// A step failed and it gave the plan up (it may form another).
+    Revised,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlanEvent {
+    pub agent: AgentId,
+    pub at: crate::SimTime,
+    pub kind: PlanEventKind,
+    /// The intention formed, completed, or given up.
+    pub intention: IntentionView,
+}
+
 /// Someone ate something (latest tick, for logs and tools only). Eating and
 /// retching are visible, so `watchers` saw it and learned from it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -460,6 +489,10 @@ pub struct PolicyOptions {
     /// Being cold or tired is answered by the choice that has worked best
     /// before (docs/plans/LEARNING.md phase 2), not a fixed order (requires `memory`).
     pub learned: bool,
+    /// The needs met by planning (docs/plans/THINKING.md): bit `1 << NeedKind
+    /// index` set means that need is eased by a plan from the agent's own
+    /// cause-and-effect model, held as an intention (requires `memory`).
+    pub plans: u8,
 }
 
 impl PolicyOptions {
@@ -472,6 +505,7 @@ impl PolicyOptions {
             social: true,
             helping: true,
             learned: true,
+            plans: 0,
         }
     }
 }
@@ -518,6 +552,10 @@ pub(crate) struct Mind {
     pub(crate) habits: Habits,
     /// The hut it lives in.
     pub(crate) home: Home,
+    /// What it believes its actions need and bring about.
+    pub(crate) model: Model,
+    /// What it is set on doing.
+    pub(crate) intention: Intention,
 }
 
 /// The most nights of attachment a home builds up.
@@ -726,6 +764,7 @@ impl Minds {
                 Crafts::founding(self.seed, agent, FAMILY_SIZE)
             },
             child,
+            model: Model::instinct(),
             ..Mind::default()
         }
     }

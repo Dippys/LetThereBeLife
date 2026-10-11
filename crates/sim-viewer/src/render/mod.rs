@@ -185,6 +185,8 @@ pub struct AgentInspection {
     pub memory: Option<MemoryInspection>,
     pub life: Option<sim_core::LifeView>,
     pub motherhood: Option<sim_core::MotherhoodView>,
+    /// What they're set on doing, if they hold a plan.
+    pub intention: Option<sim_core::IntentionView>,
 }
 
 /// A bounded, copyable snapshot of one agent's mind (places, personality,

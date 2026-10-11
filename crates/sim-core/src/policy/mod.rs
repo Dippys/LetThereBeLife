@@ -8,7 +8,9 @@ mod selection;
 mod state;
 
 pub use deliberate::HOME_RANGE;
-pub(crate) use deliberate::{HUT_SPACING, MindInput, ParentInput, deliberate, heading_toward};
+pub(crate) use deliberate::{
+    HUT_SPACING, LOW_FUEL_SECONDS, MindInput, ParentInput, deliberate, heading_toward,
+};
 #[cfg(test)]
 pub(crate) use selection::select;
 pub(crate) use selection::{PolicyAction, PolicySelection, select_with_exploration};
@@ -19,6 +21,62 @@ use std::{error::Error, fmt};
 use crate::{AgentId, InventoryView, Material, SimTime, WorldPosition};
 
 pub const PHYSICAL_POLICY_RADIUS: u8 = 8;
+
+/// What an agent perceives of its circumstances: its pressing needs, what it
+/// sees at hand (by its own food beliefs), and what it carries.
+pub(crate) fn perceived_facts(
+    perception: &crate::PhysicalPerception,
+    inventory: InventoryView,
+    needs: crate::PhysicalNeedsView,
+    food: FoodValues,
+    now: u32,
+) -> crate::cognition::Facts {
+    use crate::cognition::Facts;
+    let mut facts = 0;
+    let mut set = |on: bool, fact: u16| {
+        if on {
+            facts |= fact;
+        }
+    };
+    set(needs.hunger.threshold_reached, Facts::HUNGRY);
+    set(needs.thirst.threshold_reached, Facts::THIRSTY);
+    set(needs.rest.threshold_reached, Facts::TIRED);
+    set(needs.exposure.threshold_reached, Facts::COLD);
+    set(!perception.drinkable_water.is_empty(), Facts::WATER_NEAR);
+    let in_view = |wanted: &dyn Fn(Material) -> bool| {
+        perception
+            .resources
+            .iter()
+            .any(|resource| resource.resource.capacity > 0 && wanted(resource.resource.kind))
+    };
+    set(in_view(&|kind| food.is_food(kind)), Facts::FOOD_NEAR);
+    set(in_view(&|kind| kind == Material::Wood), Facts::WOOD_NEAR);
+    set(in_view(&|kind| kind == Material::Stone), Facts::STONE_NEAR);
+    for structure in &perception.structures {
+        let complete = structure.state == crate::StructureState::Complete;
+        if structure.kind.burns() && complete {
+            set(structure.working(now), Facts::FIRE);
+            set(
+                structure.fuel_until < now + LOW_FUEL_SECONDS,
+                Facts::DEAD_FIRE,
+            );
+        }
+        if structure.kind == crate::StructureKind::Shelter && complete {
+            set(true, Facts::SHELTER);
+            set(food.carried(structure.stored) > 0, Facts::STORE_NEAR);
+        }
+    }
+    set(food.carried(inventory) > 0, Facts::HAS_FOOD);
+    set(inventory.amount(Material::Wood) > 0, Facts::HAS_WOOD);
+    set(inventory.amount(Material::Stone) > 0, Facts::HAS_STONE);
+    set(
+        Material::ALL
+            .into_iter()
+            .any(|material| material.properties().cutting && inventory.amount(material) > 0),
+        Facts::HAS_BLADE,
+    );
+    Facts(facts)
+}
 
 /// How much an agent wants to eat each material (indexed by `Material as usize`,
 /// in belief units): positive means "food, to me". Comes from the agent's beliefs,

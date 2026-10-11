@@ -339,7 +339,17 @@ impl Engine {
             stall: _,
             habits,
             home,
+            model,
+            intention,
         } = mind;
+        model.know_how(
+            crafts.knows_hearths(),
+            crafts.knows_huts(),
+            crafts.knows_knapping(),
+        );
+        let facts = crate::policy::perceived_facts(perception, inventory, needs, food, now);
+        let intended = std::cell::Cell::new(*intention);
+        let lacked = std::cell::Cell::new(None);
         let home = home.hut();
         let stored_food = stored_food.map(crate::agent::CompactPosition::world);
         let grief_until = *grief_until;
@@ -501,15 +511,31 @@ impl Engine {
                 home,
                 trip: &trip,
                 habits: self.policy_options.learned.then_some((&*habits, situation)),
+                model: &*model,
+                plans: self.policy_options.plans,
+                facts,
+                intention: &intended,
+                lacked: &lacked,
             },
         );
+        {
+            let mind = self.minds.get_mut(agent);
+            let before = mind.intention;
+            let after = intended.get();
+            mind.intention = after;
+            if let Some((choice, fact)) = lacked.get() {
+                mind.model.lacked(choice, fact);
+            }
+            self.note_intention(agent, before, after, facts);
+        }
         self.minds.get_mut(agent).map.mark_decision(origin);
         // Getting no closer to where it's headed, decision after decision: it
         // can't get there from here, so it stops trying.
         let travelling = matches!(
             deliberation.selection.reason,
             PolicyReason::ToldPlace | PolicyReason::RememberedPlace | PolicyReason::Fetching
-        ) || deliberation.selection.goal == PhysicalGoal::SeekShelter;
+        ) || deliberation.selection.goal == PhysicalGoal::SeekShelter
+            || deliberation.trip;
         if let Some(destination) = trip.get().filter(|_| travelling) {
             let distance = origin.x.abs_diff(destination.x) + origin.y.abs_diff(destination.y);
             let mind = self.minds.get_mut(agent);
@@ -531,14 +557,15 @@ impl Engine {
                 [needs.hunger, needs.thirst, needs.rest, needs.exposure]
                     .map(|level| (level.value, level.threshold)),
             );
-            let choice = crate::cognition::Choice::of(
-                deliberation.selection.goal,
-                deliberation.selection.reason,
-            );
-            self.minds
-                .get_mut(agent)
-                .habits
-                .decided(situation, choice, discomfort);
+            let goal = deliberation.selection.goal;
+            let reason = deliberation.selection.reason;
+            let choice = crate::cognition::Choice::of(goal, reason);
+            let action = crate::cognition::Choice::acted(goal, reason, deliberation.trip);
+            let levels = [needs.hunger, needs.thirst, needs.rest, needs.exposure]
+                .map(|level| crate::cognition::need_level(level.value, level.threshold));
+            let mind = self.minds.get_mut(agent);
+            mind.habits.decided(situation, choice, discomfort);
+            mind.model.decided(action, facts, levels, now);
         }
         match deliberation.selection.reason {
             PolicyReason::Warning | PolicyReason::Recruiting => {
@@ -1403,6 +1430,55 @@ impl Engine {
         &self.grief_events
     }
 
+    /// Plans formed, completed, and given up this tick.
+    pub fn plan_events(&self) -> &[crate::cognition::PlanEvent] {
+        &self.plan_events
+    }
+
+    /// What someone is set on doing, if anything.
+    pub fn intention(&self, agent: AgentId) -> Option<crate::cognition::IntentionView> {
+        self.minds.get(agent)?.intention.view()
+    }
+
+    /// Logs what became of `agent`'s intention between `before` and `after`.
+    fn note_intention(
+        &mut self,
+        agent: AgentId,
+        before: crate::cognition::Intention,
+        after: crate::cognition::Intention,
+        facts: crate::cognition::Facts,
+    ) {
+        use crate::cognition::{Facts, PlanEvent, PlanEventKind};
+        let at = self.time;
+        let mut log = |kind, intention: crate::cognition::Intention| {
+            if let Some(intention) = intention.view() {
+                self.plan_events.push(PlanEvent {
+                    agent,
+                    at,
+                    kind,
+                    intention,
+                });
+            }
+        };
+        let replaced =
+            before.goal().is_some() && after.goal().is_some() && before.formed != after.formed;
+        let ended = before.goal().is_some() && after.goal().is_none();
+        if replaced || ended {
+            let eased = before
+                .goal()
+                .is_some_and(|need| !facts.has(Facts::NEEDS[need]));
+            let kind = if eased && !replaced {
+                PlanEventKind::Completed
+            } else {
+                PlanEventKind::Revised
+            };
+            log(kind, before);
+        }
+        if after.goal().is_some() && (before.goal().is_none() || before.formed != after.formed) {
+            log(PlanEventKind::Formed, after);
+        }
+    }
+
     /// Word lessons from the latest tick (for logs and tools).
     pub fn lesson_events(&self) -> &[LessonEvent] {
         &self.lesson_events
@@ -1450,6 +1526,7 @@ impl Engine {
             habits: mind.habits.views().collect(),
             effects: mind.habits.effect_views().collect(),
             home: mind.home.hut(),
+            beliefs: mind.model.views().collect(),
             acquaintances: mind.social.views().collect(),
             lexicon: mind.lexicon.views().collect(),
         })

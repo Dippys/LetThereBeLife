@@ -367,6 +367,45 @@ pub fn duration(seconds: f64) -> String {
     }
 }
 
+/// What's left of a plan, in words: "Plan: gather wood, then feed the fire,
+/// then warm up".
+pub fn plan(intention: sim_core::IntentionView) -> Option<String> {
+    let steps: Vec<&str> = intention
+        .steps
+        .iter()
+        .skip(intention.step)
+        .filter_map(|step| Some(plan_step(step.choice()?, step.fact())))
+        .collect();
+    (!steps.is_empty()).then(|| format!("Plan: {}", steps.join(", then ")))
+}
+
+fn plan_step(choice: sim_core::Choice, fact: Option<u16>) -> &'static str {
+    use sim_core::{Choice, Facts};
+    match (choice, fact) {
+        (Choice::Travel, Some(Facts::WATER_NEAR)) => "go to water",
+        (Choice::Travel, Some(Facts::FOOD_NEAR)) => "go where there's food",
+        (Choice::Travel, Some(Facts::WOOD_NEAR)) => "go to the trees",
+        (Choice::Travel, Some(Facts::STONE_NEAR)) => "go to the rocks",
+        (Choice::Travel, Some(Facts::FIRE | Facts::DEAD_FIRE)) => "go to a fire",
+        (Choice::Travel, Some(Facts::SHELTER)) => "go to a hut",
+        (Choice::Travel, Some(Facts::STORE_NEAR)) => "go to the stored food",
+        (Choice::Travel, _) => "go somewhere",
+        (Choice::Gather, Some(Facts::HAS_STONE)) => "gather stone",
+        (Choice::Gather, _) => "gather wood",
+        (Choice::Forage, _) => "pick food",
+        (Choice::Drink, _) => "drink",
+        (Choice::Eat, _) => "eat",
+        (Choice::TendFire, _) => "feed the fire",
+        (Choice::WarmUp, _) => "warm up",
+        (Choice::Sleep, _) => "sleep",
+        (Choice::Build, _) => "build a hut",
+        (Choice::Fetch, _) => "fetch stored food",
+        (Choice::Store, _) => "store food",
+        (Choice::Craft, _) => "make a blade",
+        _ => "do something",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

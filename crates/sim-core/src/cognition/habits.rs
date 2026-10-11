@@ -100,7 +100,23 @@ impl Choice {
         Self::Rest,
     ];
 
-    /// The kind of choice a policy selection amounts to.
+    /// The kind of action a policy selection is, for the cause-and-effect
+    /// model: a trip to a place out of view (remembered, pointed out, or
+    /// home) is travel, whatever waits at the end of it.
+    pub(crate) const fn acted(goal: PhysicalGoal, reason: PolicyReason, trip: bool) -> Self {
+        let told_or_remembered = matches!(
+            reason,
+            PolicyReason::RememberedPlace | PolicyReason::ToldPlace
+        );
+        if trip || (told_or_remembered && !matches!(goal, PhysicalGoal::Signal)) {
+            Self::Travel
+        } else {
+            Self::of(goal, reason)
+        }
+    }
+
+    /// The kind of choice a policy selection amounts to, for habits: what it
+    /// sets out to do, wherever that is.
     pub(crate) const fn of(goal: PhysicalGoal, reason: PolicyReason) -> Self {
         match goal {
             PhysicalGoal::SeekWater | PhysicalGoal::Drink => Self::Drink,
