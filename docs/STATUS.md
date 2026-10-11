@@ -9,8 +9,10 @@ _Last updated: 2026-10-10._
 
 That's the spec's definition of success. The vertical slice that first met it is done
 ([`plans/VERTICAL_SLICE.md`](plans/VERTICAL_SLICE.md)); the active plan is
-[`plans/GENERATIONS.md`](plans/GENERATIONS.md): age, sex, relationships, births, and names, so the
-band renews itself and language can pass between generations. Before it,
+[`plans/THINKING.md`](plans/THINKING.md): agents that plan and hold intentions from a learned
+cause-and-effect model, and lives that differ every run in the same world. Before it,
+[`plans/GENERATIONS.md`](plans/GENERATIONS.md) added age, sex, relationships, births, and names, so
+the band renews itself and language can pass between generations, and
 [`plans/LIVING_WORLD.md`](plans/LIVING_WORLD.md) added things described by properties, learned
 knowledge, wildlife, and hearths.
 
@@ -231,11 +233,13 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## What's next
 
-1. **Settlements:** homes (D-109), living plants (D-111) and warm hearths (D-112) are in. Next:
+1. **Thinking agents and life seeds** (docs/plans/THINKING.md, D-113): T0 split world and life
+   seeds; T1 a learned cause-and-effect model; T2 a planner and one intention, for cold first.
+2. **Settlements:** homes (D-109), living plants (D-111) and warm hearths (D-112) are in. Next:
    people knowing whose hut is whose, and families sharing a home.
-2. **Learning what works** (docs/plans/LEARNING.md): phases 1-2 done, plus understanding what
+3. **Learning what works** (docs/plans/LEARNING.md): phases 1-2 done, plus understanding what
    choices bring about (D-103, D-105, D-108). Next: how long steps take, copying others, food and
    water, multi-step projects.
-3. **More speaker feedback**: speakers watching how listeners react, overhearing others.
-4. **Separated groups (continued)**: a lasting barrier or much longer isolation.
-5. **Episodic memory** (phase 3), so agents remember who misled, helped, or warned them.
+4. **More speaker feedback**: speakers watching how listeners react, overhearing others.
+5. **Separated groups (continued)**: a lasting barrier or much longer isolation.
+6. **Episodic memory** (phase 3), so agents remember who misled, helped, or warned them.

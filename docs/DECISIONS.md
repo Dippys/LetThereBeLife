@@ -809,3 +809,16 @@ hearths placed as before). Within noise, but nothing got worse; valley 1 recover
 The check that talking brings words together now sums agreement over the 10 valleys among seeds
 1-16 (it rises in 7 of the first 8 valleys, by up to 11 points) instead of requiring it of seed 1
 alone, which dipped 65% to 64% with this change.
+
+## D-113: Thinking agents and life seeds: the plan (2026-10-11)
+
+**Decision:** Adopt docs/plans/THINKING.md. The world seed stays strictly deterministic; a separate
+life seed drives people, animals, plants and every roll, new each viewer run, recorded in saves
+and reports and replayable with `--life-seed`, with the study defaulting to one derived from the
+world seed so comparisons stay paired. Agents get a learned cause-and-effect model (what each kind
+of action needs, produces, relieves, and how long it takes), a bounded backward planner over their
+own beliefs, and one intention they follow and revise. The scripted order becomes instinct priors.
+**Why:** The owner's brief: agents react instead of thinking, and every run of a seed replays the
+same lives. No neural network or language model: minds stay readable, compact and grounded.
+**Consequences:** Built in phases T0-T6, each measured before it's switched on.
+
