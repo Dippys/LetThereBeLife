@@ -80,10 +80,10 @@ fn mental_map_layout_is_compact() {
 fn mind_layout_is_bounded() {
     assert_eq!(size_of::<super::PendingCorrection>(), 32);
     assert_eq!(size_of::<super::Dialogue>(), 112);
-    // Map 372, social 240, lexicon 192, habits 204, dialogue 112, beliefs 15 + 6 + 2,
+    // Map 372, social 240, lexicon 192, habits 204, dialogue 112, home 8, beliefs 15 + 6 + 2,
     // child flag, parent id, grief and loneliness timers, and padding.
     assert_eq!(size_of::<MentalMap>(), 372);
-    assert_eq!(size_of::<super::Mind>(), 1_184);
+    assert_eq!(size_of::<super::Mind>(), 1_192);
 }
 
 #[test]
@@ -548,4 +548,32 @@ fn getting_no_closer_for_long_enough_gives_a_destination_up() {
     assert_eq!(stall, super::Stall::default());
     // A new destination starts the count over.
     assert!(!stall.note(crate::WorldPosition { x: 0, y: 9 }, 9));
+}
+
+#[test]
+fn a_home_holds_through_nights_away_until_attachment_wears_off() {
+    let mut home = super::Home::default();
+    let hut = at(4, 4);
+    let other = at(40, 4);
+    for _ in 0..6 {
+        home.slept_at(hut, false);
+    }
+    home.slept_at(other, false);
+    home.slept_out(false);
+    assert_eq!(
+        home.hut(),
+        Some(hut),
+        "a couple of nights away don't change home"
+    );
+    home.slept_out(true);
+    assert_eq!(home.hut(), None, "a night far away wears off more");
+    home.slept_at(other, false);
+    assert_eq!(
+        home.hut(),
+        Some(other),
+        "once worn off, the next hut is home"
+    );
+    assert!(home.far_from(at(40, 400)) && !home.far_from(at(41, 4)));
+    home.lost();
+    assert_eq!(home.hut(), None);
 }

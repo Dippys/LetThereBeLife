@@ -312,6 +312,17 @@ impl Engine {
                 perception.agents.iter().any(|other| other.id.get() == id)
             });
         }
+        // Its home in view with no hut standing there: it's gone.
+        if let Some(hut) = mind.home.hut()
+            && perception.area.contains(hut)
+            && !perception.structures.iter().any(|structure| {
+                structure.position == hut
+                    && structure.kind == crate::StructureKind::Shelter
+                    && structure.state == crate::StructureState::Complete
+            })
+        {
+            mind.home.lost();
+        }
         let crate::cognition::Mind {
             map,
             social: people,
@@ -327,7 +338,9 @@ impl Engine {
             stored_food,
             stall: _,
             habits,
+            home,
         } = mind;
+        let home = home.hut();
         let stored_food = stored_food.map(crate::agent::CompactPosition::world);
         let grief_until = *grief_until;
         map.observe(
@@ -485,6 +498,7 @@ impl Engine {
                 knows_huts: crafts.knows_huts(),
                 able,
                 stored_food,
+                home,
                 trip: &trip,
                 habits: self.policy_options.learned.then_some((&*habits, situation)),
             },
@@ -495,7 +509,7 @@ impl Engine {
         let travelling = matches!(
             deliberation.selection.reason,
             PolicyReason::ToldPlace | PolicyReason::RememberedPlace | PolicyReason::Fetching
-        );
+        ) || deliberation.selection.goal == PhysicalGoal::SeekShelter;
         if let Some(destination) = trip.get().filter(|_| travelling) {
             let distance = origin.x.abs_diff(destination.x) + origin.y.abs_diff(destination.y);
             let mind = self.minds.get_mut(agent);
@@ -503,6 +517,9 @@ impl Engine {
                 mind.map.give_up(destination);
                 if mind.stored_food.map(crate::agent::CompactPosition::world) == Some(destination) {
                     mind.stored_food = None;
+                }
+                if mind.home.hut() == Some(destination) {
+                    mind.home.lost();
                 }
                 self.gave_up += 1;
             }
@@ -1427,6 +1444,7 @@ impl Engine {
             knows_huts: mind.crafts.knows_huts(),
             habits: mind.habits.views().collect(),
             effects: mind.habits.effect_views().collect(),
+            home: mind.home.hut(),
             acquaintances: mind.social.views().collect(),
             lexicon: mind.lexicon.views().collect(),
         })

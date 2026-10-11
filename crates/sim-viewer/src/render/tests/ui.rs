@@ -97,6 +97,7 @@ fn mind(lexicon: Vec<LexiconEntryView>, acquaintances: Vec<AcquaintanceView>) ->
         knows_huts: true,
         habits: Vec::new(),
         effects: Vec::new(),
+        home: None,
         acquaintances,
         lexicon,
     }

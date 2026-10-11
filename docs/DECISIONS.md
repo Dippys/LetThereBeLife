@@ -750,3 +750,28 @@ gives a shelter 614 in 618). Survival over 10 years in 20 valleys is unchanged w
 doesn't yet weigh how long a step takes, so building a hut while freezing looks as good as warming
 at a fire. Mind size 1,184 bytes.
 
+## D-109: Homes (2026-10-11)
+
+**Decision:** Each person keeps a home: the hut it sleeps under, with an attachment that grows by
+a night under its roof (up to 16) and wears down by a night elsewhere (by 4 when beyond
+`HOME_RANGE` 200 cells). Once worn away, the next hut slept in becomes home; seeing the hut gone,
+or giving up on reaching it, loses it. Cold or tired, going home is the first option. With a home,
+people don't build, unless their home is full or they're freezing far from it; a full hut in view
+lets them build right beside it (huts can cluster). Mind 1,192 bytes; `SAVE_VERSION` 3.
+**Why:** The user saw hut spam: anyone cold more than 96 cells from a hut they remembered built
+one, and wide-ranging bands put up hundreds that fell down empty.
+**Consequences:** Over 10 years in 20 valleys, huts built fell from 4,527 to 505 with survivors
+unchanged (470 against 474), but deaths from cold rose from 34 to 42: with fewer huts, people far
+from home in winter sleep rough. Variants that let anyone build beyond 200 cells kept cold deaths
+at 28 but built 3,909 huts; dropping going home when cold gave 52.
+
+## D-110: The famine-helping test no longer asserts survival (2026-10-11)
+
+**Decision:** The famine-valley test checks that people ask for food and get some, and that
+nobody asks without helping; it no longer asserts that helping keeps more people standing.
+**Why:** Since storage and huts (D-102), famine valleys (5% food) are mild: most lose nobody, and
+where people ask, others have nothing to spare. Across 20 valleys only 6-11 gifts happen, and the
+comparison was a coin flip (305 against 303 on main; 326 against 327 with homes; at 2% food 264
+against 263). The user chose to record it and fix helping later rather than hold homes.
+**Next:** make sharing matter again (spare food, food stored in huts), then restore the assertion.
+

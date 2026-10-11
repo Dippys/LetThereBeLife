@@ -260,10 +260,19 @@ impl Engine {
                     Ok(sleep) => {
                         // A night under a roof shows how a hut is put together.
                         if quality == crate::SleepQuality::Sheltered {
-                            self.structures.lived_in(target);
+                            let hut = self.structures.lived_in(target);
                             if self.policy_options.memory {
-                                self.minds.get_mut(agent).crafts.saw_building();
+                                let mind = self.minds.get_mut(agent);
+                                mind.crafts.saw_building();
+                                if let Some(hut) = hut {
+                                    let far = mind.home.far_from(target);
+                                    mind.home.slept_at(hut, far);
+                                }
                             }
+                        } else if self.policy_options.memory {
+                            let home = &mut self.minds.get_mut(agent).home;
+                            let far = home.far_from(target);
+                            home.slept_out(far);
                         }
                         self.policy_diagnostics.push(PolicyDiagnostic {
                             agent,

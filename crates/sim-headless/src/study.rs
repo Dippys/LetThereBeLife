@@ -253,6 +253,9 @@ pub struct WildlifeStats {
     pub huts: u64,
     pub huts_fallen: u64,
     pub stored: u64,
+    /// Living people with a home, and the huts they live in, at the end.
+    pub housed: u64,
+    pub homes: u64,
     pub fetched: u64,
     pub gave_up: u64,
     pub warm_ups: u64,
@@ -680,6 +683,13 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
             }
         }
     }
+    let homes: std::collections::BTreeSet<_> =
+        living.iter().filter_map(|(_, mind)| mind.home).collect();
+    wildlife.housed = living
+        .iter()
+        .filter(|(_, mind)| mind.home.is_some())
+        .count() as u64;
+    wildlife.homes = homes.len() as u64;
     report.food = food;
     wildlife.deer = engine.animal_count(sim_core::Species::Deer) as u64;
     wildlife.wolves = engine.animal_count(sim_core::Species::Wolf) as u64;
@@ -1741,9 +1751,11 @@ impl fmt::Display for StudyReport {
         )?;
         write!(
             formatter,
-            "\n  homes: huts built {} ({} fell down empty), things put away {}, food fetched {}; trips given up {}",
+            "\n  homes: huts built {} ({} fell down empty), {} people live in {} huts, things put away {}, food fetched {}; trips given up {}",
             self.wildlife.huts,
             self.wildlife.huts_fallen,
+            self.wildlife.housed,
+            self.wildlife.homes,
             self.wildlife.stored,
             self.wildlife.fetched,
             self.wildlife.gave_up

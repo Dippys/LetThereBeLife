@@ -319,15 +319,19 @@ impl StructureStore {
     }
 
     /// Someone sleeps under the hut beside `position`: it stays lived in.
-    pub(crate) fn lived_in(&mut self, position: WorldPosition) {
+    /// Returns where that hut stands.
+    pub(crate) fn lived_in(&mut self, position: WorldPosition) -> Option<WorldPosition> {
+        let mut hut = None;
         for candidate in cardinal_neighbors(position) {
             if let Some(id) = self.structure_at(candidate)
                 && let Some(record) = self.records.get_mut(id.0 as usize).and_then(Option::as_mut)
                 && record.kind == StructureKind::Shelter
             {
                 record.idle_seasons = 0;
+                hut = hut.or(Some(candidate));
             }
         }
+        hut
     }
 
     /// Whether `builder` has something under construction.

@@ -59,14 +59,13 @@ fn across_valleys<T: Send>(
 }
 
 /// In famine valleys (5% of the food, nothing grows back, no game to hunt),
-/// being able to ask for food keeps more of the band on its feet. The effect is
-/// small and comes from the few valleys where people actually ask (D-077,
-/// D-079, D-090), so this runs every livable valley among seeds 1-40 (20, in
-/// parallel) with and without helping and compares the people standing at the
-/// end (alive and not collapsed): 365 against 361 when this was written.
+/// people ask each other for food and food changes hands; without helping,
+/// nobody asks. Whether that keeps more of the band on its feet is no longer
+/// asserted: since storage and huts (D-102) these valleys are mild and the
+/// few gifts change survival by 1-3 people either way (D-110, docs/STATUS.md).
 #[test]
 #[ignore = "release-only: run with --release --ignored (part of scripts/validate)"]
-fn asking_for_food_keeps_more_of_famine_valleys_on_their_feet() {
+fn people_in_famine_valleys_ask_for_food_and_get_some() {
     let run = |seed: u64, helping: bool| {
         let mut config = valley(seed, 600_000);
         config.food_percent = 5;
@@ -82,8 +81,6 @@ fn asking_for_food_keeps_more_of_famine_valleys_on_their_feet() {
         let with_help = run(seed, true)?;
         let without = run(seed, false)?;
         Some((
-            with_help.survivors - with_help.collapsed,
-            without.survivors - without.collapsed,
             with_help.comms.summary().requests[2],
             without.comms.summary().requests[0],
         ))
@@ -93,14 +90,39 @@ fn asking_for_food_keeps_more_of_famine_valleys_on_their_feet() {
         20,
         "the livable valleys among the seeds changed"
     );
-    let helped: u32 = results.iter().map(|result| result.0).sum();
-    let alone: u32 = results.iter().map(|result| result.1).sum();
-    let gifts: u64 = results.iter().map(|result| result.2).sum();
-    let asked_alone: u64 = results.iter().map(|result| result.3).sum();
+    let gifts: u64 = results.iter().map(|result| result.0).sum();
+    let asked_alone: u64 = results.iter().map(|result| result.1).sum();
     assert_eq!(asked_alone, 0, "without helping nobody asks");
     assert!(gifts > 0, "food changed hands");
+}
+
+/// People settle in a hut they come back to rather than building wherever
+/// they get cold (D-109): over two years most have a home, and the huts that
+/// went up are a few per person, not dozens.
+#[test]
+#[ignore = "release-only: run with --release --ignored (part of scripts/validate)"]
+fn people_keep_homes_instead_of_building_wherever_they_are() {
+    let results = across_valleys(1..=16, |seed| {
+        let report = run_study(valley(seed, 2 * sim_core::TICKS_PER_YEAR)).ok()?;
+        Some((
+            report.wildlife.huts,
+            report.wildlife.housed,
+            report.survivors,
+        ))
+    });
+    assert_eq!(results.len(), 10, "the valleys among the seeds changed");
+    let built: u64 = results.iter().map(|&(huts, _, _)| huts).sum();
+    let housed: u64 = results.iter().map(|&(_, housed, _)| housed).sum();
+    let living: u64 = results
+        .iter()
+        .map(|&(_, _, survivors)| survivors as u64)
+        .sum();
     assert!(
-        helped > alone,
-        "people standing with helping {helped} vs without {alone}"
+        housed * 2 >= living,
+        "only {housed} of {living} people have a home"
+    );
+    assert!(
+        built <= 2 * living,
+        "{built} huts went up for {living} people"
     );
 }

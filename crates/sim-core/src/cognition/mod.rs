@@ -212,6 +212,8 @@ pub struct MentalMapView {
     pub habits: Vec<HabitView>,
     /// What it has seen its kinds of choice bring about.
     pub effects: Vec<EffectView>,
+    /// The hut it lives in.
+    pub home: Option<WorldPosition>,
     pub acquaintances: Vec<AcquaintanceView>,
     /// What the agent believes words mean.
     pub lexicon: Vec<LexiconEntryView>,
@@ -514,6 +516,64 @@ pub(crate) struct Mind {
     pub(crate) stall: Stall,
     /// How its own choices have gone (docs/plans/LEARNING.md).
     pub(crate) habits: Habits,
+    /// The hut it lives in.
+    pub(crate) home: Home,
+}
+
+/// The most nights of attachment a home builds up.
+pub const HOME_ATTACHMENT_MAX: u8 = 16;
+
+/// The hut an agent lives in, and how attached it is: each night under its
+/// roof adds to that, each night elsewhere wears it down, and once it's worn
+/// away the next hut it sleeps in becomes home.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct Home {
+    hut: Option<crate::agent::CompactPosition>,
+    attachment: u8,
+}
+
+impl Home {
+    pub(crate) fn hut(self) -> Option<WorldPosition> {
+        self.hut.map(crate::agent::CompactPosition::world)
+    }
+
+    /// A night under the roof of the hut at `hut`. A night far from home
+    /// wears attachment down faster: a few of those and it has moved on.
+    pub(crate) fn slept_at(&mut self, hut: WorldPosition, far: bool) {
+        let hut = crate::agent::CompactPosition::checked(hut);
+        if self.hut == hut {
+            self.attachment = (self.attachment + 1).min(HOME_ATTACHMENT_MAX);
+        } else if self.attachment <= Self::wear(far) {
+            self.hut = hut;
+            self.attachment = 1;
+        } else {
+            self.attachment -= Self::wear(far);
+        }
+    }
+
+    /// A night away from any roof.
+    pub(crate) fn slept_out(&mut self, far: bool) {
+        self.attachment = self.attachment.saturating_sub(Self::wear(far));
+        if self.attachment == 0 {
+            self.hut = None;
+        }
+    }
+
+    const fn wear(far: bool) -> u8 {
+        if far { 4 } else { 1 }
+    }
+
+    /// Whether `position` is far from home (no home is never far).
+    pub(crate) fn far_from(self, position: WorldPosition) -> bool {
+        self.hut().is_some_and(|hut| {
+            hut.x.abs_diff(position.x) + hut.y.abs_diff(position.y) > crate::HOME_RANGE
+        })
+    }
+
+    /// It saw its home is gone.
+    pub(crate) fn lost(&mut self) {
+        *self = Self::default();
+    }
 }
 
 /// Progress toward one destination: the closest it has been, and how many

@@ -146,12 +146,15 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 - **Most decisions are still hand-written.** Cold and tiredness are answered by learned habits
   and what people learned their choices bring about (D-105, D-108); food, water, storage and
   social choices are still a script.
-- **Hut spam:** people build wherever they're cold far from a hut they remember; hundreds go up
-  and fall down empty in some valleys. Next: homes people are attached to.
+- **Winter trips are dangerous:** with homes (D-109) people no longer build wherever they get
+  cold, so those far from home in winter sleep rough; cold deaths rose a little (42 against 34
+  over 20 valley-decades).
 - **Wolves are hard on loners.** Agents who wander off alone get bitten; wounded people now come
   round after 5 minutes, but some die of thirst while down or soon after.
-- **Helping matters only in famines.** With regrowth and game, nobody needs to ask for food; the M7
-  helping test runs famine valleys (`--no-regrowth --no-wildlife --food 5`).
+- **Asking for food no longer matters** (D-110). Even famine valleys (`--no-regrowth
+  --no-wildlife --food 5`) are mild since storage and huts, and where people ask, nobody has food
+  to spare: 6-11 gifts across 20 valleys, survival unchanged. The test now only checks that asking
+  and giving happen.
 - **COME (regroup) requests aren't implemented** (deferred from M7).
 - **Sharing improves survival only where knowledge is scarce.** In most scenarios agents already
   survive on their own knowledge. Sharing should matter more with bigger populations, scarcer
@@ -165,14 +168,15 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
   code 9): 1 in 19 runs on 2026-10-09, 2 in 14 on 2026-10-10, then 0 in 8, then 2 in 8 `--valley`
   smokes after M7, then 1 in 12 smokes after the living world. It happens with and without agents. Cause unknown, possibly GPU teardown.
 - The world archive needs regenerating for generator v2 (`--pregenerate-world`).
-- **Minds are 1,184 B per agent** (mental map 372 B). That's fine at viewer scale; the spec's 10M
+- **Minds are 1,192 B per agent** (mental map 372 B). That's fine at viewer scale; the spec's 10M
   agents would need ~8 GB, so compaction comes later.
 - **Greedy waypoints can pace around obstacles.** Agents no longer step straight back to where they
   were and collapse into sleep when exhausted, but longer cycles are possible.
 
 ## Recent changes
 
-- 2026-10-11 (latest): people learn what their choices bring about (a fire burning, a shelter)
+- 2026-10-11 (latest): homes: people live in a hut they come back to; hut spam is gone (D-109).
+- 2026-10-11: people learn what their choices bring about (a fire burning, a shelter)
   and value steps that lead to what helps (D-108).
 - 2026-10-11: the info box shows huts and the food stored in them; the feed notes huts
   that fall down empty.
@@ -225,9 +229,9 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## What's next
 
-1. **Homes, living plants, warm hearths:** people attached to a hut they live in (no more hut
-   spam); bushes and trees that die and spread, felled trees gone; a hut beside a burning fire
-   is warmer, so settlements can gather around hearths.
+1. **Living plants, warm hearths:** bushes and trees that die and spread, felled trees gone; a
+   hut beside a burning fire is warmer, so settlements can gather around hearths (homes, D-109,
+   are done).
 2. **Learning what works** (docs/plans/LEARNING.md): phases 1-2 done, plus understanding what
    choices bring about (D-103, D-105, D-108). Next: how long steps take, copying others, food and
    water, multi-step projects.

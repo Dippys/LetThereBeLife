@@ -169,6 +169,8 @@ pub(crate) struct MindInput<'a> {
     pub(crate) able: bool,
     /// The hut it last put food away in.
     pub(crate) stored_food: Option<WorldPosition>,
+    /// The hut it lives in.
+    pub(crate) home: Option<WorldPosition>,
     /// Set to where a trip is ultimately headed, so the engine can tell when
     /// the agent stops getting any closer.
     pub(crate) trip: &'a std::cell::Cell<Option<WorldPosition>>,
@@ -379,14 +381,34 @@ impl Planner<'_> {
         selection
     }
 
+    /// It may build a hut if it knows how, is fit for the work, and has no
+    /// home (or its home is full, or it's freezing far from it), where there's
+    /// no hut close by or every hut in view is full. Merely away on a trip, it
+    /// sleeps rough until its attachment wears off.
     fn may_build_hut(&self) -> bool {
+        let huts_full = self.perception.structures.iter().any(|structure| {
+            structure.kind == crate::StructureKind::Shelter
+                && structure.state == crate::StructureState::Complete
+        }) && self.sleepable_shelter_access().is_none();
+        let homeless = self.mind.home.is_none_or(|home| {
+            let full = huts_full
+                && self
+                    .perception
+                    .structures
+                    .iter()
+                    .any(|structure| structure.position == home);
+            full || (self.needs.exposure.threshold_reached
+                && manhattan(home, self.origin) > HOME_RANGE)
+        });
         self.mind.knows_huts
             && self.mind.able
-            && self
-                .mind
-                .map
-                .nearest_seen_distance(LandmarkKind::SHELTER, self.origin)
-                .is_none_or(|distance| distance > HUT_SPACING)
+            && homeless
+            && (huts_full
+                || self
+                    .mind
+                    .map
+                    .nearest_seen_distance(LandmarkKind::SHELTER, self.origin)
+                    .is_none_or(|distance| distance > HUT_SPACING))
     }
 
     /// A full load while short of food or of the wood for its hut: set some down.
@@ -527,6 +549,7 @@ impl Planner<'_> {
     fn learned_warmth(&self, inventory: InventoryView) -> Deliberation {
         let reason = PolicyReason::ExposureThreshold;
         let mut options = Vec::new();
+        options.extend(self.go_home(reason));
         if self.mind.knows_hearths {
             options.extend(self.warm_up());
             options.extend(self.tend_fire(inventory));
@@ -561,6 +584,7 @@ impl Planner<'_> {
             return Deliberation::act(PhysicalGoal::Sleep, spot, reason);
         }
         let mut options = Vec::new();
+        options.extend(self.go_home(reason));
         options.extend(
             self.sleepable_shelter_access()
                 .map(|access| Deliberation::act(PhysicalGoal::Sleep, access, reason)),
@@ -643,6 +667,59 @@ impl Planner<'_> {
                 .structures
                 .iter()
                 .any(|structure| structure.position == cell)
+    }
+
+    /// Its home within reach: sleep under its roof, or head back to it.
+    fn go_home(&self, reason: PolicyReason) -> Option<Deliberation> {
+        let home = self.mind.home?;
+        if manhattan(home, self.origin) > HOME_RANGE {
+            return None;
+        }
+        let in_view = self
+            .perception
+            .structures
+            .iter()
+            .any(|structure| structure.position == home);
+        let spot = in_view
+            .then(|| {
+                [(0, -1), (-1, 0), (1, 0), (0, 1)]
+                    .map(|(dx, dy)| WorldPosition {
+                        x: home.x + dx,
+                        y: home.y + dy,
+                    })
+                    .into_iter()
+                    .filter(|&cell| self.can_sleep_on(cell))
+                    .min_by_key(|&cell| (manhattan(self.origin, cell), cell.y, cell.x))
+            })
+            .flatten();
+        if let Some(spot) = spot {
+            if spot == self.origin {
+                return Some(Deliberation::act(PhysicalGoal::Sleep, spot, reason));
+            }
+            let (waypoint, heading) = self.waypoint_toward(spot)?;
+            return Some(Deliberation {
+                selection: PolicySelection {
+                    goal: PhysicalGoal::SeekShelter,
+                    target: Some(waypoint),
+                    reason,
+                },
+                heading: Some(heading),
+            });
+        }
+        if in_view {
+            // Every place under its roof is taken.
+            return None;
+        }
+        let (waypoint, heading) = self.waypoint_toward(home)?;
+        self.mind.trip.set(Some(home));
+        Some(Deliberation {
+            selection: PolicySelection {
+                goal: PhysicalGoal::SeekShelter,
+                target: Some(waypoint),
+                reason,
+            },
+            heading: Some(heading),
+        })
     }
 
     fn sleepable_shelter_access(&self) -> Option<WorldPosition> {
