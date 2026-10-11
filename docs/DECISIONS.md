@@ -940,3 +940,15 @@ had already stopped holding (seed 5: 25% against 62% before D-121): families, ho
 camps now keep everyone together, so visiting friends and following hints mostly pull people
 apart. Informative pointing-out (D-121) sends listeners off to see places they didn't know.
 
+## D-123: Idle time works toward what has proved useful (2026-10-12)
+
+**Decision:** When nothing presses and instinct would just wait, a person forms an intention to
+get the thing it lacks that its own beliefs say has been most useful: what is needed by the
+actions that eased its needs, or that brings about what those need, two steps deep (wood feeds a
+fire, at which warming up helps; stone makes a blade). It's the same planner and intention
+(`Goal::Ready`), e.g. "Getting ready: gather wood". On by default (`plans` bit 5).
+**Why:** THINKING.md T4. Replacing the calm-time script outright cost lives when tried as
+readiness (D-120); filling idle time (about half of it) adds work instead of displacing it.
+**Consequences:** Over 10 years in 20 valleys: 510 survivors against 493, deaths from cold 18
+against 27; fuel put on fires 4,136 times against 3,811.
+

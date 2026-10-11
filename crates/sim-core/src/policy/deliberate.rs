@@ -251,9 +251,7 @@ pub(crate) fn deliberate(
         Some(crate::cognition::Goal::Need(need)) => {
             urgent.is_none() || !mind.facts.has(crate::cognition::Facts::NEEDS[need])
         }
-        Some(crate::cognition::Goal::Ready(fact)) => {
-            mind.facts.has(fact) || mind.ready != Some(fact)
-        }
+        Some(crate::cognition::Goal::Ready(fact)) => mind.facts.has(fact) || urgent.is_some(),
         None => urgent.is_none(),
     };
     if done {
@@ -274,6 +272,20 @@ pub(crate) fn deliberate(
         )
     {
         return readying;
+    }
+    // Nothing to do: work toward having what has proved useful.
+    if urgent.is_none()
+        && mind.plans & PLANS_IDLE != 0
+        && instinctive.selection.goal == PhysicalGoal::Wait
+        && let Some(fact) = planner.most_useful_missing()
+        && let Some(working) = planner.planned(
+            crate::cognition::Goal::Ready(fact),
+            inventory,
+            water_here,
+            food_here,
+        )
+    {
+        return working;
     }
     let Some(need) = urgent.filter(|&need| {
         mind.plans & (1 << need as u8) != 0 && !(need == NeedKind::Rest && collapsing)
@@ -775,6 +787,57 @@ impl Planner<'_> {
         );
         let (value, tries) = habits.value(situation, choice);
         (tries >= TRUSTED_TRIES).then_some(i32::from(value) * 4)
+    }
+
+    /// The thing it lacks that has been most useful to it, by its own
+    /// beliefs: what is needed by actions that eased its needs, or that bring
+    /// about what such actions need (wood feeds a fire, at which warming up
+    /// helps), two steps deep.
+    fn most_useful_missing(&self) -> Option<u16> {
+        use crate::cognition::Facts;
+        [
+            Facts::HAS_FOOD,
+            Facts::HAS_WOOD,
+            Facts::HAS_STONE,
+            Facts::HAS_BLADE,
+            Facts::STORE_NEAR,
+        ]
+        .into_iter()
+        .filter(|&fact| !self.mind.facts.has(fact))
+        .map(|fact| (self.usefulness(fact, 2), fact))
+        .filter(|&(worth, _)| worth > 0)
+        .max_by_key(|&(worth, fact)| (worth, std::cmp::Reverse(fact)))
+        .map(|(_, fact)| fact)
+    }
+
+    /// How useful having `fact` has been: the most an action needing it has
+    /// eased its needs, or (`depth` deep) what it brought about was worth.
+    fn usefulness(&self, fact: u16, depth: u8) -> i32 {
+        use crate::cognition::{Choice, MADE};
+        let model = self.mind.model;
+        Choice::ALL
+            .into_iter()
+            .filter(|&choice| self.can(choice) && model.needs(choice).has(fact))
+            .map(|choice| {
+                let eases: i32 = (0..4)
+                    .map(|need| i32::from(model.relief(choice, need)).max(0))
+                    .sum();
+                let leads = if depth == 0 {
+                    0
+                } else {
+                    MADE.into_iter()
+                        .filter(|&made| {
+                            let (hits, tries) = model.odds(choice, made);
+                            hits >= 2 && hits * 2 >= tries
+                        })
+                        .map(|made| self.usefulness(made, depth - 1) / 2)
+                        .max()
+                        .unwrap_or(0)
+                };
+                eases.max(leads)
+            })
+            .max()
+            .unwrap_or(0)
     }
 
     /// Whether it knows how to do `choice` as a step of a plan.
@@ -1815,6 +1878,9 @@ impl Deliberation {
 
 /// The `MindInput::plans` bit for getting ready for hard seasons.
 pub(crate) const PLANS_READY: u8 = 1 << 4;
+/// The `MindInput::plans` bit for working, when idle, toward having what has
+/// proved useful.
+pub(crate) const PLANS_IDLE: u8 = 1 << 5;
 
 /// Cells from a trip's destination that count as there.
 const ARRIVED: u64 = 2;

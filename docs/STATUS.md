@@ -148,6 +148,7 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 - **Most decisions are still hand-written.** Cold and tiredness are answered by learned habits
   and what people learned their choices bring about (D-105, D-108); food, water, storage and
   social choices are still a script.
+- **Winter cold still kills**, though less (18 over 10 years in 20 valleys, D-123).
 - **Winter trips are dangerous:** with homes (D-109) people no longer build wherever they get
   cold, so those far from home in winter sleep rough; cold deaths rose a little (42 against 34
   over 20 valley-decades).
@@ -179,7 +180,9 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
-- 2026-10-12 (latest): plans for hunger and thirst (D-119); people show others places they
+- 2026-10-12 (latest): idle time works toward what has proved useful; cold deaths 27 to 18
+  over 10 years in 20 valleys (D-123).
+- 2026-10-12: plans for hunger and thirst (D-119); people show others places they
   don't know (D-121); getting ready for hard seasons built, off (D-120).
 - 2026-10-12: plans for cold on: instinct first, plans when it has nothing good;
   walks give up and avoid places they can't reach (D-118).
@@ -242,8 +245,9 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 ## What's next
 
 1. **Thinking agents** (docs/plans/THINKING.md): plans for cold, hunger and thirst on (D-118,
-   D-119); people show others what they don't know (D-121). Getting ready for hard seasons is
-   built but off (D-120). Next: T4 calm time by plans, readiness by stocking, not staying.
+   D-119); idle time works toward what has proved useful (D-123); people show others what they
+   don't know (D-121). Getting ready for hard seasons is built but off (D-120). Next: readiness
+   by stocking rather than staying; plans for more of calm time.
 2. **Settlements:** homes (D-109), living plants (D-111) and warm hearths (D-112) are in. Next:
    people knowing whose hut is whose, and families sharing a home.
 3. **Learning what works** (docs/plans/LEARNING.md): phases 1-2 done, plus understanding what

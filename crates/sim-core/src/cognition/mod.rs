@@ -36,7 +36,7 @@ pub use lexicon::{Concept, FAMILY_SIZE, LEXICON_SLOTS, LexiconEntryView, VOCAL_F
 pub(crate) use map::{HintCheck, HintSource, MentalMap, spent_kinds, visible_kinds};
 pub use map::{LANDMARK_SLOTS, MERGE_RADIUS, SEARCH_SPACING, VISIT_TILE_SIZE, VISITED_TILE_SLOTS};
 pub use model::{BeliefView, Facts};
-pub(crate) use model::{Model, need_level};
+pub(crate) use model::{EFFECTS as MADE, Model, need_level};
 pub use personality::Personality;
 pub(crate) use reading::ListenerContext;
 pub use reading::{READING_CANDIDATES, Reading, ReadingReasons, concept_topic};
@@ -492,7 +492,8 @@ pub struct PolicyOptions {
     /// The needs met by planning (docs/plans/THINKING.md): bit `1 << NeedKind
     /// index` set means that need is eased by a plan from the agent's own
     /// cause-and-effect model, held as an intention; bit 4 gets ready for a
-    /// hard season it remembers coming (requires `memory`).
+    /// hard season it remembers coming; bit 5 spends idle time getting what
+    /// has proved useful (requires `memory`).
     pub plans: u8,
 }
 
@@ -506,10 +507,12 @@ impl PolicyOptions {
             social: true,
             helping: true,
             learned: true,
-            // Getting ready for hard seasons (bit 4) is built but off (D-120).
+            // Getting ready for hard seasons (bit 4) is built but off (D-120);
+            // idle time works toward what has proved useful (bit 5, D-123).
             plans: 1 << crate::NeedKind::Hunger as u8
                 | 1 << crate::NeedKind::Thirst as u8
-                | 1 << crate::NeedKind::Exposure as u8,
+                | 1 << crate::NeedKind::Exposure as u8
+                | 1 << 5,
         }
     }
 }
