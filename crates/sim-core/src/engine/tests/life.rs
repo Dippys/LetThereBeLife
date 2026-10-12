@@ -326,3 +326,43 @@ fn whoever_watches_a_thing_made_learns_the_makers_word_for_it() {
         crate::WordEvent::Coined { agent, .. } if *agent == maker
     )));
 }
+
+#[test]
+fn a_body_left_out_rots_and_sickens_until_someone_buries_it() {
+    let mut engine = two_people();
+    engine.policy_options = crate::PolicyOptions::full();
+    let (living, dead) = (AgentId::new(0), AgentId::new(1));
+    let record = engine
+        .population
+        .finalize_death(engine.time, dead, crate::DeathCause::Exposure)
+        .unwrap();
+    engine.death_records.push(record);
+    let near = engine.population.view(living).unwrap().position;
+    assert_eq!(
+        engine.bodies().next().map(|(_, _, state)| state),
+        Some(crate::BodyState::Fresh)
+    );
+    assert!(
+        !engine.breathe_near_bodies(living, near),
+        "a fresh body is harmless"
+    );
+    engine.time = SimTime::from_ticks(engine.time.ticks() + crate::DAY_SECONDS * 60);
+    assert_eq!(
+        engine.bodies().next().map(|(_, _, state)| state),
+        Some(crate::BodyState::Rotting)
+    );
+    let thirst_before = engine.physical_needs(living).unwrap().thirst.value;
+    assert!(engine.breathe_near_bodies(living, near));
+    assert!(engine.physical_needs(living).unwrap().thirst.value > thirst_before);
+    assert!(!engine.breathe_near_bodies(living, near), "once a day");
+    assert!(
+        engine.minds.get_mut(living).crafts.knows_burial(),
+        "it learned"
+    );
+    engine.apply_bury(living, record.position).unwrap();
+    assert_eq!(
+        engine.bodies().next().map(|(_, _, state)| state),
+        Some(crate::BodyState::Buried)
+    );
+    assert_eq!(engine.burial_events().len(), 1);
+}

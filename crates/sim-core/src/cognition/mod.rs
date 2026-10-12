@@ -581,6 +581,8 @@ pub(crate) struct Mind {
     pub(crate) seasons: SeasonMemory,
     /// Where it last ate berries on open ground.
     pub(crate) sown: Sown,
+    /// Simulated second before which it won't fall sick by a body again.
+    pub(crate) sick_until: u32,
 }
 
 /// Seconds after eating somewhere before a bush there counts as having come

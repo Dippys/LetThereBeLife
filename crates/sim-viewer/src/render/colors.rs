@@ -252,3 +252,9 @@ pub(super) fn snowy(color: u32) -> u32 {
 pub(super) const MINIMAP_FIRE: u32 = rgba(255, 150, 40, 255);
 /// Behind the start screen.
 pub(super) const UI_DIM_SCREEN: u32 = rgba(8, 10, 14, 200);
+
+/// What's left of the dead: a body, one rotting, bones, a grave mound.
+pub(super) const BODY: u32 = rgba(120, 96, 80, 255);
+pub(super) const BODY_ROTTING: u32 = rgba(110, 120, 60, 255);
+pub(super) const BONES: u32 = rgba(225, 222, 210, 255);
+pub(super) const GRAVE: u32 = rgba(110, 82, 56, 255);

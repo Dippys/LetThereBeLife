@@ -23,6 +23,8 @@ pub(crate) struct Crafts {
     huts: u8,
     /// Seeds it has seen grow or watched planted (0 = it doesn't know).
     planting: u8,
+    /// Sickness by a rotting body it has felt, or burials it has watched.
+    burial: u8,
 }
 
 fn mix(mut key: u64) -> u64 {
@@ -44,6 +46,7 @@ impl Crafts {
                 knapping: 0,
                 huts: CULTURE_EVIDENCE,
                 planting: 0,
+                burial: 0,
             }
         } else {
             Self {
@@ -67,6 +70,16 @@ impl Crafts {
     /// It built a hut, or watched one go up.
     pub(crate) fn saw_building(&mut self) {
         self.huts = self.huts.saturating_add(1);
+    }
+
+    /// Believes the dead are better buried.
+    pub(crate) const fn knows_burial(self) -> bool {
+        self.burial > 0
+    }
+
+    /// It fell sick by a rotting body, or watched someone bury one.
+    pub(crate) fn saw_burial(&mut self) {
+        self.burial = self.burial.saturating_add(1);
     }
 
     /// Knows that berries pushed into the ground grow into a bush.
@@ -139,6 +152,9 @@ mod tests {
         assert!(!child.knows_planting(), "nobody starts out farming");
         child.saw_planting();
         assert!(child.knows_planting());
-        assert_eq!(std::mem::size_of::<Crafts>(), 5);
+        assert!(!child.knows_burial());
+        child.saw_burial();
+        assert!(child.knows_burial());
+        assert_eq!(std::mem::size_of::<Crafts>(), 6);
     }
 }

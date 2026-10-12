@@ -150,6 +150,11 @@ impl Engine {
         (self.plants_sprouted, self.plants_died)
     }
 
+    /// Sown bushes that died with the winter, so far.
+    pub fn crops_withered(&self) -> u64 {
+        self.crops_withered
+    }
+
     /// Living trees and bushes (of either kind) now.
     pub fn plant_census(&self) -> (u64, u64) {
         let mut census = (0, 0);

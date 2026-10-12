@@ -177,6 +177,8 @@ pub enum PhysicalGoal {
     Drop = 19,
     /// Push a carried berry into the ground beside the agent.
     Plant = 20,
+    /// Bury the body lying beside the agent.
+    Bury = 21,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -232,6 +234,8 @@ pub enum PolicyReason {
     Unloading,
     /// Planting berries near home.
     Planting,
+    /// Burying the dead.
+    Burying,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

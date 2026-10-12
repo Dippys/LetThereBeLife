@@ -268,6 +268,12 @@ pub struct WildlifeStats {
     pub winter_stock: Vec<u32>,
     /// People who noticed seeds grow; bushes planted, and times planting was watched.
     pub farming: [u64; 3],
+    pub crops_withered: u64,
+    /// Burials, and how often one was watched; people sickened by a body;
+    /// bodies lying unburied at the end.
+    pub burials: [u64; 2],
+    pub sickened: u64,
+    pub unburied: u64,
     /// Plans formed, completed, and given up; and how often each plan (its
     /// steps, as text) was formed.
     pub plans: [u64; 3],
@@ -573,6 +579,10 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                     food.first_tastes += u64::from(meal.first_taste);
                     food.watched += u64::from(meal.watchers);
                 }
+                for burial in engine.burial_events() {
+                    wildlife.burials[0] += 1;
+                    wildlife.burials[1] += u64::from(burial.watchers);
+                }
                 for farm in engine.farm_events() {
                     if farm.planted {
                         wildlife.farming[1] += 1;
@@ -751,6 +761,12 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     }
     report.families = families;
     report.comms = comms;
+    wildlife.crops_withered = engine.crops_withered();
+    wildlife.sickened = engine.sickened_by_bodies();
+    wildlife.unburied = engine
+        .bodies()
+        .filter(|(_, _, state)| *state != sim_core::BodyState::Buried)
+        .count() as u64;
     wildlife.wearing_hides = engine
         .agent_views(usize::MAX)
         .filter(|view| view.activity != AgentActivity::Dead)
@@ -2013,10 +2029,17 @@ impl fmt::Display for StudyReport {
             "; food in huts as winter began {:?}",
             self.wildlife.winter_stock
         )?;
+        let [buried, watched_burials] = self.wildlife.burials;
+        write!(
+            formatter,
+            "\n  the dead: buried {buried} (watched {watched_burials} times), sick from a rotting body {}, lying unburied at the end {}",
+            self.wildlife.sickened, self.wildlife.unburied
+        )?;
         let [noticed, planted, watched] = self.wildlife.farming;
         write!(
             formatter,
-            "\n  farming: noticed seeds grow {noticed}, bushes planted {planted} (watched {watched} times)"
+            "\n  farming: noticed seeds grow {noticed}, bushes planted {planted} (watched {watched} times), sown bushes withered in winter {}",
+            self.wildlife.crops_withered
         )?;
         let [(trees_before, bushes_before), (trees, bushes)] = self.wildlife.plants;
         write!(

@@ -198,6 +198,8 @@ pub(crate) struct MindInput<'a> {
     pub(crate) stocking: bool,
     /// Knows seeds grow, and it's a growing season.
     pub(crate) plants: bool,
+    /// A body in view it would bury.
+    pub(crate) body: Option<WorldPosition>,
     /// Old enough (and able) to hunt.
     pub(crate) hunts: bool,
     /// A place it recently couldn't get to, avoided for now.
@@ -1369,6 +1371,12 @@ impl Planner<'_> {
             && let Some(warm) = self.warm_up()
         {
             return warm.with_reason(PolicyReason::PrepareTrip);
+        }
+        // The dead come before chores.
+        if let Some(body) = self.mind.body
+            && let Some(burial) = self.at_hut(body, PhysicalGoal::Bury, PolicyReason::Burying)
+        {
+            return burial;
         }
         // Getting ready for winter: food home.
         if let Some(stock) = self.stock_home(inventory) {

@@ -198,6 +198,7 @@ impl Engine {
         perception: &PhysicalPerception,
     ) -> (PolicySelection, Option<ExplorationHeading>) {
         let season = self.season();
+        self.breathe_near_bodies(agent, origin);
         self.pair_up(agent, perception);
         let now = belief_seconds(self.time);
         let heading = self
@@ -254,6 +255,28 @@ impl Engine {
         } else {
             Vec::new()
         };
+        // A body in view it would bury: anyone's, once it has learned the dead
+        // are better buried; otherwise only family's and close friends'.
+        let body_to_bury = self.minds.get(agent).and_then(|mind| {
+            let knows = mind.crafts.knows_burial();
+            self.unburied_in(perception.area)
+                .into_iter()
+                .filter(|(dead, _)| {
+                    knows
+                        || mind.social.slot_of(*dead).is_some_and(|slot| {
+                            mind.social.tie(slot).is_some()
+                                || mind.social.familiarity(slot) >= crate::FRIEND_FAMILIARITY
+                        })
+                })
+                .map(|(_, position)| position)
+                .min_by_key(|position| {
+                    (
+                        origin.x.abs_diff(position.x) + origin.y.abs_diff(position.y),
+                        position.y,
+                        position.x,
+                    )
+                })
+        });
         // Bodies lie where people died for a while; anyone passing sees them.
         let bodies: Vec<AgentId> = self
             .death_records
@@ -363,6 +386,7 @@ impl Engine {
             avoid,
             seasons,
             sown,
+            sick_until: _,
         } = mind;
         // A bush bearing berries where it once ate some on open ground: seeds grow.
         let fruit = perception
@@ -597,7 +621,9 @@ impl Engine {
                 home,
                 others_huts: &others_huts,
                 stocking,
-                plants: crafts.knows_planting() && season != crate::Season::Winter,
+                // Sowing is a spring job: what's sown bears from summer.
+                plants: crafts.knows_planting() && season == crate::Season::Spring,
+                body: body_to_bury.filter(|_| able),
                 hunts,
                 avoid: avoid.place(now),
                 ready,
@@ -707,7 +733,7 @@ impl Engine {
         let duration = match (goal, reason) {
             (PhysicalGoal::Hunt, _) => super::HUNT_TICKS,
             (PhysicalGoal::WarmUp | PhysicalGoal::TendFire, _) => WARM_UP_TICKS,
-            (PhysicalGoal::Craft | PhysicalGoal::Plant, _) => CRAFT_TICKS,
+            (PhysicalGoal::Craft | PhysicalGoal::Plant | PhysicalGoal::Bury, _) => CRAFT_TICKS,
             (PhysicalGoal::Store | PhysicalGoal::Fetch | PhysicalGoal::Drop, _) => WARM_UP_TICKS,
             // A warning is quick: a shout and a point.
             (_, PolicyReason::Warning) => WARNING_TICKS,

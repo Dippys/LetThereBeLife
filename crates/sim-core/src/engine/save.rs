@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::Engine;
 
 /// Bumped whenever the saved layout changes; older saves are refused.
-const SAVE_VERSION: u32 = 12;
+const SAVE_VERSION: u32 = 13;
 
 /// What a save holds, borrowed from a running engine.
 #[derive(Serialize)]
@@ -21,6 +21,8 @@ struct SavedRef<'a> {
     population: &'a crate::agent::Population,
     scheduler: &'a crate::scheduler::Scheduler,
     death_records: &'a Vec<crate::DeathRecord>,
+    buried: &'a std::collections::BTreeSet<crate::AgentId>,
+    sickened: u64,
     policy_active: &'a bool,
     policy_options: &'a crate::PolicyOptions,
     minds: &'a crate::cognition::Minds,
@@ -51,6 +53,8 @@ struct Saved {
     population: crate::agent::Population,
     scheduler: crate::scheduler::Scheduler,
     death_records: Vec<crate::DeathRecord>,
+    buried: std::collections::BTreeSet<crate::AgentId>,
+    sickened: u64,
     policy_active: bool,
     policy_options: crate::PolicyOptions,
     minds: crate::cognition::Minds,
@@ -113,6 +117,8 @@ impl Engine {
             population: &self.population,
             scheduler: &self.scheduler,
             death_records: &self.death_records,
+            buried: &self.buried,
+            sickened: self.sickened,
             policy_active: &self.policy_active,
             policy_options: &self.policy_options,
             minds: &self.minds,
@@ -169,6 +175,8 @@ impl Engine {
         engine.population = saved.population;
         engine.scheduler = saved.scheduler;
         engine.death_records = saved.death_records;
+        engine.buried = saved.buried;
+        engine.sickened = saved.sickened;
         engine.policy_active = saved.policy_active;
         engine.policy_options = saved.policy_options;
         engine.minds = saved.minds;

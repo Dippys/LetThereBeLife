@@ -947,11 +947,34 @@ impl Renderer {
         build_agent_instances(
             engine
                 .agent_views(MAX_AGENT_INSTANCES)
+                .filter(|agent| agent.activity != sim_core::AgentActivity::Dead)
                 .map(|agent| (agent, engine.life(agent.id))),
             view.world_bounds(),
             view.scale() as f32,
             &mut self.agent_instances,
         );
+        // The dead, as what's left of them: a body, bones, or a grave.
+        if view.scale() as f32 >= MIN_DYNAMIC_INSTANCE_PIXELS {
+            for (_, position, state) in engine.bodies() {
+                if view.world_bounds().contains(position)
+                    && self.agent_instances.len() < MAX_AGENT_DRAWN
+                {
+                    let (inset, color) = match state {
+                        sim_core::BodyState::Fresh => (0.1, colors::BODY),
+                        sim_core::BodyState::Rotting => (0.1, colors::BODY_ROTTING),
+                        sim_core::BodyState::Bones => (0.25, colors::BONES),
+                        sim_core::BodyState::Buried => (0.2, colors::GRAVE),
+                    };
+                    self.agent_instances.push(Instance::new(
+                        position.x as f32 + inset,
+                        position.y as f32 + 0.35,
+                        1.0 - 2.0 * inset,
+                        0.4,
+                        color,
+                    ));
+                }
+            }
+        }
         // A carried baby: a small pale dot on its mother.
         let bounds = view.world_bounds();
         for agent in engine.agent_views(MAX_AGENT_INSTANCES) {
@@ -1514,8 +1537,13 @@ fn build_pictures(
             alert,
         );
     }
+    for (_, position, state) in engine.bodies() {
+        if bounds.contains(position) {
+            sprites::body(beings, position.x as f32, position.y as f32, state);
+        }
+    }
     for agent in engine.agent_views(MAX_AGENT_INSTANCES) {
-        if !bounds.contains(agent.position) {
+        if !bounds.contains(agent.position) || agent.activity == sim_core::AgentActivity::Dead {
             continue;
         }
         let ([x, y], step) = motion.drawn(agent.id, agent.position, tick);

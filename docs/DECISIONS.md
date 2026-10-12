@@ -1063,3 +1063,25 @@ grow from 16 to 20 slots, minds to 1,888 B; save version 12.
 different such words in use, all compounds; 497 survivors against 491, deaths from cold 24 against
 26. With 16 slots the tool words crowded out place words: 470 survivors.
 
+## D-132: Sown berries are a season's crop (2026-10-12)
+
+**Decision:** What grows from a sown seed (planted, or dropped by someone eating) is marked sown: it
+bears nothing until the season after it was sown, and every sown bush dies at the turn of winter.
+Seeds take only in spring, and people plant only in spring. Wild bushes still live for years.
+**Why:** The user saw planted bushes take over the land and asked that berries be planted in one
+season and harvested in another.
+**Consequences:** See D-133 for the numbers (measured together): 4,069 sown bushes withered over 10
+years in 20 valleys. Learning to plant is rarer, since a sown bush only bears in summer.
+
+## D-133: The dead rot until buried (2026-10-12)
+
+**Decision:** A body lies where the person died. After a day it rots, and anyone within 2 cells
+falls sick (thirst and tiredness up 1,500, at most once a day); after a season only bones are left,
+after a year nothing. People bury bodies in view (new goal `Bury`), before chores: family and close
+friends always, and anyone once it believes the dead are better buried (`Crafts::burial`), learned
+by falling sick by one or watching a burial. The viewer draws bodies, rotting bodies, bones and
+graves instead of every dead person forever. Minds 1,896 B; save version 13.
+**Why:** The user saw bodies all over the place and asked for burial and sickness.
+**Consequences:** With D-132, over 10 years in 20 valleys: 491 survivors against 497, deaths from
+cold 31 against 24; 25 burials, 24 people sickened by a rotting body.
+

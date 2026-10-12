@@ -3,6 +3,7 @@
 //! responsibility; each adds an `impl Engine` block.
 
 mod actions;
+mod bodies;
 mod cognition;
 mod errors;
 mod policy;
@@ -21,6 +22,7 @@ mod tick;
 mod views;
 mod wildlife;
 pub use births::{FamilyEvent, MotherhoodView};
+pub use bodies::{BodyState, BurialEvent};
 pub use names::NameEvent;
 pub use wildlife::{HUNT_TICKS, STRIKE_RANGE};
 
@@ -158,12 +160,19 @@ pub struct Engine {
     fire_events: Vec<crate::FireEvent>,
     craft_events: Vec<crate::CraftEvent>,
     farm_events: Vec<crate::FarmEvent>,
+    burial_events: Vec<BurialEvent>,
+    /// The dead who have been buried.
+    buried: std::collections::BTreeSet<AgentId>,
+    /// People who fell sick by a rotting body, so far.
+    sickened: u64,
     /// Trips abandoned because the agent stopped getting closer (for tools).
     gave_up: u64,
     /// Days and nights pass (switched off for comparisons).
     nights: bool,
     /// Plants that took root, and that died of age.
     plants_sprouted: u64,
+    /// Sown bushes that died in winter, so far.
+    crops_withered: u64,
     plants_died: u64,
     /// Things put away in huts and food taken out (for tools).
     stored: u64,
@@ -226,9 +235,13 @@ impl Engine {
             fire_events: Vec::new(),
             craft_events: Vec::new(),
             farm_events: Vec::new(),
+            burial_events: Vec::new(),
+            buried: std::collections::BTreeSet::new(),
+            sickened: 0,
             gave_up: 0,
             nights: true,
             plants_sprouted: 0,
+            crops_withered: 0,
             plants_died: 0,
             stored: 0,
             fetched: 0,
@@ -295,6 +308,7 @@ impl Engine {
                 self.fire_events.clear();
                 self.craft_events.clear();
                 self.farm_events.clear();
+                self.burial_events.clear();
                 self.gave_up = 0;
                 self.plants_sprouted = 0;
                 self.plants_died = 0;

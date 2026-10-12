@@ -130,6 +130,37 @@ pub(super) fn person(out: &mut Vec<Instance>, x: f32, y: f32, look: &PersonLook)
     });
 }
 
+const BONES: Picture = [
+    "........", "........", "........", "........", "...w....", ".ww.w.w.", "..wwww..", ".w..w...",
+];
+const GRAVE: Picture = [
+    "........", "...s....", "..sss...", "...s....", "...s....", ".mmmmmm.", "mmmmmmmm", "........",
+];
+
+/// What's left where someone died.
+pub(super) fn body(out: &mut Vec<Instance>, x: f32, y: f32, state: sim_core::BodyState) {
+    let (picture, cloth) = match state {
+        sim_core::BodyState::Fresh => (&DEAD, super::colors::BODY),
+        sim_core::BodyState::Rotting => (&DEAD, super::colors::BODY_ROTTING),
+        sim_core::BodyState::Bones => (&BONES, super::colors::BONES),
+        sim_core::BodyState::Buried => (&GRAVE, super::colors::GRAVE),
+    };
+    let skin = if state == sim_core::BodyState::Rotting {
+        rgba(150, 160, 110, 255)
+    } else {
+        SKIN
+    };
+    draw(out, x, y, 1.0, picture, &|letter| match letter {
+        b's' if state == sim_core::BodyState::Buried => Some(rgba(150, 146, 136, 255)),
+        b's' => Some(skin),
+        b'b' => Some(cloth),
+        b'l' => Some(LEGS),
+        b'w' => Some(super::colors::BONES),
+        b'm' => Some(super::colors::GRAVE),
+        _ => None,
+    });
+}
+
 const DEER: Picture = [
     "......a.", ".....aa.", ".....tt.", "tttttttt", "tttttttw", ".tttttt.", ".l.l.l.l", ".l.l.l.l",
 ];

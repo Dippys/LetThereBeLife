@@ -141,6 +141,10 @@ impl Engine {
         if !new_season {
             return;
         }
+        // What was sown this year dies with the first frost.
+        if self.season() == crate::Season::Winter {
+            self.crops_withered += self.spawned_objects.wither_sown();
+        }
         // Huts nobody has lived in for long fall down.
         for structure in self.structures.weather() {
             self.structure_diagnostics.push(crate::StructureDiagnostic {

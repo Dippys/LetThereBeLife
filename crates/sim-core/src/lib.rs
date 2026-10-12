@@ -40,8 +40,8 @@ pub use cognition::{
 };
 pub use diagnostics::{EngineCapacityMetrics, EngineDiagnostics, EngineWorkMetrics};
 pub use engine::{
-    Engine, EngineCommand, EngineCommandOutcome, EngineConfig, FamilyEvent, HUNT_TICKS,
-    MAX_SIMULATION_SPEED, MotherhoodView, NameEvent, STRIKE_RANGE, SimulationAdvanced,
+    BodyState, BurialEvent, Engine, EngineCommand, EngineCommandOutcome, EngineConfig, FamilyEvent,
+    HUNT_TICKS, MAX_SIMULATION_SPEED, MotherhoodView, NameEvent, STRIKE_RANGE, SimulationAdvanced,
     SimulationSnapshot, TickOutcome,
 };
 pub use health::{

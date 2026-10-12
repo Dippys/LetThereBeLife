@@ -179,6 +179,7 @@ pub const fn goal(goal: PhysicalGoal) -> &'static str {
         PhysicalGoal::Fetch => "Getting food from a hut",
         PhysicalGoal::Drop => "Setting things down",
         PhysicalGoal::Plant => "Planting berries",
+        PhysicalGoal::Bury => "Burying the dead",
     }
 }
 
@@ -215,6 +216,7 @@ pub const fn reason(reason: PolicyReason) -> Option<&'static str> {
         PolicyReason::Fetching => "Going for food put away in a hut",
         PolicyReason::Unloading => "Making room to carry what it needs",
         PolicyReason::Planting => "Planting near home",
+        PolicyReason::Burying => "Burying someone who died",
     })
 }
 

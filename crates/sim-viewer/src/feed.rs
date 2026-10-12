@@ -330,6 +330,19 @@ impl Feed {
             );
         }
 
+        for burial in engine.burial_events() {
+            self.tell(
+                engine,
+                format!(
+                    "{} buried {}",
+                    name(engine, burial.agent),
+                    name(engine, burial.body)
+                ),
+                Tone::Neutral,
+                Some(burial.agent),
+                burial.at,
+            );
+        }
         for farm in engine.farm_events() {
             let who = name(engine, farm.agent);
             if farm.planted {

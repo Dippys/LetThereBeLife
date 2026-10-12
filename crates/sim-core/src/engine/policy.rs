@@ -162,6 +162,7 @@ impl Engine {
                 | PhysicalGoal::TendFire
                 | PhysicalGoal::Craft
                 | PhysicalGoal::Plant
+                | PhysicalGoal::Bury
                 | PhysicalGoal::Store
                 | PhysicalGoal::Fetch
                 | PhysicalGoal::Drop

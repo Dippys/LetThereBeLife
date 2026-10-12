@@ -134,6 +134,7 @@ impl Choice {
             PhysicalGoal::BuildShelter | PhysicalGoal::BuildHearth => Self::Build,
             PhysicalGoal::Craft => Self::Craft,
             PhysicalGoal::Plant => Self::Gather,
+            PhysicalGoal::Bury => Self::Company,
             PhysicalGoal::Hunt => Self::Hunt,
             PhysicalGoal::Drop => Self::Unload,
             PhysicalGoal::Signal => Self::Company,

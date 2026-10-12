@@ -111,6 +111,9 @@ struct SpawnedObject {
     since: u32,
     remaining: u16,
     kind: SpawnKind,
+    /// Grew from a seed sown this year: bears from the next season, dies in winter.
+    #[serde(default)]
+    sown: bool,
 }
 
 impl SpawnedObject {
@@ -152,6 +155,7 @@ impl SpawnedObjects {
                 since,
                 remaining,
                 kind,
+                sown: false,
             },
         );
         debug_assert!(
@@ -169,6 +173,36 @@ impl SpawnedObjects {
             .values()
             .filter(|object| object.kind == SpawnKind::Water)
             .count() as u32;
+    }
+
+    /// Sows a seed of `kind` at `position`: it comes up bare and bears nothing
+    /// before the start of the next season (`bears_from`), and dies in winter.
+    pub(crate) fn sow(&mut self, position: WorldPosition, kind: SpawnKind, bears_from: u32) {
+        let key = CompactSpawnPosition::checked(position)
+            .expect("validated finite-world positions fit the compact spawn envelope");
+        let replaced = self.objects.insert(
+            key,
+            SpawnedObject {
+                since: bears_from,
+                remaining: 0,
+                kind,
+                sown: true,
+            },
+        );
+        debug_assert!(replaced.is_none(), "sowing checks the spot is free");
+        self.ponds += u32::from(kind == SpawnKind::Water);
+        self.revision = self.revision.saturating_add(1);
+    }
+
+    /// Winter kills everything sown this year. Returns how many died.
+    pub(crate) fn wither_sown(&mut self) -> u64 {
+        let before = self.objects.len();
+        self.objects.retain(|_, object| !object.sown);
+        let died = (before - self.objects.len()) as u64;
+        if died > 0 {
+            self.revision = self.revision.saturating_add(1);
+        }
+        died
     }
 
     /// Removes the object at `position` (a plant that died or was felled).

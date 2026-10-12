@@ -141,6 +141,7 @@ impl Engine {
             PhysicalGoal::TendFire => self.apply_tend_fire(event.agent),
             PhysicalGoal::Craft => self.apply_craft(event.agent),
             PhysicalGoal::Plant => self.apply_plant(event.agent, target),
+            PhysicalGoal::Bury => self.apply_bury(event.agent, target),
             PhysicalGoal::Store => self.apply_store(event.agent, target),
             PhysicalGoal::Fetch => self.apply_fetch(event.agent, target),
             PhysicalGoal::Drop => self.apply_drop(event.agent),
@@ -686,7 +687,8 @@ impl Engine {
                 ^ self.time.ticks()
                 ^ u64::from(agent.get()) << 40,
         );
-        if draw % SEED_ODDS != 0 {
+        // Seeds take only in spring.
+        if draw % SEED_ODDS != 0 || self.season() != crate::Season::Spring {
             return;
         }
         let turn = (draw >> 8) as usize % 4;
@@ -699,7 +701,7 @@ impl Engine {
             .find(|&spot| self.can_sprout_at(spot))
             && let Some(sprout) = crate::SpawnKind::growing(bush)
         {
-            self.spawned_objects.plant(spot, sprout, 0);
+            self.spawned_objects.sow(spot, sprout, next_season(now));
             self.plants_sprouted += 1;
         }
     }
@@ -744,7 +746,8 @@ impl Engine {
         if self.population.take(agent, seed, 1) < 1 {
             return Err(PolicyFailureReason::InconsistentState);
         }
-        self.spawned_objects.plant(target, sprout, 0);
+        let now = (self.time.ticks() / 60) as u32;
+        self.spawned_objects.sow(target, sprout, next_season(now));
         self.plants_sprouted += 1;
         let watchers: Vec<AgentId> = self
             .perceive_physical(agent, crate::PHYSICAL_POLICY_RADIUS)
@@ -1041,3 +1044,9 @@ fn bush_of(material: crate::Material) -> Option<crate::FeatureKind> {
 
 /// Without an edge, a hide comes off by hand with odds 1 in this per go at a carcass.
 const HAND_SKINNING_ODDS: u64 = 3;
+
+/// The simulated second the season after the one at `now` begins.
+fn next_season(now: u32) -> u32 {
+    let season = crate::SEASON_SECONDS as u32;
+    (now / season + 1) * season
+}
