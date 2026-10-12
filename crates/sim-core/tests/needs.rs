@@ -12,6 +12,8 @@ fn resident_engine() -> Engine {
         ticks_per_second: 60,
         world: WorldConfig::new(128, 128).unwrap(),
     });
+    // These tests count need reschedules; dawn and dusk would add their own.
+    engine.disable_night();
     engine.materialize_initial_area().unwrap();
     engine
 }

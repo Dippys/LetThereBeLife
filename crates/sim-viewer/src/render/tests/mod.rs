@@ -44,6 +44,7 @@ pub(super) fn test_render_state(cursor_world: Option<WorldPosition>) -> RenderSt
         signs: true,
         windows: Vec::new(),
         windows_menu: false,
+        darkness: 0.0,
         reached_speed: None,
         details_open: false,
         build: None,

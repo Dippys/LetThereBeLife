@@ -96,8 +96,10 @@ pub(crate) struct NeedState {
     rates: [i8; 4],
     remainders: [u8; 4],
     crossed: u8,
-    /// The season's extra cold, added to the exposure rate.
+    /// The season's (and night's) extra cold, added to the exposure rate.
     chill: i8,
+    /// Night's drowsiness, added to the rest rate while awake.
+    drowsy: i8,
 }
 
 impl NeedState {
@@ -110,6 +112,7 @@ impl NeedState {
             remainders: [0; 4],
             crossed: 0,
             chill: 0,
+            drowsy: 0,
         }
     }
 
@@ -121,22 +124,33 @@ impl NeedState {
         self.rates != self.chilled(rates_for(activity))
     }
 
-    /// `rates` with the season's chill on exposure.
+    /// `rates` with the weather on them: the chill on exposure, and night's
+    /// drowsiness on tiredness while it's rising (awake).
     const fn chilled(self, mut rates: [i8; 4]) -> [i8; 4] {
         let exposure = NeedKind::Exposure as usize;
         rates[exposure] = rates[exposure].saturating_add(self.chill);
+        let rest = NeedKind::Rest as usize;
+        if rates[rest] > 0 {
+            rates[rest] = rates[rest].saturating_add(self.drowsy);
+        }
         rates
     }
 
-    /// The season changed: exposure now rises by `chill` more per period.
-    pub(crate) fn set_chill(&mut self, chill: i8, now: SimTime) -> bool {
-        if self.chill == chill {
+    /// The weather changed: exposure now rises by `chill` more per period,
+    /// and tiredness (while awake) by `drowsy` more.
+    pub(crate) fn set_chill(&mut self, chill: i8, drowsy: i8, now: SimTime) -> bool {
+        if self.chill == chill && self.drowsy == drowsy {
             return false;
         }
         let mut base = self.rates;
         let exposure = NeedKind::Exposure as usize;
         base[exposure] = base[exposure].saturating_sub(self.chill);
+        let rest = NeedKind::Rest as usize;
+        if base[rest] > 0 {
+            base[rest] = base[rest].saturating_sub(self.drowsy);
+        }
         self.chill = chill;
+        self.drowsy = drowsy;
         let rates = self.chilled(base);
         self.transition_rates(rates, now)
     }

@@ -1,7 +1,8 @@
 use sim_core::{WORLD_GENERATION_BOUNDS, WORLD_SIDE_CELLS, WorldPosition};
 
 const INITIAL_ZOOM: f64 = 1.0;
-const MAX_ZOOM: f64 = 64.0;
+/// The closest view: this many screen pixels per cell (pictures show from 10).
+const MAX_CELL_PIXELS: f64 = 64.0;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Camera {
@@ -123,7 +124,8 @@ impl Camera {
             viewport.world_width,
             viewport.world_height,
         );
-        self.zoom = (self.zoom * 1.25_f64.powf(steps)).clamp(minimum_zoom(viewport), MAX_ZOOM);
+        self.zoom = (self.zoom * 1.25_f64.powf(steps))
+            .clamp(minimum_zoom(viewport), maximum_zoom(viewport));
         let after = self.world_point(
             cursor.0,
             cursor.1,
@@ -173,7 +175,9 @@ impl Camera {
         if viewport.screen_width == 0 || viewport.screen_height == 0 {
             return;
         }
-        self.zoom = self.zoom.clamp(minimum_zoom(viewport), MAX_ZOOM);
+        self.zoom = self
+            .zoom
+            .clamp(minimum_zoom(viewport), maximum_zoom(viewport));
         let scale = self.scale(
             viewport.screen_width,
             viewport.screen_height,
@@ -203,6 +207,17 @@ fn initial_fit_scale(
 ) -> f64 {
     (f64::from(screen_width) / f64::from(world_width))
         .min(f64::from(screen_height) / f64::from(world_height))
+}
+
+/// The zoom at which a cell is `MAX_CELL_PIXELS` wide.
+fn maximum_zoom(viewport: Viewport) -> f64 {
+    let initial_fit = initial_fit_scale(
+        viewport.screen_width,
+        viewport.screen_height,
+        viewport.world_width,
+        viewport.world_height,
+    );
+    (MAX_CELL_PIXELS / initial_fit).max(minimum_zoom(viewport))
 }
 
 fn minimum_zoom(viewport: Viewport) -> f64 {

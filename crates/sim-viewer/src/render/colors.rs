@@ -207,5 +207,24 @@ pub(super) const fn season_tint(season: sim_core::Season) -> Option<u32> {
     }
 }
 
-/// One ring of a fire's glow (rings stack toward the middle).
-pub(super) const FIRELIGHT: u32 = rgba(255, 160, 60, 34);
+/// One ring of a fire's glow (rings stack toward the middle); brighter in the dark.
+pub(super) fn firelight(darkness: f32) -> u32 {
+    rgba(255, 160, 60, (34.0 + 36.0 * darkness.clamp(0.0, 1.0)) as u8)
+}
+
+/// Night over the land, as dark as `darkness` (0-1).
+pub(super) fn night(darkness: f32) -> u32 {
+    rgba(6, 10, 34, (160.0 * darkness.clamp(0.0, 1.0)) as u8)
+}
+
+/// Family lines: the two founding families, then newcomer couples.
+pub(super) const fn family_line(line: u8) -> u32 {
+    match line % 6 {
+        0 => rgba(80, 150, 255, 255),
+        1 => rgba(255, 196, 60, 255),
+        2 => rgba(120, 220, 120, 255),
+        3 => rgba(240, 110, 200, 255),
+        4 => rgba(90, 220, 220, 255),
+        _ => rgba(240, 120, 80, 255),
+    }
+}

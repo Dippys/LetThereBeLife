@@ -7,6 +7,24 @@ use crate::SimTime;
 pub const SEASON_SECONDS: u64 = 3_600;
 /// Ticks in one season.
 pub const SEASON_TICKS: u64 = SEASON_SECONDS * 60;
+/// Simulated seconds in a day and a night: fifteen to a season.
+pub const DAY_SECONDS: u64 = SEASON_SECONDS / 15;
+/// Seconds into each day when night falls; the rest of it is night.
+pub const NIGHTFALL_SECONDS: u64 = DAY_SECONDS * 5 / 8;
+/// Extra cold at night, and how much faster tiredness builds while awake.
+pub const NIGHT_CHILL: i8 = 1;
+pub const NIGHT_DROWSINESS: i8 = 1;
+
+/// Whether it's night at `time`.
+pub const fn is_night(time: SimTime) -> bool {
+    (time.ticks() / 60) % DAY_SECONDS >= NIGHTFALL_SECONDS
+}
+
+/// How far through the day or night `time` is: 0 at dawn, 1 at the next
+/// dawn (nightfall at 5/8). For drawing the light.
+pub fn day_fraction(time: SimTime) -> f32 {
+    ((time.ticks() / 60) % DAY_SECONDS) as f32 / DAY_SECONDS as f32
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]

@@ -343,9 +343,10 @@ fn top_bar(painter: &mut Painter, state: &RenderState, width: f32) -> f32 {
     );
     x = painter.text(
         &format!(
-            " {}, {}",
+            " {}, {}{}",
             labels::season(state.season),
-            labels::cold(state.season)
+            labels::cold(state.season),
+            if state.darkness > 0.5 { ", night" } else { "" }
         ),
         x,
         text_y,

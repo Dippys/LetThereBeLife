@@ -87,6 +87,8 @@ pub(crate) struct ViewerApp {
     gestures: GestureLog,
     /// Where people have walked lately (drawn as worn paths).
     wear: crate::paths::PathWear,
+    /// People's last steps (drawn gliding) and family lines.
+    motion: crate::motion::Motion,
     feed: Feed,
     /// A short message and when it was shown.
     toast: Option<(String, Instant)>,
@@ -185,6 +187,7 @@ impl ViewerApp {
             },
             gestures: GestureLog::new(),
             wear: crate::paths::PathWear::default(),
+            motion: crate::motion::Motion::default(),
             feed: Feed::default(),
             toast: None,
             selected: None,
@@ -265,6 +268,7 @@ impl ViewerApp {
         self.history.clear();
         self.gestures.clear();
         self.wear.clear();
+        self.motion.clear();
         self.selected = None;
         self.following = false;
         self.accumulator = 0.0;

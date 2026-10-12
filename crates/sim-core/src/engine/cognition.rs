@@ -264,6 +264,14 @@ impl Engine {
             })
             .map(|record| record.agent)
             .collect();
+        // Those around who look in need (moving slowly, hungry or thirsty
+        // looking): worth showing a place they may not know.
+        let needy: Vec<AgentId> = perception
+            .agents
+            .iter()
+            .filter(|other| other.id != agent && self.visible_urgency(other.id) >= LOOKS_IN_NEED)
+            .map(|other| other.id)
+            .collect();
         let hint_outcomes = &mut self.hint_outcomes;
         let lessons = &mut self.lesson_events;
         let griefs = &mut self.grief_events;
@@ -454,12 +462,12 @@ impl Engine {
             .then(|| dialogue.correction(now))
             .flatten()
             .and_then(|pending| people.whereabouts(pending.speaker));
-        // The kinds of place someone around isn't believed to know (strangers
-        // are believed to know nothing).
+        // The kinds of place someone around who looks in need isn't believed
+        // to know (strangers are believed to know nothing).
         let unknown = perception
             .agents
             .iter()
-            .filter(|other| other.id != agent && can_watch(other.activity))
+            .filter(|other| needy.contains(&other.id) && can_watch(other.activity))
             .fold(0_u8, |unknown, other| {
                 unknown
                     | !people
@@ -1674,6 +1682,10 @@ impl Engine {
         &self.hint_outcomes
     }
 }
+
+/// Visible urgency (128 = at a need's threshold) from which someone looks in
+/// need of being shown a place.
+const LOOKS_IN_NEED: u8 = 96;
 
 /// The kinds of place right beside `position` in `perception`: water, a
 /// gatherable source, or a finished structure, within 2 cells.

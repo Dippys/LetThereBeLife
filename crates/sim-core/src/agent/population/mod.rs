@@ -101,13 +101,13 @@ impl Population {
         scheduler: &mut Scheduler,
         now: SimTime,
         agent: AgentId,
-        chill: i8,
+        (chill, drowsy): (i8, i8),
     ) -> Result<(), MoveRequestError> {
         let index = agent.0 as usize;
         if !scheduler.can_schedule(5) {
             return Err(MoveRequestError::EventSequenceExhausted);
         }
-        if self.needs[index].set_chill(chill, now) {
+        if self.needs[index].set_chill(chill, drowsy, now) {
             let state = self.needs[index];
             self.schedule_need_thresholds(scheduler, agent, state, now)
                 .map_err(|_| MoveRequestError::EventSequenceExhausted)?;

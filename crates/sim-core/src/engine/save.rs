@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::Engine;
 
 /// Bumped whenever the saved layout changes; older saves are refused.
-const SAVE_VERSION: u32 = 7;
+const SAVE_VERSION: u32 = 8;
 
 /// What a save holds, borrowed from a running engine.
 #[derive(Serialize)]
@@ -26,6 +26,7 @@ struct SavedRef<'a> {
     minds: &'a crate::cognition::Minds,
     families: &'a super::births::Families,
     gave_up: &'a u64,
+    nights: bool,
     plants: (u64, u64),
     stored: &'a u64,
     fetched: &'a u64,
@@ -55,6 +56,7 @@ struct Saved {
     minds: crate::cognition::Minds,
     families: super::births::Families,
     gave_up: u64,
+    nights: bool,
     plants: (u64, u64),
     stored: u64,
     fetched: u64,
@@ -116,6 +118,7 @@ impl Engine {
             minds: &self.minds,
             families: &self.families,
             gave_up: &self.gave_up,
+            nights: self.nights,
             plants: (self.plants_sprouted, self.plants_died),
             stored: &self.stored,
             fetched: &self.fetched,
@@ -171,6 +174,7 @@ impl Engine {
         engine.minds = saved.minds;
         engine.families = saved.families;
         engine.gave_up = saved.gave_up;
+        engine.nights = saved.nights;
         (engine.plants_sprouted, engine.plants_died) = saved.plants;
         engine.stored = saved.stored;
         engine.fetched = saved.fetched;

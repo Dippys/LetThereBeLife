@@ -6,6 +6,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut seed = None;
     let mut life_seed: Option<u64> = None;
     let mut plans: Option<u8> = None;
+    let mut no_night = false;
     let mut agent_count = None;
     let mut batch_size = 1_000_u64;
     let mut canonical = false;
@@ -78,6 +79,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ticks = Some(parse_next::<u64>(&mut args, "--years") * sim_core::TICKS_PER_YEAR)
             }
             "--seed" => seed = Some(parse_next(&mut args, "--seed")),
+            "--no-night" => no_night = true,
             "--plans" => plans = Some(parse_next::<u8>(&mut args, "--plans")),
             "--life-seed" => life_seed = Some(parse_next(&mut args, "--life-seed")),
             "--agents" => agent_count = Some(parse_next(&mut args, "--agents")),
@@ -85,7 +87,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--config" => config_path = parse_next(&mut args, "--config"),
             "--help" | "-h" => {
                 println!(
-                    "Usage: sim-headless [--canonical | --study [--near-water | --groups | --valley | --apart] [--mind legacy|memory|sharing|full] [--no-help] [--scripted] [--plans NEEDMASK] [--no-wildlife] [--no-regrowth] [--food PERCENT] [--verbose] [--trace AGENT] [--comms N] [--misreads N] [--successes N] [--lessons N] [--explain AGENT]] [--config PATH] [--ticks NUMBER | --years NUMBER] [--seed NUMBER] [--life-seed NUMBER] [--agents NUMBER] [--batch-size NUMBER]"
+                    "Usage: sim-headless [--canonical | --study [--near-water | --groups | --valley | --apart] [--mind legacy|memory|sharing|full] [--no-help] [--scripted] [--plans NEEDMASK] [--no-wildlife] [--no-regrowth] [--no-night] [--food PERCENT] [--verbose] [--trace AGENT] [--comms N] [--misreads N] [--successes N] [--lessons N] [--explain AGENT]] [--config PATH] [--ticks NUMBER | --years NUMBER] [--seed NUMBER] [--life-seed NUMBER] [--agents NUMBER] [--batch-size NUMBER]"
                 );
                 return Ok(());
             }
@@ -106,6 +108,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(life_seed) = life_seed {
             config.life_seed = life_seed;
         }
+        config.nights = !no_night;
         config.mind = sim_core::PolicyOptions {
             helping: mind.helping && !no_help,
             learned: mind.learned && !scripted,

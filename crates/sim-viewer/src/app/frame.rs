@@ -170,6 +170,7 @@ impl ViewerApp {
                 signs: self.signs,
                 windows,
                 windows_menu: self.windows_menu,
+                darkness: darkness(&self.engine),
                 reached_speed: self.shown_speed.map(|(speed, _)| speed),
                 details_open: self.details_open,
                 build: self.build,
@@ -178,7 +179,10 @@ impl ViewerApp {
                 season: self.engine.season(),
             },
             &self.gestures,
-            &self.wear,
+            crate::render::Tracks {
+                wear: &self.wear,
+                motion: &self.motion,
+            },
             allow_world_sync,
             self.pending_world_changes,
         );
@@ -248,4 +252,21 @@ impl ViewerApp {
             thread::sleep(Duration::from_millis(1));
         }
     }
+}
+
+/// How dark it is: night falls over the first part of the night and lifts
+/// toward dawn (0 by day, 1 at the depth of night). When days fly past in
+/// under a few real seconds, night isn't drawn: it would only flicker.
+fn darkness(engine: &sim_core::Engine) -> f32 {
+    let snapshot = engine.snapshot();
+    let real_day = sim_core::DAY_SECONDS as f32 / snapshot.speed.max(1.0);
+    let shown = ((real_day - 1.0) / 3.0).clamp(0.0, 1.0);
+    if !engine.is_night() || shown == 0.0 {
+        return 0.0;
+    }
+    let day = sim_core::day_fraction(sim_core::SimTime::from_ticks(engine.snapshot().tick));
+    let nightfall = sim_core::NIGHTFALL_SECONDS as f32 / sim_core::DAY_SECONDS as f32;
+    let night = (day - nightfall) / (1.0 - nightfall);
+    // Dusk over the first fifth of the night, dawn over the last fifth.
+    (night * 5.0).min((1.0 - night) * 5.0).clamp(0.0, 1.0) * shown
 }

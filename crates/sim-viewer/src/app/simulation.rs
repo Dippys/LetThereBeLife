@@ -36,6 +36,7 @@ impl ViewerApp {
                 // Engine event logs cover only the latest tick, so collect them per tick.
                 self.gestures.record_tick(&self.engine, now);
                 self.wear.record_tick(&self.engine);
+                self.motion.record_tick(&self.engine);
                 self.history.record(&self.engine, self.feed.births());
                 self.feed.record(&self.engine);
                 self.accumulator -= tick_seconds;
@@ -75,6 +76,7 @@ impl ViewerApp {
             self.engine.tick();
             self.gestures.record_tick(&self.engine, now);
             self.wear.record_tick(&self.engine);
+            self.motion.record_tick(&self.engine);
             self.feed.record(&self.engine);
             self.history.record(&self.engine, self.feed.births());
             progress.record(&self.engine, done + 1);
@@ -96,6 +98,7 @@ impl ViewerApp {
         reset(&mut self.engine);
         self.gestures.clear();
         self.wear.clear();
+        self.motion.clear();
         self.feed.clear();
         self.history.clear();
         self.selected = None;

@@ -7,6 +7,7 @@ mod generation;
 mod gestures;
 mod labels;
 mod launch;
+mod motion;
 mod paths;
 mod progress;
 mod render;

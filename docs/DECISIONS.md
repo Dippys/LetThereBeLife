@@ -952,3 +952,29 @@ readiness (D-120); filling idle time (about half of it) adds work instead of dis
 **Consequences:** Over 10 years in 20 valleys: 510 survivors against 493, deaths from cold 18
 against 27; fuel put on fires 4,136 times against 3,811.
 
+## D-124: Day and night (2026-10-12)
+
+**Decision:** A day lasts 240 simulated seconds (15 to a season); the last 3/8 of each is night.
+At nightfall and dawn everyone's needs take the new weather: night is colder (exposure +1 per
+period on top of the season's chill) and makes people sleepy (tiredness +1 per period while
+awake). `Engine::is_night`, `disable_night` (`--no-night` in the study); saved with the world.
+The viewer darkens the land at night (fading in at dusk and out at dawn, not drawn when days pass
+in under a few real seconds), fires glow brighter, and the top bar says "night".
+**Why:** The user asked for a real day and night, and to keep features that make the world harder.
+**Consequences:** Over 10 years in 20 valleys: 487 survivors with nights against 510 without,
+deaths from cold 34 against 18; 45% of sleeps now begin at night (night is 37% of the time).
+Nights that are sleepy but not colder gave 496 and 15. Colder nights are kept, as asked.
+
+## D-125: Show unknown places to those who look in need (2026-10-12)
+
+**Decision:** A person shows a place someone is believed not to know (D-121) only to people around
+who look in need (visible urgency at 75% of a need's threshold); otherwise it shares in turn as
+before, including "I've already been over there".
+**Why:** D-121 made people almost always point out unknown places, so the "explored over there"
+gesture halved (1,393 to 794 in valley 9) and people re-explored the same ground: tiles visited
+fell from 115 to 59 and the user saw people staying near where they started.
+**Consequences:** Valley 9 back to 84 tiles over 2 years (72 without nights; nights keep people
+nearer camp), valley 1 to 273 without nights (292 before D-121). Over 10 years in 20 valleys with
+nights: tiles visited up 9% (8,431 against 7,749), survivors 472 against 487, deaths from cold 40
+against 34: some of D-121's gain traded back for exploring.
+

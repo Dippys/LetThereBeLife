@@ -159,6 +159,8 @@ pub struct Engine {
     craft_events: Vec<crate::CraftEvent>,
     /// Trips abandoned because the agent stopped getting closer (for tools).
     gave_up: u64,
+    /// Days and nights pass (switched off for comparisons).
+    nights: bool,
     /// Plants that took root, and that died of age.
     plants_sprouted: u64,
     plants_died: u64,
@@ -223,6 +225,7 @@ impl Engine {
             fire_events: Vec::new(),
             craft_events: Vec::new(),
             gave_up: 0,
+            nights: true,
             plants_sprouted: 0,
             plants_died: 0,
             stored: 0,

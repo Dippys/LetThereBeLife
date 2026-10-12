@@ -37,6 +37,8 @@ pub struct StudyConfig {
     pub wildlife: bool,
     /// Picked bushes and trees grow back.
     pub regrowth: bool,
+    /// Days and nights pass.
+    pub nights: bool,
 }
 
 /// Where study agents start.
@@ -102,6 +104,7 @@ impl StudyConfig {
             food_percent: 100,
             wildlife: true,
             regrowth: true,
+            nights: true,
         }
     }
 }
@@ -264,6 +267,8 @@ pub struct WildlifeStats {
     pub plan_shapes: std::collections::BTreeMap<String, u64>,
     /// Sleeps begun in the open, under a roof, and under a roof by a fire.
     pub sleeps: [u64; 3],
+    /// Sleeps begun at night.
+    pub night_sleeps: u64,
     /// Plants that took root and died of age; trees and bushes at the start and end.
     pub sprouted: u64,
     pub plants_died: u64,
@@ -375,6 +380,9 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     }
     if !config.regrowth {
         engine.disable_regrowth();
+    }
+    if !config.nights {
+        engine.disable_night();
     }
     if config.wildlife && config.spawn.is_band() {
         // As many animals per valley either way.
@@ -522,6 +530,7 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                 for sleep in engine.sleep_diagnostics() {
                     if sleep.kind == sim_core::SleepDiagnosticKind::Started {
                         wildlife.sleeps[sleep.sleep.quality as usize] += 1;
+                        wildlife.night_sleeps += u64::from(engine.is_night());
                     }
                 }
                 for decision in engine.policy_diagnostics() {
@@ -1823,7 +1832,8 @@ impl fmt::Display for StudyReport {
         let [open, sheltered, by_fire] = self.wildlife.sleeps;
         write!(
             formatter,
-            "\n  sleeps: in the open {open}, under a roof {sheltered}, under a roof by a fire {by_fire}"
+            "\n  sleeps: in the open {open}, under a roof {sheltered}, under a roof by a fire {by_fire}; begun at night {}",
+            self.wildlife.night_sleeps
         )?;
         // What people learned works: the choices that best eased each need.
         let mut learned = Vec::new();

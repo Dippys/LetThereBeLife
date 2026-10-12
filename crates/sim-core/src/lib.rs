@@ -68,7 +68,9 @@ pub use resources::{
     InitialInventoryError, InventoryView, ResourceDeltaView,
 };
 pub use routing::{MAX_ROUTE_EXPANSIONS, RouteRequest, RouteRequestError};
-pub use season::{SEASON_SECONDS, SEASON_TICKS, Season};
+pub use season::{
+    DAY_SECONDS, NIGHTFALL_SECONDS, SEASON_SECONDS, SEASON_TICKS, Season, day_fraction, is_night,
+};
 pub use sim_world::{
     ArchiveBakeProgress, ArchiveBakeStats, BandLayout, BaseResource, BiomeType, CAMP_RADIUS,
     CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkInspection, ChunkLoadRequest, ChunkLocalPosition,

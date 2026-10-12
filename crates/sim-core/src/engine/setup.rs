@@ -135,11 +135,11 @@ impl Engine {
             position,
             self.policy_active,
         )?;
-        // Born into (or arriving in) the current season's weather.
-        let chill = self.season().chill();
+        // Born into (or arriving in) the current weather.
+        let weather = self.weather();
         let _ = self
             .population
-            .apply_chill(&mut self.scheduler, self.time, agent, chill);
+            .apply_chill(&mut self.scheduler, self.time, agent, weather);
         Ok(agent)
     }
 
@@ -170,6 +170,11 @@ impl Engine {
             }
         }
         Ok(stripped)
+    }
+
+    /// Scenario setup: no day and night, only seasons.
+    pub fn disable_night(&mut self) {
+        self.nights = false;
     }
 
     /// Scenario setup: nothing that's picked grows back (a famine valley).

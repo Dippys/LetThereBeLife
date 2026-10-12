@@ -75,12 +75,35 @@ impl Engine {
         crate::Season::at(self.time)
     }
 
-    /// At each change of season, everyone's exposure rate follows the new chill.
+    /// The weather now: the season's chill (plus night's), and night's drowsiness.
+    pub(super) fn weather(&self) -> (i8, i8) {
+        let night = self.nights && crate::season::is_night(self.time);
+        let chill = self.season().chill() + if night { crate::season::NIGHT_CHILL } else { 0 };
+        let drowsy = if night {
+            crate::season::NIGHT_DROWSINESS
+        } else {
+            0
+        };
+        (chill, drowsy)
+    }
+
+    /// Whether it's night now (never, with nights switched off).
+    pub fn is_night(&self) -> bool {
+        self.nights && crate::season::is_night(self.time)
+    }
+
+    /// At each change of season, nightfall and dawn, everyone's needs follow
+    /// the new weather.
     pub(super) fn turn_season(&mut self) {
-        if self.time.ticks() % crate::season::SEASON_TICKS != 0 {
+        let ticks = self.time.ticks();
+        let new_season = ticks % crate::season::SEASON_TICKS == 0;
+        let day = (ticks / 60) % crate::season::DAY_SECONDS;
+        let dawn_or_dusk =
+            self.nights && ticks % 60 == 0 && (day == 0 || day == crate::season::NIGHTFALL_SECONDS);
+        if !new_season && !dawn_or_dusk {
             return;
         }
-        let chill = self.season().chill();
+        let weather = self.weather();
         let living: Vec<AgentId> = self
             .population
             .views(usize::MAX)
@@ -90,7 +113,10 @@ impl Engine {
         for agent in living {
             let _ = self
                 .population
-                .apply_chill(&mut self.scheduler, self.time, agent, chill);
+                .apply_chill(&mut self.scheduler, self.time, agent, weather);
+        }
+        if !new_season {
+            return;
         }
         // Huts nobody has lived in for long fall down.
         for structure in self.structures.weather() {

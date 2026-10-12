@@ -148,7 +148,7 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 - **Most decisions are still hand-written.** Cold and tiredness are answered by learned habits
   and what people learned their choices bring about (D-105, D-108); food, water, storage and
   social choices are still a script.
-- **Winter cold still kills**, though less (18 over 10 years in 20 valleys, D-123).
+- **Cold still kills**, more since nights are colder (40 over 10 years in 20 valleys, D-124/125).
 - **Winter trips are dangerous:** with homes (D-109) people no longer build wherever they get
   cold, so those far from home in winter sleep rough; cold deaths rose a little (42 against 34
   over 20 valley-decades).
@@ -180,7 +180,10 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
-- 2026-10-12 (latest): idle time works toward what has proved useful; cold deaths 27 to 18
+- 2026-10-12 (latest): day and night, colder and sleepy (D-124); unknown places shown only to
+  those in need, so people explore again (D-125); viewer: floating windows, signs, readings,
+  season light, worn paths, pixel pictures when zoomed in, gliding walkers, family colors.
+- 2026-10-12: idle time works toward what has proved useful; cold deaths 27 to 18
   over 10 years in 20 valleys (D-123).
 - 2026-10-12: plans for hunger and thirst (D-119); people show others places they
   don't know (D-121); getting ready for hard seasons built, off (D-120).

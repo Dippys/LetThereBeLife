@@ -4,6 +4,7 @@ mod colors;
 mod details;
 mod gpu;
 mod instances;
+mod sprites;
 mod summary;
 mod text;
 mod ui;
@@ -74,6 +75,8 @@ pub struct RenderState {
     pub signs: bool,
     /// Open floating windows, back to front.
     pub windows: Vec<WindowView>,
+    /// How dark it is: 0 by day, 1 at the depth of night.
+    pub darkness: f32,
     /// The windows menu is open.
     pub windows_menu: bool,
 }
@@ -518,6 +521,16 @@ pub struct Renderer {
     /// The season's light over the land, and firelight.
     atmosphere: InstanceBuffer,
     atmosphere_instances: Vec<Instance>,
+    /// Zoomed in: texture on the ground, pictures of plants and buildings,
+    /// and of people and animals (in place of squares).
+    detail_ground: InstanceBuffer,
+    detail_ground_instances: Vec<Instance>,
+    detail_objects: InstanceBuffer,
+    detail_object_instances: Vec<Instance>,
+    detail_beings: InstanceBuffer,
+    detail_being_instances: Vec<Instance>,
+    /// Whether the last frame drew pictures rather than squares.
+    detailed: bool,
     screen_overlay: InstanceBuffer,
     screen_overlay_instances: Vec<Instance>,
     screen_overlay_capacity: usize,
@@ -688,6 +701,13 @@ impl Renderer {
             path_instances: Vec::with_capacity(MAX_PATH_INSTANCES),
             atmosphere: InstanceBuffer::dynamic(&device, "atmosphere", MAX_ATMOSPHERE_INSTANCES),
             atmosphere_instances: Vec::with_capacity(MAX_ATMOSPHERE_INSTANCES),
+            detail_ground: InstanceBuffer::dynamic(&device, "ground detail", MAX_DETAIL_GROUND),
+            detail_ground_instances: Vec::with_capacity(MAX_DETAIL_GROUND),
+            detail_objects: InstanceBuffer::dynamic(&device, "object pictures", MAX_DETAIL_OBJECTS),
+            detail_object_instances: Vec::with_capacity(MAX_DETAIL_OBJECTS),
+            detail_beings: InstanceBuffer::dynamic(&device, "people pictures", MAX_DETAIL_BEINGS),
+            detail_being_instances: Vec::with_capacity(MAX_DETAIL_BEINGS),
+            detailed: false,
             screen_overlay: InstanceBuffer::dynamic(
                 &device,
                 "screen overlay",
@@ -813,10 +833,11 @@ impl Renderer {
         engine: &Engine,
         state: RenderState,
         gestures: &GestureLog,
-        wear: &crate::paths::PathWear,
+        tracks: Tracks,
         allow_world_sync: bool,
         changed_bounds: Option<WorldRect>,
     ) -> Result<(), wgpu::SurfaceError> {
+        let Tracks { wear, motion } = tracks;
         let world = engine.world();
         let view = state.camera.view(
             self.config.width,
@@ -867,6 +888,7 @@ impl Renderer {
         build_atmosphere(
             engine,
             state.season,
+            state.darkness,
             view.world_bounds(),
             (state.snapshot.tick / 60) as u32,
             &mut self.atmosphere_instances,
@@ -935,6 +957,51 @@ impl Renderer {
             .truncate(MAX_SPAWNED_OBJECT_INSTANCES);
         self.spawned_objects
             .write(&self.queue, &self.spawned_object_instances);
+        // Zoomed in: pictures instead of squares.
+        self.detailed = view.scale() as f32 >= sprites::SPRITE_CELL_PIXELS;
+        self.detail_ground_instances.clear();
+        self.detail_object_instances.clear();
+        self.detail_being_instances.clear();
+        if self.detailed {
+            build_pictures(
+                engine,
+                motion,
+                &state,
+                view.world_bounds(),
+                &mut self.detail_ground_instances,
+                &mut self.detail_object_instances,
+                &mut self.detail_being_instances,
+            );
+            // Placed water and carcasses still draw as squares; plants and
+            // animals are pictures now.
+            self.spawned_object_instances.clear();
+            build_spawned_object_instances(
+                engine
+                    .spawned_object_views()
+                    .filter(|object| object.kind == sim_core::SpawnKind::Water),
+                view.world_bounds(),
+                view.scale() as f32,
+                &mut self.spawned_object_instances,
+            );
+            append_wildlife_instances(
+                std::iter::empty(),
+                engine.carcass_views(),
+                view.world_bounds(),
+                view.scale() as f32,
+                &mut self.spawned_object_instances,
+            );
+            self.spawned_objects
+                .write(&self.queue, &self.spawned_object_instances);
+        }
+        self.detail_ground_instances.truncate(MAX_DETAIL_GROUND);
+        self.detail_object_instances.truncate(MAX_DETAIL_OBJECTS);
+        self.detail_being_instances.truncate(MAX_DETAIL_BEINGS);
+        self.detail_ground
+            .write(&self.queue, &self.detail_ground_instances);
+        self.detail_objects
+            .write(&self.queue, &self.detail_object_instances);
+        self.detail_beings
+            .write(&self.queue, &self.detail_being_instances);
         let hovered_memory = state
             .selected
             .as_ref()
@@ -1105,15 +1172,28 @@ impl Renderer {
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.world_camera.bind_group, &[]);
             self.terrain.draw(&mut pass);
+            if self.detailed {
+                self.detail_ground.draw(&mut pass);
+            }
             self.paths.draw(&mut pass);
-            self.features.draw(&mut pass);
+            if self.detailed {
+                self.detail_objects.draw(&mut pass);
+            } else {
+                self.features.draw(&mut pass);
+            }
             self.spawned_objects.draw(&mut pass);
-            self.structures.draw(&mut pass);
+            if !self.detailed {
+                self.structures.draw(&mut pass);
+            }
             self.atmosphere.draw(&mut pass);
             self.memory_markers.draw(&mut pass);
             self.relationship_markers.draw(&mut pass);
             self.gesture_markers.draw(&mut pass);
-            self.agents.draw(&mut pass);
+            if self.detailed {
+                self.detail_beings.draw(&mut pass);
+            } else {
+                self.agents.draw(&mut pass);
+            }
             self.world_overlay.draw(&mut pass);
             pass.set_bind_group(0, &self.screen_camera.bind_group, &[]);
             self.screen_overlay.draw(&mut pass);
@@ -1224,6 +1304,161 @@ const MAX_GESTURE_DOTS: usize = 16;
 /// Each recent gesture draws its dotted line and an end square.
 const MAX_GESTURE_MARKER_INSTANCES: usize = RECENT_GESTURE_CAPACITY * (MAX_GESTURE_DOTS + 1);
 const MIN_DYNAMIC_INSTANCE_PIXELS: f32 = 1.25;
+/// What the viewer has noticed over time: worn ground, and people's last steps
+/// and family lines.
+#[derive(Clone, Copy)]
+pub struct Tracks<'a> {
+    pub wear: &'a crate::paths::PathWear,
+    pub motion: &'a crate::motion::Motion,
+}
+
+/// Pictures drawn at most: ground texture, plants and buildings, people and animals.
+const MAX_DETAIL_GROUND: usize = 1 << 17;
+const MAX_DETAIL_OBJECTS: usize = 1 << 17;
+const MAX_DETAIL_BEINGS: usize = 1 << 15;
+
+/// Zoomed in, the land as pictures: texture on the ground, then plants,
+/// rocks, huts and fires, then people and animals (people gliding between cells).
+fn build_pictures(
+    engine: &Engine,
+    motion: &crate::motion::Motion,
+    state: &RenderState,
+    bounds: WorldRect,
+    ground: &mut Vec<Instance>,
+    objects: &mut Vec<Instance>,
+    beings: &mut Vec<Instance>,
+) {
+    let tick = state.snapshot.tick;
+    let now = (tick / 60) as u32;
+    let winter = state.season == sim_core::Season::Winter;
+    let wave = (tick / 20) as u32;
+    let dead: std::collections::BTreeSet<(i64, i64)> = engine
+        .dead_plants()
+        .filter(|position| bounds.contains(*position))
+        .map(|position| (position.x, position.y))
+        .collect();
+    let left = |position: sim_core::WorldPosition| {
+        engine
+            .available_resource_at(position)
+            .ok()
+            .flatten()
+            .map_or(0, |resource| resource.capacity)
+    };
+    engine
+        .world()
+        .visit_area(bounds, |position, cell, feature| {
+            sprites::ground(
+                ground,
+                position.x,
+                position.y,
+                cell,
+                colors::terrain_color(cell),
+                wave,
+            );
+            let Some(feature) = feature else {
+                return;
+            };
+            if dead.contains(&(position.x, position.y)) {
+                return;
+            }
+            let bearing = match feature.kind {
+                sim_core::FeatureKind::Rock => true,
+                sim_core::FeatureKind::Tree => left(position) >= GROWN_TREE_WOOD,
+                _ => left(position) > 0,
+            };
+            sprites::feature(
+                objects,
+                position.x as f32,
+                position.y as f32,
+                feature.kind,
+                bearing,
+                winter,
+            );
+        });
+    for object in engine.spawned_object_views() {
+        if !bounds.contains(object.position) {
+            continue;
+        }
+        let Some(kind) = object.kind.feature() else {
+            continue;
+        };
+        let remaining = object.remaining.unwrap_or(0);
+        let bearing = match kind {
+            sim_core::FeatureKind::Rock => true,
+            sim_core::FeatureKind::Tree => remaining >= GROWN_TREE_WOOD,
+            _ => remaining > 0,
+        };
+        sprites::feature(
+            objects,
+            object.position.x as f32,
+            object.position.y as f32,
+            kind,
+            bearing,
+            winter,
+        );
+    }
+    let flicker = ((tick / 6) % 4) as u8;
+    for structure in engine.structure_views(MAX_STRUCTURE_INSTANCES) {
+        if !bounds.contains(structure.position) {
+            continue;
+        }
+        sprites::structure(
+            objects,
+            structure.position.x as f32,
+            structure.position.y as f32,
+            structure.kind.burns(),
+            structure.state == sim_core::StructureState::Complete,
+            structure.working(now),
+            flicker,
+        );
+    }
+    for animal in engine.animal_views() {
+        if !bounds.contains(animal.position) {
+            continue;
+        }
+        let alert = matches!(
+            animal.mode,
+            sim_core::AnimalMode::Fleeing | sim_core::AnimalMode::Hunting
+        );
+        sprites::animal(
+            beings,
+            animal.position.x as f32,
+            animal.position.y as f32,
+            animal.species,
+            alert,
+        );
+    }
+    for agent in engine.agent_views(MAX_AGENT_INSTANCES) {
+        if !bounds.contains(agent.position) {
+            continue;
+        }
+        let ([x, y], step) = motion.drawn(agent.id, agent.position, tick);
+        let life = engine.life(agent.id);
+        let walking = matches!(agent.activity, sim_core::AgentActivity::Moving);
+        let look = sprites::PersonLook {
+            body: colors::agent_color(agent.activity),
+            family: motion
+                .family_line(engine, agent.id)
+                .map(colors::family_line),
+            sex: life.map(|life| life.sex),
+            stage: life.map(|life| life.stage),
+            activity: agent.activity,
+            step: walking && step,
+        };
+        sprites::person(beings, x, y, &look);
+        // A carried baby: a small bundle at the hip.
+        if engine
+            .motherhood(agent.id)
+            .is_some_and(|motherhood| motherhood.baby.is_some())
+        {
+            beings.push(Instance::new(x + 0.62, y + 0.45, 0.22, 0.22, colors::BABY));
+        }
+    }
+}
+
+/// Wood from which a tree is drawn grown (below it, a sapling).
+const GROWN_TREE_WOOD: u16 = 20;
+
 /// Worn cells drawn at most.
 const MAX_PATH_INSTANCES: usize = 16_384;
 /// The season's tint plus fire glows drawn at most.
@@ -1237,19 +1472,26 @@ const FIRELIGHT_RINGS: usize = 4;
 fn build_atmosphere(
     engine: &sim_core::Engine,
     season: sim_core::Season,
+    darkness: f32,
     bounds: sim_core::WorldRect,
     now: u32,
     out: &mut Vec<Instance>,
 ) {
     out.clear();
-    if let Some(tint) = colors::season_tint(season) {
+    let cover = |out: &mut Vec<Instance>, color: u32| {
         out.push(Instance::new(
             bounds.min.x as f32,
             bounds.min.y as f32,
             (bounds.max.x - bounds.min.x) as f32,
             (bounds.max.y - bounds.min.y) as f32,
-            tint,
+            color,
         ));
+    };
+    if let Some(tint) = colors::season_tint(season) {
+        cover(out, tint);
+    }
+    if darkness > 0.0 {
+        cover(out, colors::night(darkness));
     }
     let reach = FIRELIGHT_REACH as i64;
     for fire in engine.structure_views(MAX_STRUCTURE_INSTANCES) {
@@ -1270,7 +1512,7 @@ fn build_atmosphere(
                 fire.position.y as f32 + 0.5 - radius,
                 2.0 * radius,
                 2.0 * radius,
-                colors::FIRELIGHT,
+                colors::firelight(darkness),
             ));
         }
     }
