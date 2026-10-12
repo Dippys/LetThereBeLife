@@ -24,6 +24,8 @@ pub(super) struct LaunchOptions {
     pub(super) life_seed: Option<u64>,
     /// Cells across the first view (zooms the start in or out).
     pub(super) zoom: Option<f64>,
+    /// Windows open at the start.
+    pub(super) windows: Vec<crate::render::WindowKind>,
 }
 
 pub(super) fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Error>> {
@@ -38,6 +40,7 @@ pub(super) fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Erro
     let mut save = None;
     let mut life_seed = None;
     let mut zoom = None;
+    let mut windows = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
         match argument.as_str() {
@@ -84,6 +87,16 @@ pub(super) fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Erro
                         .parse()?,
                 );
             }
+            "--windows" => {
+                let names = args.next().ok_or("--windows requires a list")?;
+                for name in names.split(',') {
+                    let kind = crate::render::WindowKind::ALL
+                        .into_iter()
+                        .find(|kind| kind.title().eq_ignore_ascii_case(name.trim()))
+                        .ok_or_else(|| format!("unknown window: {name}"))?;
+                    windows.push(kind);
+                }
+            }
             "--zoom" => {
                 zoom = Some(
                     args.next()
@@ -98,7 +111,7 @@ pub(super) fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Erro
             }
             "--help" | "-h" => {
                 println!(
-                    "Usage: sim-viewer [--config PATH] [--smoke-frames NUMBER] [--pregenerate-world] [--valley] [--advance TICKS] [--select PERSON] [--screenshot PNG] [--load SAVE] [--save SAVE] [--life-seed NUMBER] [--zoom CELLS]"
+                    "Usage: sim-viewer [--config PATH] [--smoke-frames NUMBER] [--pregenerate-world] [--valley] [--advance TICKS] [--select PERSON] [--screenshot PNG] [--load SAVE] [--save SAVE] [--life-seed NUMBER] [--zoom CELLS] [--windows story,charts,family,people,mind]"
                 );
                 std::process::exit(0);
             }
@@ -120,6 +133,7 @@ pub(super) fn launch_options() -> Result<LaunchOptions, Box<dyn std::error::Erro
         save,
         life_seed,
         zoom,
+        windows,
     })
 }
 

@@ -173,6 +173,8 @@ pub(super) const fn rgba(red: u8, green: u8, blue: u8, alpha: u8) -> u32 {
     red as u32 | (green as u32) << 8 | (blue as u32) << 16 | (alpha as u32) << 24
 }
 
+/// A floating window's title bar.
+pub(super) const UI_WINDOW_BAR: u32 = rgba(44, 52, 66, 255);
 /// A watcher's reading of a gesture: as meant, and mistaken.
 pub(super) const UI_READING: u32 = rgba(200, 228, 196, 230);
 pub(super) const UI_READING_WRONG: u32 = rgba(200, 60, 60, 235);

@@ -46,6 +46,11 @@ impl ApplicationHandler for ViewerApp {
                 self.shift = modifiers.state().shift_key();
             }
             WindowEvent::CursorMoved { position, .. } => {
+                if self.drag_window(position.x, position.y) {
+                    self.cursor = Some((position.x, position.y));
+                    self.dirty = true;
+                    return;
+                }
                 if let Some(((start_x, start_y), dragged)) = &mut self.press
                     && (position.x - *start_x).hypot(position.y - *start_y) > DRAG_THRESHOLD
                 {
@@ -112,6 +117,7 @@ impl ApplicationHandler for ViewerApp {
                     }
                     ElementState::Released => {
                         self.dragging = false;
+                        self.window_drag = None;
                         if let Some((_, false)) = self.press.take() {
                             self.click_map();
                         }
@@ -164,7 +170,24 @@ impl ApplicationHandler for ViewerApp {
                 self.dirty = true;
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                self.zoom(delta);
+                // Over a window the wheel scrolls it; elsewhere it zooms the map.
+                let window = self.cursor.and_then(|(x, y)| {
+                    self.renderer
+                        .as_ref()
+                        .and_then(|renderer| renderer.window_at(x, y))
+                });
+                match window {
+                    Some(index) => {
+                        let lines = match delta {
+                            winit::event::MouseScrollDelta::LineDelta(_, y) => -(y * 3.0) as i32,
+                            winit::event::MouseScrollDelta::PixelDelta(position) => {
+                                -(position.y / 20.0) as i32
+                            }
+                        };
+                        self.scroll_window(index, lines);
+                    }
+                    None => self.zoom(delta),
+                }
                 self.dirty = true;
             }
             WindowEvent::KeyboardInput { event, .. }

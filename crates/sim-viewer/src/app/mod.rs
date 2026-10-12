@@ -5,6 +5,7 @@ mod frame;
 mod input;
 mod selection;
 mod simulation;
+mod windows;
 mod world_loading;
 
 #[cfg(test)]
@@ -94,6 +95,16 @@ pub(crate) struct ViewerApp {
     following: bool,
     help_open: bool,
     info_open: bool,
+    /// Open floating windows, back to front.
+    windows: Vec<windows::OpenWindow>,
+    /// A window being dragged: its index and where on it the mouse holds it.
+    window_drag: Option<(usize, f32, f32)>,
+    /// The Windows menu in the top bar is open.
+    windows_menu: bool,
+    /// How the people list is ordered.
+    people_sort: crate::render::PeopleSort,
+    /// How the band has done over time, for the charts.
+    history: windows::History,
     /// Signs over people saying what they're doing (S).
     signs: bool,
     /// How far back N has jumped through the recent events.
@@ -181,6 +192,11 @@ impl ViewerApp {
             // Open the help on a normal launch so first-time viewers know what they see.
             help_open: smoke_frames.is_none(),
             info_open: false,
+            windows: Vec::new(),
+            window_drag: None,
+            windows_menu: false,
+            people_sort: crate::render::PeopleSort::default(),
+            history: windows::History::default(),
             signs: true,
             event_cursor: 0,
             details_open: false,
@@ -194,6 +210,14 @@ impl ViewerApp {
 
     /// Opens on a band already started by `startup::start_valley`: running, with
     /// the camera on the camp once the window exists.
+    /// Starts with `kinds` open.
+    pub(crate) fn with_windows(mut self, kinds: &[crate::render::WindowKind]) -> Self {
+        for &kind in kinds {
+            self.open_window(kind);
+        }
+        self
+    }
+
     /// Starts the view `cells` across (for close-up screenshots).
     pub(crate) fn with_view_span(mut self, cells: f64) -> Self {
         self.view_span = cells;
@@ -238,6 +262,7 @@ impl ViewerApp {
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.engine = sim_core::Engine::load(std::fs::File::open(path)?)?;
         self.feed.clear();
+        self.history.clear();
         self.gestures.clear();
         self.wear.clear();
         self.selected = None;

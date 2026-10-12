@@ -35,11 +35,28 @@ pub struct FeedEntry {
     pub count: u32,
 }
 
+/// Story entries kept; the oldest are dropped first.
+pub const STORY_CAPACITY: usize = 4_000;
+
+/// Something worth remembering in the band's story, and the year it happened in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoryEntry {
+    /// 1 for the first year.
+    pub year: u32,
+    pub entry: FeedEntry,
+}
+
 #[derive(Debug, Default)]
 pub struct Feed {
     entries: VecDeque<FeedEntry>,
+    /// The band's story: births, deaths, couples, newcomers, firsts.
+    story: VecDeque<StoryEntry>,
     deaths_seen: usize,
     births: u32,
+    /// Huts and hearths finished so far (the first of each is in the story).
+    built: [u32; 2],
+    /// Who started each structure being built (by structure id).
+    builders: std::collections::BTreeMap<u32, AgentId>,
 }
 
 impl Feed {
@@ -50,8 +67,41 @@ impl Feed {
 
     pub fn clear(&mut self) {
         self.entries.clear();
+        self.story.clear();
         self.deaths_seen = 0;
         self.births = 0;
+        self.built = [0, 0];
+        self.builders.clear();
+    }
+
+    /// The band's story so far, oldest first.
+    pub fn story(&self) -> impl DoubleEndedIterator<Item = &StoryEntry> {
+        self.story.iter()
+    }
+
+    /// A line in the recent events that also goes into the band's story.
+    fn tell(
+        &mut self,
+        engine: &Engine,
+        text: String,
+        tone: Tone,
+        agent: Option<AgentId>,
+        position: WorldPosition,
+    ) {
+        if self.story.len() == STORY_CAPACITY {
+            self.story.pop_front();
+        }
+        self.story.push_back(StoryEntry {
+            year: year_of(engine),
+            entry: FeedEntry {
+                text: text.clone(),
+                tone,
+                agent,
+                position,
+                count: 1,
+            },
+        });
+        self.push(text, tone, agent, position);
     }
 
     /// Babies born since the feed started.
@@ -83,8 +133,19 @@ impl Feed {
     pub fn record(&mut self, engine: &Engine) {
         let deaths = engine.death_records();
         self.deaths_seen = self.deaths_seen.min(deaths.len());
-        for death in &deaths[self.deaths_seen..] {
-            self.push(
+        for started in engine
+            .structure_diagnostics()
+            .iter()
+            .filter(|diagnostic| diagnostic.kind == sim_core::StructureDiagnosticKind::Started)
+        {
+            if let Some(builder) = started.structure.builder {
+                self.builders.insert(started.structure.id.get(), builder);
+            }
+        }
+        let fresh: Vec<_> = deaths[self.deaths_seen..].to_vec();
+        for death in &fresh {
+            self.tell(
+                engine,
                 format!(
                     "{} {}",
                     name(engine, death.agent),
@@ -160,7 +221,12 @@ impl Feed {
                 ),
                 FamilyEvent::Conceived { .. } => continue,
             };
-            self.push(text, tone, Some(agent), agent_position(engine, agent));
+            let position = agent_position(engine, agent);
+            if matches!(event, FamilyEvent::Walking { .. }) {
+                self.push(text, tone, Some(agent), position);
+            } else {
+                self.tell(engine, text, tone, Some(agent), position);
+            }
         }
 
         for event in engine.word_events() {
@@ -215,6 +281,38 @@ impl Feed {
             );
         }
 
+        // The first hut and the first hearth anyone finished, and every hearth
+        // after (they're rare): milestones in the story.
+        for built in engine
+            .structure_diagnostics()
+            .iter()
+            .filter(|diagnostic| diagnostic.kind == sim_core::StructureDiagnosticKind::Completed)
+        {
+            let hearth = built.structure.kind.burns();
+            let count = &mut self.built[usize::from(hearth)];
+            *count += 1;
+            let first = *count == 1;
+            let builder = self.builders.remove(&built.structure.id.get());
+            let who = builder.map_or_else(|| "Someone".to_owned(), |agent| name(engine, agent));
+            let text = match (hearth, first) {
+                (false, true) => format!("{who} built the first hut"),
+                (true, true) => format!("{who} built the first hearth"),
+                (true, false) => format!("{who} built a hearth"),
+                (false, false) => continue,
+            };
+            self.tell(engine, text, Tone::Good, builder, built.structure.position);
+        }
+        if engine.snapshot().tick % sim_core::TICKS_PER_YEAR == 0 {
+            let people = engine.snapshot().living_agent_count;
+            self.tell(
+                engine,
+                format!("Year {} begins: {people} people", year_of(engine)),
+                Tone::Neutral,
+                None,
+                WorldPosition { x: 0, y: 0 },
+            );
+        }
+
         for fire in engine.fire_events().iter().filter(|fire| fire.relit) {
             self.push(
                 format!("{} relit a fire", name(engine, fire.agent)),
@@ -225,7 +323,8 @@ impl Feed {
         }
 
         for couple in engine.couple_events() {
-            self.push(
+            self.tell(
+                engine,
                 format!(
                     "{} and {} became a couple",
                     name(engine, couple.first),
@@ -396,6 +495,11 @@ impl Feed {
 }
 
 /// What everyone calls `agent` (its given name), or "Person N".
+/// The year (1 for the first) the engine is in.
+fn year_of(engine: &Engine) -> u32 {
+    (engine.snapshot().tick / sim_core::TICKS_PER_YEAR) as u32 + 1
+}
+
 fn name(engine: &Engine, agent: AgentId) -> String {
     engine
         .life(agent)

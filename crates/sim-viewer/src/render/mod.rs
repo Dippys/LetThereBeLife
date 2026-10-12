@@ -7,6 +7,7 @@ mod instances;
 mod summary;
 mod text;
 mod ui;
+mod windows;
 
 #[cfg(test)]
 mod tests;
@@ -71,6 +72,10 @@ pub struct RenderState {
     pub season: sim_core::Season,
     /// Show small signs over people saying what they're doing (when zoomed in).
     pub signs: bool,
+    /// Open floating windows, back to front.
+    pub windows: Vec<WindowView>,
+    /// The windows menu is open.
+    pub windows_menu: bool,
 }
 
 /// Head counts for the top bar.
@@ -163,6 +168,160 @@ pub enum UiAction {
     Tool(BuildTool),
     /// The feed entry at this index (oldest first).
     FeedEntry(usize),
+    /// Open (or bring forward) a window.
+    OpenWindow(WindowKind),
+    /// The windows menu in the top bar.
+    WindowsMenu,
+    /// Close the window at this index (back to front).
+    CloseWindow(usize),
+    /// Grab the window at this index by its title bar.
+    WindowTitle(usize),
+    /// Somewhere in the window at this index (brings it forward).
+    WindowBody(usize),
+    /// Pick a person (and look at them).
+    Pick(sim_core::AgentId),
+    /// Look at a place, picking whoever it was about.
+    LookAt(sim_core::WorldPosition, Option<sim_core::AgentId>),
+    /// Sort the people list by this column.
+    SortPeople(PeopleSort),
+}
+
+/// The floating windows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowKind {
+    /// The band's story, year by year.
+    Story,
+    /// How the band has done over time.
+    Charts,
+    /// Who is whose child and partner.
+    Family,
+    /// Everyone alive, in a list.
+    People,
+    /// What the picked person is thinking and believes.
+    Mind,
+}
+
+impl WindowKind {
+    pub const ALL: [Self; 5] = [
+        Self::Story,
+        Self::Charts,
+        Self::Family,
+        Self::People,
+        Self::Mind,
+    ];
+
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Story => "Story",
+            Self::Charts => "Charts",
+            Self::Family => "Family",
+            Self::People => "People",
+            Self::Mind => "Mind",
+        }
+    }
+
+    /// The key that opens it.
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::Story => "J",
+            Self::Charts => "G",
+            Self::Family => "K",
+            Self::People => "P",
+            Self::Mind => "M",
+        }
+    }
+
+    /// Its size, in characters across and lines down.
+    pub const fn size(self) -> (usize, usize) {
+        match self {
+            Self::Charts => (52, 24),
+            Self::Mind => (50, 26),
+            _ => (48, 24),
+        }
+    }
+}
+
+/// How the people list is ordered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PeopleSort {
+    #[default]
+    Name,
+    Age,
+    Doing,
+}
+
+/// How a line in a window is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineStyle {
+    Normal,
+    Dim,
+    Heading,
+    Good,
+    Bad,
+    Talk,
+}
+
+/// One line of a window: text (indented), how it looks, and what clicking it does.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WindowLine {
+    pub text: String,
+    pub style: LineStyle,
+    pub indent: u8,
+    pub action: Option<UiAction>,
+}
+
+impl WindowLine {
+    pub fn new(text: impl Into<String>, style: LineStyle) -> Self {
+        Self {
+            text: text.into(),
+            style,
+            indent: 0,
+            action: None,
+        }
+    }
+
+    pub fn indented(mut self, indent: u8) -> Self {
+        self.indent = indent;
+        self
+    }
+
+    pub fn on_click(mut self, action: UiAction) -> Self {
+        self.action = Some(action);
+        self
+    }
+}
+
+/// One line on a chart: its name and its values over time (oldest first).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Series {
+    pub label: &'static str,
+    pub style: LineStyle,
+    pub values: Vec<u32>,
+    /// For counts per period (births, deaths): the total, shown instead of the latest.
+    pub total: Option<u32>,
+}
+
+/// What a window shows.
+#[derive(Debug, Clone, PartialEq)]
+pub enum WindowBody {
+    /// Lines from `first` on (what's scrolled into view), of `total`.
+    Lines {
+        lines: Vec<WindowLine>,
+        first: usize,
+        total: usize,
+    },
+    /// Charts over the years shown, with a note under them.
+    Charts { series: Vec<Series>, years: u32 },
+}
+
+/// A floating window as drawn.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WindowView {
+    pub kind: WindowKind,
+    pub title: String,
+    pub x: f32,
+    pub y: f32,
+    pub body: WindowBody,
 }
 
 /// What the interface has at a screen point.
@@ -173,6 +332,7 @@ pub enum UiHit {
     Panel,
 }
 
+pub(crate) use text::wrap;
 pub use ui::SPEEDS;
 
 #[derive(Debug, Clone, Copy)]
@@ -560,6 +720,15 @@ impl Renderer {
             .rev()
             .find(|hit| hit.contains(x, y))
             .map(|hit| hit.action.map_or(UiHit::Panel, UiHit::Action))
+    }
+
+    /// The window under a screen point, if any (by its index, back to front).
+    pub fn window_at(&self, x: f64, y: f64) -> Option<usize> {
+        let (x, y) = (x as f32, y as f32);
+        self.hits.iter().rev().find_map(|hit| match hit.action {
+            Some(UiAction::WindowBody(index)) if hit.contains(x, y) => Some(index),
+            _ => None,
+        })
     }
 
     /// Saves the next rendered frame as a PNG at `path`.

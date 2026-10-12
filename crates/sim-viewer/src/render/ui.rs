@@ -40,32 +40,32 @@ const LABEL_CHARS: usize = 10;
 /// Characters before a grid cell's value starts.
 const GRID_LABEL_CHARS: usize = 9;
 
-struct Painter<'a> {
+pub(super) struct Painter<'a> {
     out: &'a mut Vec<Instance>,
-    hits: &'a mut Vec<Hit>,
+    pub(super) hits: &'a mut Vec<Hit>,
     /// Font pixel size; every other measure is a multiple of it.
-    px: f32,
+    pub(super) px: f32,
     cursor: Option<(f32, f32)>,
 }
 
 impl Painter<'_> {
-    fn line(&self) -> f32 {
+    pub(super) fn line(&self) -> f32 {
         LINE * self.px
     }
 
-    fn pad(&self) -> f32 {
+    pub(super) fn pad(&self) -> f32 {
         4.0 * self.px
     }
 
-    fn chars(&self, count: usize) -> f32 {
+    pub(super) fn chars(&self, count: usize) -> f32 {
         count as f32 * ADVANCE * self.px
     }
 
-    fn rect(&mut self, x: f32, y: f32, width: f32, height: f32, color: u32) {
+    pub(super) fn rect(&mut self, x: f32, y: f32, width: f32, height: f32, color: u32) {
         self.out.push(Instance::new(x, y, width, height, color));
     }
 
-    fn panel(&mut self, x: f32, y: f32, width: f32, height: f32) {
+    pub(super) fn panel(&mut self, x: f32, y: f32, width: f32, height: f32) {
         self.rect(x, y, width, height, colors::UI_PANEL);
         self.outline(x, y, width, height, colors::UI_BORDER);
         self.hits.push(Hit {
@@ -86,21 +86,28 @@ impl Painter<'_> {
     }
 
     /// Text in a line box whose top is `y`; returns the x just past it.
-    fn text(&mut self, text: &str, x: f32, y: f32, color: u32) -> f32 {
+    pub(super) fn text(&mut self, text: &str, x: f32, y: f32, color: u32) -> f32 {
         push_text(self.out, text, x, y + self.px, self.px, color)
     }
 
-    fn hovered(&self, x: f32, y: f32, width: f32, height: f32) -> bool {
+    pub(super) fn hovered(&self, x: f32, y: f32, width: f32, height: f32) -> bool {
         self.cursor
             .is_some_and(|(cx, cy)| cx >= x && cy >= y && cx < x + width && cy < y + height)
     }
 
-    fn button_width(&self, label: &str) -> f32 {
+    pub(super) fn button_width(&self, label: &str) -> f32 {
         text_width(label, self.px) + 2.0 * 3.0 * self.px
     }
 
     /// A button with its top-left at (`x`, `y`); returns its width.
-    fn button(&mut self, label: &str, x: f32, y: f32, action: UiAction, active: bool) -> f32 {
+    pub(super) fn button(
+        &mut self,
+        label: &str,
+        x: f32,
+        y: f32,
+        action: UiAction,
+        active: bool,
+    ) -> f32 {
         let width = self.button_width(label);
         let height = self.line() + 2.0 * self.px;
         let color = if active {
@@ -174,6 +181,10 @@ pub(super) fn build_interface(
     if let Some(details) = details {
         details_panel(painter, details, below_info);
     }
+    super::windows::draw_windows(painter, &state.windows, width, height);
+    if state.windows_menu {
+        windows_menu(painter, width, bar);
+    }
     if state.build.is_none() {
         if let Some(hint) = start_hint(state) {
             let y = height - painter.pad() - painter.line() * 2.0;
@@ -190,6 +201,24 @@ pub(super) fn build_interface(
     }
     if state.help_open {
         help(painter, width, height);
+    }
+}
+
+/// The list of windows under the top bar's Windows button.
+fn windows_menu(painter: &mut Painter, width: f32, top: f32) {
+    let pad = painter.pad();
+    let line = painter.line();
+    let entries: Vec<String> = super::WindowKind::ALL
+        .iter()
+        .map(|kind| format!("{:<8}{}", kind.title(), kind.key()))
+        .collect();
+    let w = painter.chars(14) + 2.0 * pad;
+    let h = entries.len() as f32 * (line + 2.0 * painter.px) + 2.0 * pad;
+    let x = (width - w - painter.chars(16)).max(0.0);
+    painter.panel(x, top, w, h);
+    for (index, (kind, label)) in super::WindowKind::ALL.iter().zip(&entries).enumerate() {
+        let row_y = top + pad + index as f32 * (line + 2.0 * painter.px);
+        painter.button(label, x + pad, row_y, UiAction::OpenWindow(*kind), false);
     }
 }
 
@@ -335,6 +364,16 @@ fn top_bar(painter: &mut Painter, state: &RenderState, width: f32) -> f32 {
     let info_width = painter.button_width("Info");
     let info_x = help_x - gap - info_width;
     painter.button("Info", info_x, button_y, UiAction::Info, state.info_open);
+    let windows_width = painter.button_width("Windows");
+    let windows_x = info_x - gap - windows_width;
+    painter.button(
+        "Windows",
+        windows_x,
+        button_y,
+        UiAction::WindowsMenu,
+        state.windows_menu,
+    );
+    let info_x = windows_x;
     let census = &state.census;
     let mut items: Vec<(Option<u32>, String, u32)> = vec![(
         Some(colors::agent_color(AgentActivity::Moving)),
@@ -1329,7 +1368,7 @@ fn help(painter: &mut Painter, width: f32, height: f32) {
          things. Words can be misunderstood, and both sides learn from what happens next.",
         column * 2 + 2,
     );
-    const CONTROLS: [(&str, &str); 17] = [
+    const CONTROLS: [(&str, &str); 18] = [
         ("Drag", "move the map"),
         ("Scroll", "zoom in and out"),
         ("Click", "pick a person"),
@@ -1340,6 +1379,7 @@ fn help(painter: &mut Painter, width: f32, height: f32) {
         ("Space", "pause or resume"),
         ("1-9  + -", "speed (+ goes past 256×)"),
         ("I", "valley info"),
+        ("J G K P M", "story, charts, family, people, mind"),
         ("F5  F9", "save the world, open it"),
         ("H", "this help"),
         ("Esc", "close what's open"),

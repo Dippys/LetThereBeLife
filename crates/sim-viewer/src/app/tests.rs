@@ -311,3 +311,49 @@ fn right_drag_selection_does_not_start_outside_the_world_boundary() {
         None
     );
 }
+
+#[test]
+fn windows_open_show_the_band_and_move_and_scroll() {
+    use crate::render::{WindowBody, WindowKind};
+    let mut engine = Engine::default();
+    let start = crate::startup::start_valley(&mut engine).expect("seed 1 has a valley");
+    let mut app = ViewerApp::new(engine, None, None, None)
+        .with_valley(start)
+        .with_selected(AgentId::new(0))
+        .with_windows(&WindowKind::ALL);
+    app.advance(sim_core::TICKS_PER_YEAR / 12);
+    let views = app.window_views();
+    assert_eq!(views.len(), WindowKind::ALL.len());
+    let text = |kind: WindowKind| -> Vec<String> {
+        match &views.iter().find(|view| view.kind == kind).unwrap().body {
+            WindowBody::Lines { lines, .. } => lines.iter().map(|line| line.text.clone()).collect(),
+            WindowBody::Charts { series, .. } => {
+                series.iter().map(|chart| chart.label.to_owned()).collect()
+            }
+        }
+    };
+    assert_eq!(text(WindowKind::Story)[0], "Year 1");
+    assert!(text(WindowKind::People)[0].starts_with("20 people"));
+    assert!(text(WindowKind::Family).len() >= 10, "everyone has a line");
+    assert!(text(WindowKind::Charts).contains(&"People".to_owned()));
+    let mind = views
+        .iter()
+        .find(|view| view.kind == WindowKind::Mind)
+        .unwrap();
+    assert!(mind.title.starts_with("Mind of"));
+
+    // Dragging the front window by its title moves it.
+    let front = app.windows.len() - 1;
+    let before = (app.windows[front].x, app.windows[front].y);
+    app.cursor = Some((f64::from(before.0) + 10.0, f64::from(before.1) + 5.0));
+    app.grab_window(front);
+    assert!(app.drag_window(f64::from(before.0) + 110.0, f64::from(before.1) + 55.0));
+    assert_eq!(app.windows[front].x, before.0 + 100.0);
+    assert_eq!(app.windows[front].y, before.1 + 50.0);
+    // Scrolling never goes past the end.
+    app.scroll_window(front, 10_000);
+    let views = app.window_views();
+    if let WindowBody::Lines { first, total, .. } = &views[front].body {
+        assert!(*first <= *total);
+    }
+}

@@ -208,6 +208,33 @@ impl ViewerApp {
             UiAction::Follow => self.following = !self.following && self.selected.is_some(),
             UiAction::NextPerson => self.select_next_person(),
             UiAction::Tool(tool) => self.build = Some(tool),
+            UiAction::OpenWindow(kind) => self.open_window(kind),
+            UiAction::WindowsMenu => self.windows_menu = !self.windows_menu,
+            UiAction::CloseWindow(index) => self.close_window(index),
+            UiAction::WindowTitle(index) => self.grab_window(index),
+            UiAction::WindowBody(index) => {
+                self.raise_window(index);
+            }
+            UiAction::Pick(agent) => {
+                self.selected = Some(agent);
+                self.following = false;
+                let at = self
+                    .engine
+                    .agent_views(usize::MAX)
+                    .find(|view| view.id == agent)
+                    .map(|view| view.position);
+                if let Some(position) = at {
+                    self.focus_on(position);
+                }
+            }
+            UiAction::LookAt(position, agent) => {
+                if let Some(agent) = agent {
+                    self.selected = Some(agent);
+                    self.following = false;
+                }
+                self.focus_on(position);
+            }
+            UiAction::SortPeople(sort) => self.people_sort = sort,
             UiAction::FeedEntry(index) => {
                 let Some(entry) = self.feed.entries().nth(index).cloned() else {
                     return;
@@ -330,6 +357,11 @@ impl ViewerApp {
                 });
             }
             KeyCode::KeyN => self.next_event(),
+            KeyCode::KeyJ => self.open_window(crate::render::WindowKind::Story),
+            KeyCode::KeyG => self.open_window(crate::render::WindowKind::Charts),
+            KeyCode::KeyK => self.open_window(crate::render::WindowKind::Family),
+            KeyCode::KeyP => self.open_window(crate::render::WindowKind::People),
+            KeyCode::KeyM => self.open_window(crate::render::WindowKind::Mind),
             KeyCode::F5 => {
                 let message = match self.save_world(std::path::Path::new(QUICK_SAVE)) {
                     Ok(()) => format!("Saved the world to {QUICK_SAVE}"),

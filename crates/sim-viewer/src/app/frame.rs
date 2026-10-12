@@ -132,6 +132,7 @@ impl ViewerApp {
             self.camera.center_on(agent.view.position, viewport);
         }
         let census = self.census();
+        let windows = self.window_views();
         let (Some(window), Some(renderer)) = (&self.window, &mut self.renderer) else {
             return false;
         };
@@ -167,6 +168,8 @@ impl ViewerApp {
                 help_open: self.help_open,
                 info_open: self.info_open,
                 signs: self.signs,
+                windows,
+                windows_menu: self.windows_menu,
                 reached_speed: self.shown_speed.map(|(speed, _)| speed),
                 details_open: self.details_open,
                 build: self.build,

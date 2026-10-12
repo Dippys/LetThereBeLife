@@ -131,6 +131,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(person) = options.select {
         app = app.with_selected(sim_core::AgentId::new(person));
     }
+    app = app.with_windows(&options.windows);
     event_loop.run_app(&mut app)?;
     Ok(())
 }

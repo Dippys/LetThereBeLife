@@ -410,6 +410,31 @@ fn plan_step(choice: sim_core::Choice, fact: Option<u16>) -> &'static str {
     }
 }
 
+/// A kind of action, as a phrase: "feeding a fire".
+pub const fn action(choice: sim_core::Choice) -> &'static str {
+    use sim_core::Choice;
+    match choice {
+        Choice::Drink => "Drinking",
+        Choice::Eat => "Eating",
+        Choice::Forage => "Picking food",
+        Choice::Gather => "Gathering",
+        Choice::Store => "Storing in a hut",
+        Choice::Fetch => "Fetching stored food",
+        Choice::Sleep => "Sleeping",
+        Choice::WarmUp => "Warming up",
+        Choice::TendFire => "Feeding a fire",
+        Choice::Build => "Building",
+        Choice::Craft => "Knapping",
+        Choice::Hunt => "Hunting",
+        Choice::Travel => "Going somewhere",
+        Choice::Company => "Keeping company",
+        Choice::Explore => "Exploring",
+        Choice::Flee => "Running away",
+        Choice::Unload => "Setting things down",
+        Choice::Rest => "Resting",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

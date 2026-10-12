@@ -50,7 +50,7 @@ pub(super) fn push_text(
 
 /// Splits `text` into lines of at most `width` characters, breaking at spaces
 /// where possible.
-pub(super) fn wrap(text: &str, width: usize) -> Vec<String> {
+pub(crate) fn wrap(text: &str, width: usize) -> Vec<String> {
     let mut lines = Vec::new();
     let mut line = String::new();
     for word in text.split(' ') {

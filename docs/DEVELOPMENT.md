@@ -122,6 +122,7 @@ Compare minds before and after any behavior change. Current numbers are in [STAT
 | `Esc` | Close help, then the build palette, then the person panel (it no longer quits) |
 | `S` | Signs over people (zoomed in): asleep, by a fire, at water, food, carrying, building, hunting or running |
 | `N` | Jump through recent events in turn (camera and person panel) |
+| `J` `G` `K` `P` `M` | Floating windows (also the Windows button): the band's story by year, charts over time, the family tree, everyone alive, and the picked person's mind (plan, beliefs, places, trust). Drag by the title, scroll with the wheel, click a line to look |
 | `Space`, `1`–`9`, `+`/`-` | Pause, speed 1×–256×, step the speed up to 8192× and then a year a second ("1yr/s", 14,400×) (also buttons in the top bar); past what the computer manages, the bar shows the speed reached |
 | `F5`, `F9` | Save the world to `saves/quick.ltbl`, open it again |
 | `I` | Valley info: weather, fires burning, how many are cold/hungry/thirsty/tired, births and deaths this year |
