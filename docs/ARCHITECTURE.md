@@ -160,8 +160,9 @@ only the bootstrap load area, not the world size.
 |---|---|
 | `main.rs`, `launch.rs` | Entry point, CLI flags (`--config`, `--smoke-frames`, `--pregenerate-world`, `--valley`, `--advance`, `--select`, `--screenshot`), archive loading |
 | `app/` | `ViewerApp`: `events.rs` (winit `ApplicationHandler`, click vs drag), `input.rs` (hover description, picking, keys, interface actions), `simulation.rs` (fixed-step ticks, spawn, reset), `world_loading.rs` (generation and archive polling, dirty regions), `selection.rs`, `frame.rs` (window creation, per-frame render state) |
-| `render/` | `wgpu` `Renderer`: `gpu.rs` (uniforms, instance buffers), `instances.rs` (agents, shelters, objects, markers, gestures), `summary.rs` (multi-level chunk summaries for zoomed-out views), `colors.rs`, `ui.rs` (screen interface and its clickable regions), `text.rs` (bitmap font), `details.rs` (F3 readout), `shader.wgsl` |
-| `labels.rs`, `feed.rs` | Plain-language names for everything shown; the recent-events feed built from engine event logs |
+| `render/` | `wgpu` `Renderer`: `gpu.rs` (uniforms, instance buffers), `instances.rs` (agents, shelters, objects, markers, gestures), `sprites.rs` (8×8 pixel pictures drawn from 10 px per cell), `windows.rs` (floating windows), `summary.rs` (multi-level chunk summaries for zoomed-out views), `colors.rs`, `ui.rs` (screen interface and its clickable regions), `text.rs` (bitmap font), `details.rs` (F3 readout), `shader.wgsl` |
+| `labels.rs`, `feed.rs` | Plain-language names for everything shown; the recent-events feed and the band's story built from engine event logs |
+| `motion.rs`, `paths.rs`, `gestures.rs`, `progress.rs` | Presentation-only memory of what's been seen: last steps (gliding walkers) and family lines, worn paths, recent gestures, run progress |
 | `screenshot.rs` | Dependency-free PNG encoding for `--screenshot` |
 | `generation/` | Background Rayon pool: `mod.rs` (`WorldGenerator`, jobs), `worker.rs`, `pager.rs` (center-out 32×32-chunk bootstrap pages) |
 | `startup.rs` | Cursor-spawn validation (`T`), residency readiness check, 4,096-agent viewer limit, reset |

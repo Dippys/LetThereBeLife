@@ -148,7 +148,11 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 - **Most decisions are still hand-written.** Cold and tiredness are answered by learned habits
   and what people learned their choices bring about (D-105, D-108); food, water, storage and
   social choices are still a script.
-- **Cold still kills**, more since nights are colder (40 over 10 years in 20 valleys, D-124/125).
+- **Cold still kills**, more since nights are colder, though hides, baskets and spears bring it
+  down again (24 over 10 years in 20 valleys, D-131).
+- **The debug viewer sometimes crashes under heavy CPU load** (exit 0xc0000409, no Rust message,
+  about 1 run in 12 while studies run alongside; the viewer from before 2026-10-12 does the same).
+  It looks like the graphics driver; the release viewer hasn't shown it.
 - **Winter trips are dangerous:** with homes (D-109) people no longer build wherever they get
   cold, so those far from home in winter sleep rough; cold deaths rose a little (42 against 34
   over 20 valley-decades).
