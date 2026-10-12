@@ -267,6 +267,8 @@ pub struct WildlifeStats {
     /// Living people showing each feeling at the end, and faces misread.
     pub feelings: [u64; sim_core::Feeling::COUNT],
     pub faces_misread: u64,
+    /// Living people angry with someone at the end.
+    pub angry: u64,
     /// Racks built, pits dug, huts walled in stone, repairs done.
     pub building: [u64; 4],
     /// Things tried and how many made something; units made of each material.
@@ -894,6 +896,14 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
         }
     }
     wildlife.faces_misread = engine.faces_misread();
+    wildlife.angry = living
+        .iter()
+        .filter(|(_, mind)| {
+            mind.acquaintances
+                .iter()
+                .any(|known| known.anger >= sim_core::ANGRY)
+        })
+        .count() as u64;
     let homes: std::collections::BTreeSet<_> =
         living.iter().filter_map(|(_, mind)| mind.home).collect();
     wildlife.housed = living

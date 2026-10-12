@@ -20,6 +20,8 @@ use crate::{
     WorldPosition,
 };
 
+/// Anger at someone who refused it food (before temper); a gift eases as much.
+const REFUSED_ANGER: u8 = 32;
 /// Food handed over per request: one meal.
 const GIFT: u8 = FOOD_CONSUMPTION;
 /// Willingness (see `decide_gift`) needed to share with someone who isn't one's child.
@@ -187,6 +189,7 @@ impl Engine {
                 .saw_eaten(material, false);
         }
         // The asker sees the answer.
+        let temper = u32::from(self.personality_in_use(asker).temper);
         let asker_mind = self.minds.get_mut(asker);
         asker_mind
             .dialogue
@@ -199,6 +202,11 @@ impl Engine {
                 .helped(slot, response == RequestResponse::Gave);
             if response == RequestResponse::Gave {
                 asker_mind.social.owe(slot);
+                asker_mind.social.soothe(slot, REFUSED_ANGER);
+            } else {
+                // Refused while they had food: angry with them.
+                let anger = (u32::from(REFUSED_ANGER) * (64 + temper) / 192) as u8;
+                asker_mind.social.provoke(slot, anger);
             }
         }
         // A gift squares one favour the giver owed the asker.
@@ -311,14 +319,15 @@ impl Engine {
         }
         let sociability = self.personality_in_use(giver).sociability;
         let mind = self.minds.get_mut(giver);
-        let (trust, familiarity, owed) =
+        let (trust, familiarity, owed, anger) =
             mind.social
                 .slot_of(asker)
-                .map_or((DEFAULT_TRUST, 0, 0), |slot| {
+                .map_or((DEFAULT_TRUST, 0, 0, 0), |slot| {
                     (
                         mind.social.trust(slot),
                         mind.social.familiarity(slot),
                         mind.social.owed(slot),
+                        mind.social.anger(slot),
                     )
                 });
         // Nobody feeds someone it holds in contempt; family and those it owes
@@ -330,7 +339,8 @@ impl Engine {
         let misery = self.minds.get(giver).map_or(0, |mind| {
             i32::from(mind.feelings.level(crate::Feeling::Misery))
         });
-        let willingness = -misery / 4
+        // Nobody feeds someone it's angry with as readily.
+        let willingness = -misery / 4 - i32::from(anger)
             + i32::from(trust)
             + if tie.is_some() { FAMILY_WILLINGNESS } else { 0 }
             + i32::from(owed) * OWED_WILLINGNESS

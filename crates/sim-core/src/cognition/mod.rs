@@ -49,7 +49,7 @@ pub use signal::{DesiredEffect, Mime, PublicSignal, Tone, Understanding, Utteran
 pub(crate) use signal::{express, locate, mime_for, understand, unmistakable};
 pub(crate) use social::SocialMemory;
 pub use social::{
-    ACQUAINTANCE_SLOTS, AcquaintanceView, DEFAULT_TRUST, DISTRUST, FRIEND_FAMILIARITY, Tie,
+    ACQUAINTANCE_SLOTS, ANGRY, AcquaintanceView, DEFAULT_TRUST, DISTRUST, FRIEND_FAMILIARITY, Tie,
 };
 
 use crate::{AgentId, SimTime, WorldPosition};

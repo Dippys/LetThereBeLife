@@ -90,8 +90,12 @@ impl Temperament {
         } else if feelings.level(Feeling::Fear) < CALM && feelings.strong(Feeling::Contentment) {
             self.excursion_chance += self.excursion_chance / 2;
         }
-        if feelings.strong(Feeling::Boredom) {
+        // Bored, or frustrated by what isn't working: off to try elsewhere.
+        if feelings.strong(Feeling::Boredom) || feelings.strong(Feeling::Frustration) {
             self.excursion_chance += BORED_ROAMING;
+        }
+        if feelings.strong(Feeling::Hope) {
+            self.work_chance += HOPEFUL_WORK;
         }
         if feelings.strong(Feeling::Loneliness) {
             self.visit_chance += LONELY_VISITING;
@@ -107,6 +111,8 @@ impl Temperament {
 const CALM: u8 = 16;
 /// Extra chance (out of 256) that a bored agent's idle check becomes an excursion.
 const BORED_ROAMING: u16 = 60;
+/// Extra chance (out of 256) that a hopeful agent works when idle.
+const HOPEFUL_WORK: u16 = 40;
 /// Extra chance (out of 256) that a lonely agent goes to find a friend.
 const LONELY_VISITING: u16 = 100;
 

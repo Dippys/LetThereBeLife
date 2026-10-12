@@ -437,6 +437,7 @@ impl MemoryInspection {
             tie: None,
             owed: 0,
             name: None,
+            anger: 0,
         };
         const UNHEARD: LexiconEntryView = LexiconEntryView {
             form: VocalForm(0),

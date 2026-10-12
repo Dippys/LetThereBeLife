@@ -247,13 +247,23 @@ impl Habits {
     /// starts trying `choice` in `situation`.
     /// Re-deciding the same thing in the same situation (each step of a walk,
     /// a retry) continues the trial: it's judged only when something else is chosen.
-    pub(crate) fn decided(&mut self, situation: Situation, choice: Choice, discomfort: u16) {
+    /// A `vivid` moment (surprised or relieved) teaches twice over.
+    pub(crate) fn decided(
+        &mut self,
+        situation: Situation,
+        choice: Choice,
+        discomfort: u16,
+        vivid: bool,
+    ) {
         if self.trial.choice == choice as u8 + 1 && self.trial.situation == situation.0 {
             return;
         }
         if self.trial.choice != 0 {
             let relief = (i32::from(self.trial.discomfort) - i32::from(discomfort)) / RELIEF_SCALE;
             self.learn(self.trial.situation, self.trial.choice, relief);
+            if vivid {
+                self.learn(self.trial.situation, self.trial.choice, relief);
+            }
             self.notice(self.trial.situation, self.trial.choice, situation.0);
         }
         self.trial = Trial {
@@ -402,9 +412,9 @@ mod tests {
         for _ in 0..6 {
             // Sleeping takes the agent from 200 to 120; wandering off then
             // brings it back up to 160; resting a while, up again to 200.
-            habits.decided(cold, Choice::Sleep, 200);
-            habits.decided(cold, Choice::Explore, 120);
-            habits.decided(cold, Choice::Rest, 160);
+            habits.decided(cold, Choice::Sleep, 200, false);
+            habits.decided(cold, Choice::Explore, 120, false);
+            habits.decided(cold, Choice::Rest, 160, false);
         }
         let value = |choice: Choice| {
             habits
@@ -438,10 +448,10 @@ mod tests {
         for _ in 0..6 {
             // Feeding the dead fire eases nothing by itself, but gets it
             // burning; warming at it then eases the cold. Wandering off does neither.
-            habits.decided(cold, Choice::TendFire, 200);
-            habits.decided(by_fire, Choice::WarmUp, 200);
-            habits.decided(cold, Choice::Explore, 120);
-            habits.decided(cold, Choice::Rest, 200);
+            habits.decided(cold, Choice::TendFire, 200, false);
+            habits.decided(by_fire, Choice::WarmUp, 200, false);
+            habits.decided(cold, Choice::Explore, 120, false);
+            habits.decided(cold, Choice::Rest, 200, false);
         }
         assert!(
             habits.value(cold, Choice::TendFire).0 <= 0,

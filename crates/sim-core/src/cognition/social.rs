@@ -83,7 +83,13 @@ struct Acquaintance {
     /// The hut it last saw them asleep beside (`NO_HUT` if none): whose it is.
     hut_x: i16,
     hut_y: i16,
+    /// How angry it is with them (0 none, 255 furious): for misleading it,
+    /// refusing it, taking from it.
+    anger: u8,
 }
+
+/// Anger this strong changes how it treats someone, and shows.
+pub const ANGRY: u8 = 32;
 
 const NO_HUT: i16 = i16::MIN;
 
@@ -107,6 +113,7 @@ impl Default for Acquaintance {
             knows: 0,
             hut_x: NO_HUT,
             hut_y: NO_HUT,
+            anger: 0,
         }
     }
 }
@@ -142,6 +149,8 @@ pub struct AcquaintanceView {
     pub owed: u8,
     /// What the agent calls them, if it knows.
     pub name: Option<crate::Name>,
+    /// How angry the agent is with them.
+    pub anger: u8,
 }
 
 /// What `notice` did to the slots.
@@ -407,6 +416,29 @@ impl SocialMemory {
         self.slots[usize::from(slot)].owed()
     }
 
+    pub(crate) fn anger(&self, slot: u8) -> u8 {
+        self.slots[usize::from(slot)].anger
+    }
+
+    /// `slot` wronged the agent: angrier by `amount`.
+    pub(crate) fn provoke(&mut self, slot: u8, amount: u8) {
+        let known = &mut self.slots[usize::from(slot)];
+        known.anger = known.anger.saturating_add(amount);
+    }
+
+    /// `slot` did right by the agent: less angry by `amount`.
+    pub(crate) fn soothe(&mut self, slot: u8, amount: u8) {
+        let known = &mut self.slots[usize::from(slot)];
+        known.anger = known.anger.saturating_sub(amount);
+    }
+
+    /// A year passes: grudges halve.
+    pub(crate) fn cool_off(&mut self) {
+        for known in &mut self.slots {
+            known.anger /= 2;
+        }
+    }
+
     /// Whether the agent holds `slot` in contempt.
     pub(crate) fn distrusts(&self, slot: u8) -> bool {
         self.slots[usize::from(slot)].trust < DISTRUST
@@ -446,6 +478,7 @@ impl SocialMemory {
                     && known.position_known
                     && known.familiarity >= FRIEND_FAMILIARITY
                     && known.trust >= DISTRUST
+                    && known.anger < ANGRY
                     && now.saturating_sub(known.last_seen) <= max_age
             })
             .max_by_key(|known| {
@@ -473,6 +506,7 @@ impl SocialMemory {
                 tie: known.tie(),
                 owed: known.owed(),
                 name: (known.name != NO_NAME).then_some(crate::Name(known.name)),
+                anger: known.anger,
             })
     }
 }
@@ -494,8 +528,8 @@ mod tests {
 
     #[test]
     fn relationship_layout_is_compact() {
-        assert_eq!(size_of::<Acquaintance>(), 24);
-        assert_eq!(size_of::<SocialMemory>(), 24 * ACQUAINTANCE_SLOTS);
+        assert_eq!(size_of::<Acquaintance>(), 28);
+        assert_eq!(size_of::<SocialMemory>(), 28 * ACQUAINTANCE_SLOTS);
     }
 
     #[test]

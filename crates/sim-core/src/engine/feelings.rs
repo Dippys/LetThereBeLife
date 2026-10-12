@@ -53,6 +53,17 @@ impl Engine {
         for grief in &self.grief_events {
             felt.push((grief.agent, crate::Feeling::Grief, 255));
         }
+        // A plan that failed frustrates; retching disgusts.
+        for event in &self.plan_events {
+            if event.kind == PlanEventKind::Revised {
+                felt.push((event.agent, crate::Feeling::Frustration, 40));
+            }
+        }
+        for meal in &self.meal_events {
+            if meal.retched {
+                felt.push((meal.agent, crate::Feeling::Disgust, 120));
+            }
+        }
         for (agent, feeling, amount) in felt {
             let boldness = u32::from(self.personality_in_use(agent).boldness);
             let amount = if feeling == crate::Feeling::Fear {
@@ -67,7 +78,7 @@ impl Engine {
         }
     }
 
-    /// Once a year: skill not kept up by practice fades.
+    /// Once a year: skill not kept up by practice fades, and grudges halve.
     pub(super) fn fade_skills(&mut self) {
         let living: Vec<crate::AgentId> = self
             .population
@@ -77,7 +88,9 @@ impl Engine {
             .collect();
         for agent in living {
             if self.minds.get(agent).is_some() {
-                self.minds.get_mut(agent).character.fade();
+                let mind = self.minds.get_mut(agent);
+                mind.character.fade();
+                mind.social.cool_off();
             }
         }
     }

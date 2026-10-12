@@ -59,6 +59,15 @@ const ALARM_DISTANCE: u64 = 20;
 const BODY_TICKS: u64 = 3 * 60 * 60 * 60;
 /// Ticks it takes to make something by hand (knapping a blade).
 const CRAFT_TICKS: u64 = 300;
+/// Anger at someone whose tip proved wrong (before temper), and how much a
+/// right one soothes.
+const MISLED_ANGER: u8 = 24;
+const SOOTHED: u8 = 8;
+/// Surprise at a belief proved wrong; relief when a pressing need eases;
+/// frustration when a trip has to be given up.
+const SURPRISE_WRONG: u8 = 140;
+const RELIEF_EASED: u8 = 140;
+const FRUSTRATED_STALL: u8 = 60;
 /// Faces farther than this (cells) are read less surely.
 const FACE_READING_DISTANCE: u64 = 3;
 /// Ability with words (0-255) from which each hearing counts twice.
@@ -456,12 +465,15 @@ impl Engine {
             .filter(|hut| Some(*hut) != home)
             .collect();
         // Late in autumn, remembering a hungry winter: fill the hut with food.
+        // Worried about it, all autumn long.
         let stocking = season == crate::Season::Autumn
-            && late
+            && (late || feelings.strong(crate::Feeling::Worry))
             && seasons.remembered(crate::Season::Winter as usize)[1] >= 100;
         let stored_food = stored_food.map(crate::agent::CompactPosition::world);
         let grief_until = *grief_until;
         let explored = map.explored_tile_count();
+        let temper = u32::from(personality.temper);
+        let tempered = |amount: u8| (u32::from(amount) * (64 + temper) / 192).min(255) as u8;
         map.observe(
             agent.get(),
             origin,
@@ -490,6 +502,16 @@ impl Engine {
                 });
                 if let Some(slot) = check.teller {
                     people.hint_checked(slot, check.confirmed);
+                    // Misled, it's angry with whoever said so (the hot-tempered
+                    // more); proved right, it lets some of that go.
+                    if check.confirmed {
+                        people.soothe(slot, SOOTHED);
+                    } else {
+                        people.provoke(slot, tempered(MISLED_ANGER));
+                    }
+                }
+                if !check.confirmed {
+                    feelings.feel(crate::Feeling::Surprise, SURPRISE_WRONG);
                 }
                 learn_from_consequence(
                     ConsequenceContext {
@@ -555,6 +577,33 @@ impl Engine {
                 feelings.ease(Feeling::Boredom, 40);
             } else {
                 feelings.feel(Feeling::Boredom, 2);
+            }
+            // A need that pressed has eased: relief.
+            if !pressing && feelings.level(Feeling::Misery) >= crate::cognition::SHOWS {
+                feelings.feel(Feeling::Relief, RELIEF_EASED);
+            }
+            // Autumn, and a winter remembered as hungry: worry (the steady less).
+            if season == crate::Season::Autumn
+                && seasons.remembered(crate::Season::Winter as usize)[1] >= 100
+            {
+                let worry = (6 * (320 - u32::from(personality.steadiness)) / 192) as u8;
+                feelings.feel(Feeling::Worry, worry);
+            }
+            // A plan under way gives hope.
+            if intention.aim().is_some() {
+                feelings.feel(Feeling::Hope, 3);
+            }
+            // The dead disgust.
+            if bodies_seen {
+                feelings.feel(Feeling::Disgust, 30);
+            }
+            // Someone it's angry with in view: it tenses up.
+            if perception.agents.iter().any(|other| {
+                people
+                    .slot_of(other.id)
+                    .is_some_and(|slot| people.anger(slot) >= crate::cognition::ANGRY)
+            }) {
+                feelings.feel(Feeling::Frustration, 10);
             }
             // Faces around: fear spreads to those who see it. Strangers'
             // faces, and faces far off, are sometimes read as their lookalike.
@@ -761,6 +810,8 @@ impl Engine {
                 if mind.home.hut() == Some(destination) {
                     mind.home.lost();
                 }
+                mind.feelings
+                    .feel(crate::Feeling::Frustration, FRUSTRATED_STALL);
                 self.gave_up += 1;
             }
         }
@@ -778,7 +829,9 @@ impl Engine {
             let levels = [needs.hunger, needs.thirst, needs.rest, needs.exposure]
                 .map(|level| crate::cognition::need_level(level.value, level.threshold));
             let mind = self.minds.get_mut(agent);
-            mind.habits.decided(situation, choice, discomfort);
+            let vivid = mind.feelings.strong(crate::Feeling::Surprise)
+                || mind.feelings.strong(crate::Feeling::Relief);
+            mind.habits.decided(situation, choice, discomfort, vivid);
             mind.model.decided(action, facts, levels, now);
         }
         match deliberation.selection.reason {
@@ -1160,7 +1213,12 @@ impl Engine {
                 GestureTopic::Place(_) => mind.notice(public.sender, public.origin, now),
                 _ => None,
             };
-            let trust = teller.map_or(crate::DEFAULT_TRUST, |slot| mind.social.trust(slot));
+            // Someone it's angry with is believed less.
+            let trust = teller.map_or(crate::DEFAULT_TRUST, |slot| {
+                mind.social
+                    .trust(slot)
+                    .saturating_sub(mind.social.anger(slot) / 2)
+            });
             let (best, best_probability) = understanding.reading.best();
             let mut confidence = 0;
             let mut changed = match understanding.topic {

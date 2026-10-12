@@ -706,11 +706,28 @@ pub(super) fn person_rows(agent: &AgentInspection) -> Vec<Row> {
     {
         rows.push(Row::Text(knack, colors::UI_DIM));
     }
-    if let Some(feeling) = agent.memory.as_ref().and_then(|memory| memory.feeling) {
-        rows.push(Row::Text(
-            format!("Feeling {}", labels::feeling(feeling)),
-            colors::UI_DIM,
-        ));
+    if let Some(memory) = &agent.memory {
+        // How they feel, and who they're angry with, if anyone.
+        let angry_with = memory
+            .acquaintances()
+            .iter()
+            .filter(|known| known.anger >= sim_core::ANGRY)
+            .max_by_key(|known| (known.anger, std::cmp::Reverse(known.agent)))
+            .map(|known| {
+                known
+                    .name
+                    .map_or_else(|| labels::person(known.agent), |name| name.spoken())
+            });
+        let mut parts = Vec::new();
+        if let Some(feeling) = memory.feeling {
+            parts.push(format!("Feeling {}", labels::feeling(feeling)));
+        }
+        if let Some(name) = angry_with {
+            parts.push(format!("angry with {name}"));
+        }
+        if !parts.is_empty() {
+            rows.push(Row::Text(parts.join(" · "), colors::UI_DIM));
+        }
     }
     rows.push(Row::Gap);
 

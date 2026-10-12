@@ -42,6 +42,7 @@ fn friend(id: u32, familiarity: u8, trust: u8) -> AcquaintanceView {
         tie: None,
         owed: 0,
         name: None,
+        anger: 0,
     }
 }
 
@@ -170,6 +171,7 @@ fn person() -> AgentInspection {
                 AcquaintanceView {
                     tie: Some(sim_core::Tie::Parent),
                     name: Some(sim_core::Name(1)),
+                    anger: 0,
                     ..friend(2, u8::MAX, 220)
                 },
             ],
