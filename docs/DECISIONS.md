@@ -1151,3 +1151,31 @@ thing. Canonical scenarios now run full minds; fingerprints refreshed.
 **Consequences:** Less code and one behaviour to reason about; no more comparisons against a
 mindless baseline.
 
+## D-139: Recipes people discover: preserved food (2026-10-12)
+
+**Decision:** What can be made is a table in `sim-world` (`RECIPES`): inputs, a `Method` (by hand,
+with an edge, at a fire, or smoked by a fire, four times as slow) and what comes out. Blade,
+basket, spear and roast moved into it; new are dried meat (meat, smoked), dried berries (one berry,
+smoked) and pemmican (dried meat and dried berries by hand, makes two). `made_from` and
+`needs_edge` are gone from material properties. People know recipes from founding lore (knappers
+the tools, fire keepers roasting), by watching them made, or by trying: now and then someone
+curious with food to spare tries a combination of what it carries by the methods at hand; if the
+table has it, it's made and learned, otherwise one of each input is spoiled and the combination is
+remembered (16 per person). Known smoking is used on surplus meat (2+) or berries (4+) at a fire
+in view; pemmican is pounded when both dried foods are carried. Crafts 42 B, mind 1,968 B.
+**Why:** The owner asked for dynamic, discovered recipes; preserving food answers rot (D-134).
+**Consequences:** Over 10 years in 20 valleys (with D-140): survivors 463 against 448. People dry
+berries widely (400-5,000 per valley) but almost nobody smokes meat or makes pemmican yet: meat is
+rarely carried in surplus. A first version with experiments 5x as frequent and drying two berries
+into one starved people (424 survivors, 10 starved).
+
+## D-140: Food rots by fair shares (2026-10-12)
+
+**Decision:** Each night a carried or stored stack loses its whole share (amount over keeping
+days) and the remainder with matching odds, rolled from the life seed, instead of rounding the
+share up.
+**Why:** Rounding up made a single berry rot in one night and small stacks rot several times
+faster than their keeping days said.
+**Consequences:** Over 10 years in 20 valleys: food rotted 182,222 units against 377,797; births
+140 against 123; survivors 463 against 435.
+

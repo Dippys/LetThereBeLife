@@ -14,7 +14,8 @@ use super::{
     },
 };
 use crate::{
-    InventoryView, Material, NeedKind, PhysicalNeedsView, PhysicalPerception, WorldPosition,
+    InventoryView, Material, Method, NeedKind, PhysicalNeedsView, PhysicalPerception,
+    WorldPosition,
     cognition::{LandmarkKind, MentalMap, Personality},
     policy::{
         ExplorationHeading, FoodValues, PHYSICAL_POLICY_IDLE_RECHECK_TICKS, PhysicalGoal,
@@ -98,6 +99,12 @@ const STORE_LOAD: u8 = 9;
 const STOCK_LOAD: u8 = 7;
 /// Raw meat carried that's worth a walk to a remembered hearth to cook.
 const COOKING_TRIP_MEAT: u8 = 3;
+/// Meat, or berries, carried that's worth smoking to keep.
+const SMOKE_MEAT: u8 = 2;
+const SMOKE_BERRIES: u8 = 4;
+/// Curiosity is divided by this for the chance (out of 256) an idle check
+/// becomes an experiment.
+const EXPERIMENT_RARITY: u16 = 64;
 /// Wood a basket or a spear takes.
 const TOOL_WOOD: u8 = 2;
 /// Planting happens this close to home (cells), with this much food on
@@ -183,6 +190,8 @@ pub(crate) struct MindInput<'a> {
     pub(crate) recruit: Option<WorldPosition>,
     /// It believes a hearth would warm it (and knows how to build one).
     pub(crate) knows_hearths: bool,
+    /// What it knows of making things, and what it has tried.
+    pub(crate) crafts: crate::cognition::Crafts,
     /// Where it stood at its previous decision (it won't step straight back).
     pub(crate) came_from: Option<WorldPosition>,
     /// Mourning someone close: stays near others, takes on no work or trips.
@@ -629,17 +638,10 @@ impl Planner<'_> {
             .map(|structure| structure.position)
     }
 
-    /// Someone who keeps fire, carrying raw meat: cooks it at a fire burning
-    /// in view, or with enough meat to be worth the walk, heads for a hearth
-    /// it remembers.
-    fn cook(&self, inventory: InventoryView) -> Option<Deliberation> {
-        let meat = inventory.amount(Material::Meat);
-        if !self.mind.knows_hearths || meat == 0 {
-            return None;
-        }
+    /// The nearest fire burning in view.
+    fn fire_in_view(&self) -> Option<WorldPosition> {
         let now = (self.needs.at.ticks() / 60) as u32;
-        let fire = self
-            .perception
+        self.perception
             .structures
             .iter()
             .filter(|structure| structure.kind.burns() && structure.working(now))
@@ -649,9 +651,95 @@ impl Planner<'_> {
                     structure.position.y,
                     structure.position.x,
                 )
-            });
-        match fire {
-            Some(fire) => self.at_hut(fire.position, PhysicalGoal::Cook, PolicyReason::Cooking),
+            })
+            .map(|structure| structure.position)
+    }
+
+    /// Food it knows how to keep: pounds pemmican from dried meat and berries
+    /// it carries, or smokes surplus meat or berries at a fire in view.
+    fn preserve(&self, inventory: InventoryView) -> Option<Deliberation> {
+        let crafts = self.mind.crafts;
+        let knows = |output: Material| {
+            crate::RECIPES
+                .iter()
+                .enumerate()
+                .any(|(index, recipe)| recipe.output == output && crafts.knows(index))
+        };
+        if knows(Material::Pemmican)
+            && inventory.amount(Material::DriedMeat) > 0
+            && inventory.amount(Material::DriedBerries) > 0
+        {
+            return Some(Deliberation::act(
+                PhysicalGoal::Craft,
+                self.origin,
+                PolicyReason::Crafting,
+            ));
+        }
+        let surplus = (knows(Material::DriedMeat)
+            && inventory.amount(Material::Meat) >= SMOKE_MEAT)
+            || (knows(Material::DriedBerries)
+                && inventory.amount(Material::Berries) >= SMOKE_BERRIES);
+        if !surplus {
+            return None;
+        }
+        self.at_hut(
+            self.fire_in_view()?,
+            PhysicalGoal::Cook,
+            PolicyReason::Preserving,
+        )
+    }
+
+    /// Now and then someone curious tries something new with what it carries:
+    /// by hand, with an edge, or at a fire in view.
+    fn experiment(&self, inventory: InventoryView) -> Option<Deliberation> {
+        let chance = u16::from(self.mind.personality.curiosity) / EXPERIMENT_RARITY;
+        // Only with food to spare: a try can spoil what goes into it.
+        if self.roll(0x4558_5045) >= chance
+            || self.mind.food.carried(inventory) < self.temperament.food_reserve
+        {
+            return None;
+        }
+        let carried: Vec<Material> = inventory
+            .carried()
+            .map(|(material, _)| material)
+            .filter(|material| !material.properties().worn())
+            .collect();
+        let crafts = self.mind.crafts;
+        let roll = u64::from(self.roll(0x5452_5920));
+        if let Some(fire) = self.fire_in_view()
+            && crafts
+                .untried(&carried, &[Method::Fire, Method::Smoke], roll)
+                .is_some()
+        {
+            return self.at_hut(fire, PhysicalGoal::Cook, PolicyReason::Experimenting);
+        }
+        let edge = inventory
+            .carried()
+            .any(|(material, _)| material.properties().cutting);
+        let methods: &[Method] = if edge {
+            &[Method::Hand, Method::Edge]
+        } else {
+            &[Method::Hand]
+        };
+        crafts.untried(&carried, methods, roll).map(|_| {
+            Deliberation::act(
+                PhysicalGoal::Craft,
+                self.origin,
+                PolicyReason::Experimenting,
+            )
+        })
+    }
+
+    /// Someone who keeps fire, carrying raw meat: cooks it at a fire burning
+    /// in view, or with enough meat to be worth the walk, heads for a hearth
+    /// it remembers.
+    fn cook(&self, inventory: InventoryView) -> Option<Deliberation> {
+        let meat = inventory.amount(Material::Meat);
+        if !self.mind.knows_hearths || meat == 0 {
+            return None;
+        }
+        match self.fire_in_view() {
+            Some(fire) => self.at_hut(fire, PhysicalGoal::Cook, PolicyReason::Cooking),
             None if meat >= COOKING_TRIP_MEAT => self
                 .travel_to_known(LandmarkKind::HEARTH, PhysicalGoal::Explore)
                 .map(|trip| trip.with_reason(PolicyReason::Cooking)),
@@ -1414,6 +1502,10 @@ impl Planner<'_> {
         {
             return burial;
         }
+        // Food it knows how to keep is kept: smoked or pounded into pemmican.
+        if let Some(keep) = self.preserve(inventory) {
+            return keep;
+        }
         // Raw meat goes bad fast: cook it at a fire in view.
         if let Some(cook) = self.cook(inventory) {
             return cook;
@@ -1433,6 +1525,10 @@ impl Planner<'_> {
         // Someone who can knap and has no edge makes one from a carried stone.
         if works && let Some(craft) = self.make_tool(inventory) {
             return craft;
+        }
+        // The curious try new things with what they carry.
+        if works && let Some(trial) = self.experiment(inventory) {
+            return trial;
         }
         // Hunting is work too, and prey in view is the best work there is.
         if works && let Some(hunt) = self.hunt(inventory) {
@@ -1657,7 +1753,7 @@ impl Planner<'_> {
         let (input, amount) = crate::Material::ALL
             .into_iter()
             .filter(|material| material.properties().cutting)
-            .find_map(|material| material.properties().made_from)?;
+            .find_map(|material| material.made_from())?;
         if inventory.amount(input) >= amount {
             return Some(Deliberation::act(
                 PhysicalGoal::Craft,

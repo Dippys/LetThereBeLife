@@ -228,6 +228,10 @@ pub enum PolicyReason {
     Burying,
     /// Cooking meat at a fire.
     Cooking,
+    /// Smoking food at a fire so it keeps.
+    Preserving,
+    /// Trying something new with what it has.
+    Experimenting,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

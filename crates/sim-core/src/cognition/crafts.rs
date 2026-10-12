@@ -4,16 +4,74 @@
 //! The belief changes only from evidence: warming up at one (felt), watching
 //! someone warm their hands at one, and family lore.
 
-use crate::AgentId;
+use crate::{AgentId, Material, Method, RECIPES, Recipe};
 
 const FELT_EVIDENCE: u8 = 8;
 const WATCHED_EVIDENCE_CAP: u8 = 5;
 const CULTURE_EVIDENCE: u8 = 4;
 
-/// 4 bytes.
+/// Combinations a person remembers trying that made nothing.
+pub const TRIED_SLOTS: usize = 16;
+
+/// A combination to try or make: the kinds of input (a set) and the method,
+/// packed in 16 bits (bit 15 set when it holds one).
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+pub(crate) struct Attempt(u16);
+
+impl Attempt {
+    const NONE_SECOND: u16 = 0xF;
+
+    pub(crate) fn new(kinds: (Material, Option<Material>), method: Method) -> Self {
+        let (first, second) = kinds;
+        let second = second.map_or(Self::NONE_SECOND, |second| second as u16);
+        Self(1 << 15 | first as u16 | second << 4 | (method as u16) << 8)
+    }
+
+    pub(crate) const fn is_some(self) -> bool {
+        self.0 & 1 << 15 != 0
+    }
+
+    pub(crate) fn kinds(self) -> (Material, Option<Material>) {
+        let first = Material::ALL[usize::from(self.0 & 0xF) % Material::COUNT];
+        let second = (self.0 >> 4) & 0xF;
+        (
+            first,
+            (second != Self::NONE_SECOND)
+                .then(|| Material::ALL[usize::from(second) % Material::COUNT]),
+        )
+    }
+
+    pub(crate) fn method(self) -> Method {
+        Method::ALL[usize::from((self.0 >> 8) & 0x3)]
+    }
+
+    /// The recipe physics has for this combination, if any.
+    pub(crate) fn recipe(self) -> Option<(usize, Recipe)> {
+        Recipe::find(self.kinds(), self.method())
+    }
+}
+
+/// 42 bytes.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 pub(crate) struct Crafts {
+    /// Recipes it knows (a bit per index in `RECIPES`).
+    recipes: u16,
+    /// Combinations it tried that made nothing (oldest replaced first).
+    tried: [Attempt; TRIED_SLOTS],
+    /// What it's trying right now, judged when the work is done.
+    pending: Attempt,
     /// How strongly it believes hearths warm (0–255).
     hearth: u8,
     evidence: u8,
@@ -43,10 +101,8 @@ impl Crafts {
             Self {
                 hearth: 200,
                 evidence: CULTURE_EVIDENCE,
-                knapping: 0,
                 huts: CULTURE_EVIDENCE,
-                planting: 0,
-                burial: 0,
+                ..Self::default()
             }
         } else {
             Self {
@@ -102,6 +158,71 @@ impl Crafts {
         self.evidence > 0 && self.hearth > 64
     }
 
+    /// Knows recipe `index` (in `RECIPES`). Knapping lore covers what's made
+    /// by hand or edge from stone and wood; keeping fire covers roasting.
+    pub(crate) fn knows(self, index: usize) -> bool {
+        let lore = match RECIPES[index].output {
+            Material::Blade | Material::Basket | Material::Spear => self.knows_knapping(),
+            Material::Roast => self.knows_hearths(),
+            _ => false,
+        };
+        lore || self.recipes & 1 << index != 0
+    }
+
+    /// It made recipe `index`, or watched it made.
+    pub(crate) fn learn(&mut self, index: usize) {
+        self.recipes |= 1 << index;
+    }
+
+    /// Whether it remembers trying `attempt` for nothing.
+    pub(crate) fn tried(self, attempt: Attempt) -> bool {
+        self.tried.contains(&attempt)
+    }
+
+    /// It tried `attempt` and nothing came of it.
+    pub(crate) fn failed(&mut self, attempt: Attempt) {
+        self.tried.rotate_right(1);
+        self.tried[0] = attempt;
+    }
+
+    pub(crate) fn set_pending(&mut self, attempt: Attempt) {
+        self.pending = attempt;
+    }
+
+    pub(crate) fn take_pending(&mut self) -> Attempt {
+        std::mem::take(&mut self.pending)
+    }
+
+    /// Something worth trying with `carried` kinds by one of `methods`: a
+    /// combination it hasn't tried and doesn't already know makes something.
+    /// `roll` picks among them.
+    pub(crate) fn untried(
+        self,
+        carried: &[Material],
+        methods: &[Method],
+        roll: u64,
+    ) -> Option<Attempt> {
+        let mut options = Vec::new();
+        for (index, &first) in carried.iter().enumerate() {
+            for second in
+                std::iter::once(None).chain(carried[index + 1..].iter().copied().map(Some))
+            {
+                let kinds = match second {
+                    Some(second) if (second as u8) < (first as u8) => (second, Some(first)),
+                    _ => (first, second),
+                };
+                for &method in methods {
+                    let attempt = Attempt::new(kinds, method);
+                    let known = attempt.recipe().is_some_and(|(index, _)| self.knows(index));
+                    if !known && !self.tried(attempt) {
+                        options.push(attempt);
+                    }
+                }
+            }
+        }
+        (!options.is_empty()).then(|| options[(roll % options.len() as u64) as usize])
+    }
+
     /// It warmed up at a hearth.
     pub(crate) fn warmed(&mut self) {
         self.hearth = self.hearth.max(230);
@@ -127,7 +248,39 @@ mod tests {
     use super::*;
 
     #[test]
+    fn trying_finds_what_physics_allows_and_remembers_what_failed() {
+        let mut crafts = Crafts::default();
+        let carried = [Material::Meat, Material::Stone];
+        let methods = [Method::Hand, Method::Smoke];
+        let mut found = None;
+        for roll in 0..20 {
+            let Some(attempt) = crafts.untried(&carried, &methods, roll) else {
+                break;
+            };
+            match attempt.recipe() {
+                Some((index, recipe)) => {
+                    crafts.learn(index);
+                    found = Some(recipe.output);
+                }
+                None => crafts.failed(attempt),
+            }
+        }
+        assert!(crafts.knows(4) || found.is_some(), "smoking meat was found");
+        let smoked = Attempt::new((Material::Meat, None), Method::Smoke);
+        assert_eq!(smoked.kinds(), (Material::Meat, None));
+        assert_eq!(smoked.method(), Method::Smoke);
+        assert_eq!(
+            smoked.recipe().map(|(_, recipe)| recipe.output),
+            Some(Material::DriedMeat)
+        );
+        let nothing = Attempt::new((Material::Stone, Some(Material::Meat)), Method::Hand);
+        crafts.failed(nothing);
+        assert!(crafts.tried(nothing));
+    }
+
+    #[test]
     fn one_family_keeps_fire_and_others_learn_by_watching() {
+        assert_eq!(std::mem::size_of::<Crafts>(), 42);
         let first = Crafts::founding(1, AgentId::new(0), 8);
         let second = Crafts::founding(1, AgentId::new(8), 8);
         assert_ne!(first.knows_hearths(), second.knows_hearths());
@@ -155,6 +308,6 @@ mod tests {
         assert!(!child.knows_burial());
         child.saw_burial();
         assert!(child.knows_burial());
-        assert_eq!(std::mem::size_of::<Crafts>(), 6);
+        assert_eq!(std::mem::size_of::<Crafts>(), 42);
     }
 }

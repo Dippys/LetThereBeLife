@@ -11,6 +11,9 @@ use crate::{
     WorldPosition, WorldQueryError,
 };
 
+/// Most batches smoked at one sitting.
+const SMOKING_BATCH: u8 = 6;
+
 /// Food kept on hand when putting things away in a hut.
 const KEPT_FOOD: u8 = 2;
 /// Most food taken out of a hut at once.
@@ -571,50 +574,143 @@ impl Engine {
             .ok_or(PolicyFailureReason::TargetUnavailable)
     }
 
-    /// Makes the first thing the agent knows how to make from what it carries
-    /// (a blade from a stone). Anyone watching sees how it's done.
+    /// Makes something by hand or with an edge: what it set out to try (an
+    /// experiment), or else the first thing it knows how to make and wants
+    /// (a blade, a basket, a spear, pemmican). Anyone watching sees how.
     pub(super) fn apply_craft(&mut self, agent: AgentId) -> Result<(), PolicyFailureReason> {
-        if !self
-            .minds
-            .get(agent)
-            .is_some_and(|mind| mind.crafts.knows_knapping())
-        {
-            return Err(PolicyFailureReason::TargetUnavailable);
-        }
         let inventory = self
             .population
             .inventory(agent)
             .ok_or(PolicyFailureReason::InconsistentState)?;
-        // The first thing it can make that it doesn't have yet: a blade, then
-        // a basket, then a spear (shaped with the blade).
         let has_edge = inventory
             .carried()
             .any(|(material, _)| material.properties().cutting);
-        let (made, (input, amount)) = [
-            crate::Material::Blade,
-            crate::Material::Basket,
-            crate::Material::Spear,
-        ]
-        .into_iter()
-        .filter_map(|material| Some((material, material.properties().made_from?)))
-        .find(|&(made, (input, amount))| {
-            inventory.amount(made) == 0
-                && (!made.properties().needs_edge || has_edge)
-                && inventory.amount(input) >= amount
-                && inventory.can_add(made)
-        })
-        .ok_or(PolicyFailureReason::TargetUnavailable)?;
-        if self.population.take(agent, input, amount) < amount {
-            return Err(PolicyFailureReason::InconsistentState);
+        let attempt = self.minds.get_mut(agent).crafts.take_pending();
+        if attempt.is_some() {
+            return self.try_attempt(agent, attempt);
         }
-        self.minds.get_mut(agent).model.used(
-            crate::cognition::Choice::Craft,
-            crate::cognition::Facts::HAS_STONE,
-        );
+        let crafts = self
+            .minds
+            .get(agent)
+            .map(|mind| mind.crafts)
+            .unwrap_or_default();
+        // The first thing it can make that it doesn't have yet, or pemmican
+        // from dried meat and berries.
+        let (index, recipe) = crate::RECIPES
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(index, recipe)| {
+                crafts.knows(*index)
+                    && match recipe.method {
+                        crate::Method::Hand => true,
+                        crate::Method::Edge => has_edge,
+                        crate::Method::Fire | crate::Method::Smoke => false,
+                    }
+                    && (recipe.output.properties().nutrition > 0
+                        || inventory.amount(recipe.output) == 0)
+                    && recipe
+                        .inputs
+                        .iter()
+                        .all(|&(input, count)| inventory.amount(input) >= count)
+                    && inventory.can_add(recipe.output)
+            })
+            .min_by_key(|(_, recipe)| {
+                // Food first: it's what would otherwise go bad.
+                (
+                    recipe.output.properties().nutrition == 0,
+                    recipe.output as u8,
+                )
+            })
+            .ok_or(PolicyFailureReason::TargetUnavailable)?;
+        self.make(agent, index, recipe)
+    }
 
-        self.population.add_inventory(agent, made, 1);
-        let watchers: Vec<AgentId> = self
-            .perceive_physical(agent, crate::PHYSICAL_POLICY_RADIUS)
+    /// Turns the inputs of recipe `index` it carries into what it makes, and
+    /// lets anyone watching learn how.
+    pub(super) fn make(
+        &mut self,
+        agent: AgentId,
+        index: usize,
+        recipe: crate::Recipe,
+    ) -> Result<(), PolicyFailureReason> {
+        for (input, count) in recipe.inputs {
+            if count > 0 && self.population.take(agent, input, count) < count {
+                return Err(PolicyFailureReason::InconsistentState);
+            }
+        }
+        let made = recipe.output;
+        if made == Material::Blade {
+            self.minds.get_mut(agent).model.used(
+                crate::cognition::Choice::Craft,
+                crate::cognition::Facts::HAS_STONE,
+            );
+        }
+        self.population.add_inventory(agent, made, recipe.makes);
+        let watchers = self.watchers_of(agent);
+        for &who in std::iter::once(&agent).chain(&watchers) {
+            let mind = self.minds.get_mut(who);
+            mind.crafts.learn(index);
+            if made == Material::Blade {
+                mind.crafts.saw_knapping();
+            }
+            // Made food is expected to feed as what it was made from did.
+            if made.properties().nutrition > 0 {
+                mind.affordances.saw_cooked(recipe.inputs[0].0, made);
+            }
+        }
+        for &watcher in &watchers {
+            if made == Material::Blade {
+                self.minds.get_mut(watcher).model.saw(
+                    crate::cognition::Choice::Craft,
+                    crate::cognition::Facts::HAS_STONE,
+                    crate::cognition::Facts::HAS_BLADE,
+                );
+            }
+        }
+        self.name_made(agent, crate::Concept::Material(made), &watchers);
+        self.craft_events.push(crate::CraftEvent {
+            agent,
+            made,
+            watchers: watchers.len() as u16,
+        });
+        Ok(())
+    }
+
+    /// Tries a combination: if physics has a recipe for it (and it carries
+    /// enough), it's made and learned; otherwise one of each input is spoiled
+    /// and it remembers not to try that again.
+    fn try_attempt(
+        &mut self,
+        agent: AgentId,
+        attempt: crate::cognition::Attempt,
+    ) -> Result<(), PolicyFailureReason> {
+        self.experiments += 1;
+        let inventory = self
+            .population
+            .inventory(agent)
+            .ok_or(PolicyFailureReason::InconsistentState)?;
+        if let Some((index, recipe)) = attempt.recipe()
+            && recipe
+                .inputs
+                .iter()
+                .all(|&(input, count)| inventory.amount(input) >= count)
+            && inventory.can_add(recipe.output)
+        {
+            self.discoveries += 1;
+            return self.make(agent, index, recipe);
+        }
+        let (first, second) = attempt.kinds();
+        for kind in std::iter::once(first).chain(second) {
+            self.population.take(agent, kind, 1);
+        }
+        self.minds.get_mut(agent).crafts.failed(attempt);
+        Ok(())
+    }
+
+    /// Who is awake and close enough to see `agent` at work.
+    pub(super) fn watchers_of(&self, agent: AgentId) -> Vec<AgentId> {
+        self.perceive_physical(agent, crate::PHYSICAL_POLICY_RADIUS)
             .map(|perception| {
                 perception
                     .agents
@@ -625,25 +721,7 @@ impl Engine {
                     .map(|other| other.id)
                     .collect()
             })
-            .unwrap_or_default();
-        self.minds.get_mut(agent).crafts.saw_knapping();
-        for &watcher in &watchers {
-            let mind = self.minds.get_mut(watcher);
-            mind.crafts.saw_knapping();
-            mind.model.saw(
-                crate::cognition::Choice::Craft,
-                crate::cognition::Facts::HAS_STONE,
-                crate::cognition::Facts::HAS_BLADE,
-            );
-        }
-
-        self.name_made(agent, crate::Concept::Material(made), &watchers);
-        self.craft_events.push(crate::CraftEvent {
-            agent,
-            made,
-            watchers: watchers.len() as u16,
-        });
-        Ok(())
+            .unwrap_or_default()
     }
 
     /// Berries eaten on open ground (no bush near) may drop a seed beside the
@@ -728,6 +806,35 @@ impl Engine {
                 > 1
         {
             return Err(PolicyFailureReason::TargetUnavailable);
+        }
+        // Smoking food it knows how to keep, or trying something at the fire.
+        let attempt = self.minds.get_mut(agent).crafts.take_pending();
+        if attempt.is_some() {
+            let known = attempt.recipe().filter(|(index, _)| {
+                self.minds
+                    .get(agent)
+                    .is_some_and(|mind| mind.crafts.knows(*index))
+            });
+            let Some((index, recipe)) = known else {
+                return self.try_attempt(agent, attempt);
+            };
+            let mut made = 0;
+            while made < SMOKING_BATCH
+                && self.population.inventory(agent).is_some_and(|inventory| {
+                    recipe
+                        .inputs
+                        .iter()
+                        .all(|&(input, count)| inventory.amount(input) >= count)
+                })
+            {
+                self.make(agent, index, recipe)?;
+                made += 1;
+            }
+            return if made > 0 {
+                Ok(())
+            } else {
+                Err(PolicyFailureReason::InsufficientMaterials)
+            };
         }
         let cooked = self.population.cook(agent, Material::Meat, Material::Roast);
         if cooked == 0 {
@@ -937,8 +1044,7 @@ impl Engine {
                             || matches!(resource.kind, Material::Stone | Material::Wood))
                         && (reason != PolicyReason::Crafting
                             || Material::ALL.into_iter().any(|made| {
-                                made.properties()
-                                    .made_from
+                                made.made_from()
                                     .is_some_and(|(input, _)| input == resource.kind)
                             }))
                 })

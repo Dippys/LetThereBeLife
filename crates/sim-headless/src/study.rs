@@ -264,6 +264,9 @@ pub struct WildlifeStats {
     pub huts: u64,
     pub huts_fallen: u64,
     pub stored: u64,
+    /// Things tried and how many made something; units made of each material.
+    pub experiments: (u64, u64),
+    pub made: [u64; sim_core::Material::COUNT],
     /// Per activity, the best and the median skill among the living at the end.
     pub skills: [(u8, u8); sim_core::Activity::COUNT],
     /// Food in huts as each winter began.
@@ -602,6 +605,7 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                     wildlife.spears += u64::from(craft.made == sim_core::Material::Spear);
                     wildlife.baskets += u64::from(craft.made == sim_core::Material::Basket);
                     wildlife.cooked += u64::from(craft.made == sim_core::Material::Roast);
+                    wildlife.made[craft.made as usize] += 1;
                     wildlife.watched_crafts += u64::from(craft.watchers);
                 }
                 for fire in engine.fire_events() {
@@ -878,6 +882,7 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     wildlife.deer = engine.animal_count(sim_core::Species::Deer) as u64;
     wildlife.wolves = engine.animal_count(sim_core::Species::Wolf) as u64;
     (wildlife.sprouted, wildlife.plants_died) = engine.plant_counts();
+    wildlife.experiments = engine.experiment_counts();
     wildlife.plants[1] = engine.plant_census();
     let (stored, fetched) = engine.storage_counts();
     wildlife.stored = stored;
@@ -1943,6 +1948,15 @@ impl fmt::Display for StudyReport {
             })
             .collect();
         write!(formatter, "\n  skills (best/median): {}", skills.join(", "))?;
+        let (tries, found) = self.wildlife.experiments;
+        let made = |material: sim_core::Material| self.wildlife.made[material as usize];
+        write!(
+            formatter,
+            "\n  making: tried {tries} times ({found} made something); dried meat {}, dried berries {}, pemmican {}",
+            made(sim_core::Material::DriedMeat),
+            made(sim_core::Material::DriedBerries),
+            made(sim_core::Material::Pemmican)
+        )?;
         let [open, sheltered, by_fire] = self.wildlife.sleeps;
         write!(
             formatter,

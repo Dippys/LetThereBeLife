@@ -99,6 +99,9 @@ pub(super) const fn material_color(material: Material) -> u32 {
         Material::Spear => rgba(190, 150, 100, 235),
         Material::Basket => rgba(210, 180, 110, 235),
         Material::Roast => rgba(170, 90, 50, 235),
+        Material::DriedMeat => rgba(120, 60, 40, 235),
+        Material::DriedBerries => rgba(170, 70, 100, 235),
+        Material::Pemmican => rgba(110, 80, 55, 235),
     }
 }
 

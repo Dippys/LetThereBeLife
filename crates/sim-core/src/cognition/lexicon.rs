@@ -52,7 +52,7 @@ impl Concept {
     pub const fn is_made(self) -> bool {
         match self {
             Self::Material(material) => {
-                material.properties().worn() || material.properties().made_from.is_some()
+                material.properties().worn() || material.made_from().is_some()
             }
             _ => false,
         }
@@ -63,7 +63,7 @@ impl Concept {
     pub const fn root(self) -> Option<Self> {
         match self {
             Self::Material(Material::Hide) => Some(Self::DEER),
-            Self::Material(material) => match material.properties().made_from {
+            Self::Material(material) => match material.made_from() {
                 Some((input, _)) => Some(Self::Material(input)),
                 None => None,
             },

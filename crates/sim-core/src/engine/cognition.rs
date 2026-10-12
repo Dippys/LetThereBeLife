@@ -616,6 +616,7 @@ impl Engine {
                 warn: warn.map(|(_, position)| position),
                 recruit: recruit.map(|(_, position)| position).filter(|_| hunts),
                 knows_hearths: crafts.knows_hearths(),
+                crafts: *crafts,
                 knows_knapping: crafts.knows_knapping(),
                 came_from: map.came_from(origin),
                 grieving: now < grief_until,
@@ -744,12 +745,18 @@ impl Engine {
         if let Some(activity) = skilled {
             self.practise(agent, activity);
         }
+        // Smoking or trying something: settle now what it is.
+        let attempt = self.choose_attempt(agent, goal, reason);
+        let slowness = attempt.map_or(1, |attempt| attempt.method().slowness());
+        if let Some(attempt) = attempt {
+            self.minds.get_mut(agent).crafts.set_pending(attempt);
+        }
         let duration = match (goal, reason) {
             (PhysicalGoal::Hunt, _) => super::HUNT_TICKS,
             (PhysicalGoal::WarmUp | PhysicalGoal::TendFire, _) => WARM_UP_TICKS,
             (PhysicalGoal::Craft | PhysicalGoal::Plant | PhysicalGoal::Cook, _) => {
                 let activity = skilled.expect("matched above");
-                crate::cognition::by_ability(CRAFT_TICKS, self.ability(agent, activity))
+                crate::cognition::by_ability(CRAFT_TICKS, self.ability(agent, activity)) * slowness
             }
             (PhysicalGoal::Bury, _) => CRAFT_TICKS,
             (PhysicalGoal::Store | PhysicalGoal::Fetch | PhysicalGoal::Drop, _) => WARM_UP_TICKS,
@@ -781,6 +788,55 @@ impl Engine {
             Err(error) => {
                 self.schedule_policy_retry(agent, goal, Some(target), reason, move_failure(error));
             }
+        }
+    }
+
+    /// What a smoking or an experiment will be: the known smoking recipe for
+    /// what it carries, or an untried combination of what it carries by the
+    /// methods at hand (at a fire for cooking work, by hand or edge otherwise).
+    fn choose_attempt(
+        &self,
+        agent: AgentId,
+        goal: PhysicalGoal,
+        reason: PolicyReason,
+    ) -> Option<crate::cognition::Attempt> {
+        let inventory = self.population.inventory(agent)?;
+        let crafts = self.minds.get(agent)?.crafts;
+        match reason {
+            PolicyReason::Preserving => crate::RECIPES
+                .iter()
+                .enumerate()
+                .filter(|(index, recipe)| {
+                    recipe.method == crate::Method::Smoke
+                        && crafts.knows(*index)
+                        && recipe
+                            .inputs
+                            .iter()
+                            .all(|&(input, count)| inventory.amount(input) >= count)
+                })
+                .map(|(_, recipe)| crate::cognition::Attempt::new(recipe.kinds(), recipe.method))
+                .next(),
+            PolicyReason::Experimenting => {
+                let carried: Vec<crate::Material> = inventory
+                    .carried()
+                    .map(|(material, _)| material)
+                    .filter(|material| !material.properties().worn())
+                    .collect();
+                let edge = inventory
+                    .carried()
+                    .any(|(material, _)| material.properties().cutting);
+                let methods: &[crate::Method] = match goal {
+                    PhysicalGoal::Cook => &[crate::Method::Fire, crate::Method::Smoke],
+                    _ if edge => &[crate::Method::Hand, crate::Method::Edge],
+                    _ => &[crate::Method::Hand],
+                };
+                let roll = mix(self.config.life_seed
+                    ^ 0x5452_5920
+                    ^ u64::from(agent.get()) << 32
+                    ^ self.time.ticks());
+                crafts.untried(&carried, methods, roll)
+            }
+            _ => None,
         }
     }
 

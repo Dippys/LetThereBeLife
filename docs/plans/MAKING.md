@@ -1,6 +1,6 @@
 # Plan: making things (food, tools, buildings)
 
-Status: proposed 2026-10-12. The owner asked for dynamic recipes, and reworked building and tool
+Status: M0-M1 done (D-139), 2026-10-12; next M2 tools. The owner asked for dynamic recipes, and reworked building and tool
 making with "lots of dynamics". One system covers all three: making something from materials with
 properties, by a method, discovered by trying and passed on by watching.
 
@@ -14,8 +14,9 @@ method, what comes out, and how long it takes. Methods are physical situations, 
 | By hand | nothing |
 | With an edge | a blade carried |
 | At a fire | a burning fire beside you |
-| On a rack | a drying rack beside you, outside winter |
-| Digging | a digging stick or bare hands, open ground |
+| Smoked | a burning fire beside you, four times as long |
+
+(A drying rack, outside winter, comes with buildings in M3.)
 
 Today's crafts (blade, spear, basket, roast, hide) become rows of this table, so nothing special
 is left in code.

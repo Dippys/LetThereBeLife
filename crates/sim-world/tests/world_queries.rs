@@ -85,7 +85,10 @@ fn inspect_candidate(world: &World, position: WorldPosition) -> Option<Candidate
                         Material::Berries
                         | Material::Bitterberries
                         | Material::Meat
-                        | Material::Roast => &mut inputs.food,
+                        | Material::Roast
+                        | Material::DriedMeat
+                        | Material::DriedBerries
+                        | Material::Pemmican => &mut inputs.food,
                         Material::Wood => &mut inputs.wood,
                         Material::Stone
                         | Material::Blade

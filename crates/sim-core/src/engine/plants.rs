@@ -145,6 +145,11 @@ impl Engine {
         }
     }
 
+    /// Things people tried to make, and how many of those made something.
+    pub fn experiment_counts(&self) -> (u64, u64) {
+        (self.experiments, self.discoveries)
+    }
+
     /// Plants that took root, and that died of age, since the start.
     pub fn plant_counts(&self) -> (u64, u64) {
         (self.plants_sprouted, self.plants_died)

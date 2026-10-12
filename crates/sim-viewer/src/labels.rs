@@ -68,6 +68,9 @@ pub const fn material(material: Material) -> &'static str {
         Material::Spear => "spears",
         Material::Basket => "baskets",
         Material::Roast => "roast meat",
+        Material::DriedMeat => "dried meat",
+        Material::DriedBerries => "dried berries",
+        Material::Pemmican => "pemmican",
     }
 }
 
@@ -220,6 +223,8 @@ pub const fn reason(reason: PolicyReason) -> Option<&'static str> {
         PolicyReason::Planting => "Planting near home",
         PolicyReason::Burying => "Burying someone who died",
         PolicyReason::Cooking => "Cooking meat before it goes bad",
+        PolicyReason::Preserving => "Smoking food so it keeps",
+        PolicyReason::Experimenting => "Trying something new",
     })
 }
 

@@ -23,7 +23,7 @@ pub use affordances::AffordanceView;
 pub(crate) use affordances::Affordances;
 pub use character::DRIFT_LIMIT;
 pub(crate) use character::{Character, by_ability};
-pub(crate) use crafts::Crafts;
+pub(crate) use crafts::{Attempt, Crafts};
 pub use dialogue::{CONSEQUENCE_WEIGHT, REPAIR_WEIGHT};
 pub(crate) use dialogue::{Dialogue, LEAD_SECONDS, Lead, PendingCorrection};
 pub(crate) use fauna::Fauna;

@@ -86,7 +86,7 @@ impl Population {
     }
 
     /// A night's rot in what every living person carries. Returns units lost.
-    pub(crate) fn rot_carried(&mut self) -> u32 {
+    pub(crate) fn rot_carried(&mut self, roll: u64) -> u32 {
         let mut lost = 0;
         for (index, inventory) in self.inventories.iter_mut().enumerate() {
             if self
@@ -94,7 +94,7 @@ impl Population {
                 .get(index)
                 .is_some_and(|record| !record.activity.is_terminal())
             {
-                lost += inventory.rot(1);
+                lost += inventory.rot(1, roll ^ (index as u64).wrapping_mul(0x2545_f491_4f6c_dd1d));
             }
         }
         lost

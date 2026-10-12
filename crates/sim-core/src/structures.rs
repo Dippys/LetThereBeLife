@@ -377,8 +377,16 @@ impl StructureStore {
     /// what went in.
     /// A night's rot in what huts hold: dry and out of the sun, food keeps
     /// three times as long there. Returns units lost.
-    pub(crate) fn rot_stocks(&mut self) -> u32 {
-        self.stocks.values_mut().map(|stock| stock.rot(3)).sum()
+    pub(crate) fn rot_stocks(&mut self, roll: u64) -> u32 {
+        self.stocks
+            .iter_mut()
+            .map(|(id, stock)| {
+                stock.rot(
+                    3,
+                    roll ^ u64::from(id.0).wrapping_mul(0x2545_f491_4f6c_dd1d),
+                )
+            })
+            .sum()
     }
 
     pub(crate) fn deposit(

@@ -176,6 +176,9 @@ pub struct Engine {
     /// Units of food that went bad, so far.
     food_rotted: u64,
     plants_died: u64,
+    /// Things tried, and how many of those made something (for tools).
+    experiments: u64,
+    discoveries: u64,
     /// Things put away in huts and food taken out (for tools).
     stored: u64,
     fetched: u64,
@@ -245,6 +248,8 @@ impl Engine {
             crops_withered: 0,
             food_rotted: 0,
             plants_died: 0,
+            experiments: 0,
+            discoveries: 0,
             stored: 0,
             fetched: 0,
             wildlife: crate::wildlife::Wildlife::default(),
@@ -313,6 +318,8 @@ impl Engine {
                 self.gave_up = 0;
                 self.plants_sprouted = 0;
                 self.plants_died = 0;
+                self.experiments = 0;
+                self.discoveries = 0;
                 self.stored = 0;
                 self.fetched = 0;
                 self.wildlife = crate::wildlife::Wildlife::default();

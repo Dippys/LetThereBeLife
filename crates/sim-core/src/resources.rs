@@ -89,14 +89,22 @@ impl InventoryView {
     }
 
     /// A night's rot: of everything that goes bad, about one part in its
-    /// keeping days (times `slower`) is lost. Returns how many units rotted.
-    pub fn rot(&mut self, slower: u8) -> u32 {
+    /// keeping days (times `slower`) is lost. Whole parts always go; what's
+    /// left over goes with the matching odds, decided by `roll`. Returns how
+    /// many units rotted.
+    pub fn rot(&mut self, slower: u8, roll: u64) -> u32 {
         let mut lost = 0;
         for material in Material::ALL {
-            let keeps = material.properties().keeps_days;
+            let keeps = u32::from(material.properties().keeps_days) * u32::from(slower.max(1));
             let amount = &mut self.items[material as usize];
             if keeps > 0 && *amount > 0 {
-                let rotten = amount.div_ceil(keeps.saturating_mul(slower.max(1)));
+                let draw = (roll ^ (material as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15))
+                    .wrapping_mul(0xbf58_476d_1ce4_e5b9)
+                    >> 33;
+                let whole = u32::from(*amount) / keeps;
+                let odd =
+                    u32::from(u64::from(*amount) % u64::from(keeps) > draw % u64::from(keeps));
+                let rotten = (whole + odd).min(u32::from(*amount)) as u8;
                 *amount -= rotten;
                 lost += u32::from(rotten);
             }
@@ -353,7 +361,7 @@ mod tests {
             (Material::Roast, 6),
             (Material::Wood, 5),
         ]);
-        let lost = carried.rot(1);
+        let lost = carried.rot(1, 7);
         assert_eq!(carried.amount(Material::Wood), 5, "wood keeps");
         assert!(carried.amount(Material::Meat) < carried.amount(Material::Roast));
         assert_eq!(
@@ -363,14 +371,17 @@ mod tests {
                 - carried.amount(Material::Meat) as u32
                 - carried.amount(Material::Roast) as u32
         );
-        let mut stored = InventoryView::of(&[(Material::Berries, 8)]);
-        stored.rot(3);
-        let mut out = InventoryView::of(&[(Material::Berries, 8)]);
-        out.rot(1);
-        assert!(
-            stored.amount(Material::Berries) >= out.amount(Material::Berries),
-            "huts keep food longer"
-        );
+        let mut stored = 0;
+        let mut out = 0;
+        let mut one = 0;
+        for night in 0..400 {
+            stored += InventoryView::of(&[(Material::Berries, 8)]).rot(3, night);
+            out += InventoryView::of(&[(Material::Berries, 8)]).rot(1, night);
+            one += InventoryView::of(&[(Material::Berries, 1)]).rot(1, night);
+        }
+        assert!(stored < out, "huts keep food longer");
+        // A berry keeps 8 days: about one night in 8, not every night.
+        assert!((30..=70).contains(&one), "{one} of 400");
     }
 
     #[test]

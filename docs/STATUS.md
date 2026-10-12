@@ -101,8 +101,8 @@ so changes are judged on behaviour counts as much as on survival.
 
 - **Winter cold is still the main killer**, though learned choices (D-105) roughly halved it.
 - **Stored food is rarely eaten:** people put food away in huts but seldom come back for it.
-- **Rotting food costs children** (D-134): people gather far more and fewer are born; they don't
-  yet gather less because they know it'll rot, and seldom cook.
+- **Food still rots** (D-134): half as much since D-140, but people gather more than they eat,
+  and dry berries without yet smoking meat or making pemmican.
 - **Most decisions are still hand-written.** Cold and tiredness are answered by learned habits
   and what people learned their choices bring about (D-105, D-108); food, water, storage and
   social choices are still a script.
@@ -135,14 +135,16 @@ so changes are judged on behaviour counts as much as on survival.
   code 9): 1 in 19 runs on 2026-10-09, 2 in 14 on 2026-10-10, then 0 in 8, then 2 in 8 `--valley`
   smokes after M7, then 1 in 12 smokes after the living world. It happens with and without agents. Cause unknown, possibly GPU teardown.
 - The world archive needs regenerating for generator v2 (`--pregenerate-world`).
-- **Minds are 1,920 B per agent** (mental map 372 B). That's fine at viewer scale; the spec's 10M
+- **Minds are 1,968 B per agent** (mental map 372 B). That's fine at viewer scale; the spec's 10M
   agents would need ~8 GB, so compaction comes later.
 - **Greedy waypoints can pace around obstacles.** Agents no longer step straight back to where they
   were and collapse into sleep when exhausted, but longer cycles are possible.
 
 ## Recent changes
 
-- 2026-10-12 (latest): temperament, talents and skills: people are better at some things,
+- 2026-10-12 (latest): recipes discovered by trying and watching; dried berries, dried meat,
+  pemmican (D-139); food rots by fair shares, half as much is lost (D-140).
+- 2026-10-12: temperament, talents and skills: people are better at some things,
   specialists emerge, traits drift with life (D-137); one mind for everyone, legacy modes gone
   (D-138); people walk to a hearth to cook (D-136).
 - 2026-10-12: wildlife browses, ages and is born in spring (D-135).
