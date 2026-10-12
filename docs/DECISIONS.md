@@ -1023,3 +1023,15 @@ noticing it, not given.
 against 41; 646 people noticed seeds grow, 639 bushes were planted, watched 1,029 times. People
 stay nearer home (tiles visited 7,414 against 8,161).
 
+## D-129: Hides keep the cold off (2026-10-12)
+
+**Decision:** New material `Hide` with property `warmth` 1. Carving meat from a carcass, someone
+not yet wearing a hide takes its skin first (every time with a blade, one go in three by hand). A
+carried hide is worn: the weather's chill on that person is 1 less (never below 0), applied at
+every change of weather and when the hide is taken (`Engine::weather_for`). Worn things (blades,
+hides: `MaterialProperties::worn`) are never set down or put away. Save version 10.
+**Why:** The user asked for tools, hide clothing first, from what the world's things can do.
+**Consequences:** Over 10 years in 20 valleys: 484 survivors against 469, deaths from cold 34
+against 35; 51 people wear hides at the end. Before skinning came first, a full load of meat left
+no room and nobody got one.
+

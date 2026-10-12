@@ -546,7 +546,7 @@ impl Planner<'_> {
         let short_of_wood =
             self.may_build_hut() && inventory.amount(Material::Wood) < SHELTER_WOOD_COST;
         inventory.carried().any(|(kind, _)| {
-            !kind.properties().cutting && !food.is_food(kind) && !self.keeps_all(kind, inventory)
+            !kind.properties().worn() && !food.is_food(kind) && !self.keeps_all(kind, inventory)
         }) || food.carried(inventory) > if short_of_wood { 2 } else { 4 }
     }
 

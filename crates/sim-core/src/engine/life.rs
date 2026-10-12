@@ -87,6 +87,32 @@ impl Engine {
         (chill, drowsy)
     }
 
+    /// The weather as `agent` feels it: what it wears keeps some of the cold off.
+    pub(super) fn weather_for(&self, agent: AgentId) -> (i8, i8) {
+        let (chill, drowsy) = self.weather();
+        let warmth = self.population.inventory(agent).map_or(0, |inventory| {
+            inventory
+                .carried()
+                .map(|(material, _)| material.properties().warmth)
+                .max()
+                .unwrap_or(0)
+        });
+        let chill = if chill > 0 {
+            chill.saturating_sub(warmth).max(0)
+        } else {
+            chill
+        };
+        (chill, drowsy)
+    }
+
+    /// Puts `agent`'s needs on the weather as it feels it now.
+    pub(super) fn dress_for_weather(&mut self, agent: AgentId) {
+        let weather = self.weather_for(agent);
+        let _ = self
+            .population
+            .apply_chill(&mut self.scheduler, self.time, agent, weather);
+    }
+
     /// Whether it's night now (never, with nights switched off).
     pub fn is_night(&self) -> bool {
         self.nights && crate::season::is_night(self.time)
@@ -103,7 +129,6 @@ impl Engine {
         if !new_season && !dawn_or_dusk {
             return;
         }
-        let weather = self.weather();
         let living: Vec<AgentId> = self
             .population
             .views(usize::MAX)
@@ -111,9 +136,7 @@ impl Engine {
             .map(|view| view.id)
             .collect();
         for agent in living {
-            let _ = self
-                .population
-                .apply_chill(&mut self.scheduler, self.time, agent, weather);
+            self.dress_for_weather(agent);
         }
         if !new_season {
             return;

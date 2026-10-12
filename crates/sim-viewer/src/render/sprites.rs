@@ -68,19 +68,21 @@ pub(super) struct PersonLook {
     pub(super) activity: AgentActivity,
     /// Alternates while walking, for a stepping gait.
     pub(super) step: bool,
+    /// Wears a hide: drawn as a brown wrap over the shoulders.
+    pub(super) hide: bool,
 }
 
 const PERSON_A: Picture = [
-    "..hhh...", "..sss...", "..sss...", ".bbbbb..", ".bfffb..", "..bbb...", "..l.l...", "..l.l...",
+    "..hhh...", "..sss...", "..sss...", ".wwwww..", ".bfffb..", "..bbb...", "..l.l...", "..l.l...",
 ];
 const PERSON_B: Picture = [
-    "..hhh...", "..sss...", "..sss...", ".bbbbb..", ".bfffb..", "..bbb...", "..ll....", "...l....",
+    "..hhh...", "..sss...", "..sss...", ".wwwww..", ".bfffb..", "..bbb...", "..ll....", "...l....",
 ];
 const WOMAN_A: Picture = [
-    ".hhhh...", ".hsss...", "..sss...", ".bbbbb..", ".bfffb..", ".bbbbb..", "bbbbbbb.", "..l.l...",
+    ".hhhh...", ".hsss...", "..sss...", ".wwwww..", ".bfffb..", ".bbbbb..", "bbbbbbb.", "..l.l...",
 ];
 const WOMAN_B: Picture = [
-    ".hhhh...", ".hsss...", "..sss...", ".bbbbb..", ".bfffb..", ".bbbbb..", "bbbbbbb.", "...ll...",
+    ".hhhh...", ".hsss...", "..sss...", ".wwwww..", ".bfffb..", ".bbbbb..", "bbbbbbb.", "...ll...",
 ];
 const ASLEEP: Picture = [
     "........", "........", "........", "........", "........", "ss.bbbbb", "hsbbffbl", "........",
@@ -112,10 +114,16 @@ pub(super) fn person(out: &mut Vec<Instance>, x: f32, y: f32, look: &PersonLook)
     };
     let body = look.body;
     let family = look.family.unwrap_or(body);
+    let wrap = if look.hide {
+        rgba(130, 92, 56, 255)
+    } else {
+        body
+    };
     draw(out, x, y, size, picture, &|letter| match letter {
         b'h' => Some(hair),
         b's' => Some(SKIN),
         b'b' => Some(body),
+        b'w' => Some(wrap),
         b'f' => Some(family),
         b'l' => Some(LEGS),
         _ => None,

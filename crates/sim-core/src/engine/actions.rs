@@ -400,7 +400,7 @@ impl Engine {
         let mut kept_food = 0_u8;
         let mut offered = crate::InventoryView::default();
         for (material, amount) in inventory.carried() {
-            let keep = if material.properties().cutting {
+            let keep = if material.properties().worn() {
                 amount
             } else if food.is_food(material) {
                 let keep = amount.min(KEPT_FOOD.saturating_sub(kept_food));
@@ -475,7 +475,7 @@ impl Engine {
         };
         let mut dropped = 0_u8;
         for (material, amount) in inventory.carried() {
-            let keep = if material.properties().cutting {
+            let keep = if material.properties().worn() {
                 amount
             } else if food.is_food(material) {
                 let keep = amount.min(food_left);
@@ -906,6 +906,29 @@ impl Engine {
             crate::Handling::Chop | crate::Handling::Carve
         );
         let edge = edge.filter(|_| cuts);
+        // Carving, it takes the skin first if it has none to wear: easily with
+        // an edge, and one time in a few tearing it off by hand.
+        let skins = edge.is_some()
+            || crate::wildlife::mix(
+                self.config.life_seed
+                    ^ 0x4849_4445
+                    ^ self.time.ticks()
+                    ^ u64::from(agent.get()) << 32,
+            ) % HAND_SKINNING_ODDS
+                == 0;
+        if resource.kind == Material::Meat
+            && skins
+            && inventory.amount(Material::Hide) == 0
+            && inventory.can_add(Material::Hide)
+            && self.wildlife.skin(resource_position)
+        {
+            self.population.add_inventory(agent, Material::Hide, 1);
+            self.dress_for_weather(agent);
+        }
+        let inventory = self
+            .population
+            .inventory(agent)
+            .ok_or(PolicyFailureReason::InconsistentState)?;
         let maximum = inventory
             .remaining_capacity(resource.kind)
             .min(GATHER_YIELD * if edge.is_some() { 2 } else { 1 });
@@ -988,3 +1011,6 @@ fn bush_of(material: crate::Material) -> Option<crate::FeatureKind> {
     .into_iter()
     .find(|bush| bush.base_resource().kind == material)
 }
+
+/// Without an edge, a hide comes off by hand with odds 1 in this per go at a carcass.
+const HAND_SKINNING_ODDS: u64 = 3;

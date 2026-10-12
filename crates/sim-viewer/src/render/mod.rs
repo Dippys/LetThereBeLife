@@ -1530,6 +1530,9 @@ fn build_pictures(
             stage: life.map(|life| life.stage),
             activity: agent.activity,
             step: walking && step,
+            hide: engine
+                .inventory(agent.id)
+                .is_some_and(|inventory| inventory.amount(sim_core::Material::Hide) > 0),
         };
         sprites::person(beings, x, y, &look);
         // A carried baby: a small bundle at the hip.

@@ -136,10 +136,7 @@ impl Engine {
             self.policy_active,
         )?;
         // Born into (or arriving in) the current weather.
-        let weather = self.weather();
-        let _ = self
-            .population
-            .apply_chill(&mut self.scheduler, self.time, agent, weather);
+        self.dress_for_weather(agent);
         Ok(agent)
     }
 

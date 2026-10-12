@@ -182,6 +182,8 @@ pub(crate) struct Carcass {
     pub(crate) x: i16,
     pub(crate) y: i16,
     pub(crate) meat: u8,
+    /// Its skin is still on it.
+    pub(crate) hide: bool,
 }
 
 impl Carcass {
@@ -460,7 +462,19 @@ impl Wildlife {
             x,
             y,
             meat,
+            hide: true,
         });
+    }
+
+    /// Cuts the hide off the carcass at `position`, if it still has one.
+    pub(crate) fn skin(&mut self, position: WorldPosition) -> bool {
+        self.carcasses
+            .iter_mut()
+            .find(|carcass| carcass.position() == position && carcass.hide)
+            .is_some_and(|carcass| {
+                carcass.hide = false;
+                true
+            })
     }
 
     /// Drops spoiled or emptied carcasses.

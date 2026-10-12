@@ -28,6 +28,8 @@ pub enum Material {
     Meat,
     /// A sharp flake knapped from stone.
     Blade,
+    /// A deer's or wolf's skin, cut off with a blade: worn, it keeps the cold off.
+    Hide,
 }
 
 /// How a material is taken from where it's found: the motion anyone watching
@@ -69,10 +71,20 @@ pub struct MaterialProperties {
     pub builds: bool,
     /// Seconds for its source to grow back one unit (0 = never).
     pub regrow_seconds: u32,
+    /// Cold kept off the wearer while carried (less chill on exposure).
+    pub warmth: i8,
+}
+
+impl MaterialProperties {
+    /// Kept on the body rather than set down or put away: a cutting edge, or
+    /// something worn for warmth.
+    pub const fn worn(self) -> bool {
+        self.cutting || self.warmth > 0
+    }
 }
 
 impl Material {
-    pub const COUNT: usize = 6;
+    pub const COUNT: usize = 7;
     pub const ALL: [Self; Self::COUNT] = [
         Self::Berries,
         Self::Bitterberries,
@@ -80,6 +92,7 @@ impl Material {
         Self::Stone,
         Self::Meat,
         Self::Blade,
+        Self::Hide,
     ];
 
     pub const fn properties(self) -> MaterialProperties {
@@ -95,6 +108,7 @@ impl Material {
                 toxicity: 0,
                 builds: false,
                 regrow_seconds: 1_200,
+                warmth: 0,
             },
             Self::Bitterberries => MaterialProperties {
                 cutting: false,
@@ -107,6 +121,7 @@ impl Material {
                 toxicity: 2_500,
                 builds: false,
                 regrow_seconds: 1_200,
+                warmth: 0,
             },
             Self::Wood => MaterialProperties {
                 cutting: false,
@@ -119,6 +134,7 @@ impl Material {
                 toxicity: 0,
                 builds: true,
                 regrow_seconds: 2 * 3_600,
+                warmth: 0,
             },
             Self::Stone => MaterialProperties {
                 cutting: false,
@@ -131,6 +147,7 @@ impl Material {
                 toxicity: 0,
                 builds: false,
                 regrow_seconds: 0,
+                warmth: 0,
             },
             Self::Meat => MaterialProperties {
                 cutting: false,
@@ -143,6 +160,7 @@ impl Material {
                 toxicity: 0,
                 builds: false,
                 regrow_seconds: 0,
+                warmth: 0,
             },
             Self::Blade => MaterialProperties {
                 cutting: true,
@@ -155,6 +173,20 @@ impl Material {
                 toxicity: 0,
                 builds: false,
                 regrow_seconds: 0,
+                warmth: 0,
+            },
+            Self::Hide => MaterialProperties {
+                cutting: false,
+                made_from: None,
+                fuel_seconds: 0,
+                seasonal: false,
+                handling: Handling::Carve,
+                fixed_source: false,
+                nutrition: 0,
+                toxicity: 0,
+                builds: false,
+                regrow_seconds: 0,
+                warmth: 1,
             },
         }
     }

@@ -286,6 +286,8 @@ pub struct WildlifeStats {
     pub know_fire: [u64; 2],
     /// Founders and children who know how to knap a blade, at the end.
     pub know_knapping: [u64; 2],
+    /// Living people wearing a hide at the end.
+    pub wearing_hides: u64,
     /// For each need (hungry, thirsty, tired, cold): each choice's summed
     /// value times tries, and the tries, over every living mind's habits.
     pub habits: [[(i64, u64); sim_core::Choice::COUNT]; 4],
@@ -717,6 +719,15 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     }
     report.families = families;
     report.comms = comms;
+    wildlife.wearing_hides = engine
+        .agent_views(usize::MAX)
+        .filter(|view| view.activity != AgentActivity::Dead)
+        .filter(|view| {
+            engine
+                .inventory(view.id)
+                .is_some_and(|inventory| inventory.amount(sim_core::Material::Hide) > 0)
+        })
+        .count() as u64;
     let everyone = engine.snapshot().agent_count as usize;
     report.vocabulary_agreement = [early_vocabulary, vocabulary_agreement(&engine, population)];
     report.children_vocabulary = children_vocabulary(&engine, everyone);
@@ -1942,8 +1953,8 @@ impl fmt::Display for StudyReport {
         let [founders_knap, children_knap] = self.wildlife.know_knapping;
         write!(
             formatter,
-            "\n  tools: blades made {} (watched {} times); know how to knap: founders {founders_knap}, children {children_knap}",
-            self.wildlife.blades, self.wildlife.watched_crafts
+            "\n  tools: blades made {} (watched {} times); know how to knap: founders {founders_knap}, children {children_knap}; wearing hides {}",
+            self.wildlife.blades, self.wildlife.watched_crafts, self.wildlife.wearing_hides
         )?;
         write!(
             formatter,
