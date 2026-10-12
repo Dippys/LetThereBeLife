@@ -22,6 +22,7 @@ use crate::{
 
 /// Anger at someone who refused it food (before temper); a gift eases as much.
 const REFUSED_ANGER: u8 = 32;
+const REFUSED_SHAME: u8 = 40;
 /// Food handed over per request: one meal.
 const GIFT: u8 = FOOD_CONSUMPTION;
 /// Willingness (see `decide_gift`) needed to share with someone who isn't one's child.
@@ -204,9 +205,13 @@ impl Engine {
                 asker_mind.social.owe(slot);
                 asker_mind.social.soothe(slot, REFUSED_ANGER);
             } else {
-                // Refused while they had food: angry with them.
+                // Refused while they had food: angry with them, and a
+                // little ashamed to have asked.
                 let anger = (u32::from(REFUSED_ANGER) * (64 + temper) / 192) as u8;
                 asker_mind.social.provoke(slot, anger);
+                asker_mind
+                    .feelings
+                    .feel(crate::Feeling::Shame, REFUSED_SHAME);
             }
         }
         // A gift squares one favour the giver owed the asker.

@@ -183,6 +183,13 @@ pub struct Engine {
     stone_huts: u64,
     /// Faces read as a feeling they didn't show (for tools).
     faces_misread: u64,
+    /// Food taken from others' huts (and how often someone saw), stand-offs,
+    /// how many ended in someone backing down, and scuffles (for tools).
+    thefts: u64,
+    thefts_seen: u64,
+    confrontations: u64,
+    backed_down: u64,
+    scuffles: u64,
     /// Things put away in huts and food taken out (for tools).
     stored: u64,
     fetched: u64,
@@ -256,6 +263,11 @@ impl Engine {
             discoveries: 0,
             stone_huts: 0,
             faces_misread: 0,
+            thefts: 0,
+            thefts_seen: 0,
+            confrontations: 0,
+            backed_down: 0,
+            scuffles: 0,
             stored: 0,
             fetched: 0,
             wildlife: crate::wildlife::Wildlife::default(),
@@ -328,6 +340,11 @@ impl Engine {
                 self.discoveries = 0;
                 self.stone_huts = 0;
                 self.faces_misread = 0;
+                self.thefts = 0;
+                self.thefts_seen = 0;
+                self.confrontations = 0;
+                self.backed_down = 0;
+                self.scuffles = 0;
                 self.stored = 0;
                 self.fetched = 0;
                 self.wildlife = crate::wildlife::Wildlife::default();

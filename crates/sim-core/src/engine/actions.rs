@@ -11,6 +11,22 @@ use crate::{
     WorldPosition, WorldQueryError,
 };
 
+/// Pride at something made with others watching, plus this much per watcher.
+const PROUD_BASE: u8 = 40;
+const PROUD_PER_WATCHER: u8 = 20;
+/// Anger at a taker seen at one's own family's hut, or at anyone's.
+const ROBBED_ANGER: u8 = 96;
+const WITNESS_ANGER: u8 = 24;
+/// Shame at being seen taking.
+const CAUGHT_SHAME: u8 = 90;
+/// Food handed over by someone who backs down; shame and fear it feels; how
+/// much of the anger that settles.
+const CONFRONT_FOOD: u8 = 2;
+const CONFRONT_SHAME: u8 = 90;
+const CONFRONT_FEAR: u8 = 80;
+const CONFRONT_SETTLED: u8 = 96;
+/// Health a scuffle costs each side.
+const SCUFFLE_WOUND: u16 = 800;
 /// Most batches smoked at one sitting.
 const SMOKING_BATCH: u8 = 6;
 
@@ -143,6 +159,7 @@ impl Engine {
             | PhysicalGoal::DigPit => self.apply_build_completion(event.agent),
             PhysicalGoal::Repair => self.apply_repair(event.agent, target),
             PhysicalGoal::WallInStone => self.apply_wall_in_stone(event.agent, target),
+            PhysicalGoal::Confront => self.apply_confront(event.agent, target),
             PhysicalGoal::WarmUp => self.apply_warm_up(event.agent),
             PhysicalGoal::TendFire => self.apply_tend_fire(event.agent),
             PhysicalGoal::Craft => self.apply_craft(event.agent),
@@ -546,6 +563,127 @@ impl Engine {
             return Err(PolicyFailureReason::TargetUnavailable);
         }
         self.fetched += u64::from(taken);
+        // Food taken from a hut it knows is another family's: whoever sees it
+        // is angry with the taker (the hut's own people most), and a taker
+        // who's seen is ashamed.
+        let theirs = self.minds.get(agent).is_some_and(|mind| {
+            mind.social.others_huts().any(|other| other == hut)
+                && mind.home.hut() != Some(hut)
+                && mind.social.family_hut() != Some(hut)
+        });
+        if theirs {
+            self.thefts += 1;
+            let watchers = self.watchers_of(agent);
+            if !watchers.is_empty() {
+                self.thefts_seen += 1;
+                self.minds
+                    .get_mut(agent)
+                    .feelings
+                    .feel(crate::Feeling::Shame, CAUGHT_SHAME);
+            }
+            for watcher in watchers {
+                let temper = u32::from(self.personality_in_use(watcher).temper);
+                let mind = self.minds.get_mut(watcher);
+                let own = mind.home.hut() == Some(hut) || mind.social.family_hut() == Some(hut);
+                let anger = if own { ROBBED_ANGER } else { WITNESS_ANGER };
+                let anger = (u32::from(anger) * (64 + temper) / 192).min(255) as u8;
+                if let Some(slot) = mind.social.slot_of(agent) {
+                    mind.social.provoke(slot, anger);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Faces down whoever stands at `target` that it's furious with. The
+    /// bolder and angrier of the two carries it: the other backs down
+    /// (hands over food, ashamed and frightened), or stands its ground and it
+    /// comes to a scuffle that hurts both a little but kills nobody.
+    pub(super) fn apply_confront(
+        &mut self,
+        agent: AgentId,
+        target: WorldPosition,
+    ) -> Result<(), PolicyFailureReason> {
+        let other = self
+            .perceive_physical(agent, crate::PHYSICAL_POLICY_RADIUS)
+            .map_err(|_| PolicyFailureReason::TargetUnavailable)?
+            .agents
+            .iter()
+            .find(|seen| {
+                seen.id != agent
+                    && seen
+                        .position
+                        .x
+                        .abs_diff(target.x)
+                        .max(seen.position.y.abs_diff(target.y))
+                        <= 1
+                    && super::cognition::can_watch(seen.activity)
+            })
+            .map(|seen| seen.id)
+            .ok_or(PolicyFailureReason::TargetUnavailable)?;
+        self.confrontations += 1;
+        let anger_of = |engine: &Self, from: AgentId, at: AgentId| {
+            engine.minds.get(from).map_or(0, |mind| {
+                mind.social
+                    .slot_of(at)
+                    .map_or(0, |slot| mind.social.anger(slot))
+            })
+        };
+        let roll = crate::wildlife::mix(
+            self.config.life_seed ^ 0x4655_5259 ^ self.time.ticks() ^ u64::from(agent.get()) << 32,
+        );
+        let force = |engine: &Self, who: AgentId, at: AgentId| {
+            u32::from(engine.personality_in_use(who).boldness)
+                + u32::from(anger_of(engine, who, at)) / 2
+        };
+        let mine = force(self, agent, other) + (roll % 64) as u32;
+        let theirs = force(self, other, agent) + ((roll >> 8) % 64) as u32;
+        if mine > theirs {
+            // It backs down.
+            self.backed_down += 1;
+            let food = self.food_values(other);
+            let given = self
+                .population
+                .inventory(other)
+                .map_or(Vec::new(), |inventory| {
+                    inventory
+                        .carried()
+                        .filter(|(material, _)| food.is_food(*material))
+                        .map(|(material, count)| (material, count.min(CONFRONT_FOOD)))
+                        .take(1)
+                        .collect()
+                });
+            for (material, count) in given {
+                let taken = self.population.take(other, material, count);
+                let kept = self.population.add_inventory(agent, material, taken);
+                if kept < taken {
+                    self.population.add_inventory(other, material, taken - kept);
+                }
+            }
+            let mind = self.minds.get_mut(other);
+            mind.feelings.feel(crate::Feeling::Shame, CONFRONT_SHAME);
+            mind.feelings.feel(crate::Feeling::Fear, CONFRONT_FEAR);
+            let mind = self.minds.get_mut(agent);
+            if let Some(slot) = mind.social.slot_of(other) {
+                mind.social.soothe(slot, CONFRONT_SETTLED);
+            }
+        } else {
+            // A scuffle: both hurt a little and shaken, and it clears the air
+            // (both half as angry after); nobody is hurt past walking away.
+            self.scuffles += 1;
+            for (who, at) in [(agent, other), (other, agent)] {
+                let health = self.health(who).map_or(0, |health| health.value);
+                if health > crate::HEALTH_INCAPACITATION_THRESHOLD + 2 * SCUFFLE_WOUND {
+                    self.wound(who, SCUFFLE_WOUND);
+                }
+                let mind = self.minds.get_mut(who);
+                mind.feelings.feel(crate::Feeling::Fear, CONFRONT_FEAR / 2);
+                if let Some(slot) = mind.social.slot_of(at) {
+                    let anger = mind.social.anger(slot);
+                    mind.social.soothe(slot, anger / 2);
+                }
+            }
+        }
         Ok(())
     }
 
@@ -669,12 +807,25 @@ impl Engine {
             }
         }
         self.name_made(agent, crate::Concept::Material(made), &watchers);
+        self.proud_of_work(agent, watchers.len());
         self.craft_events.push(crate::CraftEvent {
             agent,
             made,
             watchers: watchers.len() as u16,
         });
         Ok(())
+    }
+
+    /// Something made or built while others watched: pride, more the more
+    /// who saw.
+    pub(super) fn proud_of_work(&mut self, agent: AgentId, watchers: usize) {
+        if watchers > 0 {
+            let pride = PROUD_BASE + PROUD_PER_WATCHER * watchers.min(5) as u8;
+            self.minds
+                .get_mut(agent)
+                .feelings
+                .feel(crate::Feeling::Pride, pride);
+        }
     }
 
     /// Tries a combination: if physics has a recipe for it (and it carries

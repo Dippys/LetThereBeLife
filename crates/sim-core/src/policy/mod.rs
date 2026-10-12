@@ -177,6 +177,8 @@ pub enum PhysicalGoal {
     Repair = 25,
     /// Wall the hut beside the agent in stone.
     WallInStone = 26,
+    /// Face down someone it's furious with.
+    Confront = 27,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -244,6 +246,10 @@ pub enum PolicyReason {
     Repairing,
     /// Putting up something it knows how to make.
     Building,
+    /// Helping itself to food in another family's hut.
+    Taking,
+    /// Having it out with someone who wronged it.
+    Confronting,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::Engine;
 
 /// Bumped whenever the saved layout changes; older saves are refused.
-const SAVE_VERSION: u32 = 21;
+const SAVE_VERSION: u32 = 22;
 
 /// What a save holds, borrowed from a running engine.
 #[derive(Serialize)]
@@ -30,6 +30,7 @@ struct SavedRef<'a> {
     nights: bool,
     plants: (u64, u64),
     experiments: (u64, u64, u64, u64),
+    conflict: [u64; 5],
     stored: &'a u64,
     fetched: &'a u64,
     wildlife: &'a crate::wildlife::Wildlife,
@@ -62,6 +63,7 @@ struct Saved {
     nights: bool,
     plants: (u64, u64),
     experiments: (u64, u64, u64, u64),
+    conflict: [u64; 5],
     stored: u64,
     fetched: u64,
     wildlife: crate::wildlife::Wildlife,
@@ -125,6 +127,13 @@ impl Engine {
             gave_up: &self.gave_up,
             nights: self.nights,
             plants: (self.plants_sprouted, self.plants_died),
+            conflict: [
+                self.thefts,
+                self.thefts_seen,
+                self.confrontations,
+                self.backed_down,
+                self.scuffles,
+            ],
             experiments: (
                 self.experiments,
                 self.discoveries,
@@ -188,6 +197,13 @@ impl Engine {
         engine.gave_up = saved.gave_up;
         engine.nights = saved.nights;
         (engine.plants_sprouted, engine.plants_died) = saved.plants;
+        [
+            engine.thefts,
+            engine.thefts_seen,
+            engine.confrontations,
+            engine.backed_down,
+            engine.scuffles,
+        ] = saved.conflict;
         (
             engine.experiments,
             engine.discoveries,

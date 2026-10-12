@@ -198,6 +198,7 @@ pub const fn goal(goal: PhysicalGoal) -> &'static str {
         PhysicalGoal::DigPit => "Digging a storage pit",
         PhysicalGoal::Repair => "Mending the hut",
         PhysicalGoal::WallInStone => "Walling the hut in stone",
+        PhysicalGoal::Confront => "Having it out with someone",
     }
 }
 
@@ -240,6 +241,8 @@ pub const fn reason(reason: PolicyReason) -> Option<&'static str> {
         PolicyReason::Experimenting => "Trying something new",
         PolicyReason::Repairing => "Before it falls down",
         PolicyReason::Building => "Building by home",
+        PolicyReason::Taking => "Helping themselves to food that isn't theirs",
+        PolicyReason::Confronting => "Furious with them",
     })
 }
 
@@ -370,6 +373,8 @@ pub const fn feeling(feeling: Feeling) -> &'static str {
         Feeling::Relief => "relieved",
         Feeling::Pride => "proud",
         Feeling::Shame => "ashamed",
+        Feeling::Envy => "envious",
+        Feeling::Jealousy => "jealous",
     }
 }
 

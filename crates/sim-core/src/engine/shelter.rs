@@ -165,6 +165,8 @@ impl Engine {
             .complete_for_builder(agent, now + built_in_fuel)
             .ok_or(PolicyFailureReason::InconsistentState)?;
         // A rack or a pit: whoever built or watched it knows the design.
+        let seen_by = self.watchers_of(agent).len();
+        self.proud_of_work(agent, seen_by);
         if let Some(design) = crate::cognition::Design::of(structure.kind) {
             let watchers = self.watchers_of(agent);
             for who in std::iter::once(agent).chain(watchers) {

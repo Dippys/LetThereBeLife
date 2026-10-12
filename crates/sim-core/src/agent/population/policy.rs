@@ -278,6 +278,7 @@ impl Population {
             | PhysicalGoal::Explore
             | PhysicalGoal::Signal
             | PhysicalGoal::Hunt
+            | PhysicalGoal::Confront
             | PhysicalGoal::WarmUp
             | PhysicalGoal::TendFire
             | PhysicalGoal::Wait => AgentActivity::Idle,

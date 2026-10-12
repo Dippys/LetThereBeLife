@@ -123,6 +123,7 @@ impl Engine {
                 | PhysicalGoal::Cook
                 | PhysicalGoal::Repair
                 | PhysicalGoal::WallInStone
+                | PhysicalGoal::Confront
                 | PhysicalGoal::Store
                 | PhysicalGoal::Fetch
                 | PhysicalGoal::Drop

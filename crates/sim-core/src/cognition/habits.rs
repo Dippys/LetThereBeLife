@@ -143,6 +143,7 @@ impl Choice {
             PhysicalGoal::Cook => Self::Store,
             PhysicalGoal::Hunt => Self::Hunt,
             PhysicalGoal::Drop => Self::Unload,
+            PhysicalGoal::Confront => Self::Company,
             PhysicalGoal::Signal => Self::Company,
             PhysicalGoal::Explore => match reason {
                 // Walking over to a fire is part of feeding it or warming at it.

@@ -97,6 +97,15 @@ impl Temperament {
         if feelings.strong(Feeling::Hope) {
             self.work_chance += HOPEFUL_WORK;
         }
+        // The proud work on, near others who see it; the ashamed keep away.
+        if feelings.strong(Feeling::Pride) {
+            self.work_chance += HOPEFUL_WORK;
+            self.stays_with_company = true;
+        }
+        if feelings.strong(Feeling::Shame) {
+            self.visit_chance = 0;
+            self.nosy_chance = 0;
+        }
         if feelings.strong(Feeling::Loneliness) {
             self.visit_chance += LONELY_VISITING;
         }
@@ -111,6 +120,8 @@ impl Temperament {
 const CALM: u8 = 16;
 /// Extra chance (out of 256) that a bored agent's idle check becomes an excursion.
 const BORED_ROAMING: u16 = 60;
+/// Warmth (0-255) from which someone won't take from others' huts.
+const WARM_HEARTED: u8 = 160;
 /// Extra chance (out of 256) that a hopeful agent works when idle.
 const HOPEFUL_WORK: u16 = 40;
 /// Extra chance (out of 256) that a lonely agent goes to find a friend.
@@ -232,6 +243,8 @@ pub(crate) struct MindInput<'a> {
     pub(crate) knows_hearths: bool,
     /// What it knows of making things, and what it has tried.
     pub(crate) crafts: crate::cognition::Crafts,
+    /// Where someone it's furious with stands, close by.
+    pub(crate) confront: Option<WorldPosition>,
     /// How it feels.
     pub(crate) feelings: crate::Feelings,
     /// Where it stood at its previous decision (it won't step straight back).
@@ -427,6 +440,7 @@ fn instinct(
                 )
             })
             .or_else(|| planner.fetch_food())
+            .or_else(|| planner.take_food())
             .or_else(|| planner.hunt(inventory))
             .or_else(|| planner.travel_to_food(PhysicalGoal::SeekFood))
             .or_else(|| {
@@ -1055,6 +1069,37 @@ impl Planner<'_> {
         self.at_hut(hut, PhysicalGoal::Store, PolicyReason::Storing)
     }
 
+    /// Hungry, with nothing of its own, envying food in another family's hut
+    /// in view: someone not warm-hearted helps itself.
+    fn take_food(&self) -> Option<Deliberation> {
+        if !self.mind.feelings.strong(crate::Feeling::Envy)
+            || self.mind.personality.warmth >= WARM_HEARTED
+        {
+            return None;
+        }
+        let food = self.mind.food;
+        let hut = self
+            .perception
+            .structures
+            .iter()
+            .filter(|structure| {
+                structure.kind == crate::StructureKind::Shelter
+                    && self.theirs(structure.position)
+                    && structure
+                        .stored
+                        .carried()
+                        .any(|(material, _)| food.is_food(material))
+            })
+            .min_by_key(|structure| {
+                (
+                    manhattan(self.origin, structure.position),
+                    structure.id.get(),
+                )
+            })?
+            .position;
+        self.at_hut(hut, PhysicalGoal::Fetch, PolicyReason::Taking)
+    }
+
     /// Hungry: food put away in a hut in view, or in the hut it last left food in.
     fn fetch_food(&self) -> Option<Deliberation> {
         let food = self.mind.food;
@@ -1623,6 +1668,10 @@ impl Planner<'_> {
     ) -> Deliberation {
         let origin = self.origin;
         let temperament = self.temperament;
+        // Furious with someone close by: have it out with them.
+        if let Some(target) = self.mind.confront {
+            return Deliberation::act(PhysicalGoal::Confront, target, PolicyReason::Confronting);
+        }
         if self.needs.thirst.value >= temperament.top_up_thirst {
             if let Some(target) = water_here {
                 return Deliberation::act(

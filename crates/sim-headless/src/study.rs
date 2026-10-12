@@ -269,6 +269,8 @@ pub struct WildlifeStats {
     pub faces_misread: u64,
     /// Living people angry with someone at the end.
     pub angry: u64,
+    /// Takings from others' huts, seen takings, stand-offs, backing down, scuffles.
+    pub conflict: [u64; 5],
     /// Racks built, pits dug, huts walled in stone, repairs done.
     pub building: [u64; 4],
     /// Things tried and how many made something; units made of each material.
@@ -896,6 +898,7 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
         }
     }
     wildlife.faces_misread = engine.faces_misread();
+    wildlife.conflict = engine.conflict_counts();
     wildlife.angry = living
         .iter()
         .filter(|(_, mind)| {
@@ -2010,6 +2013,11 @@ impl fmt::Display for StudyReport {
                 shown.join(", ")
             },
             self.wildlife.faces_misread
+        )?;
+        let [thefts, seen, standoffs, backed, scuffles] = self.wildlife.conflict;
+        write!(
+            formatter,
+            "\n  conflict: food taken from others' huts {thefts} ({seen} seen); stand-offs {standoffs} ({backed} backed down, {scuffles} scuffles)"
         )?;
         let [racks, pits, stone, repairs] = self.wildlife.building;
         write!(

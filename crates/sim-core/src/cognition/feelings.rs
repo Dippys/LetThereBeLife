@@ -24,10 +24,12 @@ pub enum Feeling {
     Relief,
     Pride,
     Shame,
+    Envy,
+    Jealousy,
 }
 
 impl Feeling {
-    pub const COUNT: usize = 14;
+    pub const COUNT: usize = 16;
     pub const ALL: [Self; Self::COUNT] = [
         Self::Fear,
         Self::Contentment,
@@ -43,6 +45,8 @@ impl Feeling {
         Self::Relief,
         Self::Pride,
         Self::Shame,
+        Self::Envy,
+        Self::Jealousy,
     ];
 
     /// Seconds for the feeling to halve on an average temperament.
@@ -51,7 +55,8 @@ impl Feeling {
             Self::Surprise => 120,
             Self::Fear | Self::Disgust | Self::Relief => 300,
             Self::Misery | Self::Frustration => 900,
-            Self::Hope | Self::Shame => 1_200,
+            Self::Hope | Self::Shame | Self::Envy => 1_200,
+            Self::Jealousy => 2_400,
             Self::Contentment | Self::Boredom | Self::Pride => 1_800,
             Self::Loneliness | Self::Worry => 3_600,
             Self::Grief => 7_200,
@@ -77,6 +82,7 @@ impl Feeling {
             Self::Hope => Self::Contentment,
             Self::Surprise => Self::Fear,
             Self::Relief => Self::Contentment,
+            Self::Envy | Self::Jealousy => Self::Frustration,
         }
     }
 }
@@ -86,7 +92,7 @@ pub const SHOWS: u8 = 96;
 /// A feeling this strong takes over what a person does.
 pub const STRONG: u8 = 128;
 
-/// 20 bytes: a level per feeling (0-255) and when they were last faded.
+/// 20 bytes (16 levels and a time): a level per feeling (0-255) and when they were last faded.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Feelings {
     levels: [u8; Feeling::COUNT],

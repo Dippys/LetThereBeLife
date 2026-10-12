@@ -61,11 +61,20 @@ const BODY_TICKS: u64 = 3 * 60 * 60 * 60;
 const CRAFT_TICKS: u64 = 300;
 /// Anger at someone whose tip proved wrong (before temper), and how much a
 /// right one soothes.
-const MISLED_ANGER: u8 = 24;
+const MISLED_ANGER: u8 = 16;
 const SOOTHED: u8 = 8;
 /// Surprise at a belief proved wrong; relief when a pressing need eases;
 /// frustration when a trip has to be given up.
 const SURPRISE_WRONG: u8 = 140;
+/// Anger at a rival seen beside one's partner (before temper).
+const RIVAL_ANGER: u8 = 8;
+/// About one sighting in this many of a rival turns jealousy into anger.
+const JEALOUS_ODDS: u64 = 16;
+/// Anger from which someone close by gets confronted, and how close.
+const FURIOUS: u8 = 128;
+const CONFRONT_REACH: u64 = 3;
+/// Shame at being set right in front of others.
+const CORRECTED_SHAME: u8 = 100;
 const RELIEF_EASED: u8 = 140;
 const FRUSTRATED_STALL: u8 = 60;
 /// Faces farther than this (cells) are read less surely.
@@ -304,6 +313,41 @@ impl Engine {
             .map(|record| record.agent)
             .collect();
         let bodies_seen = !bodies.is_empty();
+        // Its partner close beside another adult of the partner's opposite sex
+        // who isn't family: a rival.
+        let rival = self
+            .minds
+            .get(agent)
+            .and_then(|mind| mind.social.partner())
+            .and_then(|(_, partner)| {
+                let at = perception
+                    .agents
+                    .iter()
+                    .find(|seen| seen.id == partner)?
+                    .position;
+                let partner_sex = self.life_of(partner).sex;
+                perception
+                    .agents
+                    .iter()
+                    .find(|seen| {
+                        seen.id != agent
+                            && seen.id != partner
+                            && seen.activity != AgentActivity::Dead
+                            && seen
+                                .position
+                                .x
+                                .abs_diff(at.x)
+                                .max(seen.position.y.abs_diff(at.y))
+                                <= 1
+                            && self.life_of(seen.id).sex != partner_sex
+                            && self.age_of(seen.id) >= crate::ADULT_AGE
+                            && self
+                                .minds
+                                .get(partner)
+                                .is_none_or(|mind| mind.social.tie_with(seen.id).is_none())
+                    })
+                    .map(|seen| seen.id)
+            });
         // Those around who look in need (moving slowly, hungry or thirsty
         // looking): worth showing a place they may not know.
         let needy: Vec<AgentId> = perception
@@ -597,6 +641,31 @@ impl Engine {
             if bodies_seen {
                 feelings.feel(Feeling::Disgust, 30);
             }
+            // Jealous of a rival close to its partner, and angry with them.
+            if let Some(rival) = rival {
+                feelings.feel(Feeling::Jealousy, 30);
+                // Now and then it boils over into anger at the rival.
+                let roll = mix(u64::from(agent.get()) << 32 ^ u64::from(rival.get()) ^ u64::from(now));
+                if roll % JEALOUS_ODDS == 0
+                    && let Some(slot) = people.slot_of(rival)
+                {
+                    people.provoke(slot, tempered(RIVAL_ANGER));
+                }
+            }
+            // Hungry with nothing to eat, looking at food in another family's
+            // hut: envy.
+            if needs.hunger.threshold_reached
+                && perception.structures.iter().any(|structure| {
+                    structure.kind == crate::StructureKind::Shelter
+                        && others_huts.contains(&structure.position)
+                        && structure
+                            .stored
+                            .carried()
+                            .any(|(material, _)| food.is_food(material))
+                })
+            {
+                feelings.feel(Feeling::Envy, 12);
+            }
             // Someone it's angry with in view: it tenses up.
             if perception.agents.iter().any(|other| {
                 people
@@ -760,6 +829,24 @@ impl Engine {
                 knows_hearths: crafts.knows_hearths(),
                 crafts: *crafts,
                 feelings: *feelings,
+                confront: perception
+                    .agents
+                    .iter()
+                    .filter(|seen| {
+                        seen.id != agent
+                            && can_watch(seen.activity)
+                            && seen
+                                .position
+                                .x
+                                .abs_diff(origin.x)
+                                .max(seen.position.y.abs_diff(origin.y))
+                                <= CONFRONT_REACH
+                            && people
+                                .slot_of(seen.id)
+                                .is_some_and(|slot| people.anger(slot) >= FURIOUS)
+                    })
+                    .min_by_key(|seen| (seen.position.y, seen.position.x))
+                    .map(|seen| seen.position),
                 knows_knapping: crafts.knows_knapping(),
                 came_from: map.came_from(origin),
                 grieving: now < grief_until,
@@ -1300,6 +1387,10 @@ impl Engine {
                     // it meant: others evidently hear it otherwise.
                     mind.lexicon.contradict(form, right, REPAIR_WEIGHT);
                     mind.lexicon.record_use(form, right, false);
+                    // Set right in front of others: ashamed.
+                    if perception.agents.len() > 2 {
+                        mind.feelings.feel(crate::Feeling::Shame, CORRECTED_SHAME);
+                    }
                     (None, Some(right))
                 } else {
                     mind.lexicon.contradict(form, wrong, REPAIR_WEIGHT);

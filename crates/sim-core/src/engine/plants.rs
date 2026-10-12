@@ -145,6 +145,18 @@ impl Engine {
         }
     }
 
+    /// Food taken from others' huts, takings seen, stand-offs, stand-offs
+    /// where someone backed down, and scuffles, since the start.
+    pub fn conflict_counts(&self) -> [u64; 5] {
+        [
+            self.thefts,
+            self.thefts_seen,
+            self.confrontations,
+            self.backed_down,
+            self.scuffles,
+        ]
+    }
+
     /// Faces read as a feeling they didn't show, since the start.
     pub fn faces_misread(&self) -> u64 {
         self.faces_misread
