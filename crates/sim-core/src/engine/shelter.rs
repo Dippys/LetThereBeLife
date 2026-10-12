@@ -113,6 +113,8 @@ impl Engine {
                     goal: match kind {
                         StructureKind::Shelter => PhysicalGoal::BuildShelter,
                         StructureKind::Hearth => PhysicalGoal::BuildHearth,
+                        StructureKind::Rack => PhysicalGoal::BuildRack,
+                        StructureKind::Pit => PhysicalGoal::DigPit,
                     },
                     target: site,
                     reason,
@@ -162,6 +164,14 @@ impl Engine {
             .structures
             .complete_for_builder(agent, now + built_in_fuel)
             .ok_or(PolicyFailureReason::InconsistentState)?;
+        // A rack or a pit: whoever built or watched it knows the design.
+        if let Some(design) = crate::cognition::Design::of(structure.kind) {
+            let watchers = self.watchers_of(agent);
+            for who in std::iter::once(agent).chain(watchers) {
+                self.minds.get_mut(who).crafts.learn_design(design);
+            }
+        }
+        self.practise(agent, crate::Activity::Building);
         if structure.kind == StructureKind::Shelter {
             // Anyone who saw it go up now knows how it's done.
             let watchers: Vec<AgentId> = self

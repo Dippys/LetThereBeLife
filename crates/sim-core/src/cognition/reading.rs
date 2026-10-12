@@ -125,8 +125,10 @@ const fn likeness(seen: Mime, associated: Mime) -> i32 {
 
 /// How strongly a mime suggests each concept, strongest first (the top three).
 fn mime_evidence(mime: Mime, listener: &ListenerContext) -> [(Concept, i32); READING_CANDIDATES] {
+    // Only what a gesture can be about competes for the reading.
     let mut evidence: Vec<(Concept, i32)> = Concept::ALL
         .into_iter()
+        .filter(|concept| concept_topic(*concept).is_some())
         .map(|concept| {
             let weight = associations(concept, listener)
                 .into_iter()
@@ -163,8 +165,8 @@ pub(crate) const fn concept_kind(concept: Concept) -> Option<LandmarkKind> {
     match concept {
         Concept::Water => Some(LandmarkKind::Water),
         Concept::Material(material) => LandmarkKind::of_material(material),
-        Concept::Structure(kind) => Some(LandmarkKind::Structure(kind)),
-        Concept::Been | Concept::Species(_) => None,
+        Concept::Structure(kind) if kind.landmark() => Some(LandmarkKind::Structure(kind)),
+        Concept::Structure(_) | Concept::Been | Concept::Species(_) => None,
     }
 }
 

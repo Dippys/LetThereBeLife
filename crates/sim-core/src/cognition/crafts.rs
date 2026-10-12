@@ -10,6 +10,29 @@ const FELT_EVIDENCE: u8 = 8;
 const WATCHED_EVIDENCE_CAP: u8 = 5;
 const CULTURE_EVIDENCE: u8 = 4;
 
+/// Ways of building beyond huts and hearths, learned by trying and watching.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum Design {
+    /// Walling a hut in stone.
+    StoneWalls = 1,
+    /// A drying rack.
+    Rack = 2,
+    /// A storage pit.
+    Pit = 4,
+}
+
+impl Design {
+    /// The design a structure of `kind` shows (if it's one of these).
+    pub(crate) const fn of(kind: crate::StructureKind) -> Option<Self> {
+        match kind {
+            crate::StructureKind::Rack => Some(Self::Rack),
+            crate::StructureKind::Pit => Some(Self::Pit),
+            crate::StructureKind::Shelter | crate::StructureKind::Hearth => None,
+        }
+    }
+}
+
 /// Combinations a person remembers trying that made nothing.
 pub const TRIED_SLOTS: usize = 16;
 
@@ -53,7 +76,7 @@ impl Attempt {
     }
 
     pub(crate) fn method(self) -> Method {
-        Method::ALL[((self.0 >> 15) & 0x3) as usize]
+        Method::ALL[((self.0 >> 15) & 0x7) as usize % Method::COUNT]
     }
 
     /// The recipe physics has for this combination, if any.
@@ -72,6 +95,8 @@ pub(crate) struct Crafts {
     tried: [Attempt; TRIED_SLOTS],
     /// What it's trying right now, judged when the work is done.
     pending: Attempt,
+    /// Building designs it knows beyond huts and hearths (`Design` bits).
+    designs: u8,
     /// How strongly it believes hearths warm (0–255).
     hearth: u8,
     evidence: u8,
@@ -172,6 +197,15 @@ impl Crafts {
     /// It made recipe `index`, or watched it made.
     pub(crate) fn learn(&mut self, index: usize) {
         self.recipes |= 1 << index;
+    }
+
+    pub(crate) const fn knows_design(self, design: Design) -> bool {
+        self.designs & design as u8 != 0
+    }
+
+    /// It built `design`, or watched it built.
+    pub(crate) fn learn_design(&mut self, design: Design) {
+        self.designs |= design as u8;
     }
 
     /// Whether it remembers trying `attempt` for nothing.

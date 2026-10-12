@@ -92,9 +92,9 @@ pub use sleep::{
 };
 pub use structures::{
     BuildShelterError, HEARTH_BUILD_TICKS, HEARTH_STONE_COST, HEARTH_WARMTH, HEARTH_WOOD_COST,
-    HUT_STORE_CAPACITY, Purpose, SHELTER_BUILD_TICKS, SHELTER_STONE_COST, SHELTER_WOOD_COST,
-    StructureDiagnostic, StructureDiagnosticKind, StructureId, StructureKind, StructureState,
-    StructureView,
+    HUT_STORE_CAPACITY, Purpose, RACK_WOOD_COST, REPAIR_COST, SHELTER_BUILD_TICKS,
+    SHELTER_STONE_COST, SHELTER_WOOD_COST, STONE_HUT_STONE, StructureDiagnostic,
+    StructureDiagnosticKind, StructureId, StructureKind, StructureState, StructureView,
 };
 pub use wildlife::{
     AnimalMode, AnimalView, CARCASS_TICKS, Species, SpeciesTraits, VALLEY_DEER, VALLEY_WOLVES,

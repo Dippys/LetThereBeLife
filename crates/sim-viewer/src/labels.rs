@@ -117,6 +117,8 @@ pub const fn structure_word(kind: StructureKind) -> &'static str {
     match kind {
         StructureKind::Shelter => "hut",
         StructureKind::Hearth => "fire",
+        StructureKind::Rack => "drying rack",
+        StructureKind::Pit => "storage pit",
     }
 }
 
@@ -126,6 +128,8 @@ pub const fn place(kind: LandmarkKind) -> &'static str {
         LandmarkKind::Material(material) => self::material(material),
         LandmarkKind::Structure(StructureKind::Shelter) => "a hut",
         LandmarkKind::Structure(StructureKind::Hearth) => "a hearth",
+        LandmarkKind::Structure(StructureKind::Rack) => "a drying rack",
+        LandmarkKind::Structure(StructureKind::Pit) => "a storage pit",
     }
 }
 
@@ -190,6 +194,10 @@ pub const fn goal(goal: PhysicalGoal) -> &'static str {
         PhysicalGoal::Plant => "Planting berries",
         PhysicalGoal::Bury => "Burying the dead",
         PhysicalGoal::Cook => "Cooking meat",
+        PhysicalGoal::BuildRack => "Putting up a drying rack",
+        PhysicalGoal::DigPit => "Digging a storage pit",
+        PhysicalGoal::Repair => "Mending the hut",
+        PhysicalGoal::WallInStone => "Walling the hut in stone",
     }
 }
 
@@ -230,6 +238,8 @@ pub const fn reason(reason: PolicyReason) -> Option<&'static str> {
         PolicyReason::Cooking => "Cooking meat before it goes bad",
         PolicyReason::Preserving => "Smoking food so it keeps",
         PolicyReason::Experimenting => "Trying something new",
+        PolicyReason::Repairing => "Before it falls down",
+        PolicyReason::Building => "Building by home",
     })
 }
 
@@ -266,6 +276,8 @@ pub const fn structure(kind: StructureKind) -> &'static str {
     match kind {
         StructureKind::Shelter => "Hut",
         StructureKind::Hearth => "Hearth",
+        StructureKind::Rack => "Drying rack",
+        StructureKind::Pit => "Storage pit",
     }
 }
 

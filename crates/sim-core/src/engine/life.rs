@@ -168,7 +168,10 @@ impl Engine {
             self.crops_withered += self.spawned_objects.wither_sown();
         }
         // Huts nobody has lived in for long fall down.
-        for structure in self.structures.weather() {
+        for structure in self
+            .structures
+            .weather(self.season() == crate::Season::Winter)
+        {
             self.structure_diagnostics.push(crate::StructureDiagnostic {
                 structure,
                 at: self.time,

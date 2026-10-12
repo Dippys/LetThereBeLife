@@ -264,6 +264,8 @@ pub struct WildlifeStats {
     pub huts: u64,
     pub huts_fallen: u64,
     pub stored: u64,
+    /// Racks built, pits dug, huts walled in stone, repairs done.
+    pub building: [u64; 4],
     /// Things tried and how many made something; units made of each material.
     pub experiments: (u64, u64),
     pub made: [u64; sim_core::Material::COUNT],
@@ -537,6 +539,13 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                     wildlife.huts += u64::from(
                         completed && built.structure.kind == sim_core::StructureKind::Shelter,
                     );
+                    if completed {
+                        match built.structure.kind {
+                            sim_core::StructureKind::Rack => wildlife.building[0] += 1,
+                            sim_core::StructureKind::Pit => wildlife.building[1] += 1,
+                            _ => {}
+                        }
+                    }
                     wildlife.huts_fallen +=
                         u64::from(built.kind == sim_core::StructureDiagnosticKind::Collapsed);
                 }
@@ -561,6 +570,11 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                     }
                 }
                 for decision in engine.policy_diagnostics() {
+                    wildlife.building[3] += u64::from(
+                        decision.goal == PhysicalGoal::Repair
+                            && decision.kind == PolicyDiagnosticKind::ActionCompleted
+                            && decision.failure.is_none(),
+                    );
                     wildlife.warm_ups += u64::from(
                         decision.goal == PhysicalGoal::WarmUp
                             && decision.kind == PolicyDiagnosticKind::ActionCompleted
@@ -883,6 +897,7 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     wildlife.wolves = engine.animal_count(sim_core::Species::Wolf) as u64;
     (wildlife.sprouted, wildlife.plants_died) = engine.plant_counts();
     wildlife.experiments = engine.experiment_counts();
+    wildlife.building[2] = engine.stone_huts();
     wildlife.plants[1] = engine.plant_census();
     let (stored, fetched) = engine.storage_counts();
     wildlife.stored = stored;
@@ -1962,6 +1977,11 @@ impl fmt::Display for StudyReport {
             made(sim_core::Material::DiggingStick),
             made(sim_core::Material::Cloak)
         )?;
+        let [racks, pits, stone, repairs] = self.wildlife.building;
+        write!(
+            formatter,
+            "\n  building: drying racks {racks}, storage pits {pits}, huts walled in stone {stone}, repairs {repairs}"
+        )?;
         let [open, sheltered, by_fire] = self.wildlife.sleeps;
         write!(
             formatter,
@@ -2055,7 +2075,7 @@ impl fmt::Display for StudyReport {
         )?;
         write!(
             formatter,
-            "\n  homes: huts built {} ({} fell down empty), {} people live in {} huts, things put away {}, food fetched {}; trips given up {}",
+            "\n  homes: huts built {} ({} fell down, worn out or empty), {} people live in {} huts, things put away {}, food fetched {}; trips given up {}",
             self.wildlife.huts,
             self.wildlife.huts_fallen,
             self.wildlife.housed,

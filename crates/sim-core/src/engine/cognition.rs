@@ -746,7 +746,7 @@ impl Engine {
             self.practise(agent, activity);
         }
         // Smoking or trying something: settle now what it is.
-        let attempt = self.choose_attempt(agent, goal, reason);
+        let attempt = self.choose_attempt(agent, goal, target, reason);
         let slowness = attempt.map_or(1, |attempt| attempt.method().slowness());
         if let Some(attempt) = attempt {
             self.minds.get_mut(agent).crafts.set_pending(attempt);
@@ -765,6 +765,14 @@ impl Engine {
                     / dug
             }
             (PhysicalGoal::Bury, _) => CRAFT_TICKS / if self.digs(agent) { 2 } else { 1 },
+            (PhysicalGoal::Repair, _) => crate::cognition::by_ability(
+                CRAFT_TICKS,
+                self.ability(agent, crate::Activity::Building),
+            ),
+            (PhysicalGoal::WallInStone, _) => crate::cognition::by_ability(
+                crate::SHELTER_BUILD_TICKS / 2,
+                self.ability(agent, crate::Activity::Building),
+            ),
             (PhysicalGoal::Store | PhysicalGoal::Fetch | PhysicalGoal::Drop, _) => WARM_UP_TICKS,
             // A warning is quick: a shout and a point.
             (_, PolicyReason::Warning) => WARNING_TICKS,
@@ -818,16 +826,29 @@ impl Engine {
         &self,
         agent: AgentId,
         goal: PhysicalGoal,
+        target: WorldPosition,
         reason: PolicyReason,
     ) -> Option<crate::cognition::Attempt> {
         let inventory = self.population.inventory(agent)?;
         let crafts = self.minds.get(agent)?.crafts;
+        // Cooking work at a rack dries; at a fire it roasts or smokes.
+        let at_rack = goal == PhysicalGoal::Cook
+            && self.drying_rack(
+                self.structures
+                    .structure_at(target)
+                    .and_then(|id| self.structures.view(id)),
+            );
+        let keeping = if at_rack {
+            crate::Method::Rack
+        } else {
+            crate::Method::Smoke
+        };
         match reason {
             PolicyReason::Preserving => crate::RECIPES
                 .iter()
                 .enumerate()
                 .filter(|(index, recipe)| {
-                    recipe.method == crate::Method::Smoke
+                    recipe.method == keeping
                         && crafts.knows(*index)
                         && recipe
                             .inputs
@@ -843,6 +864,7 @@ impl Engine {
                     .carried()
                     .any(|(material, _)| material.properties().cutting);
                 let methods: &[crate::Method] = match goal {
+                    PhysicalGoal::Cook if at_rack => &[crate::Method::Rack],
                     PhysicalGoal::Cook => &[crate::Method::Fire, crate::Method::Smoke],
                     _ if edge => &[crate::Method::Hand, crate::Method::Edge],
                     _ => &[crate::Method::Hand],
@@ -1965,6 +1987,7 @@ fn places_beside(
         .iter()
         .filter(move |structure| {
             near(structure.position)
+                && structure.kind.landmark()
                 && structure.state == crate::StructureState::Complete
                 && (structure.kind != crate::StructureKind::Hearth || structure.working(now))
         })

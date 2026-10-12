@@ -131,7 +131,12 @@ impl Choice {
             PhysicalGoal::Sleep | PhysicalGoal::SeekShelter => Self::Sleep,
             PhysicalGoal::WarmUp => Self::WarmUp,
             PhysicalGoal::TendFire => Self::TendFire,
-            PhysicalGoal::BuildShelter | PhysicalGoal::BuildHearth => Self::Build,
+            PhysicalGoal::BuildShelter
+            | PhysicalGoal::BuildHearth
+            | PhysicalGoal::BuildRack
+            | PhysicalGoal::DigPit
+            | PhysicalGoal::Repair
+            | PhysicalGoal::WallInStone => Self::Build,
             PhysicalGoal::Craft => Self::Craft,
             PhysicalGoal::Plant => Self::Gather,
             PhysicalGoal::Bury => Self::Company,

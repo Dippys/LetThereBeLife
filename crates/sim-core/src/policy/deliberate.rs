@@ -99,6 +99,8 @@ const STORE_LOAD: u8 = 9;
 const STOCK_LOAD: u8 = 7;
 /// Raw meat carried that's worth a walk to a remembered hearth to cook.
 const COOKING_TRIP_MEAT: u8 = 3;
+/// Condition (out of 255) below which a home needs mending.
+const WORN: u8 = 192;
 /// Meat, or berries, carried that's worth smoking to keep.
 const SMOKE_MEAT: u8 = 2;
 const SMOKE_BERRIES: u8 = 4;
@@ -605,12 +607,32 @@ impl Planner<'_> {
                     0
                 };
                 let for_fire = if fire { crate::HEARTH_WOOD_COST + 1 } else { 0 };
-                have < for_hut.max(for_fire)
+                // Wood to mend a worn home.
+                let for_repair = if self
+                    .home_in_view()
+                    .is_some_and(|home| !home.stone && home.condition < WORN)
+                {
+                    crate::REPAIR_COST
+                } else {
+                    0
+                };
+                have < for_hut.max(for_fire).max(for_repair)
             }
             Material::Stone => {
                 let for_hearth = if fire { crate::HEARTH_STONE_COST } else { 0 };
                 let for_blade = u8::from(self.mind.knows_knapping);
-                have < for_hearth.max(for_blade)
+                // Stone for walling its hut, once it knows how.
+                let for_walls = if self
+                    .mind
+                    .crafts
+                    .knows_design(crate::cognition::Design::StoneWalls)
+                    && self.home_in_view().is_some_and(|home| !home.stone)
+                {
+                    crate::STONE_HUT_STONE
+                } else {
+                    0
+                };
+                have < for_hearth.max(for_blade).max(for_walls)
             }
             _ => false,
         }
@@ -623,18 +645,131 @@ impl Planner<'_> {
     }
 
     /// The nearest finished hut in view, and whether the agent stands beside it.
+    /// The nearest place in view to keep food (a storage pit before a hut)
+    /// whose store suits `wanted`.
     fn hut_in_view(&self, wanted: impl Fn(InventoryView) -> bool) -> Option<WorldPosition> {
         let origin = self.origin;
         self.perception
             .structures
             .iter()
             .filter(|structure| {
-                structure.kind == crate::StructureKind::Shelter
+                structure.kind.stores()
                     && structure.state == crate::StructureState::Complete
                     && !self.theirs(structure.position)
                     && wanted(structure.stored)
             })
-            .min_by_key(|structure| (manhattan(origin, structure.position), structure.id.get()))
+            .min_by_key(|structure| {
+                (
+                    structure.kind != crate::StructureKind::Pit,
+                    manhattan(origin, structure.position),
+                    structure.id.get(),
+                )
+            })
+            .map(|structure| structure.position)
+    }
+
+    /// Its home hut, if it's in view.
+    fn home_in_view(&self) -> Option<&crate::StructureView> {
+        let home = self.mind.home?;
+        self.perception.structures.iter().find(|structure| {
+            structure.position == home
+                && structure.kind == crate::StructureKind::Shelter
+                && structure.state == crate::StructureState::Complete
+        })
+    }
+
+    /// A finished structure of `kind` in view within `reach` of `near`.
+    fn structure_near(&self, kind: crate::StructureKind, near: WorldPosition, reach: u64) -> bool {
+        self.perception
+            .structures
+            .iter()
+            .any(|structure| structure.kind == kind && manhattan(structure.position, near) <= reach)
+    }
+
+    /// Its home, worn to half, mended with wood it carries, or stone (always
+    /// for a stone hut).
+    fn repair(&self, inventory: InventoryView) -> Option<Deliberation> {
+        let home = self.home_in_view()?;
+        let wood = inventory.amount(Material::Wood) >= crate::REPAIR_COST;
+        let stone = inventory.amount(Material::Stone) >= crate::REPAIR_COST;
+        let can_mend = if home.stone { stone } else { wood || stone };
+        (home.condition < WORN && can_mend)
+            .then(|| self.at_hut(home.position, PhysicalGoal::Repair, PolicyReason::Repairing))
+            .flatten()
+    }
+
+    /// Building something it knows by home: stone walls for its hut, a drying
+    /// rack, a storage pit. Without knowing the design, a curious person with
+    /// the materials sometimes tries it anyway (`trying`): that's how designs
+    /// are found.
+    fn build_by_home(&self, inventory: InventoryView, trying: bool) -> Option<Deliberation> {
+        use crate::cognition::Design;
+        let crafts = self.mind.crafts;
+        let home = self.home_in_view()?;
+        if manhattan(home.position, self.origin) > PLANTING_RANGE || !self.mind.able {
+            return None;
+        }
+        let reason = if trying {
+            PolicyReason::Experimenting
+        } else {
+            PolicyReason::Building
+        };
+        let fits = |design: Design| crafts.knows_design(design) != trying;
+        if fits(Design::StoneWalls)
+            && !home.stone
+            && inventory.amount(Material::Stone) >= crate::STONE_HUT_STONE
+        {
+            return self.at_hut(home.position, PhysicalGoal::WallInStone, reason);
+        }
+        let food = self.mind.food.carried(inventory);
+        // Never on a hut's doorstep: those are where people sleep.
+        let site = || {
+            nearest_build_site(self.origin, self.perception).filter(|&site| {
+                !self.perception.structures.iter().any(|structure| {
+                    structure.kind == crate::StructureKind::Shelter
+                        && manhattan(structure.position, site) <= 2
+                })
+            })
+        };
+        if fits(Design::Rack)
+            && inventory.amount(Material::Wood) >= crate::RACK_WOOD_COST
+            && food >= 2
+            && !self.structure_near(crate::StructureKind::Rack, home.position, PLANTING_RANGE)
+            && let Some(site) = site()
+        {
+            return Some(Deliberation::act(PhysicalGoal::BuildRack, site, reason));
+        }
+        let digs = inventory
+            .carried()
+            .any(|(material, _)| material.properties().digs);
+        if fits(Design::Pit)
+            && digs
+            && !self.structure_near(crate::StructureKind::Pit, home.position, PLANTING_RANGE)
+            && let Some(site) = site()
+        {
+            return Some(Deliberation::act(PhysicalGoal::DigPit, site, reason));
+        }
+        None
+    }
+
+    /// A drying rack in view that dries now (not in winter).
+    fn rack_in_view(&self) -> Option<WorldPosition> {
+        if crate::Season::at(self.needs.at) == crate::Season::Winter {
+            return None;
+        }
+        self.perception
+            .structures
+            .iter()
+            .filter(|structure| {
+                structure.kind == crate::StructureKind::Rack
+                    && structure.state == crate::StructureState::Complete
+            })
+            .min_by_key(|structure| {
+                (
+                    manhattan(structure.position, self.origin),
+                    structure.id.get(),
+                )
+            })
             .map(|structure| structure.position)
     }
 
@@ -702,6 +837,14 @@ impl Planner<'_> {
         let carried: Vec<Material> = inventory.carried().map(|(material, _)| material).collect();
         let crafts = self.mind.crafts;
         let roll = u64::from(self.roll(0x5452_5920));
+        if let Some(build) = self.build_by_home(inventory, true) {
+            return Some(build);
+        }
+        if let Some(rack) = self.rack_in_view()
+            && crafts.untried(&carried, &[Method::Rack], roll).is_some()
+        {
+            return self.at_hut(rack, PhysicalGoal::Cook, PolicyReason::Experimenting);
+        }
         if let Some(fire) = self.fire_in_view()
             && crafts
                 .untried(&carried, &[Method::Fire, Method::Smoke], roll)
@@ -1514,6 +1657,14 @@ impl Planner<'_> {
         if let Some(store) = self.store(inventory) {
             return store;
         }
+        // A worn home is mended before it falls down.
+        if let Some(mend) = self.repair(inventory) {
+            return mend;
+        }
+        // What it knows how to build by home: stone walls, a rack, a pit.
+        if works && let Some(build) = self.build_by_home(inventory, false) {
+            return build;
+        }
         // Someone who keeps fire feeds one that's burning low.
         if works && let Some(tend) = self.tend_fire(inventory) {
             return tend;
@@ -1739,7 +1890,7 @@ impl Planner<'_> {
                 && match recipe.method {
                     Method::Hand => true,
                     Method::Edge => has_edge,
-                    Method::Fire | Method::Smoke => false,
+                    Method::Fire | Method::Smoke | Method::Rack => false,
                 }
                 && recipe
                     .inputs

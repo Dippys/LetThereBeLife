@@ -14,6 +14,15 @@ pub const SHELTER_BUILD_TICKS: u64 = 5 * 60 * 60;
 pub const HEARTH_STONE_COST: u8 = 4;
 pub const HEARTH_WOOD_COST: u8 = 3;
 pub const HEARTH_BUILD_TICKS: u64 = 3 * 60 * 60;
+/// A drying rack takes four wood; a rack or a pit, two minutes of work.
+pub const RACK_WOOD_COST: u8 = 4;
+pub const SMALL_BUILD_TICKS: u64 = 2 * 60 * 60;
+/// Stone it takes to wall a hut in stone.
+pub const STONE_HUT_STONE: u8 = 8;
+/// Wood, or stone for a stone hut, one repair takes.
+pub const REPAIR_COST: u8 = 2;
+/// Condition (out of 255) one repair gives back.
+pub const REPAIR_AMOUNT: u8 = 128;
 /// How far around a building site `would_enclose` looks for a way out.
 const ENCLOSURE_RADIUS: i64 = 4;
 
@@ -90,6 +99,10 @@ pub enum StructureKind {
     Shelter = 0,
     /// A ring of stones around a fire: standing by it warms you.
     Hearth = 1,
+    /// A wooden frame food is hung on to dry, outside winter.
+    Rack = 2,
+    /// A hole dug in the ground: food kept in it stays cool and keeps longest.
+    Pit = 3,
 }
 
 /// What a structure is for, which is also how people show it to others.
@@ -99,11 +112,37 @@ pub enum Purpose {
     Rest,
     /// A place to get warm.
     Warmth,
+    /// A place to dry food.
+    Drying,
+    /// A place to keep food.
+    Storage,
 }
 
 impl StructureKind {
-    pub const COUNT: usize = 2;
-    pub const ALL: [Self; Self::COUNT] = [Self::Shelter, Self::Hearth];
+    pub const COUNT: usize = 4;
+    pub const ALL: [Self; Self::COUNT] = [Self::Shelter, Self::Hearth, Self::Rack, Self::Pit];
+
+    /// Worth remembering where it is and pointing out to others (huts and
+    /// fires; racks and pits are only used where they're seen).
+    pub const fn landmark(self) -> bool {
+        matches!(self, Self::Shelter | Self::Hearth)
+    }
+
+    /// Food can be put away in it (a hut or a pit).
+    pub const fn stores(self) -> bool {
+        matches!(self, Self::Shelter | Self::Pit)
+    }
+
+    /// Condition lost to the weather each season (out of 255; winter
+    /// counts half again). A stone hut wears a quarter as fast as a hut.
+    pub const fn wear(self) -> u8 {
+        match self {
+            Self::Shelter => 16,
+            Self::Rack => 24,
+            Self::Pit => 8,
+            Self::Hearth => 0,
+        }
+    }
 
     /// Whether it needs fuel to work (a fire).
     pub const fn burns(self) -> bool {
@@ -114,6 +153,8 @@ impl StructureKind {
         match self {
             Self::Shelter => Purpose::Rest,
             Self::Hearth => Purpose::Warmth,
+            Self::Rack => Purpose::Drying,
+            Self::Pit => Purpose::Storage,
         }
     }
 
@@ -128,6 +169,11 @@ impl StructureKind {
                 (crate::Material::Stone, HEARTH_STONE_COST),
                 (crate::Material::Wood, HEARTH_WOOD_COST),
             ],
+            Self::Rack => [
+                (crate::Material::Wood, RACK_WOOD_COST),
+                (crate::Material::Stone, 0),
+            ],
+            Self::Pit => [(crate::Material::Wood, 0), (crate::Material::Stone, 0)],
         }
     }
 
@@ -135,6 +181,7 @@ impl StructureKind {
         match self {
             Self::Shelter => SHELTER_BUILD_TICKS,
             Self::Hearth => HEARTH_BUILD_TICKS,
+            Self::Rack | Self::Pit => SMALL_BUILD_TICKS,
         }
     }
 
@@ -164,8 +211,12 @@ pub struct StructureView {
     pub completes_at: SimTime,
     /// For a fire: the simulated second it burns out (0 if it never burned).
     pub fuel_until: u32,
-    /// What has been put down inside it (huts only; visible to anyone nearby).
+    /// What has been put down inside it (huts and pits; visible to anyone nearby).
     pub stored: crate::InventoryView,
+    /// How sound it is (255 new, 0 falls down): wear shows.
+    pub condition: u8,
+    /// A hut walled in stone: warmer, and lasts for generations.
+    pub stone: bool,
 }
 
 impl StructureView {
@@ -239,6 +290,10 @@ pub(crate) struct StructureRecord {
     kind: StructureKind,
     /// Seasons since anyone slept in it (huts fall down when left long enough).
     idle_seasons: u8,
+    /// A hut walled in stone.
+    stone: bool,
+    /// How sound it is (255 new).
+    condition: u8,
     /// For a fire: the simulated second it burns out.
     fuel_until: u32,
 }
@@ -255,6 +310,8 @@ impl StructureRecord {
             completes_at: self.completes_at,
             fuel_until: self.fuel_until,
             stored: crate::InventoryView::default(),
+            condition: self.condition,
+            stone: self.stone,
         }
     }
 }
@@ -289,20 +346,32 @@ impl StructureStore {
         Ok(())
     }
 
-    /// A season passes: every finished hut nobody has slept in for
-    /// `HUT_ABANDONED_SEASONS` falls down, with whatever was stored in it.
-    /// Returns what fell.
-    pub(crate) fn weather(&mut self) -> Vec<StructureView> {
+    /// A season passes: weather wears every finished structure down (winter
+    /// half again as hard, stone a quarter as much), and one worn to nothing
+    /// falls; so does a hut nobody has slept in for `HUT_ABANDONED_SEASONS`
+    /// (four times as long for stone). Returns what fell, with what it held.
+    pub(crate) fn weather(&mut self, winter: bool) -> Vec<StructureView> {
         let mut fallen = Vec::new();
         for raw in 0..self.records.len() {
             let Some(record) = self.records[raw].as_mut() else {
                 continue;
             };
-            if record.kind != StructureKind::Shelter || record.state != StructureState::Complete {
+            if record.state != StructureState::Complete {
                 continue;
             }
-            record.idle_seasons = record.idle_seasons.saturating_add(1);
-            if record.idle_seasons < HUT_ABANDONED_SEASONS {
+            let mut wear = record.kind.wear();
+            if record.stone {
+                wear /= 4;
+            }
+            if winter {
+                wear += wear / 2;
+            }
+            record.condition = record.condition.saturating_sub(wear);
+            let abandoned = record.kind == StructureKind::Shelter && {
+                record.idle_seasons = record.idle_seasons.saturating_add(1);
+                record.idle_seasons >= HUT_ABANDONED_SEASONS * if record.stone { 4 } else { 1 }
+            };
+            if record.condition > 0 && !abandoned {
                 continue;
             }
             let record = *record;
@@ -316,6 +385,27 @@ impl StructureStore {
             fallen.push(view);
         }
         fallen
+    }
+
+    /// Mends the structure `id`: condition back up by `REPAIR_AMOUNT`.
+    pub(crate) fn repair(&mut self, id: StructureId) -> bool {
+        let Some(record) = self.records.get_mut(id.0 as usize).and_then(Option::as_mut) else {
+            return false;
+        };
+        record.condition = record.condition.saturating_add(REPAIR_AMOUNT);
+        true
+    }
+
+    /// Walls the hut `id` in stone (and makes it sound again).
+    pub(crate) fn wall_in_stone(&mut self, id: StructureId) -> bool {
+        match self.records.get_mut(id.0 as usize).and_then(Option::as_mut) {
+            Some(record) if record.kind == StructureKind::Shelter && !record.stone => {
+                record.stone = true;
+                record.condition = u8::MAX;
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Someone sleeps under the hut beside `position`: it stays lived in.
@@ -378,15 +468,32 @@ impl StructureStore {
     /// A night's rot in what huts hold: dry and out of the sun, food keeps
     /// three times as long there. Returns units lost.
     pub(crate) fn rot_stocks(&mut self, roll: u64) -> u32 {
+        let records = &self.records;
         self.stocks
             .iter_mut()
             .map(|(id, stock)| {
+                let pit = records
+                    .get(id.0 as usize)
+                    .copied()
+                    .flatten()
+                    .is_some_and(|record| record.kind == StructureKind::Pit);
+                // A pit is cooler still: three times as long again.
+                let slower = if pit { 9 } else { 3 };
                 stock.rot(
-                    3,
+                    slower,
                     roll ^ u64::from(id.0).wrapping_mul(0x2545_f491_4f6c_dd1d),
                 )
             })
             .sum()
+    }
+
+    /// Whether the hut beside `position` is walled in stone.
+    pub(crate) fn stone_beside(&self, position: WorldPosition) -> bool {
+        cardinal_neighbors(position).any(|candidate| {
+            self.structure_at(candidate)
+                .and_then(|id| self.view(id))
+                .is_some_and(|view| view.kind == StructureKind::Shelter && view.stone)
+        })
     }
 
     pub(crate) fn deposit(
@@ -397,7 +504,7 @@ impl StructureStore {
         let Some(view) = self.view(id) else {
             return crate::InventoryView::default();
         };
-        if view.kind != StructureKind::Shelter || view.state != StructureState::Complete {
+        if !view.kind.stores() || view.state != StructureState::Complete {
             return crate::InventoryView::default();
         }
         let stock = self.stocks.entry(id).or_default();
@@ -455,6 +562,8 @@ impl StructureStore {
             state: StructureState::UnderConstruction,
             kind,
             idle_seasons: 0,
+            stone: false,
+            condition: u8::MAX,
             fuel_until: 0,
         };
         self.records.push(Some(record));
@@ -649,7 +758,7 @@ mod tests {
         assert_eq!(size_of::<StructureId>(), 4);
         assert_eq!(size_of::<StructureKind>(), 1);
         assert_eq!(size_of::<StructureState>(), 1);
-        assert_eq!(size_of::<StructureRecord>(), 32);
+        assert_eq!(size_of::<StructureRecord>(), 40);
     }
 
     #[test]
@@ -677,6 +786,42 @@ mod tests {
     }
 
     #[test]
+    fn weather_wears_huts_down_until_they_fall_unless_mended_and_stone_lasts() {
+        let at = |x, y| WorldPosition { x, y };
+        let mut store = StructureStore::default();
+        for (builder, site) in [(0, at(0, 0)), (1, at(10, 0))] {
+            store
+                .start(
+                    AgentId::new(builder),
+                    site,
+                    StructureKind::Shelter,
+                    SimTime::ZERO,
+                    SimTime::from_ticks(1),
+                )
+                .unwrap();
+            store
+                .complete_for_builder(AgentId::new(builder), 0)
+                .unwrap();
+        }
+        let stone = store.structure_at(at(10, 0)).unwrap();
+        assert!(store.wall_in_stone(stone));
+        let mut seasons = 0;
+        while store.structure_at(at(0, 0)).is_some() {
+            store.lived_in(at(1, 0));
+            store.lived_in(at(11, 0));
+            store.weather(seasons % 4 == 3);
+            seasons += 1;
+        }
+        assert!(
+            (10..=16).contains(&seasons),
+            "a hut lasts {seasons} seasons unmended"
+        );
+        assert!(store.structure_at(at(10, 0)).is_some(), "stone outlasts it");
+        assert!(store.view(stone).unwrap().condition > 128);
+        assert!(StructureKind::Pit.stores() && !StructureKind::Rack.stores());
+    }
+
+    #[test]
     fn a_hut_left_empty_falls_down_and_a_lived_in_one_stands() {
         let at = |x, y| WorldPosition { x, y };
         let mut store = StructureStore::default();
@@ -699,12 +844,17 @@ mod tests {
             empty,
             crate::InventoryView::of(&[(crate::Material::Wood, 4)]),
         );
+        let lived = store.structure_at(at(0, 0)).unwrap();
         for season in 1..HUT_ABANDONED_SEASONS {
             store.lived_in(at(1, 0));
-            assert!(store.weather().is_empty(), "season {season}");
+            // Both are mended, or the weather would bring them down first:
+            // only being left empty tells them apart.
+            store.repair(lived);
+            store.repair(empty);
+            assert!(store.weather(season % 4 == 3).is_empty(), "season {season}");
         }
         store.lived_in(at(1, 0));
-        let fallen = store.weather();
+        let fallen = store.weather(false);
         assert_eq!(fallen.len(), 1, "only the empty hut falls");
         assert_eq!(fallen[0].position, at(10, 0));
         assert_eq!(fallen[0].stored.amount(crate::Material::Wood), 4);

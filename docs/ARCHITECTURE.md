@@ -44,7 +44,7 @@ and a `tests.rs` or `tests/` folder next to it. Every file starts with a `//!` l
 | `spatial` | Sparse chunk-bucketed agent positions; multiple agents may share a cell |
 | `resources` | Inventories as a count per `Material` (5 B); sparse `BTreeMap` of depleted generated features that grow back lazily by each material's regrowth time, or are dead (felled trees, bushes that died) |
 | `sleep` | Sleep intervals, quality, wake/interrupt (`SleepState`, 24 B) |
-| `structures` | Sparse one-cell lean-to shelters, construction lifecycle |
+| `structures` | Huts (optionally walled in stone), hearths, drying racks and storage pits: construction, a condition worn by the weather and restored by repair, hut and pit stores |
 | `placements` | Sparse overlay of placed objects (trees, bushes, rocks, water) and plants that took root by themselves; plants grow back lazily like generated ones. `engine/plants.rs` runs the yearly die-and-seed step |
 | `diagnostics` | Copied work/capacity counters for reports |
 

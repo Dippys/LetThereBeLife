@@ -61,6 +61,8 @@ pub(super) const fn structure_color(kind: StructureKind, state: StructureState) 
         (_, StructureState::UnderConstruction) => UNDER_CONSTRUCTION,
         (StructureKind::Shelter, StructureState::Complete) => HUT,
         (StructureKind::Hearth, StructureState::Complete) => HEARTH,
+        (StructureKind::Rack, StructureState::Complete) => rgba(176, 132, 80, 255),
+        (StructureKind::Pit, StructureState::Complete) => rgba(92, 70, 52, 255),
     }
 }
 
@@ -83,6 +85,8 @@ pub(super) const fn landmark_color(kind: LandmarkKind) -> u32 {
         LandmarkKind::Material(material) => material_color(material),
         LandmarkKind::Structure(StructureKind::Shelter) => rgba(255, 150, 40, 235),
         LandmarkKind::Structure(StructureKind::Hearth) => rgba(255, 90, 30, 235),
+        LandmarkKind::Structure(StructureKind::Rack) => rgba(200, 150, 90, 235),
+        LandmarkKind::Structure(StructureKind::Pit) => rgba(130, 100, 70, 235),
     }
 }
 

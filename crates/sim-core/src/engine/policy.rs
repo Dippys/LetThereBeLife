@@ -121,6 +121,8 @@ impl Engine {
                 | PhysicalGoal::Plant
                 | PhysicalGoal::Bury
                 | PhysicalGoal::Cook
+                | PhysicalGoal::Repair
+                | PhysicalGoal::WallInStone
                 | PhysicalGoal::Store
                 | PhysicalGoal::Fetch
                 | PhysicalGoal::Drop
@@ -128,15 +130,13 @@ impl Engine {
             self.start_timed_action(agent, selection.goal, target, selection.reason);
             return;
         }
-        if matches!(
-            selection.goal,
-            PhysicalGoal::BuildShelter | PhysicalGoal::BuildHearth
-        ) {
-            let kind = if selection.goal == PhysicalGoal::BuildHearth {
-                crate::StructureKind::Hearth
-            } else {
-                crate::StructureKind::Shelter
-            };
+        if let Some(kind) = match selection.goal {
+            PhysicalGoal::BuildShelter => Some(crate::StructureKind::Shelter),
+            PhysicalGoal::BuildHearth => Some(crate::StructureKind::Hearth),
+            PhysicalGoal::BuildRack => Some(crate::StructureKind::Rack),
+            PhysicalGoal::DigPit => Some(crate::StructureKind::Pit),
+            _ => None,
+        } {
             match self.start_build(agent, target, selection.reason, kind) {
                 Ok(structure) => self.policy_diagnostics.push(PolicyDiagnostic {
                     agent,

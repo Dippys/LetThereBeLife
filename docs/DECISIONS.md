@@ -1194,3 +1194,22 @@ Crafts 80 B, mind 2,016 B.
 24. Made: 4,116 digging sticks, 38 cord, 1 stone spear; no axes or cloaks yet, since a blade, wood
 and cord must be carried together and the combination found first.
 
+## D-142: Buildings that wear, are mended and improved; racks and pits (2026-10-12)
+
+**Decision:** Every structure has a condition (255 new) the weather wears down each season (huts 16,
+racks 24, pits 8, half again in winter, stone a quarter as fast; hearths don't wear); at 0 it
+falls, as an empty hut still does after two years (eight for stone). People mend a worn home (below
+three quarters) with 2 wood, or 2 stone: whoever packs stone into a wall (or watches) learns stone
+walls, and with 8 stone walls its hut in stone, which keeps as warm as a hut by a fire. New kinds:
+the drying rack (4 wood; dries meat or berries on it outside winter, twice as slow as plain work,
+no fire needed) and the storage pit (dug with a digging stick; food in it keeps three times as long
+as in a hut). Racks and pits are learned by building or watching one; someone curious with the
+materials tries them first. They're never put on a hut's doorstep and aren't remembered as places
+(`StructureKind::landmark`). Readings only weigh concepts a gesture can be about, so new things
+nobody points at don't crowd out the mime's meaning. Records 40 B; save version 19.
+**Why:** The owner asked for building with lots of dynamics (docs/plans/MAKING.md M3).
+**Consequences:** Over 10 years in 20 valleys: 474 survivors against 470, cold deaths 17 against
+16, births 159 against 142; 691 racks, 131 pits, 1,349 repairs, 11 huts walled in stone. First
+versions wore huts out in two years and put racks on huts' doorsteps, taking the places people
+sleep: cold deaths doubled (40, then 34).
+

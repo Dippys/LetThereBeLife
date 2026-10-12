@@ -145,6 +145,11 @@ impl Engine {
         }
     }
 
+    /// Huts walled in stone since the start.
+    pub fn stone_huts(&self) -> u64 {
+        self.stone_huts
+    }
+
     /// Things people tried to make, and how many of those made something.
     pub fn experiment_counts(&self) -> (u64, u64) {
         (self.experiments, self.discoveries)

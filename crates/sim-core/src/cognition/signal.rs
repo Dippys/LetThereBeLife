@@ -125,6 +125,7 @@ pub(crate) const fn purpose_motion(purpose: crate::Purpose) -> Mime {
     match purpose {
         crate::Purpose::Rest => Mime::RestHead,
         crate::Purpose::Warmth => Mime::Warm,
+        crate::Purpose::Drying | crate::Purpose::Storage => Mime::PickAndChew,
     }
 }
 

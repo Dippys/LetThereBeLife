@@ -23,17 +23,20 @@ const SWIM_CHILL: u16 = 120;
 const SWIM_EFFORT: u16 = 60;
 
 impl Engine {
-    /// Sleeping under a roof with a burning fire close by warms faster.
+    /// Sleeping under a roof with a burning fire close by, or in a stone
+    /// hut, warms faster.
     pub(super) fn by_the_fire(
         &self,
         quality: SleepQuality,
         position: WorldPosition,
     ) -> SleepQuality {
         let now = crate::cognition::belief_seconds(self.time);
+        // A stone hut keeps as warm as a hut by a fire.
         if quality == SleepQuality::Sheltered
-            && self
-                .structures
-                .fire_within(position, now, crate::FIRE_WARMTH_REACH)
+            && (self.structures.stone_beside(position)
+                || self
+                    .structures
+                    .fire_within(position, now, crate::FIRE_WARMTH_REACH))
         {
             SleepQuality::Hearthside
         } else {
@@ -134,9 +137,12 @@ impl Engine {
                     Err(PolicyFailureReason::InconsistentState)
                 }
             }
-            PhysicalGoal::BuildShelter | PhysicalGoal::BuildHearth => {
-                self.apply_build_completion(event.agent)
-            }
+            PhysicalGoal::BuildShelter
+            | PhysicalGoal::BuildHearth
+            | PhysicalGoal::BuildRack
+            | PhysicalGoal::DigPit => self.apply_build_completion(event.agent),
+            PhysicalGoal::Repair => self.apply_repair(event.agent, target),
+            PhysicalGoal::WallInStone => self.apply_wall_in_stone(event.agent, target),
             PhysicalGoal::WarmUp => self.apply_warm_up(event.agent),
             PhysicalGoal::TendFire => self.apply_tend_fire(event.agent),
             PhysicalGoal::Craft => self.apply_craft(event.agent),
@@ -563,10 +569,7 @@ impl Engine {
             .ok_or(PolicyFailureReason::TargetUnavailable)?;
         self.structures
             .view(id)
-            .filter(|view| {
-                view.kind == crate::StructureKind::Shelter
-                    && view.state == crate::StructureState::Complete
-            })
+            .filter(|view| view.kind.stores() && view.state == crate::StructureState::Complete)
             .map(|_| id)
             .ok_or(PolicyFailureReason::TargetUnavailable)
     }
@@ -602,7 +605,7 @@ impl Engine {
                     && match recipe.method {
                         crate::Method::Hand => true,
                         crate::Method::Edge => has_edge,
-                        crate::Method::Fire | crate::Method::Smoke => false,
+                        crate::Method::Fire | crate::Method::Smoke | crate::Method::Rack => false,
                     }
                     && (recipe.output.properties().nutrition > 0
                         || inventory.amount(recipe.output) == 0)
@@ -723,6 +726,126 @@ impl Engine {
         }
     }
 
+    /// Mends the structure at `target` (beside it) with wood, or stone for a
+    /// stone hut.
+    pub(super) fn apply_repair(
+        &mut self,
+        agent: AgentId,
+        target: WorldPosition,
+    ) -> Result<(), PolicyFailureReason> {
+        let id = self
+            .structures
+            .structure_at(target)
+            .ok_or(PolicyFailureReason::TargetUnavailable)?;
+        let view = self
+            .structures
+            .view(id)
+            .ok_or(PolicyFailureReason::TargetUnavailable)?;
+        // Wood mends a hut; a stone hut, or anyone out of wood, uses stone,
+        // and whoever packs stones into a wall finds out they hold.
+        let wood = self
+            .population
+            .inventory(agent)
+            .is_some_and(|inventory| inventory.amount(Material::Wood) >= crate::REPAIR_COST);
+        let material = if view.stone || !wood {
+            Material::Stone
+        } else {
+            Material::Wood
+        };
+        if self.population.take(agent, material, crate::REPAIR_COST) < crate::REPAIR_COST {
+            return Err(PolicyFailureReason::InsufficientMaterials);
+        }
+        self.structures.repair(id);
+        self.practise(agent, crate::Activity::Building);
+        if material == Material::Stone && view.kind == crate::StructureKind::Shelter {
+            let watchers = self.watchers_of(agent);
+            for who in std::iter::once(agent).chain(watchers) {
+                self.minds
+                    .get_mut(who)
+                    .crafts
+                    .learn_design(crate::cognition::Design::StoneWalls);
+            }
+        }
+        Ok(())
+    }
+
+    /// Walls the hut at `target` (beside it) in stone. Whoever does it or
+    /// watches knows how from then on.
+    pub(super) fn apply_wall_in_stone(
+        &mut self,
+        agent: AgentId,
+        target: WorldPosition,
+    ) -> Result<(), PolicyFailureReason> {
+        let id = self
+            .structures
+            .structure_at(target)
+            .ok_or(PolicyFailureReason::TargetUnavailable)?;
+        let stone = crate::STONE_HUT_STONE;
+        if self
+            .population
+            .inventory(agent)
+            .is_none_or(|inventory| inventory.amount(Material::Stone) < stone)
+        {
+            return Err(PolicyFailureReason::InsufficientMaterials);
+        }
+        if !self.structures.wall_in_stone(id) {
+            return Err(PolicyFailureReason::TargetUnavailable);
+        }
+        self.population.take(agent, Material::Stone, stone);
+        self.practise(agent, crate::Activity::Building);
+        self.stone_huts += 1;
+        let watchers = self.watchers_of(agent);
+        for who in std::iter::once(agent).chain(watchers) {
+            self.minds
+                .get_mut(who)
+                .crafts
+                .learn_design(crate::cognition::Design::StoneWalls);
+        }
+        Ok(())
+    }
+
+    /// Whether `place` is a finished drying rack that dries now (not in winter).
+    pub(super) fn drying_rack(&self, place: Option<crate::StructureView>) -> bool {
+        place.is_some_and(|rack| {
+            rack.kind == crate::StructureKind::Rack
+                && rack.state == crate::StructureState::Complete
+                && self.season() != crate::Season::Winter
+        })
+    }
+
+    /// A pending recipe it knows is made in a batch; anything else is tried.
+    fn try_or_make(
+        &mut self,
+        agent: AgentId,
+        attempt: crate::cognition::Attempt,
+    ) -> Result<(), PolicyFailureReason> {
+        let known = attempt.recipe().filter(|(index, _)| {
+            self.minds
+                .get(agent)
+                .is_some_and(|mind| mind.crafts.knows(*index))
+        });
+        let Some((index, recipe)) = known else {
+            return self.try_attempt(agent, attempt);
+        };
+        let mut made = 0;
+        while made < SMOKING_BATCH
+            && self.population.inventory(agent).is_some_and(|inventory| {
+                recipe
+                    .inputs
+                    .iter()
+                    .all(|&(input, count)| inventory.amount(input) >= count)
+            })
+        {
+            self.make(agent, index, recipe)?;
+            made += 1;
+        }
+        if made > 0 {
+            Ok(())
+        } else {
+            Err(PolicyFailureReason::InsufficientMaterials)
+        }
+    }
+
     /// Who is awake and close enough to see `agent` at work.
     pub(super) fn watchers_of(&self, agent: AgentId) -> Vec<AgentId> {
         self.perceive_physical(agent, crate::PHYSICAL_POLICY_RADIUS)
@@ -808,12 +931,13 @@ impl Engine {
             .ok_or(PolicyFailureReason::InconsistentState)?
             .position;
         let now = (self.time.ticks() / 60) as u32;
-        let burning = self
+        let place = self
             .structures
             .structure_at(target)
-            .and_then(|id| self.structures.view(id))
-            .is_some_and(|fire| fire.kind.burns() && fire.working(now));
-        if !burning
+            .and_then(|id| self.structures.view(id));
+        let burning = place.is_some_and(|fire| fire.kind.burns() && fire.working(now));
+        let rack = self.drying_rack(place);
+        if !(burning || rack)
             || position
                 .x
                 .abs_diff(target.x)
@@ -822,34 +946,28 @@ impl Engine {
         {
             return Err(PolicyFailureReason::TargetUnavailable);
         }
-        // Smoking food it knows how to keep, or trying something at the fire.
+        // Smoking or drying food it knows how to keep, or trying something
+        // at the fire or the rack.
         let attempt = self.minds.get_mut(agent).crafts.take_pending();
-        if attempt.is_some() {
-            let known = attempt.recipe().filter(|(index, _)| {
-                self.minds
-                    .get(agent)
-                    .is_some_and(|mind| mind.crafts.knows(*index))
-            });
-            let Some((index, recipe)) = known else {
-                return self.try_attempt(agent, attempt);
-            };
-            let mut made = 0;
-            while made < SMOKING_BATCH
-                && self.population.inventory(agent).is_some_and(|inventory| {
-                    recipe
-                        .inputs
-                        .iter()
-                        .all(|&(input, count)| inventory.amount(input) >= count)
-                })
-            {
-                self.make(agent, index, recipe)?;
-                made += 1;
-            }
-            return if made > 0 {
-                Ok(())
+        let fits = |method: crate::Method| {
+            if method == crate::Method::Rack {
+                rack
             } else {
-                Err(PolicyFailureReason::InsufficientMaterials)
-            };
+                burning
+            }
+        };
+        if attempt.is_some() && !fits(attempt.method()) {
+            return Err(PolicyFailureReason::TargetUnavailable);
+        }
+        if !burning {
+            // Nothing to roast on a rack.
+            if attempt.is_some() {
+                return self.try_or_make(agent, attempt);
+            }
+            return Err(PolicyFailureReason::TargetUnavailable);
+        }
+        if attempt.is_some() {
+            return self.try_or_make(agent, attempt);
         }
         let cooked = self.population.cook(agent, Material::Meat, Material::Roast);
         if cooked == 0 {

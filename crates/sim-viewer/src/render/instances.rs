@@ -367,6 +367,8 @@ pub(super) fn build_structure_instances(
                     && !structure.working(now)
                 {
                     COLD_HEARTH
+                } else if structure.stone {
+                    STONE_HUT
                 } else {
                     structure_color(structure.kind, structure.state)
                 },
@@ -374,6 +376,9 @@ pub(super) fn build_structure_instances(
         }
     }
 }
+
+/// A hut walled in stone.
+const STONE_HUT: u32 = super::colors::rgba(150, 146, 136, 255);
 
 pub(super) fn build_exact_world_instances(
     world: &World,

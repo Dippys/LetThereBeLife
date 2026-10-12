@@ -124,6 +124,7 @@ impl Progress {
                     fires += 1;
                     burning += u32::from(structure.working(now));
                 }
+                StructureKind::Rack | StructureKind::Pit => {}
             }
         }
         let oldest = engine

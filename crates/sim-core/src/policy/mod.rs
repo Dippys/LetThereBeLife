@@ -169,6 +169,14 @@ pub enum PhysicalGoal {
     Bury = 21,
     /// Cook carried meat at the fire beside the agent.
     Cook = 22,
+    /// Put up a drying rack.
+    BuildRack = 23,
+    /// Dig a storage pit.
+    DigPit = 24,
+    /// Mend the structure beside the agent.
+    Repair = 25,
+    /// Wall the hut beside the agent in stone.
+    WallInStone = 26,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -232,6 +240,10 @@ pub enum PolicyReason {
     Preserving,
     /// Trying something new with what it has.
     Experimenting,
+    /// Mending its home before it falls down.
+    Repairing,
+    /// Putting up something it knows how to make.
+    Building,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

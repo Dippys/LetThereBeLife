@@ -481,16 +481,20 @@ pub enum Method {
     Fire,
     /// By a burning fire beside you, slowly, in its smoke.
     Smoke,
+    /// Hung on a drying rack beside you, outside winter.
+    Rack,
 }
 
 impl Method {
-    pub const COUNT: usize = 4;
-    pub const ALL: [Self; Self::COUNT] = [Self::Hand, Self::Edge, Self::Fire, Self::Smoke];
+    pub const COUNT: usize = 5;
+    pub const ALL: [Self; Self::COUNT] =
+        [Self::Hand, Self::Edge, Self::Fire, Self::Smoke, Self::Rack];
 
     /// How many times longer than plain work it takes.
     pub const fn slowness(self) -> u64 {
         match self {
             Self::Hand | Self::Edge | Self::Fire => 1,
+            Self::Rack => 2,
             Self::Smoke => 4,
         }
     }
@@ -543,7 +547,7 @@ const fn assembled(parts: [Material; 3], method: Method, output: Material) -> Re
 }
 
 /// Everything that can be made.
-pub const RECIPES: [Recipe; 12] = [
+pub const RECIPES: [Recipe; 14] = [
     recipe((Material::Stone, 1), Method::Hand, Material::Blade),
     recipe((Material::Wood, 2), Method::Hand, Material::Basket),
     recipe((Material::Wood, 2), Method::Edge, Material::Spear),
@@ -604,6 +608,8 @@ pub const RECIPES: [Recipe; 12] = [
         output: Material::Cloak,
         makes: 1,
     },
+    recipe((Material::Meat, 1), Method::Rack, Material::DriedMeat),
+    recipe((Material::Berries, 1), Method::Rack, Material::DriedBerries),
 ];
 
 impl Recipe {

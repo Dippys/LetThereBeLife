@@ -23,7 +23,7 @@ pub use affordances::AffordanceView;
 pub(crate) use affordances::Affordances;
 pub use character::DRIFT_LIMIT;
 pub(crate) use character::{Character, by_ability};
-pub(crate) use crafts::{Attempt, Crafts};
+pub(crate) use crafts::{Attempt, Crafts, Design};
 pub use dialogue::{CONSEQUENCE_WEIGHT, REPAIR_WEIGHT};
 pub(crate) use dialogue::{Dialogue, LEAD_SECONDS, Lead, PendingCorrection};
 pub(crate) use fauna::Fauna;
@@ -91,8 +91,21 @@ const FIXED_MATERIALS: usize = {
     count
 };
 
+/// Kinds of structure worth remembering where they are.
+const LANDMARK_STRUCTURES: usize = {
+    let mut count = 0;
+    let mut index = 0;
+    while index < crate::StructureKind::COUNT {
+        if crate::StructureKind::ALL[index].landmark() {
+            count += 1;
+        }
+        index += 1;
+    }
+    count
+};
+
 impl LandmarkKind {
-    pub const COUNT: usize = 1 + FIXED_MATERIALS + crate::StructureKind::COUNT;
+    pub const COUNT: usize = 1 + FIXED_MATERIALS + LANDMARK_STRUCTURES;
     pub const ALL: [Self; Self::COUNT] = {
         let mut all = [Self::Water; Self::COUNT];
         let mut next = 1;
@@ -107,8 +120,11 @@ impl LandmarkKind {
         }
         index = 0;
         while index < crate::StructureKind::COUNT {
-            all[next] = Self::Structure(crate::StructureKind::ALL[index]);
-            next += 1;
+            let kind = crate::StructureKind::ALL[index];
+            if kind.landmark() {
+                all[next] = Self::Structure(kind);
+                next += 1;
+            }
             index += 1;
         }
         all

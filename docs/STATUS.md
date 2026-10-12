@@ -142,7 +142,9 @@ so changes are judged on behaviour counts as much as on survival.
 
 ## Recent changes
 
-- 2026-10-12 (latest): tools from parts (cord, axe, stone spear, digging stick, cloak) that wear
+- 2026-10-12 (latest): buildings wear and are mended; stone huts; drying racks and storage pits
+  (D-142).
+- 2026-10-12: tools from parts (cord, axe, stone spear, digging stick, cloak) that wear
   out with use (D-141).
 - 2026-10-12: recipes discovered by trying and watching; dried berries, dried meat,
   pemmican (D-139); food rots by fair shares, half as much is lost (D-140).
@@ -230,9 +232,10 @@ so changes are judged on behaviour counts as much as on survival.
 
 ## What's next
 
-1. **Making things** (docs/plans/MAKING.md): a recipe table learned by trying and watching;
-   preserved food first (rotting is the main loss), then composite tools, then building designs.
-   Then **feelings** (docs/plans/FEELINGS.md, P2-P6).
+1. **Feelings** (docs/plans/FEELINGS.md, P2-P6): fear, calm, contentment, misery, boredom,
+   loneliness and grief with expressions others read; feelings toward people; worry, hope,
+   frustration, surprise, relief; pride and shame; envy, jealousy, taking and confrontation.
+   (Making things, docs/plans/MAKING.md, is done: D-139, D-141, D-142.)
 2. **Thinking agents** (docs/plans/THINKING.md): plans for cold, hunger and thirst on (D-118,
    D-119); idle time works toward what has proved useful (D-123); people show others what they
    don't know (D-121). Getting ready for hard seasons is built but off (D-120). Next: readiness

@@ -179,6 +179,8 @@ pub struct Engine {
     /// Things tried, and how many of those made something (for tools).
     experiments: u64,
     discoveries: u64,
+    /// Huts walled in stone (for tools).
+    stone_huts: u64,
     /// Things put away in huts and food taken out (for tools).
     stored: u64,
     fetched: u64,
@@ -250,6 +252,7 @@ impl Engine {
             plants_died: 0,
             experiments: 0,
             discoveries: 0,
+            stone_huts: 0,
             stored: 0,
             fetched: 0,
             wildlife: crate::wildlife::Wildlife::default(),
@@ -320,6 +323,7 @@ impl Engine {
                 self.plants_died = 0;
                 self.experiments = 0;
                 self.discoveries = 0;
+                self.stone_huts = 0;
                 self.stored = 0;
                 self.fetched = 0;
                 self.wildlife = crate::wildlife::Wildlife::default();
