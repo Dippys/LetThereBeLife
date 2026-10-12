@@ -76,15 +76,15 @@ pub use sim_world::{
     ArchiveBakeProgress, ArchiveBakeStats, BandLayout, BaseResource, BiomeType, CAMP_RADIUS,
     CHUNK_SIZE, ChunkCoord, ChunkGenerator, ChunkInspection, ChunkLoadRequest, ChunkLocalPosition,
     ChunkOverview, ChunkPresence, ClimateSample, DEFAULT_INITIAL_WORLD_SIZE, Feature, FeatureKind,
-    GenerateAreaError, GeneratedCell, Handling, MAX_CHUNKS_PER_GENERATION, MAX_GENERATED_CELLS,
-    MAX_GENERATED_CHUNKS, MAX_GENERATED_TERRAIN_BYTES, MAX_INITIAL_CHUNKS,
+    GenerateAreaError, GeneratedCell, Handling, Kinds, MAX_CHUNKS_PER_GENERATION,
+    MAX_GENERATED_CELLS, MAX_GENERATED_CHUNKS, MAX_GENERATED_TERRAIN_BYTES, MAX_INITIAL_CHUNKS,
     MAX_TRAVERSABLE_ELEVATION_DELTA, Material, MaterialProperties, Method, PrevailingWind, RECIPES,
     Recipe, Standability, SurfaceType, TerrainCell, TerrainClass, TraversalKind, TraversalStep,
     VALLEY_BAND, VALLEY_CHILDREN_PER_FAMILY, VALLEY_FAMILIES, VALLEY_SIDE, Valley, ValleyScore,
     WORLD_GENERATION_BOUNDS, WORLD_GENERATOR_VERSION, WORLD_HALF_EXTENT, WORLD_SIDE_CELLS,
     WaterSource, World, WorldArchive, WorldArchiveError, WorldChunk, WorldChunkLoad, WorldConfig,
     WorldConfigError, WorldOverview, WorldPosition, WorldQueryError, WorldRect, apart_layout,
-    band_layout, camp_sites, family_camps, find_valley, find_valley_pair, score_square,
+    band_layout, camp_sites, canonical, family_camps, find_valley, find_valley_pair, score_square,
 };
 pub use sleep::{
     FIRE_WARMTH_REACH, REST_COLLAPSE, SleepDiagnostic, SleepDiagnosticKind,

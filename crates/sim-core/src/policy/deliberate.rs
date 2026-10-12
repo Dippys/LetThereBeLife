@@ -699,11 +699,7 @@ impl Planner<'_> {
         {
             return None;
         }
-        let carried: Vec<Material> = inventory
-            .carried()
-            .map(|(material, _)| material)
-            .filter(|material| !material.properties().worn())
-            .collect();
+        let carried: Vec<Material> = inventory.carried().map(|(material, _)| material).collect();
         let crafts = self.mind.crafts;
         let roll = u64::from(self.roll(0x5452_5920));
         if let Some(fire) = self.fire_in_view()
@@ -1733,6 +1729,30 @@ impl Planner<'_> {
         let has_edge = crate::Material::ALL
             .into_iter()
             .any(|material| material.properties().cutting && inventory.amount(material) > 0);
+        // Any tool it knows how to put together, doesn't have, and carries
+        // the parts for (an axe, a stone spear, a cloak, cord, a digging stick).
+        let crafts = self.mind.crafts;
+        let can_assemble = crate::RECIPES.iter().enumerate().any(|(index, recipe)| {
+            crafts.knows(index)
+                && recipe.output.properties().nutrition == 0
+                && inventory.amount(recipe.output) == 0
+                && match recipe.method {
+                    Method::Hand => true,
+                    Method::Edge => has_edge,
+                    Method::Fire | Method::Smoke => false,
+                }
+                && recipe
+                    .inputs
+                    .iter()
+                    .all(|&(input, count)| inventory.amount(input) >= count)
+        });
+        if can_assemble {
+            return Some(Deliberation::act(
+                PhysicalGoal::Craft,
+                self.origin,
+                PolicyReason::Crafting,
+            ));
+        }
         if !self.mind.knows_knapping {
             return None;
         }

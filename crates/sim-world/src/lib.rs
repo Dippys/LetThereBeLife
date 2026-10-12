@@ -22,8 +22,8 @@ pub use archive::{
 pub use chunk::{ChunkCoord, ChunkInspection, ChunkLocalPosition, ChunkPresence, WorldChunk};
 pub use config::{WorldConfig, WorldConfigError};
 pub use features::{
-    BaseResource, Feature, FeatureKind, Handling, Material, MaterialProperties, Method, RECIPES,
-    Recipe,
+    BaseResource, Feature, FeatureKind, Handling, Kinds, Material, MaterialProperties, Method,
+    RECIPES, Recipe, canonical,
 };
 pub use generator::{ChunkGenerator, GeneratedCell};
 pub use geometry::{WorldPosition, WorldRect};

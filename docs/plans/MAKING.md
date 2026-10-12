@@ -1,6 +1,6 @@
 # Plan: making things (food, tools, buildings)
 
-Status: M0-M1 done (D-139), 2026-10-12; next M2 tools. The owner asked for dynamic recipes, and reworked building and tool
+Status: M0-M2 done (D-139, D-141), 2026-10-12; next M3 buildings. The owner asked for dynamic recipes, and reworked building and tool
 making with "lots of dynamics". One system covers all three: making something from materials with
 properties, by a method, discovered by trying and passed on by watching.
 

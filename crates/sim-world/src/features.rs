@@ -42,6 +42,16 @@ pub enum Material {
     DriedBerries,
     /// Dried meat pounded with dried berries: very filling, keeps for a year.
     Pemmican,
+    /// Strips of hide twisted together: binds things.
+    Cord,
+    /// A blade bound to a handle: chops far faster than a hand-held flake.
+    Axe,
+    /// A blade bound to a shaft: strikes surer and deeper than a sharpened stick.
+    StoneSpear,
+    /// A stick weighted with a stone: digs quickly, for sowing and burying.
+    DiggingStick,
+    /// A hide tied on with cord: keeps the cold off better than a loose skin.
+    Cloak,
 }
 
 /// How a material is taken from where it's found: the motion anyone watching
@@ -90,6 +100,12 @@ pub struct MaterialProperties {
     /// Days it keeps before going bad, carried (0 = it keeps): each dawn about
     /// one part in this many of what's carried rots.
     pub keeps_days: u8,
+    /// Times as much wood or stone its carrier hacks off at a go (0 = no help).
+    pub chop: u8,
+    /// Digs: sowing and burying go twice as fast while it's carried.
+    pub digs: bool,
+    /// About one use in this many breaks it (0 = it doesn't wear out).
+    pub wear_odds: u8,
 }
 
 impl MaterialProperties {
@@ -101,7 +117,7 @@ impl MaterialProperties {
 }
 
 impl Material {
-    pub const COUNT: usize = 13;
+    pub const COUNT: usize = 18;
     pub const ALL: [Self; Self::COUNT] = [
         Self::Berries,
         Self::Bitterberries,
@@ -116,6 +132,11 @@ impl Material {
         Self::DriedMeat,
         Self::DriedBerries,
         Self::Pemmican,
+        Self::Cord,
+        Self::Axe,
+        Self::StoneSpear,
+        Self::DiggingStick,
+        Self::Cloak,
     ];
 
     pub const fn properties(self) -> MaterialProperties {
@@ -134,6 +155,9 @@ impl Material {
                 strike: 0,
                 room: 0,
                 keeps_days: 8,
+                chop: 0,
+                digs: false,
+                wear_odds: 0,
             },
             Self::Bitterberries => MaterialProperties {
                 cutting: false,
@@ -149,6 +173,9 @@ impl Material {
                 strike: 0,
                 room: 0,
                 keeps_days: 8,
+                chop: 0,
+                digs: false,
+                wear_odds: 0,
             },
             Self::Wood => MaterialProperties {
                 cutting: false,
@@ -164,6 +191,9 @@ impl Material {
                 strike: 0,
                 room: 0,
                 keeps_days: 0,
+                chop: 0,
+                digs: false,
+                wear_odds: 0,
             },
             Self::Stone => MaterialProperties {
                 cutting: false,
@@ -179,6 +209,9 @@ impl Material {
                 strike: 0,
                 room: 0,
                 keeps_days: 0,
+                chop: 0,
+                digs: false,
+                wear_odds: 0,
             },
             Self::Meat => MaterialProperties {
                 cutting: false,
@@ -194,6 +227,9 @@ impl Material {
                 strike: 0,
                 room: 0,
                 keeps_days: 3,
+                chop: 0,
+                digs: false,
+                wear_odds: 0,
             },
             Self::Blade => MaterialProperties {
                 cutting: true,
@@ -209,6 +245,9 @@ impl Material {
                 strike: 0,
                 room: 0,
                 keeps_days: 0,
+                chop: 2,
+                digs: false,
+                wear_odds: 6,
             },
             Self::Hide => MaterialProperties {
                 cutting: false,
@@ -224,6 +263,9 @@ impl Material {
                 strike: 0,
                 room: 0,
                 keeps_days: 0,
+                chop: 0,
+                digs: false,
+                wear_odds: 0,
             },
             Self::Spear => MaterialProperties {
                 cutting: false,
@@ -239,6 +281,9 @@ impl Material {
                 strike: 15,
                 room: 0,
                 keeps_days: 0,
+                chop: 0,
+                digs: false,
+                wear_odds: 15,
             },
             Self::Basket => MaterialProperties {
                 cutting: false,
@@ -254,6 +299,9 @@ impl Material {
                 strike: 0,
                 room: 6,
                 keeps_days: 0,
+                chop: 0,
+                digs: false,
+                wear_odds: 0,
             },
             Self::Roast => MaterialProperties {
                 cutting: false,
@@ -269,6 +317,9 @@ impl Material {
                 strike: 0,
                 room: 0,
                 keeps_days: 15,
+                chop: 0,
+                digs: false,
+                wear_odds: 0,
             },
             Self::DriedMeat => MaterialProperties {
                 cutting: false,
@@ -284,6 +335,9 @@ impl Material {
                 strike: 0,
                 room: 0,
                 keeps_days: 60,
+                chop: 0,
+                digs: false,
+                wear_odds: 0,
             },
             Self::DriedBerries => MaterialProperties {
                 cutting: false,
@@ -299,6 +353,9 @@ impl Material {
                 strike: 0,
                 room: 0,
                 keeps_days: 40,
+                chop: 0,
+                digs: false,
+                wear_odds: 0,
             },
             Self::Pemmican => MaterialProperties {
                 cutting: false,
@@ -314,6 +371,99 @@ impl Material {
                 strike: 0,
                 room: 0,
                 keeps_days: 200,
+                chop: 0,
+                digs: false,
+                wear_odds: 0,
+            },
+            Self::Cord => MaterialProperties {
+                cutting: false,
+                fuel_seconds: 0,
+                seasonal: false,
+                handling: Handling::Pick,
+                fixed_source: false,
+                nutrition: 0,
+                toxicity: 0,
+                builds: false,
+                regrow_seconds: 0,
+                warmth: 0,
+                strike: 0,
+                room: 0,
+                keeps_days: 0,
+                chop: 0,
+                digs: false,
+                wear_odds: 0,
+            },
+            Self::Axe => MaterialProperties {
+                cutting: true,
+                fuel_seconds: 0,
+                seasonal: false,
+                handling: Handling::Pick,
+                fixed_source: false,
+                nutrition: 0,
+                toxicity: 0,
+                builds: false,
+                regrow_seconds: 0,
+                warmth: 0,
+                strike: 0,
+                room: 0,
+                keeps_days: 0,
+                chop: 3,
+                digs: false,
+                wear_odds: 20,
+            },
+            Self::StoneSpear => MaterialProperties {
+                cutting: false,
+                fuel_seconds: 0,
+                seasonal: false,
+                handling: Handling::Pick,
+                fixed_source: false,
+                nutrition: 0,
+                toxicity: 0,
+                builds: false,
+                regrow_seconds: 0,
+                warmth: 0,
+                strike: 30,
+                room: 0,
+                keeps_days: 0,
+                chop: 0,
+                digs: false,
+                wear_odds: 30,
+            },
+            Self::DiggingStick => MaterialProperties {
+                cutting: false,
+                fuel_seconds: 0,
+                seasonal: false,
+                handling: Handling::Pick,
+                fixed_source: false,
+                nutrition: 0,
+                toxicity: 0,
+                builds: false,
+                regrow_seconds: 0,
+                warmth: 0,
+                strike: 0,
+                room: 0,
+                keeps_days: 0,
+                chop: 0,
+                digs: true,
+                wear_odds: 20,
+            },
+            Self::Cloak => MaterialProperties {
+                cutting: false,
+                fuel_seconds: 0,
+                seasonal: false,
+                handling: Handling::Pick,
+                fixed_source: false,
+                nutrition: 0,
+                toxicity: 0,
+                builds: false,
+                regrow_seconds: 0,
+                warmth: 3,
+                strike: 0,
+                room: 0,
+                keeps_days: 0,
+                chop: 0,
+                digs: false,
+                wear_odds: 0,
             },
         }
     }
@@ -346,20 +496,46 @@ impl Method {
     }
 }
 
-/// One way of making something: what goes in (a second input of count 0 means
-/// none), how, and how many come out. Physics, not knowledge: people discover
-/// these by trying and by watching each other.
+/// One way of making something: what goes in (inputs of count 0 are unused),
+/// how, and how many come out. Physics, not knowledge: people discover these
+/// by trying and by watching each other.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Recipe {
-    pub inputs: [(Material, u8); 2],
+    pub inputs: [(Material, u8); 3],
     pub method: Method,
     pub output: Material,
     pub makes: u8,
 }
 
+/// The kinds of thing that go into something, as a set: ascending, unused
+/// places `None` at the end.
+pub type Kinds = [Option<Material>; 3];
+
+/// `kinds` in canonical order (ascending, `None` last, no repeats).
+pub fn canonical(mut kinds: Kinds) -> Kinds {
+    kinds.sort_by_key(|kind| kind.map_or(u8::MAX, |material| material as u8));
+    if kinds[1] == kinds[0] {
+        kinds[1] = None;
+    }
+    if kinds[2] == kinds[1] || kinds[2] == kinds[0] {
+        kinds[2] = None;
+    }
+    kinds.sort_by_key(|kind| kind.map_or(u8::MAX, |material| material as u8));
+    kinds
+}
+
 const fn recipe(input: (Material, u8), method: Method, output: Material) -> Recipe {
     Recipe {
-        inputs: [input, (input.0, 0)],
+        inputs: [input, (input.0, 0), (input.0, 0)],
+        method,
+        output,
+        makes: 1,
+    }
+}
+
+const fn assembled(parts: [Material; 3], method: Method, output: Material) -> Recipe {
+    Recipe {
+        inputs: [(parts[0], 1), (parts[1], 1), (parts[2], 1)],
         method,
         output,
         makes: 1,
@@ -367,7 +543,7 @@ const fn recipe(input: (Material, u8), method: Method, output: Material) -> Reci
 }
 
 /// Everything that can be made.
-pub const RECIPES: [Recipe; 7] = [
+pub const RECIPES: [Recipe; 12] = [
     recipe((Material::Stone, 1), Method::Hand, Material::Blade),
     recipe((Material::Wood, 2), Method::Hand, Material::Basket),
     recipe((Material::Wood, 2), Method::Edge, Material::Spear),
@@ -379,28 +555,69 @@ pub const RECIPES: [Recipe; 7] = [
         Material::DriedBerries,
     ),
     Recipe {
-        inputs: [(Material::DriedMeat, 1), (Material::DriedBerries, 1)],
+        inputs: [
+            (Material::DriedMeat, 1),
+            (Material::DriedBerries, 1),
+            (Material::DriedMeat, 0),
+        ],
         method: Method::Hand,
         output: Material::Pemmican,
         makes: 2,
+    },
+    Recipe {
+        inputs: [
+            (Material::Hide, 1),
+            (Material::Hide, 0),
+            (Material::Hide, 0),
+        ],
+        method: Method::Edge,
+        output: Material::Cord,
+        makes: 3,
+    },
+    assembled(
+        [Material::Blade, Material::Wood, Material::Cord],
+        Method::Hand,
+        Material::Axe,
+    ),
+    assembled(
+        [Material::Blade, Material::Wood, Material::Cord],
+        Method::Edge,
+        Material::StoneSpear,
+    ),
+    Recipe {
+        inputs: [
+            (Material::Wood, 1),
+            (Material::Stone, 1),
+            (Material::Wood, 0),
+        ],
+        method: Method::Hand,
+        output: Material::DiggingStick,
+        makes: 1,
+    },
+    Recipe {
+        inputs: [
+            (Material::Hide, 1),
+            (Material::Cord, 1),
+            (Material::Hide, 0),
+        ],
+        method: Method::Hand,
+        output: Material::Cloak,
+        makes: 1,
     },
 ];
 
 impl Recipe {
     /// The kinds of thing that go in, as a set (order doesn't matter).
-    pub const fn kinds(&self) -> (Material, Option<Material>) {
-        let [(first, _), (second, count)] = self.inputs;
-        if count == 0 {
-            (first, None)
-        } else if (first as u8) <= (second as u8) {
-            (first, Some(second))
-        } else {
-            (second, Some(first))
-        }
+    pub fn kinds(&self) -> Kinds {
+        canonical(
+            self.inputs
+                .map(|(material, count)| (count > 0).then_some(material)),
+        )
     }
 
     /// The recipe for these kinds of input by this method, if physics has one.
-    pub fn find(kinds: (Material, Option<Material>), method: Method) -> Option<(usize, Recipe)> {
+    pub fn find(kinds: Kinds, method: Method) -> Option<(usize, Recipe)> {
+        let kinds = canonical(kinds);
         RECIPES
             .iter()
             .copied()

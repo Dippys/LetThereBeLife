@@ -173,14 +173,14 @@ Release harnesses and soaks are `#[ignore]`d. Run them explicitly:
 cargo test --release -p sim-headless --test canonical_scenarios -- --ignored --nocapture --test-threads=1
 ```
 
-Determinism fingerprints (world generator v2; refreshed 2026-10-12 after recipes and fair rot, D-139, D-140; earlier, when every agent got the full
+Determinism fingerprints (world generator v2; refreshed 2026-10-12 after tools, D-141; earlier, when every agent got the full
 mind, D-138). If one changes, simulation behavior changed.
 
 | Run | Hash |
 |---|---|
-| `sim-headless --ticks 600 --seed 42` (20 agents) | `384848fda2d36a27` |
-| `sim-headless --canonical --agents 20` (600,000 ticks) | `fb8d782f031294de` |
-| `sim-headless --canonical --agents 100` (600,000 ticks) | `7fceef7e723de916` |
+| `sim-headless --ticks 600 --seed 42` (20 agents) | `7e207690ceab73a4` |
+| `sim-headless --canonical --agents 20` (600,000 ticks) | `a8602b4a2e4e55bb` |
+| `sim-headless --canonical --agents 100` (600,000 ticks) | `b3df0931c43ed9d0` |
 
 ## Tooling
 

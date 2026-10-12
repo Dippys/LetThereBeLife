@@ -756,9 +756,15 @@ impl Engine {
             (PhysicalGoal::WarmUp | PhysicalGoal::TendFire, _) => WARM_UP_TICKS,
             (PhysicalGoal::Craft | PhysicalGoal::Plant | PhysicalGoal::Cook, _) => {
                 let activity = skilled.expect("matched above");
+                let dug = if goal == PhysicalGoal::Plant && self.digs(agent) {
+                    2
+                } else {
+                    1
+                };
                 crate::cognition::by_ability(CRAFT_TICKS, self.ability(agent, activity)) * slowness
+                    / dug
             }
-            (PhysicalGoal::Bury, _) => CRAFT_TICKS,
+            (PhysicalGoal::Bury, _) => CRAFT_TICKS / if self.digs(agent) { 2 } else { 1 },
             (PhysicalGoal::Store | PhysicalGoal::Fetch | PhysicalGoal::Drop, _) => WARM_UP_TICKS,
             // A warning is quick: a shout and a point.
             (_, PolicyReason::Warning) => WARNING_TICKS,
@@ -791,6 +797,20 @@ impl Engine {
         }
     }
 
+    /// Whether `agent` carries something to dig with; using it wears it.
+    fn digs(&mut self, agent: AgentId) -> bool {
+        let tool = self.population.inventory(agent).and_then(|inventory| {
+            inventory
+                .carried()
+                .map(|(material, _)| material)
+                .find(|material| material.properties().digs)
+        });
+        if let Some(tool) = tool {
+            self.wear(agent, tool);
+        }
+        tool.is_some()
+    }
+
     /// What a smoking or an experiment will be: the known smoking recipe for
     /// what it carries, or an untried combination of what it carries by the
     /// methods at hand (at a fire for cooking work, by hand or edge otherwise).
@@ -817,11 +837,8 @@ impl Engine {
                 .map(|(_, recipe)| crate::cognition::Attempt::new(recipe.kinds(), recipe.method))
                 .next(),
             PolicyReason::Experimenting => {
-                let carried: Vec<crate::Material> = inventory
-                    .carried()
-                    .map(|(material, _)| material)
-                    .filter(|material| !material.properties().worn())
-                    .collect();
+                let carried: Vec<crate::Material> =
+                    inventory.carried().map(|(material, _)| material).collect();
                 let edge = inventory
                     .carried()
                     .any(|(material, _)| material.properties().cutting);

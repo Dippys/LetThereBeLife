@@ -1952,10 +1952,15 @@ impl fmt::Display for StudyReport {
         let made = |material: sim_core::Material| self.wildlife.made[material as usize];
         write!(
             formatter,
-            "\n  making: tried {tries} times ({found} made something); dried meat {}, dried berries {}, pemmican {}",
+            "\n  making: tried {tries} times ({found} made something); dried meat {}, dried berries {}, pemmican {}; cord {}, axes {}, stone spears {}, digging sticks {}, cloaks {}",
             made(sim_core::Material::DriedMeat),
             made(sim_core::Material::DriedBerries),
-            made(sim_core::Material::Pemmican)
+            made(sim_core::Material::Pemmican),
+            made(sim_core::Material::Cord),
+            made(sim_core::Material::Axe),
+            made(sim_core::Material::StoneSpear),
+            made(sim_core::Material::DiggingStick),
+            made(sim_core::Material::Cloak)
         )?;
         let [open, sheltered, by_fire] = self.wildlife.sleeps;
         write!(

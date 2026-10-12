@@ -609,14 +609,18 @@ impl Engine {
                 .into_iter()
                 .find(|material| material.properties().cutting && inventory.amount(*material) > 0)
         });
-        // A spear's point reaches further in.
-        let point = self.population.inventory(hunter).map_or(0, |inventory| {
+        // A spear's point reaches further in (the best one carried).
+        let spear = self.population.inventory(hunter).and_then(|inventory| {
             inventory
                 .carried()
-                .map(|(material, _)| u64::from(material.properties().strike))
-                .max()
-                .unwrap_or(0)
+                .map(|(material, _)| material)
+                .filter(|material| material.properties().strike > 0)
+                .max_by_key(|material| material.properties().strike)
         });
+        let point = spear.map_or(0, |spear| u64::from(spear.properties().strike));
+        if let Some(spear) = spear {
+            self.wear(hunter, spear);
+        }
         let chance = (STRIKE_CHANCE
             + HELPER_CHANCE * helpers
             + u64::from(edge.is_some()) * EDGE_CHANCE

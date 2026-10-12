@@ -102,6 +102,11 @@ pub(super) const fn material_color(material: Material) -> u32 {
         Material::DriedMeat => rgba(120, 60, 40, 235),
         Material::DriedBerries => rgba(170, 70, 100, 235),
         Material::Pemmican => rgba(110, 80, 55, 235),
+        Material::Cord => rgba(180, 150, 110, 235),
+        Material::Axe => rgba(160, 170, 180, 235),
+        Material::StoneSpear => rgba(200, 160, 110, 235),
+        Material::DiggingStick => rgba(150, 110, 70, 235),
+        Material::Cloak => rgba(120, 85, 55, 235),
     }
 }
 

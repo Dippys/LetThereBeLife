@@ -71,6 +71,11 @@ pub const fn material(material: Material) -> &'static str {
         Material::DriedMeat => "dried meat",
         Material::DriedBerries => "dried berries",
         Material::Pemmican => "pemmican",
+        Material::Cord => "cord",
+        Material::Axe => "axes",
+        Material::StoneSpear => "stone spears",
+        Material::DiggingStick => "digging sticks",
+        Material::Cloak => "cloaks",
     }
 }
 

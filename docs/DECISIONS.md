@@ -1179,3 +1179,18 @@ faster than their keeping days said.
 **Consequences:** Over 10 years in 20 valleys: food rotted 182,222 units against 377,797; births
 140 against 123; survivors 463 against 435.
 
+## D-141: Tools put together from parts, and worn out by use (2026-10-12)
+
+**Decision:** Recipes take up to three inputs. New things: cord (a hide cut with an edge, makes 3),
+axe (blade, wood and cord by hand: chops 3x), stone spear (the same parts shaped with an edge:
+strike +30), digging stick (wood and a stone: sowing and burying twice as fast) and cloak (hide
+and cord: warmth 3). Material properties gained `chop`, `digs` and `wear_odds`; every tool that's
+used (the best edge for chopping, the best point for a strike, a digging stick) breaks about one
+use in its odds, replacing the blade-only wear. People who know a tool and carry its parts make
+it; trying can use a carried tool as an ingredient, and a failed try spoils only what's used up.
+Crafts 80 B, mind 2,016 B.
+**Why:** The owner asked for tools and tool making with lots of dynamics (docs/plans/MAKING.md M2).
+**Consequences:** Over 10 years in 20 valleys: 470 survivors against 463, cold deaths 16 against
+24. Made: 4,116 digging sticks, 38 cord, 1 stone spear; no axes or cloaks yet, since a blade, wood
+and cord must be carried together and the combination found first.
+

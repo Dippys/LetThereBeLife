@@ -22,9 +22,6 @@ const FETCHED_FOOD: u8 = 6;
 const SWIM_CHILL: u16 = 120;
 const SWIM_EFFORT: u16 = 60;
 
-/// One use in this many wears a blade out.
-const BLADE_WEAR_ODDS: u64 = 6;
-
 impl Engine {
     /// Sleeping under a roof with a burning fire close by warms faster.
     pub(super) fn by_the_fire(
@@ -700,12 +697,30 @@ impl Engine {
             self.discoveries += 1;
             return self.make(agent, index, recipe);
         }
-        let (first, second) = attempt.kinds();
-        for kind in std::iter::once(first).chain(second) {
-            self.population.take(agent, kind, 1);
+        // What's used up is spoiled; tools come through a failed try.
+        for kind in attempt.kinds().into_iter().flatten() {
+            if !kind.properties().worn() {
+                self.population.take(agent, kind, 1);
+            }
         }
         self.minds.get_mut(agent).crafts.failed(attempt);
         Ok(())
+    }
+
+    /// `agent` used `tool` once: about one use in its wear odds breaks it.
+    pub(super) fn wear(&mut self, agent: AgentId, tool: Material) {
+        let odds = u64::from(tool.properties().wear_odds);
+        if odds > 0
+            && crate::wildlife::mix(
+                self.config.life_seed
+                    ^ 0x5745_4152
+                    ^ self.time.ticks()
+                    ^ u64::from(agent.get()) << 32,
+            ) % odds
+                == 0
+        {
+            self.population.take(agent, tool, 1);
+        }
     }
 
     /// Who is awake and close enough to see `agent` at work.
@@ -1072,9 +1087,11 @@ impl Engine {
         };
         // A cutting edge doubles what one go at chopping or carving yields,
         // and wears with use.
+        // The best edge it carries: an axe before a hand-held flake.
         let edge = Material::ALL
             .into_iter()
-            .find(|material| material.properties().cutting && inventory.amount(*material) > 0);
+            .filter(|material| material.properties().cutting && inventory.amount(*material) > 0)
+            .max_by_key(|material| material.properties().chop);
         let cuts = matches!(
             resource.kind.properties().handling,
             crate::Handling::Chop | crate::Handling::Carve
@@ -1129,7 +1146,7 @@ impl Engine {
         self.practise(agent, activity);
         let maximum = inventory
             .remaining_capacity(resource.kind)
-            .min(knack as u8 * if edge.is_some() { 2 } else { 1 });
+            .min(knack as u8 * edge.map_or(1, |edge| edge.properties().chop.max(1)));
         let gathered = if resource.kind == Material::Meat {
             self.wildlife.butcher(resource_position, maximum)
         } else if self.spawned_objects.at(resource_position).is_some() {
@@ -1144,13 +1161,8 @@ impl Engine {
         };
         let accepted = self.population.add_inventory(agent, kind, gathered);
         debug_assert_eq!(accepted, gathered);
-        if let Some(blade) = edge
-            && crate::wildlife::mix(
-                self.config.life_seed ^ self.time.ticks() ^ u64::from(agent.get()),
-            ) % BLADE_WEAR_ODDS
-                == 0
-        {
-            self.population.take(agent, blade, 1);
+        if let Some(tool) = edge {
+            self.wear(agent, tool);
         }
         Ok(())
     }
