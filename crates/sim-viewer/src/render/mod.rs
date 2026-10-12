@@ -79,6 +79,39 @@ pub struct RenderState {
     pub darkness: f32,
     /// The windows menu is open.
     pub windows_menu: bool,
+    /// Show the small map of the band's land in the corner.
+    pub minimap: bool,
+    /// The start screen, while it's up.
+    pub start: Option<StartView>,
+}
+
+/// The start screen: what to begin with, and the settings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartView {
+    pub settings_open: bool,
+    /// A quick save exists to open.
+    pub save_exists: bool,
+    /// The settings' current values, as shown on their buttons.
+    pub settings: Vec<(Setting, String)>,
+}
+
+/// Something set from the start screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Setting {
+    Signs,
+    SmallMap,
+    Alerts,
+    Director,
+}
+
+/// A choice on the start screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartChoice {
+    NewValley,
+    EmptyWorld,
+    OpenSave,
+    Settings,
+    Change(Setting),
 }
 
 /// Head counts for the top bar.
@@ -187,6 +220,10 @@ pub enum UiAction {
     LookAt(sim_core::WorldPosition, Option<sim_core::AgentId>),
     /// Sort the people list by this column.
     SortPeople(PeopleSort),
+    /// Center the view here (a click on the small map).
+    CenterOn(sim_core::WorldPosition),
+    /// A choice on the start screen.
+    Start(StartChoice),
 }
 
 /// The floating windows.
@@ -890,7 +927,7 @@ impl Renderer {
             state.season,
             state.darkness,
             view.world_bounds(),
-            (state.snapshot.tick / 60) as u32,
+            (view.scale() as f32, state.snapshot.tick),
             &mut self.atmosphere_instances,
         );
         self.atmosphere
@@ -1121,6 +1158,30 @@ impl Renderer {
                 ))
             })
             .collect();
+        // Close up, names under people's feet in their family's color.
+        let names: Vec<Name> = if view.scale() as f32 >= MIN_NAME_CELL_PIXELS {
+            let tick = state.snapshot.tick;
+            engine
+                .agent_views(MAX_AGENT_INSTANCES)
+                .filter(|agent| {
+                    view.world_bounds().contains(agent.position)
+                        && agent.activity != sim_core::AgentActivity::Dead
+                })
+                .filter_map(|agent| {
+                    let life = engine.life(agent.id)?;
+                    let (at, _) = motion.drawn(agent.id, agent.position, tick);
+                    let color = motion
+                        .family_line(engine, agent.id)
+                        .map_or(colors::UI_TEXT, colors::family_line);
+                    Some((at, life.name.spoken(), color))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let minimap = state
+            .minimap
+            .then(|| build_minimap(engine, view.world_bounds(), state.season));
         build_interface(
             &mut self.screen_overlay_instances,
             &mut self.hits,
@@ -1130,6 +1191,8 @@ impl Renderer {
                 gestures: &recent_gestures,
                 signs: &signs,
                 readings: &readings,
+                names: &names,
+                minimap: minimap.as_ref(),
             },
             (!self.details_text.is_empty()).then_some(self.details_text.as_str()),
         );
@@ -1462,7 +1525,7 @@ const GROWN_TREE_WOOD: u16 = 20;
 /// Worn cells drawn at most.
 const MAX_PATH_INSTANCES: usize = 16_384;
 /// The season's tint plus fire glows drawn at most.
-const MAX_ATMOSPHERE_INSTANCES: usize = 1_024;
+const MAX_ATMOSPHERE_INSTANCES: usize = 2_048;
 /// How far firelight reaches, in cells, and in how many rings it fades.
 const FIRELIGHT_REACH: f32 = 7.0;
 const FIRELIGHT_RINGS: usize = 4;
@@ -1474,10 +1537,11 @@ fn build_atmosphere(
     season: sim_core::Season,
     darkness: f32,
     bounds: sim_core::WorldRect,
-    now: u32,
+    (scale, tick): (f32, u64),
     out: &mut Vec<Instance>,
 ) {
     out.clear();
+    let now = (tick / 60) as u32;
     let cover = |out: &mut Vec<Instance>, color: u32| {
         out.push(Instance::new(
             bounds.min.x as f32,
@@ -1490,6 +1554,7 @@ fn build_atmosphere(
     if let Some(tint) = colors::season_tint(season) {
         cover(out, tint);
     }
+    weather(season, bounds, scale, tick, out);
     if darkness > 0.0 {
         cover(out, colors::night(darkness));
     }
@@ -1518,6 +1583,141 @@ fn build_atmosphere(
     }
 }
 
+/// Cells across the small map.
+pub(super) const MINIMAP_SIDE: usize = 48;
+
+/// The small map: the land around the band (at least `MINIMAP_MIN_SPAN` cells
+/// across), people and fires on it, and the part in view.
+pub(super) struct Minimap {
+    pub(super) area: WorldRect,
+    /// `MINIMAP_SIDE` squared colors, row by row (`None` where not generated).
+    pub(super) cells: Vec<Option<u32>>,
+    pub(super) people: Vec<(WorldPosition, u32)>,
+    pub(super) fires: Vec<WorldPosition>,
+    pub(super) view: WorldRect,
+}
+
+const MINIMAP_MIN_SPAN: i64 = 192;
+
+fn build_minimap(engine: &Engine, view: WorldRect, season: sim_core::Season) -> Minimap {
+    let living: Vec<_> = engine
+        .agent_views(MAX_AGENT_INSTANCES)
+        .filter(|agent| agent.activity != sim_core::AgentActivity::Dead)
+        .collect();
+    let (mut min, mut max) = (
+        WorldPosition {
+            x: i64::MAX,
+            y: i64::MAX,
+        },
+        WorldPosition {
+            x: i64::MIN,
+            y: i64::MIN,
+        },
+    );
+    for agent in &living {
+        min.x = min.x.min(agent.position.x);
+        min.y = min.y.min(agent.position.y);
+        max.x = max.x.max(agent.position.x);
+        max.y = max.y.max(agent.position.y);
+    }
+    if living.is_empty() {
+        min = view.min;
+        max = view.max;
+    }
+    let span = (max.x - min.x).max(max.y - min.y).max(MINIMAP_MIN_SPAN) + 48;
+    let center = WorldPosition {
+        x: (min.x + max.x) / 2,
+        y: (min.y + max.y) / 2,
+    };
+    let area = WorldRect {
+        min: WorldPosition {
+            x: center.x - span / 2,
+            y: center.y - span / 2,
+        },
+        max: WorldPosition {
+            x: center.x - span / 2 + span,
+            y: center.y - span / 2 + span,
+        },
+    };
+    let world = engine.world();
+    let step = span / MINIMAP_SIDE as i64;
+    let mut cells = Vec::with_capacity(MINIMAP_SIDE * MINIMAP_SIDE);
+    for row in 0..MINIMAP_SIDE as i64 {
+        for column in 0..MINIMAP_SIDE as i64 {
+            let position = WorldPosition {
+                x: area.min.x + column * step + step / 2,
+                y: area.min.y + row * step + step / 2,
+            };
+            cells.push(world.cell(position).map(|cell| {
+                let color = colors::terrain_color(cell);
+                match (season, cell.water()) {
+                    (sim_core::Season::Winter, None) => colors::snowy(color),
+                    _ => color,
+                }
+            }));
+        }
+    }
+    let now = (engine.snapshot().tick / 60) as u32;
+    Minimap {
+        area,
+        cells,
+        people: living
+            .iter()
+            .map(|agent| (agent.position, colors::agent_color(agent.activity)))
+            .collect(),
+        fires: engine
+            .structure_views(MAX_STRUCTURE_INSTANCES)
+            .filter(|fire| fire.kind.burns() && fire.working(now))
+            .map(|fire| fire.position)
+            .collect(),
+        view,
+    }
+}
+
+/// Flakes or leaves drifting across the view at once.
+const WEATHER_SPECKS: u64 = 260;
+
+/// Snow falling in winter and leaves drifting down in autumn: specks spread
+/// over the view by a fixed hash, each falling at its own pace with the clock,
+/// a few screen pixels across whatever the zoom.
+fn weather(
+    season: sim_core::Season,
+    bounds: sim_core::WorldRect,
+    scale: f32,
+    tick: u64,
+    out: &mut Vec<Instance>,
+) {
+    let (count, size, colors_of): (u64, f32, &[u32]) = match season {
+        sim_core::Season::Winter => (WEATHER_SPECKS, 3.0, &[colors::SNOW]),
+        sim_core::Season::Autumn => (WEATHER_SPECKS / 4, 4.0, &colors::LEAVES),
+        _ => return,
+    };
+    let width = (bounds.max.x - bounds.min.x) as f32;
+    let height = (bounds.max.y - bounds.min.y) as f32;
+    let speck = size / scale.max(0.01);
+    // Screen pixels fallen per tick.
+    let fall = 0.5 / scale.max(0.01);
+    for index in 0..count {
+        let mut hash = index.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+        hash ^= hash >> 31;
+        let across = (hash % 10_000) as f32 / 10_000.0;
+        let start = ((hash >> 16) % 10_000) as f32 / 10_000.0;
+        let pace = 0.6 + ((hash >> 32) % 100) as f32 / 100.0;
+        let fallen = tick as f32 * fall * pace;
+        let y = (start * height + fallen).rem_euclid(height);
+        // A gentle sideways sway.
+        let sway = ((tick as f32 / 40.0 + index as f32).sin()) * 6.0 / scale.max(0.01);
+        let x = (across * width + sway + fallen * 0.3).rem_euclid(width);
+        out.push(Instance::new(
+            bounds.min.x as f32 + x,
+            bounds.min.y as f32 + y,
+            speck,
+            speck,
+            colors_of[index as usize % colors_of.len()],
+        ));
+    }
+}
+
 /// Cells must be at least this many pixels wide before signs over people show.
 const MIN_SIGN_CELL_PIXELS: f32 = 6.0;
 
@@ -1527,6 +1727,12 @@ pub(super) type PersonSign = (sim_core::WorldPosition, char, u32);
 /// What a watcher took a gesture to mean: where it stands, the meaning, and
 /// whether that's not what the speaker meant.
 pub(super) type Reading = (sim_core::WorldPosition, String, bool);
+
+/// Cells must be at least this many pixels wide before names show.
+const MIN_NAME_CELL_PIXELS: f32 = 24.0;
+
+/// A name under someone: where they're drawn, the name, its color.
+pub(super) type Name = ([f32; 2], String, u32);
 
 /// Signs for the living people in `bounds`: asleep, by a fire, at water,
 /// eating, carrying or gathering, building, hunting, running.

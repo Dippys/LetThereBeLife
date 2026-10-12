@@ -136,6 +136,8 @@ pub(super) struct MapMarks<'a> {
     pub(super) gestures: &'a [GestureMark],
     pub(super) signs: &'a [super::PersonSign],
     pub(super) readings: &'a [super::Reading],
+    pub(super) names: &'a [super::Name],
+    pub(super) minimap: Option<&'a super::Minimap>,
 }
 
 pub(super) fn build_interface(
@@ -150,6 +152,8 @@ pub(super) fn build_interface(
         gestures,
         signs,
         readings,
+        names,
+        minimap,
     } = *marks;
     let (width, height) = view.screen_size();
     out.clear();
@@ -162,10 +166,20 @@ pub(super) fn build_interface(
         cursor: state.cursor.map(|(x, y)| (x as f32, y as f32)),
     };
     let painter = &mut painter;
+    person_names(painter, view, names);
     person_signs(painter, view, signs, gestures, readings);
     speech_bubbles(painter, view, gestures);
-    listener_readings(painter, view, readings);
+    // Under the names, if they're shown.
+    let below = if names.is_empty() {
+        0.0
+    } else {
+        painter.line()
+    };
+    listener_readings(painter, view, readings, below);
     let bar = top_bar(painter, state, width);
+    if let Some(map) = minimap {
+        small_map(painter, map, bar);
+    }
     let palette_top = state
         .build
         .map_or(height, |tool| build_palette(painter, tool, width, height));
@@ -201,6 +215,118 @@ pub(super) fn build_interface(
     }
     if state.help_open {
         help(painter, width, height);
+    }
+    if let Some(start) = &state.start {
+        start_screen(painter, start, width, height);
+    }
+}
+
+/// The start screen, over a dimmed world: a new valley with a band, an empty
+/// world to fill, the quick save, and settings.
+fn start_screen(painter: &mut Painter, start: &super::StartView, width: f32, height: f32) {
+    use super::StartChoice;
+    let px = painter.px;
+    let pad = painter.pad();
+    let line = painter.line();
+    painter.rect(0.0, 0.0, width, height, colors::UI_DIM_SCREEN);
+    // The world behind isn't clickable.
+    painter.hits.push(Hit {
+        x: 0.0,
+        y: 0.0,
+        width,
+        height,
+        action: None,
+    });
+    let title = "Let There Be Life";
+    let subtitle = "People who learn the world, and each other, from nothing.";
+    let choices: [(&str, &str, StartChoice, bool); 4] = [
+        (
+            "New valley",
+            "a band of two families by water",
+            StartChoice::NewValley,
+            true,
+        ),
+        (
+            "Empty world",
+            "place people yourself (T)",
+            StartChoice::EmptyWorld,
+            true,
+        ),
+        (
+            "Open save",
+            "the quick save (F5 saves)",
+            StartChoice::OpenSave,
+            start.save_exists,
+        ),
+        (
+            "Settings",
+            "what's shown and when",
+            StartChoice::Settings,
+            true,
+        ),
+    ];
+    let rows = choices.len()
+        + if start.settings_open {
+            start.settings.len()
+        } else {
+            0
+        };
+    let w = (text_width(subtitle, px) + 2.0 * pad).max(64.0 * ADVANCE * px);
+    let h = 3.0 * line + px + rows as f32 * (line + 4.0 * px) + 3.0 * pad;
+    let (x, y) = (((width - w) / 2.0).max(0.0), ((height - h) / 2.0).max(0.0));
+    painter.panel(x, y, w, h);
+    let big = 2.0 * px;
+    push_text(
+        painter.out,
+        title,
+        x + (w - text_width(title, big)) / 2.0,
+        y + pad,
+        big,
+        colors::UI_TITLE,
+    );
+    let mut row = y + pad + 2.0 * line + px;
+    painter.text(
+        subtitle,
+        x + (w - text_width(subtitle, px)) / 2.0,
+        row,
+        colors::UI_DIM,
+    );
+    row += line + pad;
+    let button = 18.0 * ADVANCE * px;
+    for (label, about, choice, enabled) in choices {
+        if enabled {
+            painter.button(label, x + pad, row, UiAction::Start(choice), false);
+        } else {
+            painter.rect(
+                x + pad,
+                row,
+                painter.button_width(label),
+                line + 2.0 * px,
+                colors::UI_BUTTON,
+            );
+            painter.text(label, x + pad + 3.0 * px, row + px, colors::UI_DIM);
+        }
+        painter.text(about, x + pad + button, row + px, colors::UI_DIM);
+        row += line + 4.0 * px;
+        if choice == StartChoice::Settings && start.settings_open {
+            for (setting, value) in &start.settings {
+                let name = match setting {
+                    super::Setting::Signs => "Signs over people",
+                    super::Setting::SmallMap => "Small map",
+                    super::Setting::Alerts => "Alerts",
+                    super::Setting::Director => "Director camera",
+                };
+                painter.text(name, x + pad + 2.0 * pad, row + px, colors::UI_TEXT);
+                painter.button(
+                    value,
+                    x + pad + button,
+                    row,
+                    UiAction::Start(StartChoice::Change(*setting)),
+                    false,
+                );
+                row += line + 4.0 * px;
+            }
+        }
     }
 }
 
@@ -1242,6 +1368,124 @@ fn person_signs(
     }
 }
 
+/// Clicks on the small map land on a grid this many blocks across.
+const MINIMAP_CLICK_BLOCKS: usize = 12;
+
+/// The small map in the top-left corner under the bar: the land, the part in
+/// view outlined, fires and people as dots; a click centers the view there.
+fn small_map(painter: &mut Painter, map: &super::Minimap, top: f32) {
+    let px = painter.px;
+    let side = super::MINIMAP_SIDE;
+    let dot = (px * 1.5).round().max(2.0);
+    let size = dot * side as f32;
+    let (left, top) = (4.0 * px, top + 4.0 * px);
+    painter.rect(
+        left - px,
+        top - px,
+        size + 2.0 * px,
+        size + 2.0 * px,
+        colors::UI_PANEL,
+    );
+    for row in 0..side {
+        let mut column = 0;
+        while column < side {
+            let color = map.cells[row * side + column];
+            let start = column;
+            while column < side && map.cells[row * side + column] == color {
+                column += 1;
+            }
+            if let Some(color) = color {
+                painter.rect(
+                    left + start as f32 * dot,
+                    top + row as f32 * dot,
+                    (column - start) as f32 * dot,
+                    dot,
+                    color,
+                );
+            }
+        }
+    }
+    let span = (map.area.max.x - map.area.min.x) as f32;
+    let to_map = |position: WorldPosition| {
+        (
+            left + (position.x - map.area.min.x) as f32 / span * size,
+            top + (position.y - map.area.min.y) as f32 / span * size,
+        )
+    };
+    let inside = |(x, y): (f32, f32)| x >= left && y >= top && x < left + size && y < top + size;
+    // The part in view, outlined (clipped to the map).
+    let (x0, y0) = to_map(map.view.min);
+    let (x1, y1) = to_map(map.view.max);
+    let (x0, y0) = (x0.max(left), y0.max(top));
+    let (x1, y1) = (x1.min(left + size), y1.min(top + size));
+    if x1 > x0 && y1 > y0 {
+        let line = px.max(1.0);
+        for (x, y, w, h) in [
+            (x0, y0, x1 - x0, line),
+            (x0, y1 - line, x1 - x0, line),
+            (x0, y0, line, y1 - y0),
+            (x1 - line, y0, line, y1 - y0),
+        ] {
+            painter.rect(x, y, w, h, colors::UI_TEXT);
+        }
+    }
+    for &fire in &map.fires {
+        let at = to_map(fire);
+        if inside(at) {
+            painter.rect(
+                at.0 - px,
+                at.1 - px,
+                2.0 * px,
+                2.0 * px,
+                colors::MINIMAP_FIRE,
+            );
+        }
+    }
+    for &(person, color) in &map.people {
+        let at = to_map(person);
+        if inside(at) {
+            painter.rect(at.0 - px, at.1 - px, 2.0 * px, 2.0 * px, color);
+        }
+    }
+    // Clicks: a coarse grid of places to center on.
+    let block = size / MINIMAP_CLICK_BLOCKS as f32;
+    for row in 0..MINIMAP_CLICK_BLOCKS {
+        for column in 0..MINIMAP_CLICK_BLOCKS {
+            let center = WorldPosition {
+                x: map.area.min.x
+                    + ((column as f32 + 0.5) / MINIMAP_CLICK_BLOCKS as f32 * span) as i64,
+                y: map.area.min.y
+                    + ((row as f32 + 0.5) / MINIMAP_CLICK_BLOCKS as f32 * span) as i64,
+            };
+            painter.hits.push(Hit {
+                x: left + column as f32 * block,
+                y: top + row as f32 * block,
+                width: block,
+                height: block,
+                action: Some(UiAction::CenterOn(center)),
+            });
+        }
+    }
+}
+
+/// Names under people's feet, in their family's color.
+fn person_names(painter: &mut Painter, view: CameraView, names: &[super::Name]) {
+    let (width, height) = view.screen_size();
+    let scale = view.scale() as f32;
+    let [center_x, center_y] = view.center();
+    let px = painter.px;
+    for ([x, y], name, color) in names {
+        let w = text_width(name, px) + 2.0 * px;
+        let left = (x + 0.5 - center_x) * scale + width / 2.0 - w / 2.0;
+        let top = (y + 1.0 - center_y) * scale + height / 2.0;
+        if left + w < 0.0 || top < 0.0 || left > width || top > height {
+            continue;
+        }
+        painter.rect(left, top, w, painter.line() - px, colors::UI_SIGN_BACK);
+        painter.text(name, left + px, top, *color);
+    }
+}
+
 /// Words being said right now, over the speakers' heads.
 fn speech_bubbles(painter: &mut Painter, view: CameraView, gestures: &[GestureMark]) {
     let (width, height) = view.screen_size();
@@ -1306,7 +1550,12 @@ fn speech_bubbles(painter: &mut Painter, view: CameraView, gestures: &[GestureMa
 /// What watchers took the latest gestures to mean, in small bubbles under
 /// their feet (speakers' words go over heads): pale when they got it, red
 /// when they didn't.
-fn listener_readings(painter: &mut Painter, view: CameraView, readings: &[super::Reading]) {
+fn listener_readings(
+    painter: &mut Painter,
+    view: CameraView,
+    readings: &[super::Reading],
+    below: f32,
+) {
     let (width, height) = view.screen_size();
     let scale = view.scale() as f32;
     if scale < MIN_BUBBLE_CELL_PIXELS {
@@ -1325,7 +1574,7 @@ fn listener_readings(painter: &mut Painter, view: CameraView, readings: &[super:
         let w = text_width(text, px) + 4.0 * px;
         let h = painter.line();
         let x = (position.x as f32 + 0.5 - center_x) * scale + width / 2.0 - w / 2.0;
-        let y = (position.y as f32 + 1.0 - center_y) * scale + height / 2.0 + px;
+        let y = (position.y as f32 + 1.0 - center_y) * scale + height / 2.0 + px + below;
         if x + w < 0.0 || y + h < 0.0 || x > width || y > height {
             continue;
         }
@@ -1369,7 +1618,7 @@ fn help(painter: &mut Painter, width: f32, height: f32) {
          things. Words can be misunderstood, and both sides learn from what happens next.",
         column * 2 + 2,
     );
-    const CONTROLS: [(&str, &str); 18] = [
+    const CONTROLS: [(&str, &str); 21] = [
         ("Drag", "move the map"),
         ("Scroll", "zoom in and out"),
         ("Click", "pick a person"),
@@ -1377,6 +1626,9 @@ fn help(painter: &mut Painter, width: f32, height: f32) {
         ("F", "follow the picked person"),
         ("N", "jump to recent events in turn"),
         ("S", "signs over people on or off"),
+        ("O", "small map on or off"),
+        ("A", "alerts: off, say, say and pause"),
+        ("D", "director: camera goes where things happen"),
         ("Space", "pause or resume"),
         ("1-9  + -", "speed (+ goes past 256×)"),
         ("I", "valley info"),

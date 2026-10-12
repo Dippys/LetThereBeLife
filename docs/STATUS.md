@@ -182,7 +182,8 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 - 2026-10-12 (latest): day and night, colder and sleepy (D-124); unknown places shown only to
   those in need, so people explore again (D-125); viewer: floating windows, signs, readings,
-  season light, worn paths, pixel pictures when zoomed in, gliding walkers, family colors.
+  season light, worn paths, pixel pictures when zoomed in, gliding walkers, family colors,
+  names, snow and leaves, small map, alerts, director camera, start screen.
 - 2026-10-12: idle time works toward what has proved useful; cold deaths 27 to 18
   over 10 years in 20 valleys (D-123).
 - 2026-10-12: plans for hunger and thirst (D-119); people show others places they

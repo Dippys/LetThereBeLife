@@ -121,6 +121,9 @@ Compare minds before and after any behavior change. Current numbers are in [STAT
 | `Tab` / `F` | Next living person / follow the picked person |
 | `Esc` | Close help, then the build palette, then the person panel (it no longer quits) |
 | `S` | Signs over people (zoomed in): asleep, by a fire, at water, food, carrying, building, hunting or running |
+| `O` | Small map of the band's land (top left); click it to look there |
+| `A` | Alerts on notable events (deaths, births, couples, newcomers, firsts): off, say, or say and pause |
+| `D` | Director: the camera goes to whoever the latest notable event is about, or someone new every 20 s |
 | `N` | Jump through recent events in turn (camera and person panel) |
 | `J` `G` `K` `P` `M` | Floating windows (also the Windows button): the band's story by year, charts over time, the family tree, everyone alive, and the picked person's mind (plan, beliefs, places, trust). Drag by the title, scroll with the wheel, click a line to look |
 | `Space`, `1`–`9`, `+`/`-` | Pause, speed 1×–256×, step the speed up to 8192× and then a year a second ("1yr/s", 14,400×) (also buttons in the top bar); past what the computer manages, the bar shows the speed reached |

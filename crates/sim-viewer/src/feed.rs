@@ -48,6 +48,10 @@ pub struct StoryEntry {
 
 #[derive(Debug, Default)]
 pub struct Feed {
+    /// Notable events so far (deaths, births, couples, newcomers, firsts),
+    /// and the latest: for alerts and the director camera.
+    notable: u64,
+    latest_notable: Option<FeedEntry>,
     entries: VecDeque<FeedEntry>,
     /// The band's story: births, deaths, couples, newcomers, firsts.
     story: VecDeque<StoryEntry>,
@@ -72,6 +76,13 @@ impl Feed {
         self.births = 0;
         self.built = [0, 0];
         self.builders.clear();
+        self.notable = 0;
+        self.latest_notable = None;
+    }
+
+    /// How many notable events have happened, and the latest one.
+    pub fn notable(&self) -> (u64, Option<&FeedEntry>) {
+        (self.notable, self.latest_notable.as_ref())
     }
 
     /// The band's story so far, oldest first.
@@ -91,15 +102,21 @@ impl Feed {
         if self.story.len() == STORY_CAPACITY {
             self.story.pop_front();
         }
+        let entry = FeedEntry {
+            text: text.clone(),
+            tone,
+            agent,
+            position,
+            count: 1,
+        };
+        // Story lines about someone are notable (the yearly census isn't).
+        if agent.is_some() {
+            self.notable += 1;
+            self.latest_notable = Some(entry.clone());
+        }
         self.story.push_back(StoryEntry {
             year: year_of(engine),
-            entry: FeedEntry {
-                text: text.clone(),
-                tone,
-                agent,
-                position,
-                count: 1,
-            },
+            entry,
         });
         self.push(text, tone, agent, position);
     }

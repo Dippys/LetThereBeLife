@@ -228,3 +228,24 @@ pub(super) const fn family_line(line: u8) -> u32 {
         _ => rgba(240, 120, 80, 255),
     }
 }
+
+/// Falling snow, and autumn leaves.
+pub(super) const SNOW: u32 = rgba(245, 248, 255, 220);
+pub(super) const LEAVES: [u32; 3] = [
+    rgba(214, 120, 40, 230),
+    rgba(190, 70, 40, 230),
+    rgba(220, 180, 60, 230),
+];
+
+/// Land on the small map in winter: lightened toward snow.
+pub(super) fn snowy(color: u32) -> u32 {
+    let lift = |shift: u32| {
+        let channel = (color >> shift) & 0xff;
+        (channel + (235 - channel.min(235)) / 2) << shift
+    };
+    lift(0) | lift(8) | lift(16) | (color & 0xff00_0000)
+}
+/// A burning fire on the small map.
+pub(super) const MINIMAP_FIRE: u32 = rgba(255, 150, 40, 255);
+/// Behind the start screen.
+pub(super) const UI_DIM_SCREEN: u32 = rgba(8, 10, 14, 200);

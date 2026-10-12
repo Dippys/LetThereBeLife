@@ -116,6 +116,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if opened_save {
         app = app.with_opened_world();
     }
+    if !options.valley && !opened_save && options.advance == 0 {
+        app = app.with_start_screen();
+    }
     if options.advance > 0 {
         let started = Instant::now();
         app.advance(options.advance);

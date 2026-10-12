@@ -16,6 +16,9 @@ use crate::{
     startup::{reset, residency_ready, spawn_at},
 };
 
+/// With nothing notable happening, the director moves on after this long.
+const DIRECTOR_IDLE: std::time::Duration = std::time::Duration::from_secs(20);
+
 impl ViewerApp {
     pub(super) fn update(&mut self) {
         let now = Instant::now();
@@ -40,6 +43,13 @@ impl ViewerApp {
                 self.history.record(&self.engine, self.feed.births());
                 self.feed.record(&self.engine);
                 self.accumulator -= tick_seconds;
+                if self.alerts == super::Alerts::Pause && self.feed.notable().0 > self.notable_seen
+                {
+                    self.engine
+                        .command(sim_core::EngineCommand::SetPaused(true));
+                    self.accumulator = 0.0;
+                    break;
+                }
             }
             let frame = elapsed.as_secs_f64();
             if frame > 0.0 {
@@ -58,6 +68,38 @@ impl ViewerApp {
             _ => Some((self.reached_speed.round() as u32, now)),
         };
         self.track_year();
+        self.take_notable();
+    }
+
+    /// Alerts on (and the director cuts to) the latest notable event; with
+    /// nothing notable for a while, the director moves on to someone else.
+    fn take_notable(&mut self) {
+        let (count, latest) = self.feed.notable();
+        if count > self.notable_seen {
+            self.notable_seen = count;
+            let Some(entry) = latest.cloned() else {
+                return;
+            };
+            if self.alerts != super::Alerts::Off {
+                self.show_toast(entry.text.clone());
+            }
+            if self.director {
+                self.director_cut = Some(Instant::now());
+                if let Some(agent) = entry.agent {
+                    self.selected = Some(agent);
+                    self.following = true;
+                }
+                self.focus_on(entry.position);
+            }
+        } else if self.director
+            && self
+                .director_cut
+                .is_none_or(|cut| cut.elapsed() > DIRECTOR_IDLE)
+        {
+            self.director_cut = Some(Instant::now());
+            self.select_next_person();
+            self.following = self.selected.is_some();
+        }
     }
 
     /// Notes the deaths and births so far whenever a new year begins.
@@ -100,6 +142,7 @@ impl ViewerApp {
         self.wear.clear();
         self.motion.clear();
         self.feed.clear();
+        self.notable_seen = 0;
         self.history.clear();
         self.selected = None;
         self.following = false;

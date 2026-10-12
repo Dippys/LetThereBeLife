@@ -103,6 +103,18 @@ pub(crate) struct ViewerApp {
     window_drag: Option<(usize, f32, f32)>,
     /// The Windows menu in the top bar is open.
     windows_menu: bool,
+    /// The small map in the corner is shown.
+    minimap: bool,
+    /// What happens when something notable happens.
+    alerts: Alerts,
+    /// The camera follows whoever the latest notable event is about.
+    director: bool,
+    /// Notable events already alerted on.
+    notable_seen: u64,
+    /// When the director last cut to someone.
+    director_cut: Option<Instant>,
+    /// The start screen is up (and whether its settings are open).
+    start: Option<bool>,
     /// How the people list is ordered.
     people_sort: crate::render::PeopleSort,
     /// How the band has done over time, for the charts.
@@ -198,6 +210,12 @@ impl ViewerApp {
             windows: Vec::new(),
             window_drag: None,
             windows_menu: false,
+            minimap: true,
+            alerts: Alerts::Show,
+            director: false,
+            notable_seen: 0,
+            director_cut: None,
+            start: None,
             people_sort: crate::render::PeopleSort::default(),
             history: windows::History::default(),
             signs: true,
@@ -233,6 +251,73 @@ impl ViewerApp {
         self
     }
 
+    /// Opens on the start screen.
+    pub(crate) fn with_start_screen(mut self) -> Self {
+        self.start = Some(false);
+        self
+    }
+
+    /// The start screen as drawn.
+    fn start_view(&self) -> Option<crate::render::StartView> {
+        use crate::render::Setting;
+        let settings_open = self.start?;
+        let on_off = |on: bool| if on { "On" } else { "Off" }.to_owned();
+        Some(crate::render::StartView {
+            settings_open,
+            save_exists: std::path::Path::new(input::QUICK_SAVE).exists(),
+            settings: vec![
+                (Setting::Signs, on_off(self.signs)),
+                (Setting::SmallMap, on_off(self.minimap)),
+                (
+                    Setting::Alerts,
+                    match self.alerts {
+                        Alerts::Off => "Off",
+                        Alerts::Show => "Say what happens",
+                        Alerts::Pause => "Say it and pause",
+                    }
+                    .to_owned(),
+                ),
+                (Setting::Director, on_off(self.director)),
+            ],
+        })
+    }
+
+    /// A choice on the start screen.
+    fn start_choice(&mut self, choice: crate::render::StartChoice) {
+        use crate::render::{Setting, StartChoice};
+        match choice {
+            StartChoice::NewValley => match crate::startup::start_valley(&mut self.engine) {
+                Ok(start) => {
+                    self.start = None;
+                    self.population_status = PopulationStatus::Active;
+                    self.focus_on(start.camp);
+                }
+                Err(error) => self.show_toast(format!("No valley here: {error}")),
+            },
+            StartChoice::EmptyWorld => {
+                self.start = None;
+                self.show_toast("An empty world: press T to add a person at the mouse");
+            }
+            StartChoice::OpenSave => match self.open_world(std::path::Path::new(input::QUICK_SAVE))
+            {
+                Ok(()) => self.start = None,
+                Err(error) => self.show_toast(format!("Couldn't open the quick save: {error}")),
+            },
+            StartChoice::Settings => self.start = Some(!self.start.unwrap_or(false)),
+            StartChoice::Change(Setting::Signs) => self.signs = !self.signs,
+            StartChoice::Change(Setting::SmallMap) => self.minimap = !self.minimap,
+            StartChoice::Change(Setting::Alerts) => {
+                self.alerts = match self.alerts {
+                    Alerts::Off => Alerts::Show,
+                    Alerts::Show => Alerts::Pause,
+                    Alerts::Pause => Alerts::Off,
+                }
+            }
+            StartChoice::Change(Setting::Director) => self.director = !self.director,
+        }
+        self.dirty = true;
+    }
+
     /// A world opened from a save: it's already lived in, so look at its people.
     pub(crate) fn with_opened_world(mut self) -> Self {
         self.population_status = PopulationStatus::Active;
@@ -265,6 +350,7 @@ impl ViewerApp {
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.engine = sim_core::Engine::load(std::fs::File::open(path)?)?;
         self.feed.clear();
+        self.notable_seen = 0;
         self.history.clear();
         self.gestures.clear();
         self.wear.clear();
@@ -328,3 +414,14 @@ const WORLD_SYNC_INTERVAL: Duration = Duration::from_millis(125);
 const ARCHIVE_DETAIL_MIN_SCALE: f64 = 0.25;
 /// Cells visible across the shorter screen axis when opening on the valley camp.
 const VALLEY_VIEW_SPAN_CELLS: f64 = 128.0;
+
+/// What the viewer does when something notable happens (a death, a birth,
+/// a couple, newcomers, a first hut or hearth).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Alerts {
+    Off,
+    /// Say what happened in a banner.
+    Show,
+    /// Say it and pause.
+    Pause,
+}

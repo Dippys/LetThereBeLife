@@ -133,6 +133,7 @@ impl ViewerApp {
         }
         let census = self.census();
         let windows = self.window_views();
+        let start = self.start_view();
         let (Some(window), Some(renderer)) = (&self.window, &mut self.renderer) else {
             return false;
         };
@@ -170,6 +171,8 @@ impl ViewerApp {
                 signs: self.signs,
                 windows,
                 windows_menu: self.windows_menu,
+                minimap: self.minimap,
+                start,
                 darkness: darkness(&self.engine),
                 reached_speed: self.shown_speed.map(|(speed, _)| speed),
                 details_open: self.details_open,

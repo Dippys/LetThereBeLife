@@ -377,6 +377,8 @@ fn interface(state: &crate::render::RenderState) -> Vec<Hit> {
             gestures: &[],
             signs: &[],
             readings: &[],
+            names: &[],
+            minimap: None,
         },
         None,
     );
@@ -568,6 +570,8 @@ fn listeners_show_their_reading_red_when_mistaken_and_people_show_signs() {
             gestures: &[],
             signs: &signs,
             readings: &readings,
+            names: &[],
+            minimap: None,
         },
         None,
     );
@@ -581,4 +585,31 @@ fn listeners_show_their_reading_red_when_mistaken_and_people_show_signs() {
         "a mistaken one"
     );
     assert!(has(crate::render::colors::SIGN_SLEEP), "someone asleep");
+}
+
+#[test]
+fn start_screen_offers_each_beginning_and_blocks_the_world_behind() {
+    use crate::render::{Setting, StartChoice, StartView, UiAction};
+    let mut state = super::test_render_state(None);
+    state.start = Some(StartView {
+        settings_open: true,
+        save_exists: false,
+        settings: vec![(Setting::Signs, "On".to_owned())],
+    });
+    let hits = interface(&state);
+    let offers = |choice| {
+        hits.iter()
+            .any(|hit| hit.action == Some(UiAction::Start(choice)))
+    };
+    assert!(offers(StartChoice::NewValley));
+    assert!(offers(StartChoice::EmptyWorld));
+    assert!(offers(StartChoice::Settings));
+    assert!(offers(StartChoice::Change(Setting::Signs)));
+    // No save to open: the button is shown but does nothing.
+    assert!(!offers(StartChoice::OpenSave));
+    // A click anywhere else lands on the screen, not the world.
+    assert!(
+        hits.iter()
+            .any(|hit| hit.action.is_none() && hit.contains(1.0, 790.0))
+    );
 }

@@ -20,7 +20,7 @@ const FOCUS_MIN_CELL_PIXELS: f64 = 3.0;
 const FOCUS_SPAN_CELLS: f64 = 96.0;
 
 /// Where F5 saves the world and F9 opens it from.
-const QUICK_SAVE: &str = "saves/quick.ltbl";
+pub(super) const QUICK_SAVE: &str = "saves/quick.ltbl";
 impl ViewerApp {
     pub(super) fn update_hover(&mut self) {
         let Some(window) = self.window.clone() else {
@@ -235,6 +235,11 @@ impl ViewerApp {
                 self.focus_on(position);
             }
             UiAction::SortPeople(sort) => self.people_sort = sort,
+            UiAction::Start(choice) => self.start_choice(choice),
+            UiAction::CenterOn(position) => {
+                self.following = false;
+                self.focus_on(position);
+            }
             UiAction::FeedEntry(index) => {
                 let Some(entry) = self.feed.entries().nth(index).cloned() else {
                     return;
@@ -273,7 +278,7 @@ impl ViewerApp {
     }
 
     /// Picks the next living person after the selected one (by id) and looks at them.
-    fn select_next_person(&mut self) {
+    pub(super) fn select_next_person(&mut self) {
         let after = self.selected.map_or(0, |agent| agent.get());
         let living: Vec<AgentView> = self
             .engine
@@ -348,6 +353,35 @@ impl ViewerApp {
             KeyCode::Minus | KeyCode::NumpadSubtract => self.step_speed(-1),
             KeyCode::KeyH | KeyCode::F1 => self.help_open = !self.help_open,
             KeyCode::KeyI => self.info_open = !self.info_open,
+            KeyCode::KeyA => {
+                self.alerts = match self.alerts {
+                    super::Alerts::Off => super::Alerts::Show,
+                    super::Alerts::Show => super::Alerts::Pause,
+                    super::Alerts::Pause => super::Alerts::Off,
+                };
+                self.show_toast(match self.alerts {
+                    super::Alerts::Off => "Alerts off",
+                    super::Alerts::Show => "Alerts: say what happens",
+                    super::Alerts::Pause => "Alerts: say what happens and pause",
+                });
+            }
+            KeyCode::KeyD => {
+                self.director = !self.director;
+                self.director_cut = None;
+                self.show_toast(if self.director {
+                    "Director on: the camera goes where things happen"
+                } else {
+                    "Director off"
+                });
+            }
+            KeyCode::KeyO => {
+                self.minimap = !self.minimap;
+                self.show_toast(if self.minimap {
+                    "Small map on"
+                } else {
+                    "Small map off"
+                });
+            }
             KeyCode::KeyS => {
                 self.signs = !self.signs;
                 self.show_toast(if self.signs {
