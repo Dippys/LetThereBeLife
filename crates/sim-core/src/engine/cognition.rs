@@ -1514,6 +1514,59 @@ impl Engine {
         Some(form)
     }
 
+    /// Having made (or skinned) a thing with others watching, `maker` says
+    /// what it is: its word, or a new one it makes up (most often from its
+    /// word for what the thing is made from, with an ending). Watchers see the
+    /// thing and hear the word, so they learn it (a child now and then with a
+    /// vowel changed).
+    pub(super) fn name_made(&mut self, maker: AgentId, concept: Concept, watchers: &[AgentId]) {
+        if watchers.is_empty() || !self.policy_options.memory {
+            return;
+        }
+        let roll = mix(self.config.life_seed
+            ^ 0x4e41_4d45
+            ^ u64::from(maker.get()) << 32
+            ^ self.time.ticks());
+        let lexicon = &mut self.minds.get_mut(maker).lexicon;
+        let form = match lexicon.produce(concept) {
+            Some(form) => form,
+            None => {
+                let base = concept
+                    .root()
+                    .and_then(|root| lexicon.produce(root))
+                    .filter(|base| base.parts().is_none());
+                let coined = base
+                    .and_then(|base| lexicon.coin_compound(concept, base, roll >> 8))
+                    .or_else(|| lexicon.coin(concept, roll >> 16));
+                let Some(form) = coined else {
+                    return;
+                };
+                self.word_events.push(crate::WordEvent::Coined {
+                    agent: maker,
+                    form,
+                    concept,
+                });
+                form
+            }
+        };
+        for &watcher in watchers {
+            let shifts = self.age_of(watcher) < crate::ADULT_AGE
+                && mix(roll ^ u64::from(watcher.get()) << 40) % SOUND_SHIFT_ODDS == 0;
+            let learned = if shifts { form.shifted() } else { form };
+            self.minds
+                .get_mut(watcher)
+                .lexicon
+                .hear_with_evidence(learned, concept);
+            if learned != form {
+                self.word_events.push(crate::WordEvent::Shifted {
+                    agent: watcher,
+                    heard: form,
+                    learned,
+                });
+            }
+        }
+    }
+
     /// New words and sound shifts from the latest tick (for logs and tools).
     pub fn word_events(&self) -> &[crate::WordEvent] {
         &self.word_events

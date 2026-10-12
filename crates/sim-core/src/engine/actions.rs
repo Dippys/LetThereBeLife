@@ -640,6 +640,7 @@ impl Engine {
                 );
             }
         }
+        self.name_made(agent, crate::Concept::Material(made), &watchers);
         self.craft_events.push(crate::CraftEvent {
             agent,
             made,
@@ -936,6 +937,20 @@ impl Engine {
         {
             self.population.add_inventory(agent, Material::Hide, 1);
             self.dress_for_weather(agent);
+            let watchers: Vec<AgentId> = self
+                .perceive_physical(agent, crate::PHYSICAL_POLICY_RADIUS)
+                .map(|perception| {
+                    perception
+                        .agents
+                        .iter()
+                        .filter(|other| {
+                            other.id != agent && super::cognition::can_watch(other.activity)
+                        })
+                        .map(|other| other.id)
+                        .collect()
+                })
+                .unwrap_or_default();
+            self.name_made(agent, crate::Concept::Material(Material::Hide), &watchers);
         }
         let inventory = self
             .population

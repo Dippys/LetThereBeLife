@@ -815,17 +815,24 @@ pub(super) fn person_rows(agent: &AgentInspection) -> Vec<Row> {
 
     rows.push(Row::Gap);
     rows.push(Row::Heading("Their words"));
-    let words: Vec<(&'static str, String)> = Concept::ALL
+    // Compound words are too long for the two-column grid: a row each.
+    let (compounds, words): (Vec<_>, Vec<_>) = Concept::ALL
         .into_iter()
-        .filter_map(|concept| {
-            let form = memory.word_for(concept)?;
-            Some((labels::concept_short(concept), labels::word(form)))
-        })
-        .collect();
-    if words.is_empty() {
+        .filter_map(|concept| Some((concept, memory.word_for(concept)?)))
+        .partition(|(_, form)| form.parts().is_some());
+    if words.is_empty() && compounds.is_empty() {
         rows.push(Row::Text("No words yet".to_owned(), colors::UI_DIM));
-    } else {
-        rows.push(Row::Grid(words));
+    }
+    if !words.is_empty() {
+        rows.push(Row::Grid(
+            words
+                .into_iter()
+                .map(|(concept, form)| (labels::concept_short(concept), labels::word(form)))
+                .collect(),
+        ));
+    }
+    for (concept, form) in compounds {
+        rows.push(Row::Pair(labels::concept(concept), labels::word(form)));
     }
 
     rows.push(Row::Gap);

@@ -295,3 +295,34 @@ fn a_dwindling_band_is_joined_by_newcomers_with_their_own_words() {
     engine.age_people();
     assert!(engine.family_events().is_empty());
 }
+
+#[test]
+fn whoever_watches_a_thing_made_learns_the_makers_word_for_it() {
+    let mut engine = two_people();
+    engine.policy_options = crate::PolicyOptions::full();
+    let (maker, watcher) = (AgentId::new(0), AgentId::new(1));
+    let spear = crate::Concept::Material(crate::Material::Spear);
+    assert_eq!(engine.minds.get_mut(maker).lexicon.produce(spear), None);
+    engine.name_made(maker, spear, &[watcher]);
+    let said = engine
+        .minds
+        .get_mut(maker)
+        .lexicon
+        .produce(spear)
+        .expect("it made up a word");
+    // Built on its word for wood, which founders have.
+    let wood = engine
+        .minds
+        .get_mut(maker)
+        .lexicon
+        .produce(crate::Concept::WOOD);
+    assert_eq!(said.parts().map(|(base, _)| base), wood);
+    assert_eq!(
+        engine.minds.get_mut(watcher).lexicon.produce(spear),
+        Some(said)
+    );
+    assert!(engine.word_events().iter().any(|event| matches!(
+        event,
+        crate::WordEvent::Coined { agent, .. } if *agent == maker
+    )));
+}

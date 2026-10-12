@@ -1050,3 +1050,16 @@ slots, inherited tool words crowded out words like water.
 against 34 (more food carried and stored). Before founders lost the tool words it was 502 and 21,
 with 175 spears and 184 baskets made.
 
+## D-131: Words for new things, built from old ones (2026-10-12)
+
+**Decision:** Words grow with the world. Making a blade, basket or spear, or skinning a hide, with
+others watching, the maker says the thing's word; with none, it makes one up, most often a compound:
+its word for what the thing is made from (a hide: deer) with one of 6 endings (`VocalForm::compound`,
+forms 32 and up; named like "kini-mo"). Watchers see the thing and hear the word, so they learn it;
+a child now and then learns it with a vowel changed, as with other words (dialects drift). Lexicons
+grow from 16 to 20 slots, minds to 1,888 B; save version 12.
+**Why:** The user asked for language that grows: compound words, dialect drift.
+**Consequences:** Over 10 years in 20 valleys: 127 people end with a word for a made thing, 63
+different such words in use, all compounds; 497 survivors against 491, deaths from cold 24 against
+26. With 16 slots the tool words crowded out place words: 470 survivors.
+

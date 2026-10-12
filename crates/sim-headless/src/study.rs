@@ -225,6 +225,9 @@ pub struct FamilyStats {
     /// Words coined, coined words said by two or more living people at the end,
     /// and sound shifts.
     pub new_words: [u64; 3],
+    /// Living people with a word for something made; the distinct words for
+    /// made things they'd say, and how many of those are compounds.
+    pub tool_words: [u64; 3],
     /// Percent of place words where the two founding families' most common
     /// word is the same, at the end.
     pub shared_words: u64,
@@ -685,6 +688,30 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
         })
         .count() as u64;
     families.new_words = [coined.len() as u64, caught_on, shifts];
+    let made: Vec<sim_core::Concept> = sim_core::Concept::ALL
+        .into_iter()
+        .filter(|concept| concept.is_made())
+        .collect();
+    let mut tool_words: Vec<sim_core::VocalForm> = Vec::new();
+    let mut speakers = 0;
+    for (_, mind) in &living {
+        let words: Vec<_> = made
+            .iter()
+            .filter_map(|&concept| top_word(&mind.lexicon, concept))
+            .collect();
+        speakers += u64::from(!words.is_empty());
+        tool_words.extend(words);
+    }
+    tool_words.sort_unstable();
+    tool_words.dedup();
+    families.tool_words = [
+        speakers,
+        tool_words.len() as u64,
+        tool_words
+            .iter()
+            .filter(|form| form.parts().is_some())
+            .count() as u64,
+    ];
     let family_minds = |family: u8| -> Vec<&sim_core::MentalMapView> {
         living
             .iter()
@@ -1840,6 +1867,11 @@ impl fmt::Display for StudyReport {
                 formatter,
                 "\n  new words: coined {coined} ({caught_on} said by 2+ people at the end), sound shifts {shifts}; the two families share {}% of place words",
                 families.shared_words
+            )?;
+            let [speakers, words, compounds] = families.tool_words;
+            write!(
+                formatter,
+                "\n  words for made things: {speakers} people have one; {words} different words in use ({compounds} compounds)"
             )?;
             let [known, acquaintances, wrong] = families.names;
             let [heard, misheard] = families.calls;

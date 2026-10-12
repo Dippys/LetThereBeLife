@@ -56,6 +56,19 @@ impl Concept {
         }
     }
 
+    /// What a made thing's word is built on: what it's made from (a hide's,
+    /// the animal it came off).
+    pub const fn root(self) -> Option<Self> {
+        match self {
+            Self::Material(Material::Hide) => Some(Self::DEER),
+            Self::Material(material) => match material.properties().made_from {
+                Some((input, _)) => Some(Self::Material(input)),
+                None => None,
+            },
+            _ => None,
+        }
+    }
+
     pub const BERRIES: Self = Self::Material(Material::Berries);
     pub const BITTERBERRIES: Self = Self::Material(Material::Bitterberries);
     pub const WOOD: Self = Self::Material(Material::Wood);
@@ -88,12 +101,34 @@ impl Concept {
 )]
 pub struct VocalForm(pub u8);
 
-/// How many distinct forms exist (more than concepts, so variants can arise).
+/// How many distinct simple forms exist (more than concepts, so variants can arise).
 pub const VOCAL_FORMS: u8 = 32;
+/// Endings a compound can take (forms `VOCAL_FORMS..` are compounds; 255 stays free).
+const COMPOUND_ENDINGS: u8 = 6;
 
 impl VocalForm {
-    /// A pronounceable two-syllable rendering, for people reading logs.
+    /// A word made of a simple word and an ending: the word for what a thing
+    /// is made from, said with something added ("wood-thing").
+    pub const fn compound(base: Self, ending: u8) -> Self {
+        Self(VOCAL_FORMS + (base.0 % VOCAL_FORMS) * COMPOUND_ENDINGS + ending % COMPOUND_ENDINGS)
+    }
+
+    /// The simple word and the ending of a compound.
+    pub const fn parts(self) -> Option<(Self, u8)> {
+        if self.0 < VOCAL_FORMS {
+            return None;
+        }
+        let code = self.0 - VOCAL_FORMS;
+        Some((Self(code / COMPOUND_ENDINGS), code % COMPOUND_ENDINGS))
+    }
+
+    /// A pronounceable rendering, for people reading logs: two syllables, and
+    /// a compound's ending after a dash.
     pub fn name(self) -> String {
+        if let Some((base, ending)) = self.parts() {
+            const ENDINGS: [&str; COMPOUND_ENDINGS as usize] = ["ka", "ti", "mo", "nu", "re", "sa"];
+            return format!("{}-{}", base.name(), ENDINGS[usize::from(ending)]);
+        }
         const CONSONANTS: [char; 8] = ['k', 't', 'm', 'n', 'r', 's', 'v', 'l'];
         const VOWELS: [char; 4] = ['a', 'i', 'u', 'o'];
         let id = usize::from(self.0);
@@ -111,12 +146,15 @@ const COINED_EVIDENCE: u16 = 2;
 impl VocalForm {
     /// The same word with its first vowel changed, as a child might pick it up.
     pub(crate) const fn shifted(self) -> Self {
-        Self((self.0 ^ 8) % VOCAL_FORMS)
+        match self.parts() {
+            Some((base, ending)) => Self::compound(base.shifted(), ending),
+            None => Self((self.0 ^ 8) % VOCAL_FORMS),
+        }
     }
 }
 
 /// Entries per lexicon.
-pub const LEXICON_SLOTS: usize = 16;
+pub const LEXICON_SLOTS: usize = 20;
 /// Evidence a founder's inherited association starts with.
 const INHERITED_EVIDENCE: u16 = 6;
 /// Founders come from families of this many (agent ids `0..8`, `8..16`, ...).
@@ -280,6 +318,34 @@ impl Lexicon {
         let start = (roll % u64::from(VOCAL_FORMS)) as u8;
         let form = (0..VOCAL_FORMS)
             .map(|offset| VocalForm((start + offset) % VOCAL_FORMS))
+            .find(|form| {
+                !self
+                    .entries
+                    .iter()
+                    .any(|entry| !entry.is_empty() && entry.form == form.0)
+            })?;
+        let slot = self.free_slot()?;
+        self.entries[slot] = LexicalEntry {
+            form: form.0,
+            concept: concept.index() as u8,
+            positive: COINED_EVIDENCE,
+            ..LexicalEntry::default()
+        };
+        Some(form)
+    }
+
+    /// Makes up a compound word for `concept` from `base` (its word for what
+    /// the thing is made from) and the first ending, from `roll` on, it doesn't
+    /// use yet. `None` if every ending is taken.
+    pub(crate) fn coin_compound(
+        &mut self,
+        concept: Concept,
+        base: VocalForm,
+        roll: u64,
+    ) -> Option<VocalForm> {
+        let start = (roll % u64::from(COMPOUND_ENDINGS)) as u8;
+        let form = (0..COMPOUND_ENDINGS)
+            .map(|offset| VocalForm::compound(base, start + offset))
             .find(|form| {
                 !self
                     .entries
@@ -489,6 +555,30 @@ mod tests {
         }
         assert!(agree > disagree * 5, "mostly shared: {agree} vs {disagree}");
         assert!(disagree > 0, "but with individual variation");
+    }
+
+    #[test]
+    fn made_things_get_compound_words_built_on_what_they_are_made_from() {
+        let spear = Concept::Material(Material::Spear);
+        assert_eq!(spear.root(), Some(Concept::WOOD));
+        assert_eq!(
+            Concept::Material(Material::Hide).root(),
+            Some(Concept::DEER)
+        );
+        let wood = VocalForm(5);
+        let mut lexicon = Lexicon::default();
+        let first = lexicon.coin_compound(spear, wood, 0).unwrap();
+        assert_eq!(first.parts(), Some((wood, 0)));
+        assert!(first.name().starts_with(&wood.name()));
+        // The same ending isn't used twice: a basket gets another.
+        let basket = lexicon
+            .coin_compound(Concept::Material(Material::Basket), wood, 0)
+            .unwrap();
+        assert_eq!(basket.parts(), Some((wood, 1)));
+        // A child's vowel slip changes the base, not the ending.
+        assert_eq!(first.shifted().parts(), Some((wood.shifted(), 0)));
+        // Every compound stays clear of the map's "no word" marker.
+        assert!(VocalForm::compound(VocalForm(VOCAL_FORMS - 1), COMPOUND_ENDINGS - 1).0 < u8::MAX);
     }
 
     #[test]
