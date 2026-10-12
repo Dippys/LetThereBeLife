@@ -1605,9 +1605,12 @@ impl Planner<'_> {
             .reachable_cells
             .iter()
             .copied()
-            .filter(|&cell| cell != origin && candidate_available(origin, self.perception, cell))
+            .filter(|&cell| {
+                cell != origin
+                    && manhattan(cell, threat) > manhattan(origin, threat)
+                    && candidate_available(origin, self.perception, cell)
+            })
             .map(|cell| (manhattan(cell, threat), cell))
-            .filter(|&(distance, _)| distance > manhattan(origin, threat))
             .max_by_key(|&(distance, cell)| (distance, -cell.y, -cell.x))?;
         Some(Deliberation {
             selection: PolicySelection {
@@ -1791,10 +1794,10 @@ impl Planner<'_> {
             .filter(|&cell| {
                 cell != origin
                     && back.is_none_or(|back| manhattan(cell, back) > 1)
+                    && manhattan(cell, destination) < current
                     && candidate_available(origin, self.perception, cell)
             })
             .map(|cell| (manhattan(cell, destination), cell))
-            .filter(|&(distance, _)| distance < current)
             .min_by_key(|&(distance, cell)| (distance, cell.y, cell.x));
         match direct {
             Some((_, cell)) => Some((cell, heading)),

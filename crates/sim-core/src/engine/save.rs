@@ -184,6 +184,7 @@ impl Engine {
         engine.next_signal_id = saved.next_signal_id;
         engine.resource_deltas = saved.resource_deltas;
         engine.spawned_objects = saved.spawned_objects;
+        engine.spawned_objects.recount_ponds();
         engine.structures = saved.structures;
         engine.runtime_counters = saved.runtime_counters;
         Ok(engine)

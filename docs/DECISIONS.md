@@ -978,3 +978,18 @@ nearer camp), valley 1 to 273 without nights (292 before D-121). Over 10 years i
 nights: tiles visited up 9% (8,431 against 7,749), survivors 472 against 487, deaths from cold 40
 against 34: some of D-121's gain traded back for exploring.
 
+## D-126: Faster ticks, same results (2026-10-12)
+
+**Decision:** Hot lookups now avoid searching ordered maps cell by cell, without changing any
+order that affects results:
+- route search keeps the last terrain chunk it touched, fetches each expanded cell once, uses a
+  stamped grid for its node index, and skips the placed-object check when there are no ponds;
+- perception walks each row's placed objects and structures alongside the cells;
+- `agents_in` scans only the overlapping buckets, then sorts by row, column and id;
+- nearest-target searches check availability only for candidates that would beat the best;
+- exploration works out the available cells once for every heading it tries.
+The step-cost rule is shared (`sim_world::traversal_between`).
+**Why:** The user asked for speed with identical results.
+**Consequences:** 3-year studies run 1.5 to 1.8 times faster: valley 1 in 8.2 s (was 14.9 s),
+valley 9 in 8.4 s (was 12.5 s). Output is byte-identical on valleys 1, 4, 9, 13, 21 and 30.
+

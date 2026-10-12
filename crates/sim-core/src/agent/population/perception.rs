@@ -154,6 +154,9 @@ impl Population {
             terrain[index] = Some((cell, feature));
         });
         for y in area.min.y..area.max.y {
+            // What's placed and built in this row, walked alongside the cells.
+            let mut row_objects = spawned_objects.in_row(y, area.min.x, area.max.x).peekable();
+            let mut row_structures = structures.xs_in_row(y, area.min.x, area.max.x).peekable();
             for x in area.min.x..area.max.x {
                 let position = WorldPosition { x, y };
                 if !crate::WORLD_GENERATION_BOUNDS.contains(position) {
@@ -162,15 +165,13 @@ impl Population {
                 let index = (y - area.min.y) as usize * width_cells + (x - area.min.x) as usize;
                 let (cell, feature) = terrain[index].ok_or(PerceptionError::Unloaded)?;
                 elevations.push(cell.elevation);
-                let object = spawned_objects.at(position);
+                let object = row_objects.next_if(|object| object.position.x == x);
+                let built = row_structures.next_if_eq(&x).is_some();
                 let placed_water = object.is_some_and(|object| object.kind == SpawnKind::Water);
                 let water = cell
                     .water()
                     .or_else(|| placed_water.then_some(crate::WaterSource::Lake));
-                if cell.water().is_none()
-                    && !placed_water
-                    && structures.structure_at(position).is_none()
-                {
+                if cell.water().is_none() && !placed_water && !built {
                     traversable_cells.push(position);
                 }
                 let blocks = |kind: crate::FeatureKind| {

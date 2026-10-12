@@ -25,7 +25,7 @@ pub use features::{BaseResource, Feature, FeatureKind, Handling, Material, Mater
 pub use generator::{ChunkGenerator, GeneratedCell};
 pub use geometry::{WorldPosition, WorldRect};
 pub use loads::{ChunkLoadRequest, WorldChunkLoad};
-pub use storage::World;
+pub use storage::{ChunkCells, World, traversal_between};
 pub use terrain::{
     BiomeType, ClimateSample, PrevailingWind, SurfaceType, TerrainCell, TerrainClass, WaterSource,
 };

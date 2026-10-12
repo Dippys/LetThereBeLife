@@ -5,8 +5,12 @@ use super::World;
 use crate::{
     BaseResource, ClimateSample, Feature, MAX_TRAVERSABLE_ELEVATION_DELTA, Standability,
     TerrainCell, TraversalKind, TraversalStep, WORLD_GENERATION_BOUNDS, WaterSource, WorldPosition,
-    WorldQueryError, WorldRect, chunk::chunk_coord, terrain::water_source,
-    traversal::surface_traversal_cost, worldgen::climate_at,
+    WorldQueryError, WorldRect,
+    chunk::{ChunkCoord, chunk_coord},
+    loads::LoadedChunk,
+    terrain::water_source,
+    traversal::surface_traversal_cost,
+    worldgen::climate_at,
 };
 
 impl World {
@@ -74,27 +78,16 @@ impl World {
         }
         let source = self.resident_cell(from)?;
         let target = self.resident_cell(to)?;
-        let elevation_delta = i32::from(target.elevation) - i32::from(source.elevation);
-        // Lakes and rivers can be waded or swum; the sea can't.
-        let sea = |cell: TerrainCell| water_source(cell) == Some(WaterSource::Ocean);
-        let kind = if sea(source) || sea(target) {
-            TraversalKind::BlockedByWater
-        } else if elevation_delta.unsigned_abs() > u32::from(MAX_TRAVERSABLE_ELEVATION_DELTA) {
-            TraversalKind::BlockedBySlope
-        } else {
-            TraversalKind::Passable
-        };
-        let cost = if kind == TraversalKind::Passable {
-            surface_traversal_cost(target.surface())
-                + (elevation_delta.unsigned_abs() as u16).div_ceil(32)
-        } else {
-            0
-        };
-        Ok(TraversalStep {
-            elevation_delta,
-            cost,
-            kind,
-        })
+        Ok(traversal_between(source, target))
+    }
+
+    /// The resident chunk holding `position`, for many cell lookups in a row
+    /// without searching for the chunk each time.
+    pub fn chunk_cells(&self, position: WorldPosition) -> Option<ChunkCells<'_>> {
+        let coord = chunk_coord(position);
+        self.chunks
+            .get(&coord)
+            .map(|chunk| ChunkCells { coord, chunk })
     }
 
     pub fn cell(&self, position: WorldPosition) -> Option<TerrainCell> {
@@ -122,5 +115,53 @@ impl World {
             let bounds = chunk.bounds(coord);
             bounds.contains(position).then_some(bounds)
         })
+    }
+}
+
+/// One cardinal step from a cell to its neighbor: blocked by the sea or a
+/// steep slope, otherwise costing the target's surface plus the climb.
+pub fn traversal_between(source: TerrainCell, target: TerrainCell) -> TraversalStep {
+    let elevation_delta = i32::from(target.elevation) - i32::from(source.elevation);
+    // Lakes and rivers can be waded or swum; the sea can't.
+    let sea = |cell: TerrainCell| water_source(cell) == Some(WaterSource::Ocean);
+    let kind = if sea(source) || sea(target) {
+        TraversalKind::BlockedByWater
+    } else if elevation_delta.unsigned_abs() > u32::from(MAX_TRAVERSABLE_ELEVATION_DELTA) {
+        TraversalKind::BlockedBySlope
+    } else {
+        TraversalKind::Passable
+    };
+    let cost = if kind == TraversalKind::Passable {
+        surface_traversal_cost(target.surface())
+            + (elevation_delta.unsigned_abs() as u16).div_ceil(32)
+    } else {
+        0
+    };
+    TraversalStep {
+        elevation_delta,
+        cost,
+        kind,
+    }
+}
+
+/// The cells of one resident chunk (see `World::chunk_cells`).
+#[derive(Clone, Copy)]
+pub struct ChunkCells<'a> {
+    coord: ChunkCoord,
+    chunk: &'a LoadedChunk,
+}
+
+impl ChunkCells<'_> {
+    pub fn contains(self, position: WorldPosition) -> bool {
+        chunk_coord(position) == self.coord
+    }
+
+    /// The cell at `position`, if it is in this chunk.
+    pub fn cell(self, position: WorldPosition) -> Option<TerrainCell> {
+        if self.contains(position) {
+            self.chunk.cell(self.coord, position)
+        } else {
+            None
+        }
     }
 }

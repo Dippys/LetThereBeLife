@@ -150,25 +150,43 @@ impl SpatialIndex {
         }
     }
 
+    /// The agents in `area`, by row, then column, then id.
     pub(crate) fn agents_in(&self, area: WorldRect, output: &mut Vec<AgentId>) {
         output.clear();
-        for y in area.min.y..area.max.y {
-            for x in area.min.x..area.max.x {
-                let position = WorldPosition { x, y };
-                let bucket = SpatialBucket::at(position);
-                let local_cell = bucket.local_cell(position);
+        if area.max.x <= area.min.x || area.max.y <= area.min.y {
+            return;
+        }
+        // Only the buckets the area overlaps, each scanned once.
+        let first = SpatialBucket::at(area.min);
+        let last = SpatialBucket::at(WorldPosition {
+            x: area.max.x - 1,
+            y: area.max.y - 1,
+        });
+        let mut found: Vec<(i64, i64, AgentId)> = Vec::new();
+        for bucket_y in first.y..=last.y {
+            for bucket_x in first.x..=last.x {
+                let bucket = SpatialBucket {
+                    x: bucket_x,
+                    y: bucket_y,
+                };
                 let Some(occupants) = self.buckets.get(&bucket) else {
                     continue;
                 };
-                let start = occupants.partition_point(|entry| entry.local_cell < local_cell);
-                output.extend(
-                    occupants[start..]
-                        .iter()
-                        .take_while(|entry| entry.local_cell == local_cell)
-                        .map(|entry| entry.agent),
-                );
+                for entry in occupants {
+                    let position = WorldPosition {
+                        x: i64::from(bucket_x) * CHUNK_SIZE
+                            + i64::from(entry.local_cell) % CHUNK_SIZE,
+                        y: i64::from(bucket_y) * CHUNK_SIZE
+                            + i64::from(entry.local_cell) / CHUNK_SIZE,
+                    };
+                    if area.contains(position) {
+                        found.push((position.y, position.x, entry.agent));
+                    }
+                }
             }
         }
+        found.sort_unstable();
+        output.extend(found.into_iter().map(|(_, _, agent)| agent));
     }
 
     pub(crate) fn len(&self) -> usize {

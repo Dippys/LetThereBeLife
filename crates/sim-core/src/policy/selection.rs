@@ -203,16 +203,15 @@ pub(super) fn nearest_shelter_access(
     origin: WorldPosition,
     perception: &PhysicalPerception,
 ) -> Option<WorldPosition> {
-    perception
+    let candidates = perception
         .structures
         .iter()
         .filter(|structure| {
             structure.state == StructureState::Complete
                 && structure.kind == crate::StructureKind::Shelter
         })
-        .flat_map(|structure| cardinal_neighbors(structure.position))
-        .filter(|candidate| candidate_available(origin, perception, *candidate))
-        .min_by_key(|candidate| target_key(origin, *candidate))
+        .flat_map(|structure| cardinal_neighbors(structure.position));
+    nearest_available(origin, perception, candidates)
 }
 
 pub(super) fn nearest_build_site(
@@ -260,12 +259,11 @@ pub(super) fn nearest_water_access(
     origin: WorldPosition,
     perception: &PhysicalPerception,
 ) -> Option<WorldPosition> {
-    perception
+    let candidates = perception
         .drinkable_water
         .iter()
-        .flat_map(|water| cardinal_neighbors(water.position))
-        .filter(|candidate| candidate_available(origin, perception, *candidate))
-        .min_by_key(|candidate| target_key(origin, *candidate))
+        .flat_map(|water| cardinal_neighbors(water.position));
+    nearest_available(origin, perception, candidates)
 }
 
 pub(super) fn nearest_resource_access(
@@ -273,15 +271,34 @@ pub(super) fn nearest_resource_access(
     perception: &PhysicalPerception,
     accepts: impl Fn(Material) -> bool,
 ) -> Option<WorldPosition> {
-    perception
+    let candidates = perception
         .resources
         .iter()
         .filter(|resource| accepts(resource.resource.kind))
         .flat_map(|resource| {
             std::iter::once(resource.position).chain(cardinal_neighbors(resource.position))
-        })
-        .filter(|candidate| candidate_available(origin, perception, *candidate))
-        .min_by_key(|candidate| target_key(origin, *candidate))
+        });
+    nearest_available(origin, perception, candidates)
+}
+
+/// The first of `candidates` nearest `origin` (then by row and column) that is
+/// available. Only candidates that would beat the best so far are checked.
+fn nearest_available(
+    origin: WorldPosition,
+    perception: &PhysicalPerception,
+    candidates: impl Iterator<Item = WorldPosition>,
+) -> Option<WorldPosition> {
+    let mut best: Option<((u64, i64, i64), WorldPosition)> = None;
+    for candidate in candidates {
+        let key = target_key(origin, candidate);
+        if best.is_some_and(|(best_key, _)| key >= best_key) {
+            continue;
+        }
+        if candidate_available(origin, perception, candidate) {
+            best = Some((key, candidate));
+        }
+    }
+    best.map(|(_, position)| position)
 }
 
 fn cardinal_neighbors(position: WorldPosition) -> std::array::IntoIter<WorldPosition, 4> {

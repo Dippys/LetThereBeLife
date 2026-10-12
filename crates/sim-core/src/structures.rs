@@ -339,6 +339,22 @@ impl StructureStore {
         self.by_builder.contains_key(&builder)
     }
 
+    /// The x of each structure in row `y` from `min_x` up to `max_x`, in order.
+    pub(crate) fn xs_in_row(
+        &self,
+        y: i64,
+        min_x: i64,
+        max_x: i64,
+    ) -> impl Iterator<Item = i64> + '_ {
+        let clamp = |value: i64| value.clamp(i64::from(i16::MIN), i64::from(i16::MAX)) as i16;
+        let row = i16::try_from(y).ok();
+        let (low, high) = (clamp(min_x), clamp(max_x));
+        row.filter(|_| low < high)
+            .into_iter()
+            .flat_map(move |row| self.by_position.range((row, low)..(row, high)))
+            .map(|(&(_, x), _)| i64::from(x))
+    }
+
     pub(crate) fn structure_at(&self, position: WorldPosition) -> Option<StructureId> {
         CompactPosition::checked(position)
             .and_then(|key| self.by_position.get(&(key.y, key.x)).copied())

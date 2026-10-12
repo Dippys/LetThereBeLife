@@ -29,15 +29,20 @@ pub(super) fn exploration_target(
     perception: &PhysicalPerception,
     heading: ExplorationHeading,
 ) -> Option<(WorldPosition, ExplorationHeading)> {
+    // The cells it could go to, worked out once for every heading tried.
+    let available: Vec<WorldPosition> = perception
+        .reachable_cells
+        .iter()
+        .copied()
+        .filter(|candidate| *candidate != origin)
+        .filter(|candidate| candidate_available(origin, perception, *candidate))
+        .collect();
     [0_i8, 1, -1, 2, -2, 3, -3, 4].into_iter().find_map(|turn| {
         let heading = heading.rotated(turn);
         let (heading_x, heading_y) = heading.delta();
-        perception
-            .reachable_cells
+        available
             .iter()
             .copied()
-            .filter(|candidate| *candidate != origin)
-            .filter(|candidate| candidate_available(origin, perception, *candidate))
             .filter_map(|candidate| {
                 let dx = candidate.x - origin.x;
                 let dy = candidate.y - origin.y;

@@ -129,6 +129,9 @@ pub(crate) struct SpawnedObjects {
     revision: u64,
     /// The engine's current time in seconds, advanced every tick.
     now: u32,
+    /// Placed ponds among the objects (none, usually, so steps skip looking).
+    #[serde(skip)]
+    ponds: u32,
 }
 
 impl SpawnedObjects {
@@ -155,14 +158,25 @@ impl SpawnedObjects {
             replaced.is_none(),
             "placement validation rejects replacement"
         );
+        self.ponds += u32::from(kind == SpawnKind::Water);
         self.revision = self.revision.saturating_add(1);
+    }
+
+    /// Counts the placed ponds again (after loading).
+    pub(crate) fn recount_ponds(&mut self) {
+        self.ponds = self
+            .objects
+            .values()
+            .filter(|object| object.kind == SpawnKind::Water)
+            .count() as u32;
     }
 
     /// Removes the object at `position` (a plant that died or was felled).
     pub(crate) fn remove(&mut self, position: WorldPosition) {
         if let Some(key) = CompactSpawnPosition::checked(position)
-            && self.objects.remove(&key).is_some()
+            && let Some(removed) = self.objects.remove(&key)
         {
+            self.ponds -= u32::from(removed.kind == SpawnKind::Water);
             self.revision = self.revision.saturating_add(1);
         }
     }
@@ -170,6 +184,33 @@ impl SpawnedObjects {
     /// Moves the clock growth is measured against.
     pub(crate) fn advance(&mut self, now: u32) {
         self.now = now;
+    }
+
+    /// The objects in row `y` from `min_x` up to (not including) `max_x`, by x.
+    pub(crate) fn in_row(
+        &self,
+        y: i64,
+        min_x: i64,
+        max_x: i64,
+    ) -> impl Iterator<Item = SpawnedObjectView> + '_ {
+        let clamp = |value: i64| value.clamp(i64::from(i16::MIN), i64::from(i16::MAX)) as i16;
+        let row = i16::try_from(y).ok();
+        let (low, high) = (clamp(min_x), clamp(max_x));
+        row.filter(|_| low < high)
+            .into_iter()
+            .flat_map(move |row| {
+                self.objects.range(
+                    CompactSpawnPosition { y: row, x: low }..CompactSpawnPosition {
+                        y: row,
+                        x: high,
+                    },
+                )
+            })
+            .map(|(key, object)| SpawnedObjectView {
+                position: key.world(),
+                kind: object.kind,
+                remaining: object.kind.resource().map(|_| object.remaining(self.now)),
+            })
     }
 
     pub(crate) fn at(&self, position: WorldPosition) -> Option<SpawnedObjectView> {
@@ -214,17 +255,21 @@ impl SpawnedObjects {
         from: WorldPosition,
         to: WorldPosition,
     ) -> Result<TraversalStep, WorldQueryError> {
-        let step = world.traversal_step(from, to)?;
-        if !step.is_passable() {
-            return Ok(step);
+        Ok(self.placed_step(world.traversal_step(from, to)?, to))
+    }
+
+    /// `step` (onto `to`, from the terrain alone) as changed by what's placed there.
+    pub(crate) fn placed_step(&self, step: TraversalStep, to: WorldPosition) -> TraversalStep {
+        if !step.is_passable() || self.ponds == 0 {
+            return step;
         }
         match self.at(to).map(|object| object.kind) {
             // A placed pond is shallow: it can be waded, slowly.
-            Some(SpawnKind::Water) => Ok(TraversalStep::wading(step.elevation_delta())),
+            Some(SpawnKind::Water) => TraversalStep::wading(step.elevation_delta()),
             Some(
                 SpawnKind::Tree | SpawnKind::BerryBush | SpawnKind::BitterBush | SpawnKind::Rock,
             )
-            | None => Ok(step),
+            | None => step,
         }
     }
 

@@ -11,6 +11,7 @@ use crate::{
 
 mod loading;
 mod queries;
+pub use queries::{ChunkCells, traversal_between};
 mod visits;
 
 /// A declared bootstrap world with a deterministic, chunk-backed

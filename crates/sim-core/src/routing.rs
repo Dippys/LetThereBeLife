@@ -99,8 +99,74 @@ impl PartialOrd for OpenNode {
 #[derive(Debug, Default)]
 pub(crate) struct RoutePlanner {
     nodes: Vec<RouteNode>,
-    by_position: HashMap<CompactPosition, u16>,
+    by_position: NodeIndex,
     open: BinaryHeap<OpenNode>,
+}
+
+/// Cells across the grid of node numbers around a search's origin.
+const INDEX_SIDE: i32 = 128;
+
+/// Which node a position is, during one search: a grid around the origin
+/// (cleared by moving to a new stamp), and a map for the few positions
+/// beyond it. Lookups only, never iterated.
+#[derive(Debug, Default)]
+struct NodeIndex {
+    origin: (i32, i32),
+    stamp: u32,
+    /// (stamp, node) per grid cell; a cell is set only if its stamp is current.
+    grid: Vec<(u32, u16)>,
+    beyond: HashMap<CompactPosition, u16>,
+}
+
+impl NodeIndex {
+    fn reset(&mut self, origin: CompactPosition) {
+        if self.grid.is_empty() {
+            self.grid = vec![(0, 0); (INDEX_SIDE * INDEX_SIDE) as usize];
+        }
+        self.stamp = self.stamp.wrapping_add(1);
+        if self.stamp == 0 {
+            self.grid.fill((0, 0));
+            self.stamp = 1;
+        }
+        self.origin = (
+            i32::from(origin.x) - INDEX_SIDE / 2,
+            i32::from(origin.y) - INDEX_SIDE / 2,
+        );
+        if !self.beyond.is_empty() {
+            self.beyond.clear();
+        }
+    }
+
+    fn slot(&self, position: CompactPosition) -> Option<usize> {
+        let x = i32::from(position.x) - self.origin.0;
+        let y = i32::from(position.y) - self.origin.1;
+        ((0..INDEX_SIDE).contains(&x) && (0..INDEX_SIDE).contains(&y))
+            .then(|| (y * INDEX_SIDE + x) as usize)
+    }
+
+    fn get(&self, position: CompactPosition) -> Option<u16> {
+        match self.slot(position) {
+            Some(slot) => {
+                let (stamp, node) = self.grid[slot];
+                (stamp == self.stamp).then_some(node)
+            }
+            None => self.beyond.get(&position).copied(),
+        }
+    }
+
+    #[cfg(test)]
+    fn capacity(&self) -> usize {
+        self.grid.len() + self.beyond.capacity()
+    }
+
+    fn insert(&mut self, position: CompactPosition, node: u16) {
+        match self.slot(position) {
+            Some(slot) => self.grid[slot] = (self.stamp, node),
+            None => {
+                self.beyond.insert(position, node);
+            }
+        }
+    }
 }
 
 impl RoutePlanner {
@@ -112,10 +178,10 @@ impl RoutePlanner {
     ) -> Result<RoutePlan, RouteRequestError> {
         validate_request(environment, origin, request)?;
         self.nodes.clear();
-        self.by_position.clear();
         self.open.clear();
 
         let origin = CompactPosition::checked(origin).ok_or(RouteRequestError::OutsideWorld)?;
+        self.by_position.reset(origin);
         let destination =
             CompactPosition::checked(request.destination).ok_or(RouteRequestError::OutsideWorld)?;
         self.nodes.push(RouteNode {
@@ -131,6 +197,10 @@ impl RoutePlanner {
             node: 0,
         });
 
+        let mut cells = Cells {
+            world: environment.world,
+            last: None,
+        };
         let mut expansions = 0_u16;
         while let Some(open) = self.open.pop() {
             let index = usize::from(open.node);
@@ -146,6 +216,8 @@ impl RoutePlanner {
                 });
             }
             let current = open.position.world();
+            // Fetched on the first neighbor that needs it (as a step would).
+            let mut source = None;
             for (dx, dy) in [(0_i64, -1_i64), (-1, 0), (1, 0), (0, 1)] {
                 let neighbor = WorldPosition {
                     x: current.x + dx,
@@ -156,10 +228,14 @@ impl RoutePlanner {
                 {
                     continue;
                 }
+                let from = match source {
+                    Some(cell) => cell,
+                    None => *source.insert(cells.resident(current).map_err(map_query_error)?),
+                };
+                let to = cells.resident(neighbor).map_err(map_query_error)?;
                 let step = environment
                     .spawned_objects
-                    .traversal_step(environment.world, current, neighbor)
-                    .map_err(map_query_error)?;
+                    .placed_step(sim_world::traversal_between(from, to), neighbor);
                 let Some(step_cost) = step.cost() else {
                     continue;
                 };
@@ -168,7 +244,7 @@ impl RoutePlanner {
                 };
                 let compact =
                     CompactPosition::checked(neighbor).ok_or(RouteRequestError::OutsideWorld)?;
-                if let Some(&raw) = self.by_position.get(&compact) {
+                if let Some(raw) = self.by_position.get(compact) {
                     let existing = &mut self.nodes[usize::from(raw)];
                     if cost < existing.cost && !existing.closed {
                         existing.cost = cost;
@@ -228,6 +304,36 @@ impl RoutePlanner {
             self.by_position.capacity(),
             self.open.capacity(),
         )
+    }
+}
+
+/// Resident cells for one search, remembering the last chunk used (most
+/// lookups land in it).
+struct Cells<'a> {
+    world: &'a World,
+    last: Option<sim_world::ChunkCells<'a>>,
+}
+
+impl Cells<'_> {
+    /// The cell at `position`, failing as `World::traversal_step` would.
+    fn resident(
+        &mut self,
+        position: WorldPosition,
+    ) -> Result<sim_world::TerrainCell, WorldQueryError> {
+        if !crate::WORLD_GENERATION_BOUNDS.contains(position) {
+            return Err(WorldQueryError::OutsideWorldBounds);
+        }
+        if let Some(chunk) = self.last
+            && chunk.contains(position)
+        {
+            return chunk.cell(position).ok_or(WorldQueryError::Unloaded);
+        }
+        let chunk = self
+            .world
+            .chunk_cells(position)
+            .ok_or(WorldQueryError::Unloaded)?;
+        self.last = Some(chunk);
+        chunk.cell(position).ok_or(WorldQueryError::Unloaded)
     }
 }
 
