@@ -1085,3 +1085,16 @@ graves instead of every dead person forever. Minds 1,896 B; save version 13.
 **Consequences:** With D-132, over 10 years in 20 valleys: 491 survivors against 497, deaths from
 cold 31 against 24; 25 burials, 24 people sickened by a rotting body.
 
+## D-134: Food goes bad unless cooked (2026-10-12)
+
+**Decision:** Materials have `keeps_days`: berries 8, raw meat 3, roast 15, others forever. Each dawn
+about one part in that many of what each person carries rots; in huts food keeps three times as
+long. New material `Roast` (nutrition 7,000): someone who keeps fire, carrying raw meat with a fire
+burning in view, goes and cooks it (new goal `Cook`); it and anyone watching expect roast to feed as
+meat did, and the cook names it (a compound on the word for meat). Save version 14.
+**Why:** The user asked that berries and meat go bad unless cooked.
+**Consequences:** Over 10 years in 20 valleys: 441 survivors against 491. Deaths barely changed (39
+against 42); people spend their time gathering (gathers 628,348 against 232,426, tiles visited
+nearly double) and fewer children are born. Meat was cooked only rarely. Harsher keeping (berries 4
+days, meat 2, roast 10, huts twice) gave 417.
+

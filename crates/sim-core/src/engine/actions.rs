@@ -142,6 +142,7 @@ impl Engine {
             PhysicalGoal::Craft => self.apply_craft(event.agent),
             PhysicalGoal::Plant => self.apply_plant(event.agent, target),
             PhysicalGoal::Bury => self.apply_bury(event.agent, target),
+            PhysicalGoal::Cook => self.apply_cook(event.agent, target),
             PhysicalGoal::Store => self.apply_store(event.agent, target),
             PhysicalGoal::Fetch => self.apply_fetch(event.agent, target),
             PhysicalGoal::Drop => self.apply_drop(event.agent),
@@ -704,6 +705,65 @@ impl Engine {
             self.spawned_objects.sow(spot, sprout, next_season(now));
             self.plants_sprouted += 1;
         }
+    }
+
+    /// Cooks the raw meat it carries over the burning fire at `target` (beside
+    /// it). It and anyone watching expect cooked meat to feed as meat did.
+    pub(super) fn apply_cook(
+        &mut self,
+        agent: AgentId,
+        target: WorldPosition,
+    ) -> Result<(), PolicyFailureReason> {
+        let position = self
+            .population
+            .view(agent)
+            .ok_or(PolicyFailureReason::InconsistentState)?
+            .position;
+        let now = (self.time.ticks() / 60) as u32;
+        let burning = self
+            .structures
+            .structure_at(target)
+            .and_then(|id| self.structures.view(id))
+            .is_some_and(|fire| fire.kind.burns() && fire.working(now));
+        if !burning
+            || position
+                .x
+                .abs_diff(target.x)
+                .max(position.y.abs_diff(target.y))
+                > 1
+        {
+            return Err(PolicyFailureReason::TargetUnavailable);
+        }
+        let cooked = self.population.cook(agent, Material::Meat, Material::Roast);
+        if cooked == 0 {
+            return Err(PolicyFailureReason::InsufficientMaterials);
+        }
+        let watchers: Vec<AgentId> = self
+            .perceive_physical(agent, crate::PHYSICAL_POLICY_RADIUS)
+            .map(|perception| {
+                perception
+                    .agents
+                    .iter()
+                    .filter(|other| {
+                        other.id != agent && super::cognition::can_watch(other.activity)
+                    })
+                    .map(|other| other.id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        for &who in std::iter::once(&agent).chain(&watchers) {
+            self.minds
+                .get_mut(who)
+                .affordances
+                .saw_cooked(Material::Meat, Material::Roast);
+        }
+        self.name_made(agent, crate::Concept::Material(Material::Roast), &watchers);
+        self.craft_events.push(crate::CraftEvent {
+            agent,
+            made: Material::Roast,
+            watchers: watchers.len() as u16,
+        });
+        Ok(())
     }
 
     /// Pushes a carried berry into the ground at `target` (beside the agent),

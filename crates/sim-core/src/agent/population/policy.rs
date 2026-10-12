@@ -281,7 +281,8 @@ impl Population {
             | PhysicalGoal::Fetch
             | PhysicalGoal::Drop
             | PhysicalGoal::Plant
-            | PhysicalGoal::Bury => AgentActivity::Gathering,
+            | PhysicalGoal::Bury
+            | PhysicalGoal::Cook => AgentActivity::Gathering,
             PhysicalGoal::Incapacitated => AgentActivity::Incapacitated,
         };
         if !scheduler.can_schedule(

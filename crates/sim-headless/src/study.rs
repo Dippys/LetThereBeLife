@@ -274,6 +274,9 @@ pub struct WildlifeStats {
     pub burials: [u64; 2],
     pub sickened: u64,
     pub unburied: u64,
+    /// Food units that went bad; meat cooked (times).
+    pub rotted: u64,
+    pub cooked: u64,
     /// Plans formed, completed, and given up; and how often each plan (its
     /// steps, as text) was formed.
     pub plans: [u64; 3],
@@ -595,6 +598,7 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                     wildlife.blades += u64::from(craft.made == sim_core::Material::Blade);
                     wildlife.spears += u64::from(craft.made == sim_core::Material::Spear);
                     wildlife.baskets += u64::from(craft.made == sim_core::Material::Basket);
+                    wildlife.cooked += u64::from(craft.made == sim_core::Material::Roast);
                     wildlife.watched_crafts += u64::from(craft.watchers);
                 }
                 for fire in engine.fire_events() {
@@ -763,6 +767,7 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     report.comms = comms;
     wildlife.crops_withered = engine.crops_withered();
     wildlife.sickened = engine.sickened_by_bodies();
+    wildlife.rotted = engine.food_rotted();
     wildlife.unburied = engine
         .bodies()
         .filter(|(_, _, state)| *state != sim_core::BodyState::Buried)
@@ -2028,6 +2033,11 @@ impl fmt::Display for StudyReport {
             formatter,
             "; food in huts as winter began {:?}",
             self.wildlife.winter_stock
+        )?;
+        write!(
+            formatter,
+            "\n  food going bad: {} units rotted; meat cooked {} times",
+            self.wildlife.rotted, self.wildlife.cooked
         )?;
         let [buried, watched_burials] = self.wildlife.burials;
         write!(

@@ -133,6 +133,19 @@ impl Affordances {
     }
 
     /// The agent watched someone eat `material` (and saw whether they retched).
+    /// It saw `raw` cooked into `cooked`: until it learns otherwise, it expects
+    /// the cooked thing to feed as the raw one did.
+    pub(crate) fn saw_cooked(&mut self, raw: Material, cooked: Material) {
+        let from = self.beliefs[raw as usize];
+        let into = &mut self.beliefs[cooked as usize];
+        if into.evidence == 0 && from.evidence > 0 {
+            *into = Belief {
+                evidence: 1,
+                ..from
+            };
+        }
+    }
+
     /// People eat what they think is food, so eating suggests it feeds; retching
     /// says it sickens.
     pub(crate) fn saw_eaten(&mut self, material: Material, retched: bool) {

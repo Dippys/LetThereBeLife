@@ -150,6 +150,11 @@ impl Engine {
         (self.plants_sprouted, self.plants_died)
     }
 
+    /// Units of food that went bad, so far.
+    pub fn food_rotted(&self) -> u64 {
+        self.food_rotted
+    }
+
     /// Sown bushes that died with the winter, so far.
     pub fn crops_withered(&self) -> u64 {
         self.crops_withered

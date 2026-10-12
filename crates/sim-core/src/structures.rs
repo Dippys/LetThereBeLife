@@ -375,6 +375,12 @@ impl StructureStore {
 
     /// Puts as much of `inventory` as fits into the finished hut `id`; returns
     /// what went in.
+    /// A night's rot in what huts hold: dry and out of the sun, food keeps
+    /// three times as long there. Returns units lost.
+    pub(crate) fn rot_stocks(&mut self) -> u32 {
+        self.stocks.values_mut().map(|stock| stock.rot(3)).sum()
+    }
+
     pub(crate) fn deposit(
         &mut self,
         id: StructureId,

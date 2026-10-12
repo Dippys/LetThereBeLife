@@ -88,6 +88,22 @@ impl InventoryView {
         self.capacity().saturating_sub(self.total())
     }
 
+    /// A night's rot: of everything that goes bad, about one part in its
+    /// keeping days (times `slower`) is lost. Returns how many units rotted.
+    pub fn rot(&mut self, slower: u8) -> u32 {
+        let mut lost = 0;
+        for material in Material::ALL {
+            let keeps = material.properties().keeps_days;
+            let amount = &mut self.items[material as usize];
+            if keeps > 0 && *amount > 0 {
+                let rotten = amount.div_ceil(keeps.saturating_mul(slower.max(1)));
+                *amount -= rotten;
+                lost += u32::from(rotten);
+            }
+        }
+        lost
+    }
+
     pub fn can_add(self, kind: Material) -> bool {
         self.remaining_capacity(kind) > 0
     }
@@ -327,6 +343,34 @@ mod tests {
         assert_eq!(size_of::<ResourceDelta>(), 12);
         assert_eq!(align_of::<ResourceDelta>(), 4);
         assert_eq!(size_of::<Delta>(), 8);
+    }
+
+    #[test]
+    fn food_rots_a_little_each_night_and_cooked_meat_keeps_longer() {
+        let mut carried = InventoryView::of(&[
+            (Material::Berries, 8),
+            (Material::Meat, 6),
+            (Material::Roast, 6),
+            (Material::Wood, 5),
+        ]);
+        let lost = carried.rot(1);
+        assert_eq!(carried.amount(Material::Wood), 5, "wood keeps");
+        assert!(carried.amount(Material::Meat) < carried.amount(Material::Roast));
+        assert_eq!(
+            lost,
+            8 + 6 + 6
+                - carried.amount(Material::Berries) as u32
+                - carried.amount(Material::Meat) as u32
+                - carried.amount(Material::Roast) as u32
+        );
+        let mut stored = InventoryView::of(&[(Material::Berries, 8)]);
+        stored.rot(3);
+        let mut out = InventoryView::of(&[(Material::Berries, 8)]);
+        out.rot(1);
+        assert!(
+            stored.amount(Material::Berries) >= out.amount(Material::Berries),
+            "huts keep food longer"
+        );
     }
 
     #[test]

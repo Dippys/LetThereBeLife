@@ -34,6 +34,8 @@ pub enum Material {
     Spear,
     /// Woven from twigs: holds more than two hands can.
     Basket,
+    /// Meat cooked over a fire: more filling, and it keeps.
+    Roast,
 }
 
 /// How a material is taken from where it's found: the motion anyone watching
@@ -83,6 +85,9 @@ pub struct MaterialProperties {
     pub room: u8,
     /// Making it needs a cutting edge carried, to shape it.
     pub needs_edge: bool,
+    /// Days it keeps before going bad, carried (0 = it keeps): each dawn about
+    /// one part in this many of what's carried rots.
+    pub keeps_days: u8,
 }
 
 impl MaterialProperties {
@@ -94,7 +99,7 @@ impl MaterialProperties {
 }
 
 impl Material {
-    pub const COUNT: usize = 9;
+    pub const COUNT: usize = 10;
     pub const ALL: [Self; Self::COUNT] = [
         Self::Berries,
         Self::Bitterberries,
@@ -105,6 +110,7 @@ impl Material {
         Self::Hide,
         Self::Spear,
         Self::Basket,
+        Self::Roast,
     ];
 
     pub const fn properties(self) -> MaterialProperties {
@@ -124,6 +130,7 @@ impl Material {
                 strike: 0,
                 room: 0,
                 needs_edge: false,
+                keeps_days: 8,
             },
             Self::Bitterberries => MaterialProperties {
                 cutting: false,
@@ -140,6 +147,7 @@ impl Material {
                 strike: 0,
                 room: 0,
                 needs_edge: false,
+                keeps_days: 8,
             },
             Self::Wood => MaterialProperties {
                 cutting: false,
@@ -156,6 +164,7 @@ impl Material {
                 strike: 0,
                 room: 0,
                 needs_edge: false,
+                keeps_days: 0,
             },
             Self::Stone => MaterialProperties {
                 cutting: false,
@@ -172,6 +181,7 @@ impl Material {
                 strike: 0,
                 room: 0,
                 needs_edge: false,
+                keeps_days: 0,
             },
             Self::Meat => MaterialProperties {
                 cutting: false,
@@ -188,6 +198,7 @@ impl Material {
                 strike: 0,
                 room: 0,
                 needs_edge: false,
+                keeps_days: 3,
             },
             Self::Blade => MaterialProperties {
                 cutting: true,
@@ -204,6 +215,7 @@ impl Material {
                 strike: 0,
                 room: 0,
                 needs_edge: false,
+                keeps_days: 0,
             },
             Self::Hide => MaterialProperties {
                 cutting: false,
@@ -220,6 +232,7 @@ impl Material {
                 strike: 0,
                 room: 0,
                 needs_edge: false,
+                keeps_days: 0,
             },
             Self::Spear => MaterialProperties {
                 cutting: false,
@@ -236,6 +249,7 @@ impl Material {
                 strike: 15,
                 room: 0,
                 needs_edge: true,
+                keeps_days: 0,
             },
             Self::Basket => MaterialProperties {
                 cutting: false,
@@ -252,6 +266,24 @@ impl Material {
                 strike: 0,
                 room: 6,
                 needs_edge: false,
+                keeps_days: 0,
+            },
+            Self::Roast => MaterialProperties {
+                cutting: false,
+                made_from: Some((Self::Meat, 1)),
+                fuel_seconds: 0,
+                seasonal: false,
+                handling: Handling::Carve,
+                fixed_source: false,
+                nutrition: 7_000,
+                toxicity: 0,
+                builds: false,
+                regrow_seconds: 0,
+                warmth: 0,
+                strike: 0,
+                room: 0,
+                needs_edge: false,
+                keeps_days: 15,
             },
         }
     }

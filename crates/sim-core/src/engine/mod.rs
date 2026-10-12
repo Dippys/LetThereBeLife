@@ -173,6 +173,8 @@ pub struct Engine {
     plants_sprouted: u64,
     /// Sown bushes that died in winter, so far.
     crops_withered: u64,
+    /// Units of food that went bad, so far.
+    food_rotted: u64,
     plants_died: u64,
     /// Things put away in huts and food taken out (for tools).
     stored: u64,
@@ -242,6 +244,7 @@ impl Engine {
             nights: true,
             plants_sprouted: 0,
             crops_withered: 0,
+            food_rotted: 0,
             plants_died: 0,
             stored: 0,
             fetched: 0,

@@ -135,6 +135,7 @@ impl Choice {
             PhysicalGoal::Craft => Self::Craft,
             PhysicalGoal::Plant => Self::Gather,
             PhysicalGoal::Bury => Self::Company,
+            PhysicalGoal::Cook => Self::Store,
             PhysicalGoal::Hunt => Self::Hunt,
             PhysicalGoal::Drop => Self::Unload,
             PhysicalGoal::Signal => Self::Company,

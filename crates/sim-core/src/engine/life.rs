@@ -124,6 +124,11 @@ impl Engine {
         let ticks = self.time.ticks();
         let new_season = ticks % crate::season::SEASON_TICKS == 0;
         let day = (ticks / 60) % crate::season::DAY_SECONDS;
+        // Each dawn, food that goes bad rots a little.
+        if ticks > 0 && ticks % 60 == 0 && day == 0 {
+            self.food_rotted += u64::from(self.population.rot_carried());
+            self.food_rotted += u64::from(self.structures.rot_stocks());
+        }
         let dawn_or_dusk =
             self.nights && ticks % 60 == 0 && (day == 0 || day == crate::season::NIGHTFALL_SECONDS);
         if !new_season && !dawn_or_dusk {

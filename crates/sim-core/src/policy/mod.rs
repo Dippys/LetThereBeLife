@@ -179,6 +179,8 @@ pub enum PhysicalGoal {
     Plant = 20,
     /// Bury the body lying beside the agent.
     Bury = 21,
+    /// Cook carried meat at the fire beside the agent.
+    Cook = 22,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -236,6 +238,8 @@ pub enum PolicyReason {
     Planting,
     /// Burying the dead.
     Burying,
+    /// Cooking meat at a fire.
+    Cooking,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

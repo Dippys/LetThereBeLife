@@ -82,9 +82,10 @@ fn inspect_candidate(world: &World, position: WorldPosition) -> Option<Candidate
                     .expect("the scenario surveys only resident cells")
                 {
                     let total = match resource.kind {
-                        Material::Berries | Material::Bitterberries | Material::Meat => {
-                            &mut inputs.food
-                        }
+                        Material::Berries
+                        | Material::Bitterberries
+                        | Material::Meat
+                        | Material::Roast => &mut inputs.food,
                         Material::Wood => &mut inputs.wood,
                         Material::Stone
                         | Material::Blade

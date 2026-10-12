@@ -623,6 +623,28 @@ impl Planner<'_> {
             .map(|structure| structure.position)
     }
 
+    /// Someone who keeps fire, carrying raw meat, with a fire burning in view:
+    /// goes to it and cooks the meat.
+    fn cook(&self, inventory: InventoryView) -> Option<Deliberation> {
+        if !self.mind.knows_hearths || inventory.amount(Material::Meat) == 0 {
+            return None;
+        }
+        let now = (self.needs.at.ticks() / 60) as u32;
+        let fire = self
+            .perception
+            .structures
+            .iter()
+            .filter(|structure| structure.kind.burns() && structure.working(now))
+            .min_by_key(|structure| {
+                (
+                    manhattan(structure.position, self.origin),
+                    structure.position.y,
+                    structure.position.x,
+                )
+            })?;
+        self.at_hut(fire.position, PhysicalGoal::Cook, PolicyReason::Cooking)
+    }
+
     /// The hut at `hut` belongs to another family, as far as it knows.
     fn theirs(&self, hut: WorldPosition) -> bool {
         self.mind.others_huts.contains(&hut)
@@ -1377,6 +1399,10 @@ impl Planner<'_> {
             && let Some(burial) = self.at_hut(body, PhysicalGoal::Bury, PolicyReason::Burying)
         {
             return burial;
+        }
+        // Raw meat goes bad fast: cook it at a fire in view.
+        if let Some(cook) = self.cook(inventory) {
+            return cook;
         }
         // Getting ready for winter: food home.
         if let Some(stock) = self.stock_home(inventory) {

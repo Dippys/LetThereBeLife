@@ -85,6 +85,35 @@ impl Population {
         taken
     }
 
+    /// A night's rot in what every living person carries. Returns units lost.
+    pub(crate) fn rot_carried(&mut self) -> u32 {
+        let mut lost = 0;
+        for (index, inventory) in self.inventories.iter_mut().enumerate() {
+            if self
+                .records
+                .get(index)
+                .is_some_and(|record| !record.activity.is_terminal())
+            {
+                lost += inventory.rot(1);
+            }
+        }
+        lost
+    }
+
+    /// Turns all carried `raw` into `cooked`, one for one. Returns how many.
+    pub(crate) fn cook(
+        &mut self,
+        agent: AgentId,
+        raw: crate::Material,
+        cooked: crate::Material,
+    ) -> u8 {
+        let inventory = &mut self.inventories[agent.0 as usize];
+        let amount = inventory.items[raw as usize];
+        inventory.items[raw as usize] = 0;
+        inventory.items[cooked as usize] = inventory.items[cooked as usize].saturating_add(amount);
+        amount
+    }
+
     /// Eats one carried unit of `material`: hunger falls by its nutrition, and
     /// its toxicity is added to thirst and tiredness. Returns its properties
     /// (what the agent feels).

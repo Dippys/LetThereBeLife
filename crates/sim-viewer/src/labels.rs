@@ -67,6 +67,7 @@ pub const fn material(material: Material) -> &'static str {
         Material::Hide => "hides",
         Material::Spear => "spears",
         Material::Basket => "baskets",
+        Material::Roast => "roast meat",
     }
 }
 
@@ -180,6 +181,7 @@ pub const fn goal(goal: PhysicalGoal) -> &'static str {
         PhysicalGoal::Drop => "Setting things down",
         PhysicalGoal::Plant => "Planting berries",
         PhysicalGoal::Bury => "Burying the dead",
+        PhysicalGoal::Cook => "Cooking meat",
     }
 }
 
@@ -217,6 +219,7 @@ pub const fn reason(reason: PolicyReason) -> Option<&'static str> {
         PolicyReason::Unloading => "Making room to carry what it needs",
         PolicyReason::Planting => "Planting near home",
         PolicyReason::Burying => "Burying someone who died",
+        PolicyReason::Cooking => "Cooking meat before it goes bad",
     })
 }
 

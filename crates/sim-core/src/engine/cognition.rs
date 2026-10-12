@@ -733,7 +733,10 @@ impl Engine {
         let duration = match (goal, reason) {
             (PhysicalGoal::Hunt, _) => super::HUNT_TICKS,
             (PhysicalGoal::WarmUp | PhysicalGoal::TendFire, _) => WARM_UP_TICKS,
-            (PhysicalGoal::Craft | PhysicalGoal::Plant | PhysicalGoal::Bury, _) => CRAFT_TICKS,
+            (
+                PhysicalGoal::Craft | PhysicalGoal::Plant | PhysicalGoal::Bury | PhysicalGoal::Cook,
+                _,
+            ) => CRAFT_TICKS,
             (PhysicalGoal::Store | PhysicalGoal::Fetch | PhysicalGoal::Drop, _) => WARM_UP_TICKS,
             // A warning is quick: a shout and a point.
             (_, PolicyReason::Warning) => WARNING_TICKS,

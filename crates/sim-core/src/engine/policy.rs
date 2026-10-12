@@ -163,6 +163,7 @@ impl Engine {
                 | PhysicalGoal::Craft
                 | PhysicalGoal::Plant
                 | PhysicalGoal::Bury
+                | PhysicalGoal::Cook
                 | PhysicalGoal::Store
                 | PhysicalGoal::Fetch
                 | PhysicalGoal::Drop

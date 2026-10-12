@@ -51,7 +51,9 @@ impl Concept {
     /// nobody starts out with a word for it.
     pub const fn is_made(self) -> bool {
         match self {
-            Self::Material(material) => material.properties().worn(),
+            Self::Material(material) => {
+                material.properties().worn() || material.properties().made_from.is_some()
+            }
             _ => false,
         }
     }

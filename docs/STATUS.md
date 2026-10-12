@@ -145,6 +145,8 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 - **Winter cold is still the main killer**, though learned choices (D-105) roughly halved it.
 - **Stored food is rarely eaten:** people put food away in huts but seldom come back for it.
+- **Rotting food costs children** (D-134): people gather far more and fewer are born; they don't
+  yet gather less because they know it'll rot, and seldom cook.
 - **Most decisions are still hand-written.** Cold and tiredness are answered by learned habits
   and what people learned their choices bring about (D-105, D-108); food, water, storage and
   social choices are still a script.
@@ -184,7 +186,8 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
-- 2026-10-12 (latest): sown berries are a season's crop (D-132); the dead rot and sicken until
+- 2026-10-12 (latest): food rots unless cooked (D-134).
+- 2026-10-12: sown berries are a season's crop (D-132); the dead rot and sicken until
   buried, and burial is learned (D-133).
 - 2026-10-12: words for made things, compounds of the word for what they're made
   from, learned by watching them made (D-131).
