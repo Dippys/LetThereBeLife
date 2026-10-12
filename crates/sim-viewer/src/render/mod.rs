@@ -1529,12 +1529,15 @@ fn build_pictures(
             animal.mode,
             sim_core::AnimalMode::Fleeing | sim_core::AnimalMode::Hunting
         );
+        // Young in their first year are drawn small.
+        let young = (tick / 60) as i64 - i64::from(animal.born) < sim_core::SECONDS_PER_YEAR;
         sprites::animal(
             beings,
             animal.position.x as f32,
             animal.position.y as f32,
             animal.species,
             alert,
+            young,
         );
     }
     for (_, position, state) in engine.bodies() {

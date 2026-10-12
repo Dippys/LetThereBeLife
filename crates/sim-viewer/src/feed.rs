@@ -443,7 +443,23 @@ impl Feed {
                     None,
                     position,
                 ),
-                WildlifeEvent::Struck { .. } | WildlifeEvent::Born { .. } => {}
+                WildlifeEvent::Born {
+                    species, position, ..
+                } => self.push(
+                    format!("A young {} was born", labels::species(species)),
+                    Tone::Neutral,
+                    None,
+                    position,
+                ),
+                WildlifeEvent::Died {
+                    species, position, ..
+                } => self.push(
+                    format!("An old {} died", labels::species(species)),
+                    Tone::Neutral,
+                    None,
+                    position,
+                ),
+                WildlifeEvent::Struck { .. } => {}
             }
         }
 

@@ -168,7 +168,15 @@ const WOLF: Picture = [
     "......e.", ".....ggg", "g...gggn", ".ggggggg", ".gggggg.", ".gggggg.", ".g.g.g.g", ".g.g.g.g",
 ];
 
-pub(super) fn animal(out: &mut Vec<Instance>, x: f32, y: f32, species: Species, alert: bool) {
+pub(super) fn animal(
+    out: &mut Vec<Instance>,
+    x: f32,
+    y: f32,
+    species: Species,
+    alert: bool,
+    young: bool,
+) {
+    let size = if young { 0.6 } else { 0.95 };
     match species {
         Species::Deer => {
             let coat = if alert {
@@ -176,7 +184,7 @@ pub(super) fn animal(out: &mut Vec<Instance>, x: f32, y: f32, species: Species, 
             } else {
                 rgba(170, 120, 70, 255)
             };
-            draw(out, x, y, 0.95, &DEER, &|letter| match letter {
+            draw(out, x, y, size, &DEER, &|letter| match letter {
                 b't' => Some(coat),
                 b'a' => Some(rgba(120, 90, 60, 255)),
                 b'w' => Some(rgba(240, 236, 226, 255)),
@@ -190,7 +198,7 @@ pub(super) fn animal(out: &mut Vec<Instance>, x: f32, y: f32, species: Species, 
             } else {
                 rgba(110, 110, 118, 255)
             };
-            draw(out, x, y, 0.95, &WOLF, &|letter| match letter {
+            draw(out, x, y, size, &WOLF, &|letter| match letter {
                 b'g' => Some(coat),
                 b'e' => Some(rgba(80, 80, 88, 255)),
                 b'n' => Some(rgba(30, 30, 34, 255)),

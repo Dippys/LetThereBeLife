@@ -251,6 +251,8 @@ pub struct WildlifeStats {
     pub predator_kills: u64,
     pub bites: u64,
     pub births: u64,
+    /// Animals that died of old age.
+    pub old_age: u64,
     /// Living deer and wolves at the end.
     pub deer: u64,
     pub wolves: u64,
@@ -574,6 +576,7 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                         sim_core::WildlifeEvent::Killed { .. } => wildlife.predator_kills += 1,
                         sim_core::WildlifeEvent::Bite { .. } => wildlife.bites += 1,
                         sim_core::WildlifeEvent::Born { .. } => wildlife.births += 1,
+                        sim_core::WildlifeEvent::Died { .. } => wildlife.old_age += 1,
                     }
                 }
                 for meal in engine.meal_events() {
@@ -1830,7 +1833,7 @@ impl fmt::Display for StudyReport {
             let [founders_fear, children_fear] = wild.fear_wolves;
             write!(
                 formatter,
-                "\n  wildlife: hunt decisions {}, flee decisions {}, calls {} ({} failed), strikes {}, kills by people {} ({} together), deer killed by wolves {}, bites {}, births {}; left: deer {} wolves {}; fear wolves: founders {founders_fear}, children {children_fear}",
+                "\n  wildlife: hunt decisions {}, flee decisions {}, calls {} ({} failed), strikes {}, kills by people {} ({} together), deer killed by wolves {}, bites {}, births {}, died of age {}; left: deer {} wolves {}; fear wolves: founders {founders_fear}, children {children_fear}",
                 wild.hunt_decisions,
                 wild.flee_decisions,
                 wild.call_decisions,
@@ -1841,6 +1844,7 @@ impl fmt::Display for StudyReport {
                 wild.predator_kills,
                 wild.bites,
                 wild.births,
+                wild.old_age,
                 wild.deer,
                 wild.wolves,
             )?;

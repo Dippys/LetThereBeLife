@@ -58,6 +58,10 @@ pub struct SpeciesTraits {
     /// Ticks between young for each animal while below the cap: a herd of
     /// ten breeds ten times as often as a single animal would.
     pub birth_ticks: u64,
+    /// Eats berries off bushes.
+    pub browses: bool,
+    /// Years it lives, at most.
+    pub lifespan_years: u8,
 }
 
 impl Species {
@@ -68,7 +72,7 @@ impl Species {
         match self {
             Self::Deer => SpeciesTraits {
                 senses: 4,
-                calm_step_ticks: 150,
+                calm_step_ticks: 90,
                 hurried_step_ticks: 13,
                 shy: true,
                 scent: 4,
@@ -78,6 +82,8 @@ impl Species {
                 preys_on: None,
                 max_population: 40,
                 birth_ticks: 60 * 60 * 60 * 2,
+                browses: true,
+                lifespan_years: 6,
             },
             Self::Wolf => SpeciesTraits {
                 senses: 10,
@@ -89,8 +95,10 @@ impl Species {
                 toughness: 4,
                 meat: 6,
                 preys_on: Some(Self::Deer),
-                max_population: 4,
+                max_population: 6,
                 birth_ticks: 60 * 60 * 60 * 16,
+                browses: false,
+                lifespan_years: 8,
             },
         }
     }
@@ -114,6 +122,8 @@ pub struct AnimalView {
     pub position: WorldPosition,
     pub mode: AnimalMode,
     pub wounds: u8,
+    /// Simulated second it was born (negative for the first ones).
+    pub born: i32,
 }
 
 /// Something that happened to or because of an animal (latest tick, for logs,
@@ -149,6 +159,12 @@ pub enum WildlifeEvent {
         species: Species,
         position: WorldPosition,
     },
+    /// An animal died of old age.
+    Died {
+        animal: u32,
+        species: Species,
+        position: WorldPosition,
+    },
 }
 
 /// One animal. 24 bytes.
@@ -163,6 +179,8 @@ pub(crate) struct Animal {
     pub(crate) mode: AnimalMode,
     pub(crate) wounds: u8,
     pub(crate) alive: bool,
+    /// Simulated second it was born (before the start for the first ones).
+    pub(crate) born: i32,
 }
 
 impl Animal {
@@ -245,6 +263,8 @@ pub(crate) enum Move {
     /// Attack the person or animal next to it.
     BitePerson(AgentId),
     AttackAnimal(usize),
+    /// Eat berries off the bush in this cell (beside it).
+    Browse(WorldPosition),
     Stay(AnimalMode),
 }
 
@@ -253,6 +273,8 @@ pub(crate) struct Senses<'a> {
     pub(crate) people: &'a [(AgentId, WorldPosition)],
     /// Living animals nearby: (index, species, position).
     pub(crate) animals: &'a [(usize, Species, WorldPosition)],
+    /// The nearest bush with berries in sight, for animals that browse.
+    pub(crate) fruit: Option<WorldPosition>,
     pub(crate) now: u64,
     pub(crate) seed: u64,
 }
@@ -328,8 +350,22 @@ pub(crate) fn decide(
         }
     }
 
+    // A browser that's hungry goes to berries in sight and eats.
+    if traits.browses
+        && hungry
+        && let Some(bush) = senses.fruit
+    {
+        if chebyshev(here, bush) <= 1 {
+            return Move::Browse(bush);
+        }
+        if roll % 2 == 0
+            && let Some(cell) = step_toward(here, bush, standable)
+        {
+            return Move::Step(cell, AnimalMode::Grazing);
+        }
+    }
     // Calm: drift, mostly toward others of its kind.
-    if roll % 3 != 0 {
+    if roll % 3 == 0 {
         return Move::Stay(if hungry {
             AnimalMode::Grazing
         } else {
@@ -410,6 +446,7 @@ impl Wildlife {
                 position: animal.position(),
                 mode: animal.mode,
                 wounds: animal.wounds,
+                born: animal.born,
             })
     }
 
@@ -510,6 +547,7 @@ mod tests {
             mode: AnimalMode::Grazing,
             wounds: 0,
             alive: true,
+            born: 0,
         }
     }
 
@@ -520,6 +558,7 @@ mod tests {
         Senses {
             people,
             animals,
+            fruit: None,
             now: 1_000,
             seed: 1,
         }
@@ -528,8 +567,24 @@ mod tests {
     const OPEN: &dyn Fn(WorldPosition) -> bool = &|_| true;
 
     #[test]
+    fn hungry_deer_browse_berries_in_sight() {
+        let deer = animal(Species::Deer, at(0, 0));
+        let beside = Senses {
+            fruit: Some(at(1, 0)),
+            ..senses(&[], &[])
+        };
+        assert_eq!(decide(0, deer, &beside, OPEN), Move::Browse(at(1, 0)));
+        let full = Animal {
+            fed_until: 5_000,
+            ..deer
+        };
+        assert_ne!(decide(0, full, &beside, OPEN), Move::Browse(at(1, 0)));
+        assert!(!Species::Wolf.traits().browses);
+    }
+
+    #[test]
     fn animals_are_compact() {
-        assert_eq!(std::mem::size_of::<Animal>(), 24);
+        assert_eq!(std::mem::size_of::<Animal>(), 32);
         assert_eq!(std::mem::size_of::<Carcass>(), 16);
     }
 

@@ -1098,3 +1098,15 @@ against 42); people spend their time gathering (gathers 628,348 against 232,426,
 nearly double) and fewer children are born. Meat was cooked only rarely. Harsher keeping (berries 4
 days, meat 2, roast 10, huts twice) gave 417.
 
+## D-135: Livelier wildlife (2026-10-12)
+
+**Decision:** Calm animals move two times in three (was one), deer step every 90 ticks (was 150).
+Hungry deer go to berries in sight and eat a mouthful (`Move::Browse`), full for two hours after.
+Animals age (`born`; deer live up to 6 years, wolves 8) and die of it, leaving a carcass; the first
+ones start at random ages. Young are born only in spring, three times as fast, and are drawn small
+in their first year. Up to 6 wolves (was 4). Animals are 32 B; save version 15.
+**Why:** The user asked for wildlife that's more active and reproduces.
+**Consequences:** Over 10 years in 20 valleys: 442 survivors against 441; 298 animals died of age,
+3,397 were born; bites 1,578 against 2,542; 461 deer and 40 wolves left against 664 and 80.
+Exhaustion deaths 21 against 12.
+

@@ -186,7 +186,8 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## Recent changes
 
-- 2026-10-12 (latest): food rots unless cooked (D-134).
+- 2026-10-12 (latest): wildlife browses, ages and is born in spring (D-135).
+- 2026-10-12: food rots unless cooked (D-134).
 - 2026-10-12: sown berries are a season's crop (D-132); the dead rot and sicken until
   buried, and burial is learned (D-133).
 - 2026-10-12: words for made things, compounds of the word for what they're made

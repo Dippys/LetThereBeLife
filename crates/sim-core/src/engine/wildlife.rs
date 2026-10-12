@@ -30,6 +30,12 @@ const MIN_BREEDERS: usize = 8;
 /// How long someone knocked down by a wound lies before coming round (5 minutes).
 pub(super) const WOUND_RECOVERY_TICKS: u64 = 18_000;
 
+/// Young come this much faster in spring (and not at all otherwise).
+const SPRING_BURST: u64 = 3;
+/// Berries a browsing animal eats in a go, and how long it's full after.
+const BROWSE_BITE: u8 = 1;
+const BROWSED_TICKS: u64 = 60 * 60 * 2;
+
 impl Engine {
     /// Scenario setup: releases `deer` deer in three herds and `wolves` wolves at
     /// spots chosen from the seed inside `area`, which also bounds where they
@@ -117,6 +123,12 @@ impl Engine {
         };
         let now = self.time.ticks();
         let id = self.wildlife.animals.len() as u64;
+        // Grown, of some age within its life (the young born here are made
+        // newborn by `breed_wildlife`).
+        let life = u64::from(species.traits().lifespan_years) * crate::SECONDS_PER_YEAR as u64;
+        let age = mix(self.config.life_seed ^ 0x0041_4745 ^ id) % (life * 3 / 4).max(1)
+            + crate::SECONDS_PER_YEAR as u64;
+        let born = (now / 60) as i64 - age.min(life) as i64;
         self.wildlife.animals.push(Animal {
             // Spread first moves out so the herd doesn't step in lockstep.
             next_act: now + mix(self.config.life_seed ^ id) % species.traits().calm_step_ticks,
@@ -127,6 +139,7 @@ impl Engine {
             mode: AnimalMode::Grazing,
             wounds: 0,
             alive: true,
+            born: born as i32,
         });
         true
     }
@@ -154,6 +167,18 @@ impl Engine {
             }
             let traits = animal.species.traits();
             let here = animal.position();
+            // Old age: it lies down and dies, leaving its meat.
+            let age = (now / 60) as i64 - i64::from(animal.born);
+            if age >= i64::from(traits.lifespan_years) * crate::SECONDS_PER_YEAR {
+                self.wildlife.animals[index].alive = false;
+                self.wildlife.leave_carcass(here, traits.meat, now);
+                self.witness(WildlifeEvent::Died {
+                    animal: index as u32,
+                    species: animal.species,
+                    position: here,
+                });
+                continue;
+            }
             let reach = traits.senses;
             let sensed = WorldRect {
                 min: WorldPosition {
@@ -185,9 +210,14 @@ impl Engine {
                 })
                 .map(|(other, animal)| (other, animal.species, animal.position()))
                 .collect();
+            let fruit = traits
+                .browses
+                .then(|| self.fruit_near(here, reach))
+                .flatten();
             let senses = Senses {
                 people: &people,
                 animals: &animals,
+                fruit,
                 now,
                 seed: self.config.life_seed,
             };
@@ -196,6 +226,34 @@ impl Engine {
         }
         self.breed_wildlife();
         self.wildlife.rot(now);
+    }
+
+    /// The nearest bush with berries within `reach` of `here`.
+    fn fruit_near(&self, here: WorldPosition, reach: i64) -> Option<WorldPosition> {
+        let mut nearest: Option<(i64, WorldPosition)> = None;
+        for dy in -reach..=reach {
+            for dx in -reach..=reach {
+                let cell = WorldPosition {
+                    x: here.x + dx,
+                    y: here.y + dy,
+                };
+                let fruit =
+                    self.available_resource_at(cell)
+                        .ok()
+                        .flatten()
+                        .is_some_and(|resource| {
+                            matches!(
+                                resource.kind,
+                                crate::Material::Berries | crate::Material::Bitterberries
+                            ) && resource.capacity > 0
+                        });
+                let distance = dx.abs().max(dy.abs());
+                if fruit && nearest.is_none_or(|(best, _)| distance < best) {
+                    nearest = Some((distance, cell));
+                }
+            }
+        }
+        nearest.map(|(_, cell)| cell)
     }
 
     fn apply_animal_move(&mut self, index: usize, choice: Move) {
@@ -225,6 +283,18 @@ impl Engine {
                 } else {
                     calm
                 };
+            }
+            Move::Browse(bush) => {
+                // A mouthful, then it's full for a while.
+                if self.spawned_objects.at(bush).is_some() {
+                    self.spawned_objects.gather(bush, BROWSE_BITE);
+                } else {
+                    let _ = self.resource_deltas.gather(&self.world, bush, BROWSE_BITE);
+                }
+                let animal = &mut self.wildlife.animals[index];
+                animal.mode = AnimalMode::Grazing;
+                animal.fed_until = now + BROWSED_TICKS;
+                animal.next_act = calm;
             }
             Move::BitePerson(agent) => {
                 let position = animal.position();
@@ -290,12 +360,13 @@ impl Engine {
                 self.immigrate(species, now);
                 continue;
             }
-            // Young are born outside winter.
+            // Young are born in spring, all in a burst.
             if living.len() >= usize::from(traits.max_population)
-                || self.season() == crate::Season::Winter
+                || self.season() != crate::Season::Spring
             {
                 continue;
             }
+            self.wildlife.next_birth[slot] = now + traits.birth_ticks / breeders / SPRING_BURST;
             let parent = living[(mix(self.config.life_seed ^ now) % living.len() as u64) as usize];
             let at = self.wildlife.animals[parent].position();
             if let Some(cell) = crate::wildlife::cardinal(at)
@@ -303,6 +374,9 @@ impl Engine {
                 .find(|cell| self.animal_can_stand(*cell))
                 && self.spawn_animal(species, cell)
             {
+                if let Some(young) = self.wildlife.animals.last_mut() {
+                    young.born = (now / 60) as i32;
+                }
                 self.wildlife_events.push(WildlifeEvent::Born {
                     animal: (self.wildlife.animals.len() - 1) as u32,
                     species,
