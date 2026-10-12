@@ -30,7 +30,21 @@ impl Engine {
                 agent,
                 radius,
             )
-            .map(|perception| self.with_wildlife(perception))
+            .map(|perception| self.with_faces(self.with_wildlife(perception)))
+    }
+
+    /// Adds the feeling showing on each perceived agent's face.
+    fn with_faces(&self, mut perception: PhysicalPerception) -> PhysicalPerception {
+        perception.expressions = perception
+            .agents
+            .iter()
+            .filter(|other| other.activity != crate::AgentActivity::Dead)
+            .filter_map(|other| {
+                let shown = self.minds.get(other.id)?.feelings.shown()?;
+                Some((other.id, shown))
+            })
+            .collect();
+        perception
     }
 
     /// Adds the carcasses inside the perceived area, and the animals within

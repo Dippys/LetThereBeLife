@@ -78,6 +78,38 @@ impl Temperament {
     }
 }
 
+impl Temperament {
+    /// How feelings bend it: the frightened stay with others and don't roam,
+    /// the calm and the bored roam more, the lonely go visiting.
+    pub(crate) fn moved_by(mut self, feelings: &crate::Feelings) -> Self {
+        use crate::Feeling;
+        if feelings.strong(Feeling::Fear) {
+            self.excursion_chance = 0;
+            self.nosy_chance = 0;
+            self.stays_with_company = true;
+        } else if feelings.level(Feeling::Fear) < CALM && feelings.strong(Feeling::Contentment) {
+            self.excursion_chance += self.excursion_chance / 2;
+        }
+        if feelings.strong(Feeling::Boredom) {
+            self.excursion_chance += BORED_ROAMING;
+        }
+        if feelings.strong(Feeling::Loneliness) {
+            self.visit_chance += LONELY_VISITING;
+        }
+        if feelings.strong(Feeling::Grief) {
+            self.stays_with_company = true;
+        }
+        self
+    }
+}
+
+/// Fear below this, with contentment, is calm.
+const CALM: u8 = 16;
+/// Extra chance (out of 256) that a bored agent's idle check becomes an excursion.
+const BORED_ROAMING: u16 = 60;
+/// Extra chance (out of 256) that a lonely agent goes to find a friend.
+const LONELY_VISITING: u16 = 100;
+
 /// A remembered shelter this close counts as home: tired agents walk back to it,
 /// and agents don't build another one.
 pub const HOME_RANGE: u64 = 200;
@@ -194,6 +226,8 @@ pub(crate) struct MindInput<'a> {
     pub(crate) knows_hearths: bool,
     /// What it knows of making things, and what it has tried.
     pub(crate) crafts: crate::cognition::Crafts,
+    /// How it feels.
+    pub(crate) feelings: crate::Feelings,
     /// Where it stood at its previous decision (it won't step straight back).
     pub(crate) came_from: Option<WorldPosition>,
     /// Mourning someone close: stays near others, takes on no work or trips.
@@ -258,7 +292,7 @@ pub(crate) fn deliberate(
         needs,
         perception,
         mind: &mind,
-        temperament: Temperament::of(mind.personality),
+        temperament: Temperament::of(mind.personality).moved_by(&mind.feelings),
     };
     // Danger comes before everything else: warn the others unless it's already
     // close, then get away.
@@ -827,7 +861,12 @@ impl Planner<'_> {
     /// Now and then someone curious tries something new with what it carries:
     /// by hand, with an edge, or at a fire in view.
     fn experiment(&self, inventory: InventoryView) -> Option<Deliberation> {
-        let chance = u16::from(self.mind.personality.curiosity) / EXPERIMENT_RARITY;
+        let bored = if self.mind.feelings.strong(crate::Feeling::Boredom) {
+            2
+        } else {
+            1
+        };
+        let chance = u16::from(self.mind.personality.curiosity) / EXPERIMENT_RARITY * bored;
         // Only with food to spare: a try can spoil what goes into it.
         if self.roll(0x4558_5045) >= chance
             || self.mind.food.carried(inventory) < self.temperament.food_reserve

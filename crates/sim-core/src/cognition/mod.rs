@@ -8,6 +8,7 @@ mod character;
 mod crafts;
 mod dialogue;
 mod fauna;
+mod feelings;
 mod gesture;
 mod habits;
 mod intention;
@@ -28,6 +29,7 @@ pub use dialogue::{CONSEQUENCE_WEIGHT, REPAIR_WEIGHT};
 pub(crate) use dialogue::{Dialogue, LEAD_SECONDS, Lead, PendingCorrection};
 pub(crate) use fauna::Fauna;
 pub use fauna::FaunaView;
+pub use feelings::{Feeling, Feelings, SHOWS};
 pub use gesture::Gesture;
 pub(crate) use gesture::reach_toward;
 pub use habits::{Choice, EFFECTS, EffectView, HABIT_SLOTS, HabitView, Situation};
@@ -223,6 +225,8 @@ pub struct MentalMapView {
     pub abilities: [u8; Activity::COUNT],
     /// Its practised skill at each `Activity` (0-255).
     pub skills: [u8; Activity::COUNT],
+    /// The feeling showing on its face, if any.
+    pub feeling: Option<Feeling>,
     pub landmarks: Vec<LandmarkView>,
     pub explored_tiles: usize,
     /// A child of the band (started with no words) rather than a founder.
@@ -572,6 +576,8 @@ pub(crate) struct Mind {
     pub(crate) sick_until: u32,
     /// Skills from practice, and how life has shifted its traits.
     pub(crate) character: Character,
+    /// How it feels.
+    pub(crate) feelings: Feelings,
 }
 
 /// Seconds after eating somewhere before a bush there counts as having come

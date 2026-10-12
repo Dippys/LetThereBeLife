@@ -59,6 +59,8 @@ const ALARM_DISTANCE: u64 = 20;
 const BODY_TICKS: u64 = 3 * 60 * 60 * 60;
 /// Ticks it takes to make something by hand (knapping a blade).
 const CRAFT_TICKS: u64 = 300;
+/// Faces farther than this (cells) are read less surely.
+const FACE_READING_DISTANCE: u64 = 3;
 /// Ability with words (0-255) from which each hearing counts twice.
 const QUICK_EAR: u8 = 176;
 /// One in this many words a child hears is picked up with a vowel changed.
@@ -208,6 +210,7 @@ impl Engine {
             .exploration_heading(agent)
             .unwrap_or(ExplorationHeading::North);
         let personality = self.personality_in_use(agent);
+        let night = self.is_night();
         let wayfinding = self
             .innate_personality(agent)
             .talent(crate::Activity::Wayfinding);
@@ -291,6 +294,7 @@ impl Engine {
             })
             .map(|record| record.agent)
             .collect();
+        let bodies_seen = !bodies.is_empty();
         // Those around who look in need (moving slowly, hungry or thirsty
         // looking): worth showing a place they may not know.
         let needy: Vec<AgentId> = perception
@@ -383,6 +387,7 @@ impl Engine {
             stored_food,
             stall: _,
             character,
+            feelings,
             habits,
             home,
             model,
@@ -503,9 +508,92 @@ impl Engine {
             },
         );
         // New ground covered: practice at finding the way.
-        if map.explored_tile_count() > explored {
+        let explored_new = map.explored_tile_count() > explored;
+        if explored_new {
             character.practise(crate::Activity::Wayfinding, wayfinding);
         }
+        // How it feels, from what it's going through (docs/plans/FEELINGS.md).
+        let misread_faces = {
+            use crate::Feeling;
+            feelings.fade(now, personality.steadiness);
+            // The timid feel fear more, the bold less.
+            let timid = |amount: u32| {
+                (amount * (320 - u32::from(personality.boldness)) / 192).min(255) as u8
+            };
+            let alone = !perception
+                .agents
+                .iter()
+                .any(|other| other.id != agent && other.activity != AgentActivity::Dead);
+            if danger.is_some() {
+                feelings.feel(Feeling::Fear, timid(40));
+            }
+            if bodies_seen {
+                feelings.feel(Feeling::Fear, timid(20));
+            }
+            if night && alone {
+                feelings.feel(Feeling::Fear, timid(6));
+            }
+            let pressing = needs.hunger.threshold_reached
+                || needs.thirst.threshold_reached
+                || needs.exposure.threshold_reached;
+            if pressing {
+                feelings.feel(Feeling::Misery, 8);
+                feelings.ease(Feeling::Contentment, 8);
+            } else {
+                feelings.ease(Feeling::Misery, 4);
+                if !alone {
+                    feelings.feel(Feeling::Contentment, 6);
+                }
+            }
+            if alone {
+                let lonely = (3 * (64 + u32::from(personality.sociability)) / 192) as u8;
+                feelings.feel(Feeling::Loneliness, lonely);
+            } else {
+                feelings.ease(Feeling::Loneliness, 12);
+            }
+            if explored_new {
+                feelings.ease(Feeling::Boredom, 40);
+            } else {
+                feelings.feel(Feeling::Boredom, 2);
+            }
+            // Faces around: fear spreads to those who see it. Strangers'
+            // faces, and faces far off, are sometimes read as their lookalike.
+            let mut misread = 0;
+            for &(other, shown) in &perception.expressions {
+                if other == agent {
+                    continue;
+                }
+                let familiar = people
+                    .slot_of(other)
+                    .is_some_and(|slot| people.familiarity(slot) >= crate::FRIEND_FAMILIARITY);
+                let far = perception
+                    .agents
+                    .iter()
+                    .find(|seen| seen.id == other)
+                    .is_some_and(|seen| {
+                        seen.position
+                            .x
+                            .abs_diff(origin.x)
+                            .max(seen.position.y.abs_diff(origin.y))
+                            > FACE_READING_DISTANCE
+                    });
+                let roll =
+                    mix(u64::from(agent.get()) << 32 ^ u64::from(other.get()) ^ u64::from(now));
+                let read = if (!familiar || far) && roll % 3 == 0 {
+                    misread += 1;
+                    shown.lookalike()
+                } else {
+                    shown
+                };
+                // Seeing fear unsettles, but alone it never frightens: it
+                // stops short of what shows.
+                if read == Feeling::Fear && feelings.level(Feeling::Fear) < crate::cognition::SHOWS
+                {
+                    feelings.feel(Feeling::Fear, timid(4));
+                }
+            }
+            misread
+        };
         let search_target = if map.seen_count(LandmarkKind::Water) == 0 {
             Some(map.search_target(origin, perception.area))
         } else {
@@ -516,7 +604,12 @@ impl Engine {
             .agents
             .iter()
             .any(|other| other.id != agent && can_watch(other.activity));
-        let cooldown = Personality::scale(personality.sociability, 110, 10) as u32;
+        let cooldown = Personality::scale(personality.sociability, 110, 10) as u32
+            / if feelings.strong(crate::Feeling::Contentment) {
+                2
+            } else {
+                1
+            };
         // Setting the record straight with a speaker in view comes before sharing.
         let correction = dialogue.correction(now).filter(|correction| {
             perception
@@ -617,6 +710,7 @@ impl Engine {
                 recruit: recruit.map(|(_, position)| position).filter(|_| hunts),
                 knows_hearths: crafts.knows_hearths(),
                 crafts: *crafts,
+                feelings: *feelings,
                 knows_knapping: crafts.knows_knapping(),
                 came_from: map.came_from(origin),
                 grieving: now < grief_until,
@@ -651,6 +745,7 @@ impl Engine {
             self.note_intention(agent, before, after, facts);
         }
         self.minds.get_mut(agent).map.mark_decision(origin);
+        self.faces_misread += misread_faces;
         // Getting no closer to where it's headed, decision after decision: it
         // can't get there from here, so it stops trying and keeps clear of
         // that place for a while.
@@ -1811,6 +1906,7 @@ impl Engine {
             personality: self.personality_in_use(agent),
             abilities: crate::Activity::ALL.map(|activity| self.ability(agent, activity)),
             skills: mind.character.skills(),
+            feeling: mind.feelings.shown(),
             landmarks: mind.map.views().collect(),
             explored_tiles: mind.map.explored_tile_count(),
             child: mind.child,

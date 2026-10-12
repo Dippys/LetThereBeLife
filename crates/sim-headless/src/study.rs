@@ -264,6 +264,9 @@ pub struct WildlifeStats {
     pub huts: u64,
     pub huts_fallen: u64,
     pub stored: u64,
+    /// Living people showing each feeling at the end, and faces misread.
+    pub feelings: [u64; sim_core::Feeling::COUNT],
+    pub faces_misread: u64,
     /// Racks built, pits dug, huts walled in stone, repairs done.
     pub building: [u64; 4],
     /// Things tried and how many made something; units made of each material.
@@ -885,6 +888,12 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
             wildlife.skills[activity as usize] = (best, median);
         }
     }
+    for (_, mind) in &living {
+        if let Some(feeling) = mind.feeling {
+            wildlife.feelings[feeling as usize] += 1;
+        }
+    }
+    wildlife.faces_misread = engine.faces_misread();
     let homes: std::collections::BTreeSet<_> =
         living.iter().filter_map(|(_, mind)| mind.home).collect();
     wildlife.housed = living
@@ -1976,6 +1985,21 @@ impl fmt::Display for StudyReport {
             made(sim_core::Material::StoneSpear),
             made(sim_core::Material::DiggingStick),
             made(sim_core::Material::Cloak)
+        )?;
+        let shown: Vec<String> = sim_core::Feeling::ALL
+            .into_iter()
+            .filter(|feeling| self.wildlife.feelings[*feeling as usize] > 0)
+            .map(|feeling| format!("{feeling:?} {}", self.wildlife.feelings[feeling as usize]))
+            .collect();
+        write!(
+            formatter,
+            "\n  feelings at the end: {}; faces misread {}",
+            if shown.is_empty() {
+                "none showing".to_owned()
+            } else {
+                shown.join(", ")
+            },
+            self.wildlife.faces_misread
         )?;
         let [racks, pits, stone, repairs] = self.wildlife.building;
         write!(

@@ -1,7 +1,6 @@
 # Plan: feelings, temperament and talents
 
-Status: P1 (temperament, talents, skills) done, D-137, 2026-10-12; the making system
-(docs/plans/MAKING.md) comes next, then P2-P6. The owner asked for feelings (sadness, envy and the rest),
+Status: P1 (D-137) and P2 (D-143) done, 2026-10-12; making things (MAKING.md) done; next P3. The owner asked for feelings (sadness, envy and the rest),
 everything they need, and personalities that make each person unique and better at some things
 than others.
 

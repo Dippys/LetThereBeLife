@@ -59,6 +59,7 @@ fn mind(lexicon: Vec<LexiconEntryView>, acquaintances: Vec<AcquaintanceView>) ->
         agent: AgentId::new(7),
         abilities: [128; sim_core::Activity::COUNT],
         skills: [64; sim_core::Activity::COUNT],
+        feeling: None,
         personality: Personality {
             curiosity: 210,
             ..Personality::AVERAGE

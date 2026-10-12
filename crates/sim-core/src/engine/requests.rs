@@ -326,7 +326,12 @@ impl Engine {
         if trust < crate::DISTRUST && tie.is_none() {
             return RequestResponse::Refused;
         }
-        let willingness = i32::from(trust)
+        // The miserable hold on to what they have.
+        let misery = self.minds.get(giver).map_or(0, |mind| {
+            i32::from(mind.feelings.level(crate::Feeling::Misery))
+        });
+        let willingness = -misery / 4
+            + i32::from(trust)
             + if tie.is_some() { FAMILY_WILLINGNESS } else { 0 }
             + i32::from(owed) * OWED_WILLINGNESS
             + i32::from(familiarity) / 4

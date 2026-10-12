@@ -145,6 +145,11 @@ impl Engine {
         }
     }
 
+    /// Faces read as a feeling they didn't show, since the start.
+    pub fn faces_misread(&self) -> u64 {
+        self.faces_misread
+    }
+
     /// Huts walled in stone since the start.
     pub fn stone_huts(&self) -> u64 {
         self.stone_huts

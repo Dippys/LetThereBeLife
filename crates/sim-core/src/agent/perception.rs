@@ -47,6 +47,9 @@ pub struct PhysicalPerception {
     /// Living animals in view, in id order. Carcasses appear among `resources`
     /// (as meat).
     pub animals: Vec<crate::AnimalView>,
+    /// The feeling showing on the face of each agent in view that shows one
+    /// (what the face shows, not what's felt; watchers may misread it).
+    pub expressions: Vec<(crate::AgentId, crate::Feeling)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

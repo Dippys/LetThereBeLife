@@ -237,6 +237,7 @@ impl Population {
             reserved_cells,
             spent_resources,
             animals: Vec::new(),
+            expressions: Vec::new(),
         })
     }
 }

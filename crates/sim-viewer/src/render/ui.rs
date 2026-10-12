@@ -706,6 +706,12 @@ pub(super) fn person_rows(agent: &AgentInspection) -> Vec<Row> {
     {
         rows.push(Row::Text(knack, colors::UI_DIM));
     }
+    if let Some(feeling) = agent.memory.as_ref().and_then(|memory| memory.feeling) {
+        rows.push(Row::Text(
+            format!("Feeling {}", labels::feeling(feeling)),
+            colors::UI_DIM,
+        ));
+    }
     rows.push(Row::Gap);
 
     let (doing, why) = doing(agent);

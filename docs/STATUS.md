@@ -135,14 +135,16 @@ so changes are judged on behaviour counts as much as on survival.
   code 9): 1 in 19 runs on 2026-10-09, 2 in 14 on 2026-10-10, then 0 in 8, then 2 in 8 `--valley`
   smokes after M7, then 1 in 12 smokes after the living world. It happens with and without agents. Cause unknown, possibly GPU teardown.
 - The world archive needs regenerating for generator v2 (`--pregenerate-world`).
-- **Minds are 2,016 B per agent** (mental map 372 B). That's fine at viewer scale; the spec's 10M
+- **Minds are 2,040 B per agent** (mental map 372 B). That's fine at viewer scale; the spec's 10M
   agents would need ~8 GB, so compaction comes later.
 - **Greedy waypoints can pace around obstacles.** Agents no longer step straight back to where they
   were and collapse into sleep when exhausted, but longer cycles are possible.
 
 ## Recent changes
 
-- 2026-10-12 (latest): buildings wear and are mended; stone huts; drying racks and storage pits
+- 2026-10-12 (latest): feelings, part one: fear, contentment, misery, boredom, loneliness,
+  grief, shown on faces and sometimes misread (D-143).
+- 2026-10-12: buildings wear and are mended; stone huts; drying racks and storage pits
   (D-142).
 - 2026-10-12: tools from parts (cord, axe, stone spear, digging stick, cloak) that wear
   out with use (D-141).
@@ -232,9 +234,9 @@ so changes are judged on behaviour counts as much as on survival.
 
 ## What's next
 
-1. **Feelings** (docs/plans/FEELINGS.md, P2-P6): fear, calm, contentment, misery, boredom,
-   loneliness and grief with expressions others read; feelings toward people; worry, hope,
-   frustration, surprise, relief; pride and shame; envy, jealousy, taking and confrontation.
+1. **Feelings** (docs/plans/FEELINGS.md): part one is in (D-143). Next: feelings toward people
+   (anger), worry, hope, frustration, surprise, relief, disgust; pride and shame; envy,
+   jealousy, taking and confrontation.
    (Making things, docs/plans/MAKING.md, is done: D-139, D-141, D-142.)
 2. **Thinking agents** (docs/plans/THINKING.md): plans for cold, hunger and thirst on (D-118,
    D-119); idle time works toward what has proved useful (D-123); people show others what they

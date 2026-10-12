@@ -403,6 +403,8 @@ pub struct MemoryInspection {
     pub personality: Personality,
     /// How good they are at each activity (0-255).
     pub abilities: [u8; sim_core::Activity::COUNT],
+    /// The feeling showing on their face, if any.
+    pub feeling: Option<sim_core::Feeling>,
     acquaintances: [AcquaintanceView; ACQUAINTANCE_SLOTS],
     acquaintance_len: u8,
     lexicon: [LexiconEntryView; LEXICON_SLOTS],
@@ -460,6 +462,7 @@ impl MemoryInspection {
             explored_tiles: view.explored_tiles,
             personality: view.personality,
             abilities: view.abilities,
+            feeling: view.feeling,
             acquaintances,
             acquaintance_len: acquaintance_len as u8,
             lexicon,

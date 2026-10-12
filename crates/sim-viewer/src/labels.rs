@@ -3,9 +3,9 @@
 
 use sim_core::{
     AcquaintanceView, Activity, AgentActivity, AgentId, AnimalMode, BiomeType, Concept, DeathCause,
-    FeatureKind, GestureTopic, LandmarkKind, LifeStage, LifeView, Material, Mime, Personality,
-    PhysicalGoal, PolicyReason, Sex, SleepQuality, SpawnKind, Species, StructureKind, SurfaceType,
-    Tie, VocalForm,
+    FeatureKind, Feeling, GestureTopic, LandmarkKind, LifeStage, LifeView, Material, Mime,
+    Personality, PhysicalGoal, PolicyReason, Sex, SleepQuality, SpawnKind, Species, StructureKind,
+    SurfaceType, Tie, VocalForm,
 };
 
 /// "Woman, 34", "Boy, 9", "Baby girl, 1".
@@ -351,6 +351,26 @@ pub fn personality(personality: Personality) -> &'static str {
         }
     }
     summary
+}
+
+/// How a feeling reads in a sentence about someone ("frightened").
+pub const fn feeling(feeling: Feeling) -> &'static str {
+    match feeling {
+        Feeling::Fear => "frightened",
+        Feeling::Contentment => "content",
+        Feeling::Misery => "miserable",
+        Feeling::Boredom => "bored",
+        Feeling::Loneliness => "lonely",
+        Feeling::Grief => "grieving",
+        Feeling::Disgust => "disgusted",
+        Feeling::Worry => "worried",
+        Feeling::Hope => "hopeful",
+        Feeling::Frustration => "frustrated",
+        Feeling::Surprise => "surprised",
+        Feeling::Relief => "relieved",
+        Feeling::Pride => "proud",
+        Feeling::Shame => "ashamed",
+    }
 }
 
 /// Ability from which a person counts as good at something, and below which poor.

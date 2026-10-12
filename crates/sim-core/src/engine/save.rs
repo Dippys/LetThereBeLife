@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::Engine;
 
 /// Bumped whenever the saved layout changes; older saves are refused.
-const SAVE_VERSION: u32 = 19;
+const SAVE_VERSION: u32 = 20;
 
 /// What a save holds, borrowed from a running engine.
 #[derive(Serialize)]
@@ -29,7 +29,7 @@ struct SavedRef<'a> {
     gave_up: &'a u64,
     nights: bool,
     plants: (u64, u64),
-    experiments: (u64, u64, u64),
+    experiments: (u64, u64, u64, u64),
     stored: &'a u64,
     fetched: &'a u64,
     wildlife: &'a crate::wildlife::Wildlife,
@@ -61,7 +61,7 @@ struct Saved {
     gave_up: u64,
     nights: bool,
     plants: (u64, u64),
-    experiments: (u64, u64, u64),
+    experiments: (u64, u64, u64, u64),
     stored: u64,
     fetched: u64,
     wildlife: crate::wildlife::Wildlife,
@@ -125,7 +125,12 @@ impl Engine {
             gave_up: &self.gave_up,
             nights: self.nights,
             plants: (self.plants_sprouted, self.plants_died),
-            experiments: (self.experiments, self.discoveries, self.stone_huts),
+            experiments: (
+                self.experiments,
+                self.discoveries,
+                self.stone_huts,
+                self.faces_misread,
+            ),
             stored: &self.stored,
             fetched: &self.fetched,
             wildlife: &self.wildlife,
@@ -183,7 +188,12 @@ impl Engine {
         engine.gave_up = saved.gave_up;
         engine.nights = saved.nights;
         (engine.plants_sprouted, engine.plants_died) = saved.plants;
-        (engine.experiments, engine.discoveries, engine.stone_huts) = saved.experiments;
+        (
+            engine.experiments,
+            engine.discoveries,
+            engine.stone_huts,
+            engine.faces_misread,
+        ) = saved.experiments;
         engine.stored = saved.stored;
         engine.fetched = saved.fetched;
         engine.wildlife = saved.wildlife;

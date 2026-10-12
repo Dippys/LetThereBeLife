@@ -1213,3 +1213,21 @@ nobody points at don't crowd out the mime's meaning. Records 40 B; save version 
 versions wore huts out in two years and put racks on huts' doorsteps, taking the places people
 sleep: cold deaths doubled (40, then 34).
 
+## D-143: Feelings, part one (2026-10-12)
+
+**Decision:** Each mind holds 14 feelings (`cognition::Feelings`, 20 B), raised by what happens and
+halving over a set time (surprise in 2 minutes, grief in 2 hours), faster for the steady. Part one
+uses six. Fear: a bite, a wolf near, the dead seen, the dark alone, scaled by boldness. Misery:
+needs pressing. Contentment: comfortable among others. Loneliness: alone (more for the sociable).
+Boredom: nothing new. Grief: losing someone close. What they change: the frightened don't roam and
+stay with others; the calm and content roam half again as much; the bored roam and experiment
+more; the lonely visit more; the grieving stay with others; the content share places twice as
+often; the miserable give less. The strongest feeling over 96 shows on the face
+(`PhysicalPerception::expressions`); watchers read it, and strangers' faces or faces over 3 cells
+away are read as a lookalike one time in three (fear as frustration, grief as misery). Seeing fear
+unsettles but alone never frightens. The panel says how someone feels. Mind 2,040 B; save 20.
+**Why:** The owner asked for feelings (docs/plans/FEELINGS.md P2).
+**Consequences:** Over 10 years in 20 valleys: 478 survivors against 474, births 188 against
+159, time in company up a fifth; cold deaths 24 against 17, starvation 11 against 2. Letting seen
+fear frighten people ran away (17 of a band frightened at once, cold deaths 38).
+

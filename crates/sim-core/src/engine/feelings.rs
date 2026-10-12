@@ -1,7 +1,7 @@
 //! What happens to people shapes them (docs/plans/FEELINGS.md). Once a tick,
 //! after everything has happened, this reads what each person went through
 //! (bites, plans that worked or failed, tips that proved right or wrong,
-//! losses) and lets it move their traits a little.
+//! losses) and lets it move their traits a little and stir their feelings.
 
 use super::Engine;
 use crate::cognition::PlanEventKind;
@@ -42,6 +42,28 @@ impl Engine {
         }
         for (agent, index, amount) in nudges {
             self.minds.get_mut(agent).character.nudge(index, amount);
+        }
+        // Bites frighten (the timid more); losing someone close grieves.
+        let mut felt = Vec::new();
+        for event in &self.wildlife_events {
+            if let crate::WildlifeEvent::Bite { agent, .. } = *event {
+                felt.push((agent, crate::Feeling::Fear, 160));
+            }
+        }
+        for grief in &self.grief_events {
+            felt.push((grief.agent, crate::Feeling::Grief, 255));
+        }
+        for (agent, feeling, amount) in felt {
+            let boldness = u32::from(self.personality_in_use(agent).boldness);
+            let amount = if feeling == crate::Feeling::Fear {
+                (amount * (320 - boldness) / 192).min(255)
+            } else {
+                amount
+            };
+            self.minds
+                .get_mut(agent)
+                .feelings
+                .feel(feeling, amount as u8);
         }
     }
 
