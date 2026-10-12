@@ -112,7 +112,23 @@ impl ViewerApp {
             .find(|structure| structure.position == position)
         {
             let now = (self.engine.snapshot().tick / 60) as u32;
+            let mut residents = ([None; 3], 0_u8);
+            for (index, agent) in self
+                .engine
+                .agent_views(VIEWER_AGENT_LIMIT)
+                .filter(|agent| {
+                    agent.activity != sim_core::AgentActivity::Dead
+                        && self.engine.home_of(agent.id) == Some(position)
+                })
+                .enumerate()
+            {
+                match residents.0.get_mut(index) {
+                    Some(slot) => *slot = self.engine.life(agent.id).map(|life| life.name),
+                    None => residents.1 = residents.1.saturating_add(1),
+                }
+            }
             return Some(Hover::Structure {
+                residents,
                 kind: structure.kind,
                 state: structure.state,
                 burning: structure

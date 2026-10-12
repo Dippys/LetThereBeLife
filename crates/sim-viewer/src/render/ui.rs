@@ -585,8 +585,26 @@ pub(super) fn hover_lines(hover: &Hover) -> (String, Option<String>) {
             state,
             burning,
             stored,
+            residents,
         } => (
-            labels::structure(kind).to_owned(),
+            {
+                let names: Vec<String> = residents
+                    .0
+                    .iter()
+                    .flatten()
+                    .map(|name| name.spoken())
+                    .collect();
+                match (names.as_slice(), residents.1) {
+                    ([], _) => labels::structure(kind).to_owned(),
+                    ([one], 0) => format!("{one}'s home"),
+                    (names, 0) => format!(
+                        "Home of {} and {}",
+                        names[..names.len() - 1].join(", "),
+                        names[names.len() - 1]
+                    ),
+                    (names, more) => format!("Home of {} and {more} more", names.join(", ")),
+                }
+            },
             if state == StructureState::UnderConstruction {
                 Some("being built".to_owned())
             } else if let Some(left) = burning {

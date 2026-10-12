@@ -80,11 +80,11 @@ fn mental_map_layout_is_compact() {
 fn mind_layout_is_bounded() {
     assert_eq!(size_of::<super::PendingCorrection>(), 32);
     assert_eq!(size_of::<super::Dialogue>(), 112);
-    // Map 372, social 240, lexicon 192, habits 204, dialogue 112, home 8, model 536,
+    // Map 372, social 288, lexicon 192, habits 204, dialogue 112, home 8, model 536,
     // intention 20, avoid 12, seasons 11, beliefs 15 + 6 + 2,
     // child flag, parent id, grief and loneliness timers, and padding.
     assert_eq!(size_of::<MentalMap>(), 372);
-    assert_eq!(size_of::<super::Mind>(), 1_768);
+    assert_eq!(size_of::<super::Mind>(), 1_816);
 }
 
 #[test]

@@ -57,7 +57,7 @@ impl Tie {
 
 const EMPTY: u32 = u32::MAX;
 
-/// One remembered person. Exactly 20 bytes.
+/// One remembered person. Exactly 24 bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(C)]
 struct Acquaintance {
@@ -80,7 +80,12 @@ struct Acquaintance {
     /// The kinds of place it believes they know (a bit per `LandmarkKind`
     /// index): it saw them there, or they pointed one out.
     knows: u8,
+    /// The hut it last saw them asleep beside (`NO_HUT` if none): whose it is.
+    hut_x: i16,
+    hut_y: i16,
 }
+
+const NO_HUT: i16 = i16::MIN;
 
 const NO_NAME: u16 = u16::MAX;
 /// Hearing someone called another name this many times running changes one's mind.
@@ -100,6 +105,8 @@ impl Default for Acquaintance {
             name: NO_NAME,
             name_doubt: 0,
             knows: 0,
+            hut_x: NO_HUT,
+            hut_y: NO_HUT,
         }
     }
 }
@@ -340,6 +347,48 @@ impl SocialMemory {
         self.slot_of(other).and_then(|slot| self.tie(slot))
     }
 
+    /// It saw `slot` asleep beside the hut at `hut`: that's where they live.
+    pub(crate) fn saw_asleep_at(&mut self, slot: u8, hut: WorldPosition) {
+        if let (Ok(x), Ok(y)) = (i16::try_from(hut.x), i16::try_from(hut.y)) {
+            let known = &mut self.slots[usize::from(slot)];
+            known.hut_x = x;
+            known.hut_y = y;
+        }
+    }
+
+    /// The huts it believes belong to people outside its family and friends
+    /// (friends make room).
+    pub(crate) fn others_huts(&self) -> impl Iterator<Item = WorldPosition> + '_ {
+        self.slots
+            .iter()
+            .filter(|known| {
+                known.agent != EMPTY
+                    && known.tie().is_none()
+                    && known.familiarity < FRIEND_FAMILIARITY
+                    && known.hut_x != NO_HUT
+            })
+            .map(|known| WorldPosition {
+                x: i64::from(known.hut_x),
+                y: i64::from(known.hut_y),
+            })
+    }
+
+    /// Where its family lives, as far as it knows: its partner's hut, else a
+    /// parent's, else a child's, else a brother's or sister's.
+    pub(crate) fn family_hut(&self) -> Option<WorldPosition> {
+        [Tie::Partner, Tie::Parent, Tie::Child, Tie::Sibling]
+            .into_iter()
+            .find_map(|tie| {
+                self.slots.iter().find(|known| {
+                    known.agent != EMPTY && known.tie() == Some(tie) && known.hut_x != NO_HUT
+                })
+            })
+            .map(|known| WorldPosition {
+                x: i64::from(known.hut_x),
+                y: i64::from(known.hut_y),
+            })
+    }
+
     /// The agent received a favour from `slot` and owes them one more.
     pub(crate) fn owe(&mut self, slot: u8) {
         let known = &mut self.slots[usize::from(slot)];
@@ -445,8 +494,8 @@ mod tests {
 
     #[test]
     fn relationship_layout_is_compact() {
-        assert_eq!(size_of::<Acquaintance>(), 20);
-        assert_eq!(size_of::<SocialMemory>(), 20 * ACQUAINTANCE_SLOTS);
+        assert_eq!(size_of::<Acquaintance>(), 24);
+        assert_eq!(size_of::<SocialMemory>(), 24 * ACQUAINTANCE_SLOTS);
     }
 
     #[test]
@@ -547,5 +596,22 @@ mod tests {
         };
         social.update_whereabouts(view, |_| false);
         assert_eq!(social.friend_to_visit(2, 100), None);
+    }
+
+    #[test]
+    fn huts_seen_slept_in_are_theirs_unless_family() {
+        let mut social = SocialMemory::default();
+        let stranger = social.notice(AgentId::new(4), at(10, 10), 1).unwrap().slot;
+        let partner = social.notice(AgentId::new(5), at(20, 20), 1).unwrap().slot;
+        social.set_tie(partner, Tie::Partner);
+        assert_eq!(social.others_huts().count(), 0);
+        assert_eq!(social.family_hut(), None);
+        social.saw_asleep_at(stranger, at(11, 10));
+        social.saw_asleep_at(partner, at(21, 20));
+        assert_eq!(social.others_huts().collect::<Vec<_>>(), vec![at(11, 10)]);
+        assert_eq!(social.family_hut(), Some(at(21, 20)));
+        // Seen asleep somewhere else: they've moved.
+        social.saw_asleep_at(stranger, at(30, 30));
+        assert_eq!(social.others_huts().collect::<Vec<_>>(), vec![at(30, 30)]);
     }
 }

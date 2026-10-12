@@ -261,6 +261,8 @@ pub struct WildlifeStats {
     pub huts: u64,
     pub huts_fallen: u64,
     pub stored: u64,
+    /// Food in huts as each winter began.
+    pub winter_stock: Vec<u32>,
     /// Plans formed, completed, and given up; and how often each plan (its
     /// steps, as text) was formed.
     pub plans: [u64; 3],
@@ -437,6 +439,7 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
         plants: [engine.plant_census(), (0, 0)],
         ..WildlifeStats::default()
     };
+    let mut last_season = engine.season();
     for tick in 1..=config.ticks {
         match engine.tick() {
             TickOutcome::Advanced { .. } => {
@@ -593,6 +596,22 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                 return Err(ScenarioError("simulation time exhausted".into()));
             }
         }
+        let season = engine.season();
+        if season == sim_core::Season::Winter && last_season != sim_core::Season::Winter {
+            wildlife.winter_stock.push(
+                engine
+                    .structure_views(usize::MAX)
+                    .map(|hut| {
+                        hut.stored
+                            .carried()
+                            .filter(|(material, _)| material.properties().nutrition > 0)
+                            .map(|(_, amount)| u32::from(amount))
+                            .sum::<u32>()
+                    })
+                    .sum(),
+            );
+        }
+        last_season = season;
         if tick == STUDY_SAMPLE_TICKS {
             early_vocabulary = vocabulary_agreement(&engine, population);
         }
@@ -1926,6 +1945,11 @@ impl fmt::Display for StudyReport {
             self.wildlife.stored,
             self.wildlife.fetched,
             self.wildlife.gave_up
+        )?;
+        write!(
+            formatter,
+            "; food in huts as winter began {:?}",
+            self.wildlife.winter_stock
         )?;
         let [(trees_before, bushes_before), (trees, bushes)] = self.wildlife.plants;
         write!(

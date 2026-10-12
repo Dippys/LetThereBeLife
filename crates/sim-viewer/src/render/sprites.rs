@@ -174,17 +174,26 @@ const COLD_HEARTH: Picture = [
     "........", "........", "........", "........", "........", ".s...s..", "sswwwss.", ".sssss..",
 ];
 
+/// How a hut or hearth looks this frame.
+pub(super) struct StructureLook {
+    pub(super) hearth: bool,
+    pub(super) finished: bool,
+    pub(super) burning: bool,
+    /// 0-3: shifts a burning fire's colors from frame to frame.
+    pub(super) flicker: u8,
+    /// The family color of those who live in a hut, flown as a flag.
+    pub(super) family: Option<u32>,
+}
+
 /// A hut (finished or being built), or a hearth, burning or gone out.
-/// `flicker` (0-3) shifts a burning fire's colors from frame to frame.
-pub(super) fn structure(
-    out: &mut Vec<Instance>,
-    x: f32,
-    y: f32,
-    hearth: bool,
-    finished: bool,
-    burning: bool,
-    flicker: u8,
-) {
+pub(super) fn structure(out: &mut Vec<Instance>, x: f32, y: f32, look: &StructureLook) {
+    let StructureLook {
+        hearth,
+        finished,
+        burning,
+        flicker,
+        family,
+    } = *look;
     let (picture, flames) = match (hearth, finished, burning) {
         (false, true, _) => (&HUT, false),
         (false, false, _) => (&HUT_FRAME, false),
@@ -209,6 +218,18 @@ pub(super) fn structure(
         b'c' if flames => Some(flame(80)),
         _ => None,
     });
+    if let Some(color) = family {
+        let dot = 1.0 / DOTS as f32;
+        // A pole at the roof's peak, and a flag.
+        out.push(Instance::new(
+            x + 4.0 * dot,
+            y,
+            dot / 2.0,
+            2.0 * dot,
+            rgba(60, 40, 30, 255),
+        ));
+        out.push(Instance::new(x + 4.5 * dot, y, 1.5 * dot, dot, color));
+    }
 }
 
 const TREE: Picture = [

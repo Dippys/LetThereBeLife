@@ -344,9 +344,25 @@ fn tooltips_name_what_is_under_the_mouse() {
             kind: StructureKind::Hearth,
             state: StructureState::UnderConstruction,
             burning: Some(600),
-            stored: sim_core::InventoryView::default()
+            stored: sim_core::InventoryView::default(),
+            residents: ([None; 3], 0),
         }),
         ("Hearth".to_owned(), Some("being built".to_owned()))
+    );
+    assert_eq!(
+        hover_lines(&Hover::Structure {
+            kind: StructureKind::Shelter,
+            state: StructureState::Complete,
+            burning: None,
+            stored: sim_core::InventoryView::default(),
+            residents: ([Some(sim_core::Name(1)), Some(sim_core::Name(2)), None], 0),
+        })
+        .0,
+        format!(
+            "Home of {} and {}",
+            sim_core::Name(1).spoken(),
+            sim_core::Name(2).spoken()
+        )
     );
     assert_eq!(
         hover_lines(&Hover::Carcass { meat: 4 }).1,

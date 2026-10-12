@@ -289,6 +289,12 @@ impl Engine {
                         greetings.push(other.id);
                     }
                     if let Some(slot) = mind.notice(other.id, other.position, now) {
+                        // Asleep beside a hut: that's where they live.
+                        if other.activity == AgentActivity::Sleeping
+                            && let Some(hut) = hut_beside(perception, other.position)
+                        {
+                            mind.social.saw_asleep_at(slot, hut);
+                        }
                         // Seen right at a place: they know it's there.
                         for kind in places_beside(perception, other.position, now) {
                             mind.social.credit_knowing(slot, kind);
@@ -386,7 +392,18 @@ impl Engine {
         let facts = crate::policy::perceived_facts(perception, inventory, needs, food, now);
         let intended = std::cell::Cell::new(*intention);
         let lacked = std::cell::Cell::new(None);
-        let home = home.hut();
+        let own_home = home.hut();
+        // Without a home of its own, its family's is home; huts it has seen
+        // others live in are theirs.
+        let home = own_home.or_else(|| people.family_hut());
+        let others_huts: Vec<WorldPosition> = people
+            .others_huts()
+            .filter(|hut| Some(*hut) != home)
+            .collect();
+        // Late in autumn, remembering a hungry winter: fill the hut with food.
+        let stocking = season == crate::Season::Autumn
+            && late
+            && seasons.remembered(crate::Season::Winter as usize)[1] >= 100;
         let stored_food = stored_food.map(crate::agent::CompactPosition::world);
         let grief_until = *grief_until;
         map.observe(
@@ -556,6 +573,8 @@ impl Engine {
                 able,
                 stored_food,
                 home,
+                others_huts: &others_huts,
+                stocking,
                 avoid: avoid.place(now),
                 ready,
                 habits: self.policy_options.learned.then_some((&*habits, situation)),
@@ -1563,6 +1582,11 @@ impl Engine {
     }
 
     /// A copy of what `agent` knows about places and people. `None` before it has a mind.
+    /// The hut `agent` has made its home, if any.
+    pub fn home_of(&self, agent: AgentId) -> Option<WorldPosition> {
+        self.minds.get(agent)?.home.hut()
+    }
+
     pub fn mental_map(&self, agent: AgentId) -> Option<MentalMapView> {
         let mind = self.minds.get(agent)?;
         Some(MentalMapView {
@@ -1681,6 +1705,21 @@ impl Engine {
     pub fn hint_outcomes(&self) -> &[HintOutcomeEvent] {
         &self.hint_outcomes
     }
+}
+
+/// The finished hut right beside `position` in `perception`, if any.
+fn hut_beside(perception: &PhysicalPerception, position: WorldPosition) -> Option<WorldPosition> {
+    perception
+        .structures
+        .iter()
+        .find(|structure| {
+            structure.kind == crate::StructureKind::Shelter
+                && structure.state == crate::StructureState::Complete
+                && structure.position.x.abs_diff(position.x)
+                    + structure.position.y.abs_diff(position.y)
+                    == 1
+        })
+        .map(|structure| structure.position)
 }
 
 /// Visible urgency (128 = at a need's threshold) from which someone looks in

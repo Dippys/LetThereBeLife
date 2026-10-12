@@ -158,6 +158,8 @@ pub enum Hover {
         burning: Option<u32>,
         /// What a hut holds.
         stored: sim_core::InventoryView,
+        /// Who lives there: up to three names, and how many more.
+        residents: ([Option<sim_core::Name>; 3], u8),
     },
     Resource {
         label: &'static str,
@@ -1461,18 +1463,39 @@ fn build_pictures(
         );
     }
     let flicker = ((tick / 6) % 4) as u8;
+    // Whose home each hut is: the first resident's family line.
+    let mut homes: Vec<(sim_core::WorldPosition, u8)> = Vec::new();
+    for agent in engine.agent_views(MAX_AGENT_INSTANCES) {
+        if agent.activity == sim_core::AgentActivity::Dead {
+            continue;
+        }
+        if let Some(home) = engine.home_of(agent.id)
+            && bounds.contains(home)
+            && !homes.iter().any(|(hut, _)| *hut == home)
+            && let Some(line) = motion.family_line(engine, agent.id)
+        {
+            homes.push((home, line));
+        }
+    }
     for structure in engine.structure_views(MAX_STRUCTURE_INSTANCES) {
         if !bounds.contains(structure.position) {
             continue;
         }
+        let family = homes
+            .iter()
+            .find(|(hut, _)| *hut == structure.position)
+            .map(|&(_, line)| colors::family_line(line));
         sprites::structure(
             objects,
             structure.position.x as f32,
             structure.position.y as f32,
-            structure.kind.burns(),
-            structure.state == sim_core::StructureState::Complete,
-            structure.working(now),
-            flicker,
+            &sprites::StructureLook {
+                hearth: structure.kind.burns(),
+                finished: structure.state == sim_core::StructureState::Complete,
+                burning: structure.working(now),
+                flicker,
+                family,
+            },
         );
     }
     for animal in engine.animal_views() {

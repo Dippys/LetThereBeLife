@@ -993,3 +993,19 @@ The step-cost rule is shared (`sim_world::traversal_between`).
 **Consequences:** 3-year studies run 1.5 to 1.8 times faster: valley 1 in 8.2 s (was 14.9 s),
 valley 9 in 8.4 s (was 12.5 s). Output is byte-identical on valleys 1, 4, 9, 13, 21 and 30.
 
+## D-127: Whose hut is whose (2026-10-12)
+
+**Decision:** Each acquaintance record keeps the hut that person was last seen asleep beside: that
+is where they live, as far as the watcher knows. A hut where someone outside the family who isn't a
+friend lives is theirs: people don't sleep there unless freezing, and don't put things in it or
+take food from it. Without a home of its own, a person's family's hut (partner's, then parent's,
+child's, sibling's) is home. Late in autumn, someone who remembers a hungry winter carries food
+home and puts it away (until the hut holds 24). The viewer names the residents in a hut's tooltip
+and flies their family color on its roof. Acquaintances grow to 24 B, minds to 1,816 B; save version 9.
+**Why:** The user asked for settlements and ownership: whose hut is whose, families sharing
+homes, stocking a hut before winter. Ownership is a belief from what's seen, not a world fact.
+**Consequences:** Over 10 years in 20 valleys: 467 survivors against 472, deaths from cold 41
+against 40; 135 huts lived in by 446 people (141 by 453 before). Without the friends exception it
+was 455 and 52 (people slept out rather than in a stranger's hut). Food is put away but still
+hardly ever fetched back out.
+

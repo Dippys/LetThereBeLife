@@ -90,6 +90,10 @@ const CURIOSITY_BONUS: i32 = 8;
 pub(crate) const HUT_SPACING: u64 = 96;
 /// Carrying at least this much, a hut in view is worth stopping at to unload.
 const STORE_LOAD: u8 = 9;
+/// Food carried before a stocking trip home (more than is kept back on storing).
+const STOCK_LOAD: u8 = 7;
+/// Food in the home hut that's stock enough for winter.
+const STOCKED_FOOD: u32 = 24;
 /// A fire with less than this much burning left (seconds) is worth feeding.
 pub(crate) const LOW_FUEL_SECONDS: u32 = 20 * 60;
 /// Idle agents go to look at places pointed out within this many cells.
@@ -181,6 +185,10 @@ pub(crate) struct MindInput<'a> {
     pub(crate) stored_food: Option<WorldPosition>,
     /// The hut it lives in.
     pub(crate) home: Option<WorldPosition>,
+    /// Huts it believes are other families' (it saw them sleep there).
+    pub(crate) others_huts: &'a [WorldPosition],
+    /// Late autumn after a hungry winter: carry food home and put it away.
+    pub(crate) stocking: bool,
     /// A place it recently couldn't get to, avoided for now.
     pub(crate) avoid: Option<WorldPosition>,
     /// Something to get ready for a hard season it remembers coming.
@@ -595,10 +603,47 @@ impl Planner<'_> {
             .filter(|structure| {
                 structure.kind == crate::StructureKind::Shelter
                     && structure.state == crate::StructureState::Complete
+                    && !self.theirs(structure.position)
                     && wanted(structure.stored)
             })
             .min_by_key(|structure| (manhattan(origin, structure.position), structure.id.get()))
             .map(|structure| structure.position)
+    }
+
+    /// The hut at `hut` belongs to another family, as far as it knows.
+    fn theirs(&self, hut: WorldPosition) -> bool {
+        self.mind.others_huts.contains(&hut)
+    }
+
+    /// Late autumn after a hungry winter, with food enough on it: take it
+    /// home and put it away (unless home is far, or full of food already).
+    fn stock_home(&self, inventory: InventoryView) -> Option<Deliberation> {
+        let home = self.mind.home?;
+        let food = self.mind.food;
+        if !self.mind.stocking
+            || food.carried(inventory) < STOCK_LOAD
+            || manhattan(home, self.origin) > HOME_RANGE
+        {
+            return None;
+        }
+        let stocked = self.perception.structures.iter().any(|structure| {
+            structure.position == home
+                && structure
+                    .stored
+                    .carried()
+                    .filter(|(material, _)| food.is_food(*material))
+                    .map(|(_, amount)| u32::from(amount))
+                    .sum::<u32>()
+                    >= STOCKED_FOOD
+        });
+        if stocked {
+            return None;
+        }
+        let trip = self.at_hut(home, PhysicalGoal::Store, PolicyReason::Storing)?;
+        Some(Deliberation {
+            toward: Some(home),
+            ..trip
+        })
     }
 
     /// Goes to `hut` and does `goal` there (beside it), for `reason`.
@@ -1169,6 +1214,8 @@ impl Planner<'_> {
             .filter(|structure| {
                 structure.state == crate::StructureState::Complete
                     && structure.kind == crate::StructureKind::Shelter
+                    // Another family's hut only when freezing.
+                    && (!self.theirs(structure.position) || self.needs.exposure.threshold_reached)
             })
             .flat_map(|structure| {
                 let at = structure.position;
@@ -1225,7 +1272,9 @@ impl Planner<'_> {
             return drop;
         }
         // Stocking up needs room to carry it; a full load goes to its use first.
-        if food.carried(inventory) < temperament.food_reserve
+        let stocking = self.mind.stocking && self.mind.home.is_some();
+        if (food.carried(inventory) < temperament.food_reserve
+            || (stocking && food.carried(inventory) < STOCK_LOAD))
             && inventory.can_add(Material::Berries)
         {
             if let Some(target) = food_here {
@@ -1257,6 +1306,10 @@ impl Planner<'_> {
             && let Some(warm) = self.warm_up()
         {
             return warm.with_reason(PolicyReason::PrepareTrip);
+        }
+        // Getting ready for winter: food home.
+        if let Some(stock) = self.stock_home(inventory) {
+            return stock;
         }
         // Loaded down with a hut in view: put the surplus away.
         if let Some(store) = self.store(inventory) {
