@@ -73,6 +73,8 @@ const JEALOUS_ODDS: u64 = 16;
 /// Anger from which someone close by gets confronted, and how close.
 const FURIOUS: u8 = 128;
 const CONFRONT_REACH: u64 = 3;
+/// Seconds after a stand-off before it will start another.
+const CONFRONT_COOLDOWN: u32 = 3_600;
 /// Shame at being set right in front of others.
 const CORRECTED_SHAME: u8 = 100;
 const RELIEF_EASED: u8 = 140;
@@ -441,6 +443,7 @@ impl Engine {
             stall: _,
             character,
             feelings,
+            confronted_at,
             habits,
             home,
             model,
@@ -645,7 +648,8 @@ impl Engine {
             if let Some(rival) = rival {
                 feelings.feel(Feeling::Jealousy, 30);
                 // Now and then it boils over into anger at the rival.
-                let roll = mix(u64::from(agent.get()) << 32 ^ u64::from(rival.get()) ^ u64::from(now));
+                let roll =
+                    mix(u64::from(agent.get()) << 32 ^ u64::from(rival.get()) ^ u64::from(now));
                 if roll % JEALOUS_ODDS == 0
                     && let Some(slot) = people.slot_of(rival)
                 {
@@ -832,6 +836,7 @@ impl Engine {
                 confront: perception
                     .agents
                     .iter()
+                    .filter(|_| now.saturating_sub(*confronted_at) >= CONFRONT_COOLDOWN)
                     .filter(|seen| {
                         seen.id != agent
                             && can_watch(seen.activity)

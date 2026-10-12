@@ -1,6 +1,7 @@
 # Plan: feelings, temperament and talents
 
-Status: P1 (D-137) and P2 (D-143) done, 2026-10-12; making things (MAKING.md) done; next P3. The owner asked for feelings (sadness, envy and the rest),
+Status: P1-P6 done (D-137, D-143, D-144, D-145), 2026-10-12. Taking food from others' huts is
+built but hasn't happened in measured runs. The owner asked for feelings (sadness, envy and the rest),
 everything they need, and personalities that make each person unique and better at some things
 than others.
 

@@ -578,6 +578,8 @@ pub(crate) struct Mind {
     pub(crate) character: Character,
     /// How it feels.
     pub(crate) feelings: Feelings,
+    /// Simulated second of its last stand-off (it won't start another soon).
+    pub(crate) confronted_at: u32,
 }
 
 /// Seconds after eating somewhere before a bush there counts as having come

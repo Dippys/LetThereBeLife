@@ -1231,3 +1231,40 @@ unsettles but alone never frightens. The panel says how someone feels. Mind 2,04
 159, time in company up a fifth; cold deaths 24 against 17, starvation 11 against 2. Letting seen
 fear frighten people ran away (17 of a band frightened at once, cold deaths 38).
 
+## D-144: Feelings, part two: anger at people; worry, hope, frustration, surprise, relief, disgust (2026-10-12)
+
+**Decision:** Each acquaintance slot keeps anger (28 B slots): a tip from them proved wrong (16,
+scaled by temper) or food refused when they had it (32) angers; a tip proved right (8) or a gift
+(32) soothes; grudges halve each year. The angry give that person less, believe their tips less,
+don't visit them, and tense up (frustration) with them in view; the panel names who they're angry
+with. Worry rises in autumn after a winter remembered as hungry (less for the steady) and starts
+stocking the hut all autumn; hope comes with a plan under way and makes people work more; a
+failed plan or an abandoned trip frustrates, sending people off to try elsewhere and experiment
+more; a belief proved wrong surprises and a pressing need easing relieves, and either makes that
+moment's lesson count twice; retching and the dead disgust. Mind 2,088 B; save 21.
+**Why:** docs/plans/FEELINGS.md P3 and P4.
+**Consequences:** Over 10 years in 20 valleys: 495 survivors against 478, cold deaths 19 against
+24, starvation 3 against 11, births level (188).
+
+## D-145: Feelings, part three: pride, shame, envy, jealousy; taking and confrontation (2026-10-12)
+
+**Decision:** Pride (40, plus 20 per watcher up to five) comes from making or building something
+while watched; the proud work more and stay near others. Shame comes from having one's own word
+set right in front of others (100), being refused food (40) or being seen taking (90); the ashamed
+share a third as often and don't visit or go nosing. Envy rises in someone hungry looking at food
+in a hut it knows is another family's; envious and not warm-hearted (warmth under 160), it takes
+from that hut (`PolicyReason::Taking`), and anyone who sees it is angry with the taker (96 for the
+hut's own family, 24 for others). Jealousy rises when one's partner stands beside an adult of the
+partner's opposite sex outside the family, and about one sighting in 16 turns to anger at the
+rival. Furious with someone within 3 cells (anger 128) and nothing pressing, a person confronts them
+(`PhysicalGoal::Confront`): boldness plus half the anger, plus luck, decides it. The loser backs
+down (hands over up to 2 food, ashamed and frightened, and the winner's anger settles), or it
+comes to a scuffle that costs each 800 health (never below what lets them walk away), shakes both,
+and halves both angers. A stand-off starts at most once an hour per person. Save 22.
+**Why:** docs/plans/FEELINGS.md P5 and P6.
+**Consequences:** Over 10 years in 20 valleys: 508 survivors against 495, births 208 against 188,
+cold deaths 28 against 19. 472 stand-offs (276 backed down, 196 scuffles). No food was taken in any
+valley: being hungry with nothing, near another family's hut with food in it, rarely happens.
+Without the hourly limit one valley had 1,794 stand-offs; jealous anger on every sighting gave 447
+in five years in one valley.
+

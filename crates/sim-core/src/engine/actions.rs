@@ -622,6 +622,10 @@ impl Engine {
             .map(|seen| seen.id)
             .ok_or(PolicyFailureReason::TargetUnavailable)?;
         self.confrontations += 1;
+        let now = crate::cognition::belief_seconds(self.time);
+        for who in [agent, other] {
+            self.minds.get_mut(who).confronted_at = now;
+        }
         let anger_of = |engine: &Self, from: AgentId, at: AgentId| {
             engine.minds.get(from).map_or(0, |mind| {
                 mind.social
