@@ -64,9 +64,8 @@ The toolchain is installed on Windows. From WSL, call `cargo.exe` (e.g.
    - Simulation state and rules use integer / fixed-point math. Floats only appear in
      presentation-facing values (speed multiplier, displayed seconds).
    - Thread count and completion order must not change results.
-4. **Measure behavior changes.** Run the behavior study (`--study`, several seeds and spawn modes,
-   `--mind legacy|memory|full`) before and after changing agent decisions or world generation, and
-   record the numbers. Use `--trace AGENT` to see why an agent died before guessing.
+4. **Measure behavior changes.** Run the behavior study (`--study`, several seeds and spawn modes)
+   before and after changing agent decisions or world generation, and record the numbers. Use `--trace AGENT` to see why an agent died before guessing.
 5. **No hidden meaning channel.** Receivers read only public signals (forms, pointing, gaze,
    tone), never the sender's intent or concept. Communication never inserts a task into another
    agent. Keep candidate sets and lexicons bounded.

@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
-    Concept, InventoryView, NeedKind, PHYSICAL_POLICY_RADIUS, PhysicalGoal, PolicyOptions,
-    PolicyReason, RequestResponse,
+    Concept, InventoryView, NeedKind, PHYSICAL_POLICY_RADIUS, PhysicalGoal, PolicyReason,
+    RequestResponse,
 };
 
 /// Two neighbours with average personalities and helping enabled; agent 0 is
@@ -25,10 +25,10 @@ fn hungry_and_holding(food: u8) -> Engine {
             InventoryView::of(&[(crate::Material::Berries, food)]),
         )
         .unwrap();
-    engine.policy_options = PolicyOptions {
-        social: false,
-        ..PolicyOptions::full()
-    };
+    // Ordinary people, so the outcome turns on need and ties, not temperament.
+    for agent in [AgentId::new(0), AgentId::new(1)] {
+        engine.set_personality_for_test(agent, crate::Personality::AVERAGE);
+    }
     engine.population.set_need_value_for_test(
         AgentId::new(0),
         NeedKind::Hunger,
@@ -152,16 +152,6 @@ fn a_parent_feeds_its_child_and_a_misread_request_is_repaired() {
     assert_eq!(request.response, RequestResponse::Gave);
     assert_eq!(request.read_as, Concept::Water);
     assert_eq!(engine.repair_events().len(), 1);
-}
-
-#[test]
-fn without_helping_nobody_asks() {
-    let mut engine = hungry_and_holding(8);
-    engine.policy_options.helping = false;
-    let perception = engine
-        .perceive_physical(AgentId::new(0), PHYSICAL_POLICY_RADIUS)
-        .unwrap();
-    assert_eq!(engine.beg_target(AgentId::new(0), &perception), None);
 }
 
 #[test]

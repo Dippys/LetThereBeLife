@@ -3,8 +3,8 @@ use std::{error::Error, fmt};
 use rayon::prelude::*;
 use sim_core::{
     AgentId, AgentSpawnError, Engine, EngineCommand, GenerateAreaError, PolicyActivationError,
-    PolicyOptions, PopulationInit, PopulationInitError, VALLEY_BAND, VALLEY_CHILDREN_PER_FAMILY,
-    VALLEY_FAMILIES, VALLEY_SIDE, World, WorldPosition, WorldRect, band_layout, find_valley,
+    PopulationInit, PopulationInitError, VALLEY_BAND, VALLEY_CHILDREN_PER_FAMILY, VALLEY_FAMILIES,
+    VALLEY_SIDE, World, WorldPosition, WorldRect, band_layout, find_valley,
 };
 
 pub const VIEWER_AGENT_LIMIT: usize = 4_096;
@@ -73,7 +73,7 @@ pub fn spawn_band(
             sites,
         )
         .map_err(ViewerSpawnError::Population)?;
-    if let Err(error) = engine.activate_physical_policy_with_options(PolicyOptions::full()) {
+    if let Err(error) = engine.activate_physical_policy() {
         engine.command(EngineCommand::Reset);
         return Err(ViewerSpawnError::Policy(error));
     }
@@ -275,7 +275,6 @@ mod tests {
         let position = first_standable(&forward);
         spawn_at(&mut forward, position).unwrap();
         spawn_at(&mut reverse, position).unwrap();
-        assert_eq!(forward.policy_options(), PolicyOptions::full());
         for _ in 0..600 {
             forward.tick();
             reverse.tick();
@@ -353,7 +352,6 @@ mod tests {
             engine.snapshot().agent_count as usize,
             VALLEY_BAND + VALLEY_FAMILIES * VALLEY_CHILDREN_PER_FAMILY
         );
-        assert_eq!(engine.policy_options(), PolicyOptions::full());
         let agents: Vec<_> = engine.agent_views(usize::MAX).collect();
         assert_eq!(agents[0].position, start.camp);
         assert!(
@@ -393,7 +391,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             sites
         );
-        assert_eq!(engine.policy_options(), PolicyOptions::full());
         reset(&mut engine);
         assert_eq!(engine.snapshot().agent_count, 0);
         assert!(matches!(

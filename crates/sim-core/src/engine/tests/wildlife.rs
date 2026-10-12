@@ -1,9 +1,6 @@
 use super::*;
 use crate::engine::wildlife::WOUND_RECOVERY_TICKS;
-use crate::{
-    Material, PHYSICAL_POLICY_RADIUS, PhysicalGoal, PolicyOptions, PolicyReason, Species,
-    WildlifeEvent,
-};
+use crate::{Material, PHYSICAL_POLICY_RADIUS, PhysicalGoal, PolicyReason, Species, WildlifeEvent};
 
 /// Two neighbours with full minds, and wildlife allowed across the whole area.
 fn valley_pair() -> (Engine, WorldPosition, WorldPosition) {
@@ -19,7 +16,6 @@ fn valley_pair() -> (Engine, WorldPosition, WorldPosition) {
             &[first, second],
         )
         .unwrap();
-    engine.policy_options = PolicyOptions::full();
     engine.wildlife.area = Some(area);
     (engine, first, second)
 }
@@ -176,9 +172,7 @@ fn people_run_from_animals_they_fear_and_go_after_ones_they_hunt() {
 #[test]
 fn someone_knocked_down_by_bites_comes_round_and_decides_again() {
     let (mut engine, _, _) = valley_pair();
-    engine
-        .activate_physical_policy_with_options(PolicyOptions::full())
-        .unwrap();
+    engine.activate_physical_policy().unwrap();
     let victim = AgentId::new(0);
     // Bites until it collapses (health 10,000 falls 1,500 a bite).
     while engine.population.view(victim).unwrap().activity != AgentActivity::Incapacitated {

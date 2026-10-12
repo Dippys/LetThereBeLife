@@ -97,8 +97,11 @@ impl Engine {
             return Err(BuildShelterError::NotFit);
         }
         // Stronger hands build faster; the old and the slight take longer.
-        let duration =
-            kind.build_ticks() * (100 - 3 * self.strength(agent)).clamp(80, 200) as u64 / 100;
+        let duration = crate::cognition::by_ability(
+            kind.build_ticks() * (100 - 3 * self.strength(agent)).clamp(80, 200) as u64 / 100,
+            self.ability(agent, crate::Activity::Building),
+        );
+        self.practise(agent, crate::Activity::Building);
         self.compact_scheduler_if_needed();
         let due = self
             .population
@@ -124,17 +127,16 @@ impl Engine {
         self.population
             .consume_build_materials(agent, kind)
             .expect("recipe was prevalidated");
-        if self.policy_options.memory {
-            let model = &mut self.minds.get_mut(agent).model;
-            for &(material, amount) in &kind.cost() {
-                match material {
-                    _ if amount == 0 => {}
-                    crate::Material::Wood => model.used(Choice::Build, Facts::HAS_WOOD),
-                    crate::Material::Stone => model.used(Choice::Build, Facts::HAS_STONE),
-                    _ => {}
-                }
+        let model = &mut self.minds.get_mut(agent).model;
+        for &(material, amount) in &kind.cost() {
+            match material {
+                _ if amount == 0 => {}
+                crate::Material::Wood => model.used(Choice::Build, Facts::HAS_WOOD),
+                crate::Material::Stone => model.used(Choice::Build, Facts::HAS_STONE),
+                _ => {}
             }
         }
+
         self.structure_diagnostics.push(StructureDiagnostic {
             structure,
             at: self.time,
@@ -160,7 +162,7 @@ impl Engine {
             .structures
             .complete_for_builder(agent, now + built_in_fuel)
             .ok_or(PolicyFailureReason::InconsistentState)?;
-        if structure.kind == StructureKind::Shelter && self.policy_options.memory {
+        if structure.kind == StructureKind::Shelter {
             // Anyone who saw it go up now knows how it's done.
             let watchers: Vec<AgentId> = self
                 .perceive_physical(agent, crate::PHYSICAL_POLICY_RADIUS)

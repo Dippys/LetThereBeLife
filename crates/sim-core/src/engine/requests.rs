@@ -40,9 +40,6 @@ impl Engine {
         agent: AgentId,
         perception: &PhysicalPerception,
     ) -> Option<(AgentId, WorldPosition)> {
-        if !self.policy_options.helping {
-            return None;
-        }
         let mind = self.minds.get(agent);
         if mind.is_some_and(|mind| !mind.dialogue.may_request(belief_seconds(self.time)))
             || self

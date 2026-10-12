@@ -26,17 +26,18 @@ pub use agent::{
     RouteEventOutcome, RouteOutcomeKind, RouteScheduled, SimTime, SpawnInvalidReason,
 };
 pub use cognition::{
-    ACQUAINTANCE_SLOTS, AcquaintanceView, AffordanceView, BeliefView, CONSEQUENCE_WEIGHT, Choice,
-    Concept, CoupleEvent, CraftEvent, DEFAULT_TRUST, DISTRUST, DesiredEffect, EFFECTS, EffectView,
-    FAMILY_SIZE, FRIEND_FAMILIARITY, Facts, FarmEvent, FaunaView, FireEvent, Gesture, GestureTopic,
-    Goal, GriefEvent, HABIT_SLOTS, HabitView, HintOutcomeEvent, IntentionView, InterpretationEvent,
-    LANDMARK_SLOTS, LEXICON_SLOTS, LandmarkKind, LandmarkSource, LandmarkView, LeadFollowedEvent,
-    LessonCause, LessonEvent, LexiconEntryView, MERGE_RADIUS, MealEvent, MentalMapView, Mime,
-    PLAN_STEPS, Personality, PlanEvent, PlanEventKind, PolicyOptions, PublicSignal,
-    READING_CANDIDATES, REPAIR_WEIGHT, Reading, ReadingReasons, RepairEvent, RepairResponse,
-    RequestEvent, RequestResponse, SEARCH_SPACING, SHARE_COOLDOWN_SECONDS, SIGNAL_TICKS,
-    SignalEvent, Situation, Step, Tie, Tone, Understanding, UtteranceIntent, VISIT_TILE_SIZE,
-    VISITED_TILE_SLOTS, VOCAL_FORMS, VocalForm, WordEvent, concept_topic,
+    ACQUAINTANCE_SLOTS, AcquaintanceView, Activity, AffordanceView, BeliefView, CONSEQUENCE_WEIGHT,
+    Choice, Concept, CoupleEvent, CraftEvent, DEFAULT_TRUST, DISTRUST, DRIFT_LIMIT, DesiredEffect,
+    EFFECTS, EffectView, FAMILY_SIZE, FRIEND_FAMILIARITY, Facts, FarmEvent, FaunaView, FireEvent,
+    Gesture, GestureTopic, Goal, GriefEvent, HABIT_SLOTS, HabitView, HintOutcomeEvent,
+    IntentionView, InterpretationEvent, LANDMARK_SLOTS, LEXICON_SLOTS, LandmarkKind,
+    LandmarkSource, LandmarkView, LeadFollowedEvent, LessonCause, LessonEvent, LexiconEntryView,
+    MERGE_RADIUS, MealEvent, MentalMapView, Mime, PLAN_STEPS, Personality, PlanEvent,
+    PlanEventKind, PublicSignal, READING_CANDIDATES, REPAIR_WEIGHT, Reading, ReadingReasons,
+    RepairEvent, RepairResponse, RequestEvent, RequestResponse, SEARCH_SPACING,
+    SHARE_COOLDOWN_SECONDS, SIGNAL_TICKS, SignalEvent, Situation, Step, Tie, Tone, Understanding,
+    UtteranceIntent, VISIT_TILE_SIZE, VISITED_TILE_SLOTS, VOCAL_FORMS, VocalForm, WordEvent,
+    concept_topic,
 };
 pub use diagnostics::{EngineCapacityMetrics, EngineDiagnostics, EngineWorkMetrics};
 pub use engine::{

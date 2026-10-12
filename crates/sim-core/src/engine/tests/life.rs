@@ -56,10 +56,7 @@ fn founders_and_children_get_ages_from_the_seed() {
 #[test]
 fn seeing_the_body_of_family_brings_grief() {
     let mut engine = two_people();
-    engine.policy_options = crate::PolicyOptions::full();
-    engine
-        .activate_physical_policy_with_options(crate::PolicyOptions::full())
-        .unwrap();
+    engine.activate_physical_policy().unwrap();
     engine.bond(AgentId::new(1), AgentId::new(0));
     engine.lives = vec![
         Some(Life {
@@ -96,7 +93,6 @@ fn seeing_the_body_of_family_brings_grief() {
 /// Two adults of the other sex who know each other this well.
 fn acquainted(familiarity_sightings: u32, raised_together: bool) -> Engine {
     let mut engine = two_people();
-    engine.policy_options = crate::PolicyOptions::full();
     let adult = |sex| {
         Some(Life {
             born: -((25 * SECONDS_PER_YEAR) as i32),
@@ -177,9 +173,7 @@ fn people_raised_together_do_not_pair_unless_long_alone() {
 #[test]
 fn a_couple_has_a_baby_who_later_walks_and_knows_its_family() {
     let mut engine = acquainted(60, false);
-    engine
-        .activate_physical_policy_with_options(crate::PolicyOptions::full())
-        .unwrap();
+    engine.activate_physical_policy().unwrap();
     decide(&mut engine, 0);
     assert_eq!(engine.partner_of(AgentId::new(0)), Some(AgentId::new(1)));
     // Try until she conceives (each try is one decision spent together).
@@ -262,7 +256,6 @@ fn a_greeting_teaches_bystanders_a_name() {
 #[test]
 fn a_dwindling_band_is_joined_by_newcomers_with_their_own_words() {
     let mut engine = two_people();
-    engine.policy_options = crate::PolicyOptions::full();
     engine.set_founders(2);
     engine.time = SimTime::from_ticks(TICKS_PER_YEAR);
     engine.age_people();
@@ -299,7 +292,6 @@ fn a_dwindling_band_is_joined_by_newcomers_with_their_own_words() {
 #[test]
 fn whoever_watches_a_thing_made_learns_the_makers_word_for_it() {
     let mut engine = two_people();
-    engine.policy_options = crate::PolicyOptions::full();
     let (maker, watcher) = (AgentId::new(0), AgentId::new(1));
     let spear = crate::Concept::Material(crate::Material::Spear);
     assert_eq!(engine.minds.get_mut(maker).lexicon.produce(spear), None);
@@ -330,7 +322,6 @@ fn whoever_watches_a_thing_made_learns_the_makers_word_for_it() {
 #[test]
 fn a_body_left_out_rots_and_sickens_until_someone_buries_it() {
     let mut engine = two_people();
-    engine.policy_options = crate::PolicyOptions::full();
     let (living, dead) = (AgentId::new(0), AgentId::new(1));
     let record = engine
         .population

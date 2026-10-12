@@ -1,5 +1,5 @@
 use super::*;
-use crate::{InventoryView, Material, NeedKind, PolicyOptions};
+use crate::{InventoryView, Material, NeedKind};
 
 /// Two neighbours with full minds. Agent 0 carries `food`; agent 1 watches.
 fn eater_and_watcher(food: &[(Material, u8)]) -> Engine {
@@ -18,7 +18,6 @@ fn eater_and_watcher(food: &[(Material, u8)]) -> Engine {
     engine
         .set_initial_inventory(AgentId::new(0), InventoryView::of(food))
         .unwrap();
-    engine.policy_options = PolicyOptions::full();
     engine
 }
 
@@ -109,25 +108,6 @@ fn a_hungry_child_tastes_what_it_has_never_tried_and_a_full_one_does_not() {
     assert!(meal.first_taste);
     // Stone fed it nothing; it won't try that again.
     assert_eq!(value(&mut engine, 0, Material::Stone), Some(0));
-}
-
-#[test]
-fn legacy_agents_without_minds_eat_by_real_properties() {
-    let mut engine = eater_and_watcher(&[(Material::Bitterberries, 1), (Material::Berries, 1)]);
-    engine.policy_options = PolicyOptions::default();
-    engine.apply_eat(AgentId::new(0)).unwrap();
-    assert_eq!(
-        engine
-            .population
-            .inventory(AgentId::new(0))
-            .unwrap()
-            .amount(Material::Berries),
-        0
-    );
-    assert!(
-        engine.meal_events().is_empty(),
-        "no minds, nothing to learn or log"
-    );
 }
 
 #[test]

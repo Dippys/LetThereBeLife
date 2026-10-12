@@ -5,39 +5,19 @@ use super::errors::{
     build_failure, move_failure, perception_failure, request_failure, sleep_failure,
 };
 use crate::agent::MovementEnvironment;
-use crate::policy::{PolicyAction, PolicySelection, retry_delay, select_with_exploration};
+use crate::policy::{PolicyAction, PolicySelection, retry_delay};
 use crate::scheduler::{self};
 use crate::{
     AgentId, Engine, ExplorationHeading, PHYSICAL_POLICY_ACTION_TICKS,
     PHYSICAL_POLICY_IDLE_RECHECK_TICKS, PHYSICAL_POLICY_RADIUS, PHYSICAL_POLICY_ROUTE_BUDGET,
     PhysicalGoal, PolicyActivationError, PolicyDiagnostic, PolicyDiagnosticKind,
-    PolicyFailureReason, PolicyOptions, PolicyReason, RouteRequest, SleepDiagnostic,
-    SleepDiagnosticKind, WorldPosition,
+    PolicyFailureReason, PolicyReason, RouteRequest, SleepDiagnostic, SleepDiagnosticKind,
+    WorldPosition,
 };
 
 impl Engine {
-    /// Activates autonomous physical decisions after population initialization.
+    /// Activates autonomous decisions after population initialization.
     pub fn activate_physical_policy(&mut self) -> Result<(), PolicyActivationError> {
-        self.activate_physical_policy_with_options(PolicyOptions::default())
-    }
-
-    /// Activates autonomous physical decisions with bounded deterministic wandering
-    /// whenever the local perception window contains no actionable objective.
-    pub fn activate_physical_policy_with_exploration(
-        &mut self,
-    ) -> Result<(), PolicyActivationError> {
-        self.activate_physical_policy_with_options(PolicyOptions {
-            exploration: true,
-            ..PolicyOptions::default()
-        })
-    }
-
-    /// Activates autonomous physical decisions with explicit cognitive features.
-    /// `memory` implies exploration; `sharing` requires `memory` and is ignored without it.
-    pub fn activate_physical_policy_with_options(
-        &mut self,
-        options: PolicyOptions,
-    ) -> Result<(), PolicyActivationError> {
         if !self.population.is_initialized() {
             return Err(PolicyActivationError::PopulationNotInitialized);
         }
@@ -58,15 +38,6 @@ impl Engine {
             .activate_policy(&mut self.scheduler, due)
             .map_err(|_| PolicyActivationError::EventSequenceExhausted)?;
         self.policy_active = true;
-        self.policy_options = PolicyOptions {
-            exploration: options.exploration || options.memory,
-            memory: options.memory,
-            sharing: options.memory && options.sharing,
-            social: options.memory && options.social,
-            helping: options.memory && options.social && options.helping,
-            learned: options.memory && options.learned,
-            plans: if options.memory { options.plans } else { 0 },
-        };
         Ok(())
     }
 
@@ -105,22 +76,8 @@ impl Engine {
         let width = (perception.area.max.x - perception.area.min.x) as u64;
         let height = (perception.area.max.y - perception.area.min.y) as u64;
         self.runtime_counters.policy_perceived_cells += width * height;
-        let (selection, selected_heading) = if self.policy_options.memory {
-            self.deliberate_with_memory(event.agent, view.position, needs, inventory, &perception)
-        } else {
-            let exploration_heading = self
-                .policy_options
-                .exploration
-                .then(|| self.population.exploration_heading(event.agent))
-                .flatten();
-            select_with_exploration(
-                view.position,
-                needs,
-                inventory,
-                &perception,
-                exploration_heading,
-            )
-        };
+        let (selection, selected_heading) =
+            self.deliberate_with_memory(event.agent, view.position, needs, inventory, &perception);
         self.policy_diagnostics.push(PolicyDiagnostic {
             agent: event.agent,
             at: self.time,
@@ -265,15 +222,13 @@ impl Engine {
                         // A night under a roof shows how a hut is put together.
                         if quality.sheltered() {
                             let hut = self.structures.lived_in(target);
-                            if self.policy_options.memory {
-                                let mind = self.minds.get_mut(agent);
-                                mind.crafts.saw_building();
-                                if let Some(hut) = hut {
-                                    let far = mind.home.far_from(target);
-                                    mind.home.slept_at(hut, far);
-                                }
+                            let mind = self.minds.get_mut(agent);
+                            mind.crafts.saw_building();
+                            if let Some(hut) = hut {
+                                let far = mind.home.far_from(target);
+                                mind.home.slept_at(hut, far);
                             }
-                        } else if self.policy_options.memory {
+                        } else {
                             let home = &mut self.minds.get_mut(agent).home;
                             let far = home.far_from(target);
                             home.slept_out(far);

@@ -47,7 +47,7 @@ Measures how viewer-like agents actually fare. They spawn without supplies and r
 
 ```sh
 cargo run --release -p sim-headless -- --study [--near-water | --groups | --valley | --apart] [--seed N]
-    [--agents N] [--ticks N | --years N] [--mind legacy|memory|sharing|full] [--no-help] [--food PERCENT]
+    [--agents N] [--ticks N | --years N] [--food PERCENT]
     [--no-wildlife] [--no-regrowth]
     [--verbose] [--trace AGENT]
     [--comms N] [--misreads N] [--lessons N] [--successes N] [--explain AGENT]
@@ -62,8 +62,7 @@ cargo run --release -p sim-headless -- --study [--near-water | --groups | --vall
   spawns on random land.
 - The valley also releases 24 deer and 2 wolves (`--no-wildlife` to leave them out).
   `--food PERCENT` strips all but that share of the berries at the start, `--no-regrowth` stops
-  picked bushes and trees from growing back (a famine valley), and `--no-help` turns off asking
-  for food.
+  picked bushes and trees from growing back (a famine valley).
 - The `food:` line counts meals by material, sickness, first tastes, and watched meals, and what
   founders and children ended up believing about bitter berries. The `wildlife:` line counts hunt
   and flee decisions, warnings and calls to hunt, strikes and kills (alone and together), bites,
@@ -95,8 +94,9 @@ cargo run --release -p sim-headless -- --study [--near-water | --groups | --vall
   differ from the given name) and names misheard, and `words passed down` shows, per generation,
   how many of their place words are still the founders' most common ones. `survivors` counts the
   living; `(collapsed N)` are alive but down.
-- `--mind legacy` is the old reactive policy (what the viewer used before). `memory` adds the
-  mental map. `sharing` adds gestures. `full` (the default) adds personalities and relationships.
+- Every agent has the full mind; the old mindless and partial modes are gone (D-138).
+- The `skills` line gives, per activity, the best and the median skill among the living: a
+  wide gap means some people have become the band's hunters or builders.
 - The `social:` line shows the % of time agents spend near another agent, their acquaintances,
   mean trust, and "I've been there" gestures. The `trait` lines split agents at each trait's
   midpoint and compare the behavior that trait should change. That's how you check that different
@@ -173,15 +173,14 @@ Release harnesses and soaks are `#[ignore]`d. Run them explicitly:
 cargo test --release -p sim-headless --test canonical_scenarios -- --ignored --nocapture --test-threads=1
 ```
 
-Determinism fingerprints (world generator v2; the smoke run re-verified 2026-10-11 after the life
-seed, D-114, the canonical ones last on 2026-10-10). If one changes, simulation behavior changed.
-Canonical runs use the legacy policy; the study covers the mind.
+Determinism fingerprints (world generator v2; refreshed 2026-10-12 when every agent got the full
+mind, D-138). If one changes, simulation behavior changed.
 
 | Run | Hash |
 |---|---|
-| `sim-headless --ticks 600 --seed 42` (20 agents) | `b0fc5ebe5aa8fa38` |
-| `sim-headless --canonical --agents 20` (600,000 ticks) | `358092051ec6b444` |
-| `sim-headless --canonical --agents 100` (600,000 ticks) | `e4842c31783f1ea1` |
+| `sim-headless --ticks 600 --seed 42` (20 agents) | `9e750ca06ae8d2f7` |
+| `sim-headless --canonical --agents 20` (600,000 ticks) | `6084913be56c4992` |
+| `sim-headless --canonical --agents 100` (600,000 ticks) | `6f9c4d1f0b055f7d` |
 
 ## Tooling
 

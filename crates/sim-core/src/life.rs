@@ -95,7 +95,7 @@ pub(crate) struct Life {
     pub(crate) name: Name,
 }
 
-const _: () = assert!(size_of::<Life>() == 12);
+const _: () = assert!(size_of::<Life>() == 24);
 
 impl Life {
     /// Someone present when the run starts: a founder is an adult of 18-39, a

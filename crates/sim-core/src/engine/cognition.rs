@@ -18,7 +18,7 @@ use crate::{
     AgentActivity, AgentId, Engine, ExplorationHeading, GestureTopic, HintOutcomeEvent,
     InterpretationEvent, InventoryView, LandmarkKind, MentalMapView, PHYSICAL_POLICY_RADIUS,
     PhysicalGoal, PhysicalNeedsView, PhysicalPerception, PolicyDiagnostic, PolicyDiagnosticKind,
-    PolicyFailureReason, PolicyOptions, PolicyReason, SIGNAL_TICKS, SignalEvent, WorldPosition,
+    PolicyFailureReason, PolicyReason, SIGNAL_TICKS, SignalEvent, WorldPosition,
 };
 
 /// What delivering one public signal did.
@@ -59,6 +59,8 @@ const ALARM_DISTANCE: u64 = 20;
 const BODY_TICKS: u64 = 3 * 60 * 60 * 60;
 /// Ticks it takes to make something by hand (knapping a blade).
 const CRAFT_TICKS: u64 = 300;
+/// Ability with words (0-255) from which each hearing counts twice.
+const QUICK_EAR: u8 = 176;
 /// One in this many words a child hears is picked up with a vowel changed.
 const SOUND_SHIFT_ODDS: u64 = 40;
 /// How long someone mourns a person close to them (30 simulated minutes).
@@ -205,8 +207,10 @@ impl Engine {
             .population
             .exploration_heading(agent)
             .unwrap_or(ExplorationHeading::North);
-        let social = self.policy_options.social;
         let personality = self.personality_in_use(agent);
+        let wayfinding = self
+            .innate_personality(agent)
+            .talent(crate::Activity::Wayfinding);
         let at = self.time;
         let latest_signal = self.next_signal_id;
         let beg = self.beg_target(agent, perception);
@@ -300,60 +304,59 @@ impl Engine {
         let lessons = &mut self.lesson_events;
         let griefs = &mut self.grief_events;
         let mind = self.minds.get_mut(agent);
-        if social {
-            for other in &perception.agents {
-                if other.id != agent && other.activity != AgentActivity::Dead {
-                    // Meeting someone again after a while: call out their name.
-                    let reunion = mind.social.slot_of(other.id).is_some_and(|slot| {
-                        mind.social.name(slot).is_some()
-                            && now.saturating_sub(mind.social.last_seen(slot))
-                                >= super::names::GREETING_GAP_SECONDS
-                    });
-                    if reunion && can_watch(other.activity) {
-                        greetings.push(other.id);
-                    }
-                    if let Some(slot) = mind.notice(other.id, other.position, now) {
-                        // Asleep beside a hut: that's where they live.
-                        if other.activity == AgentActivity::Sleeping
-                            && let Some(hut) = hut_beside(perception, other.position)
-                        {
-                            mind.social.saw_asleep_at(slot, hut);
-                        }
-                        // Seen right at a place: they know it's there.
-                        for kind in places_beside(perception, other.position, now) {
-                            mind.social.credit_knowing(slot, kind);
-                        }
-                        // Founders know the names of their own family's founders.
-                        if let Some(name) = founder_names
-                            .iter()
-                            .find(|(id, _)| *id == other.id)
-                            .map(|(_, name)| *name)
-                        {
-                            mind.social.learn_name(slot, name);
-                        }
-                    }
-                }
-            }
-            // The body of someone close: mourn them, then let them go.
-            for body in bodies {
-                let close = mind.social.slot_of(body).is_some_and(|slot| {
-                    mind.social.tie(slot).is_some()
-                        || mind.social.familiarity(slot) >= crate::FRIEND_FAMILIARITY
+        for other in &perception.agents {
+            if other.id != agent && other.activity != AgentActivity::Dead {
+                // Meeting someone again after a while: call out their name.
+                let reunion = mind.social.slot_of(other.id).is_some_and(|slot| {
+                    mind.social.name(slot).is_some()
+                        && now.saturating_sub(mind.social.last_seen(slot))
+                            >= super::names::GREETING_GAP_SECONDS
                 });
-                if close {
-                    mind.grief_until = now.saturating_add(GRIEF_SECONDS);
-                    mind.social.forget(body);
-                    griefs.push(crate::GriefEvent {
-                        agent,
-                        lost: body,
-                        at,
-                    });
+                if reunion && can_watch(other.activity) {
+                    greetings.push(other.id);
+                }
+                if let Some(slot) = mind.notice(other.id, other.position, now) {
+                    // Asleep beside a hut: that's where they live.
+                    if other.activity == AgentActivity::Sleeping
+                        && let Some(hut) = hut_beside(perception, other.position)
+                    {
+                        mind.social.saw_asleep_at(slot, hut);
+                    }
+                    // Seen right at a place: they know it's there.
+                    for kind in places_beside(perception, other.position, now) {
+                        mind.social.credit_knowing(slot, kind);
+                    }
+                    // Founders know the names of their own family's founders.
+                    if let Some(name) = founder_names
+                        .iter()
+                        .find(|(id, _)| *id == other.id)
+                        .map(|(_, name)| *name)
+                    {
+                        mind.social.learn_name(slot, name);
+                    }
                 }
             }
-            mind.social.update_whereabouts(perception.area, |id| {
-                perception.agents.iter().any(|other| other.id.get() == id)
-            });
         }
+        // The body of someone close: mourn them, then let them go.
+        for body in bodies {
+            let close = mind.social.slot_of(body).is_some_and(|slot| {
+                mind.social.tie(slot).is_some()
+                    || mind.social.familiarity(slot) >= crate::FRIEND_FAMILIARITY
+            });
+            if close {
+                mind.grief_until = now.saturating_add(GRIEF_SECONDS);
+                mind.social.forget(body);
+                griefs.push(crate::GriefEvent {
+                    agent,
+                    lost: body,
+                    at,
+                });
+            }
+        }
+        mind.social.update_whereabouts(perception.area, |id| {
+            perception.agents.iter().any(|other| other.id.get() == id)
+        });
+
         // Its home in view with no hut standing there: it's gone.
         if let Some(hut) = mind.home.hut()
             && perception.area.contains(hut)
@@ -379,6 +382,7 @@ impl Engine {
             last_eligible_seen: _,
             stored_food,
             stall: _,
+            character,
             habits,
             home,
             model,
@@ -452,6 +456,7 @@ impl Engine {
             && seasons.remembered(crate::Season::Winter as usize)[1] >= 100;
         let stored_food = stored_food.map(crate::agent::CompactPosition::world);
         let grief_until = *grief_until;
+        let explored = map.explored_tile_count();
         map.observe(
             agent.get(),
             origin,
@@ -478,7 +483,7 @@ impl Engine {
                     confirmed: check.confirmed,
                     at,
                 });
-                if social && let Some(slot) = check.teller {
+                if let Some(slot) = check.teller {
                     people.hint_checked(slot, check.confirmed);
                 }
                 learn_from_consequence(
@@ -497,6 +502,10 @@ impl Engine {
                 );
             },
         );
+        // New ground covered: practice at finding the way.
+        if map.explored_tile_count() > explored {
+            character.practise(crate::Activity::Wayfinding, wayfinding);
+        }
         let search_target = if map.seen_count(LandmarkKind::Water) == 0 {
             Some(map.search_target(origin, perception.area))
         } else {
@@ -509,19 +518,14 @@ impl Engine {
             .any(|other| other.id != agent && can_watch(other.activity));
         let cooldown = Personality::scale(personality.sociability, 110, 10) as u32;
         // Setting the record straight with a speaker in view comes before sharing.
-        let correction = self
-            .policy_options
-            .sharing
-            .then(|| dialogue.correction(now))
-            .flatten()
-            .filter(|correction| {
-                perception
-                    .agents
-                    .iter()
-                    .any(|other| other.id == correction.speaker && can_watch(other.activity))
-            });
+        let correction = dialogue.correction(now).filter(|correction| {
+            perception
+                .agents
+                .iter()
+                .any(|other| other.id == correction.speaker && can_watch(other.activity))
+        });
         // A correction for someone out of sight: go to where they were last seen.
-        let seek = (self.policy_options.sharing && correction.is_none())
+        let seek = (correction.is_none())
             .then(|| dialogue.correction(now))
             .flatten()
             .and_then(|pending| people.whereabouts(pending.speaker));
@@ -540,7 +544,7 @@ impl Engine {
         let share = correction
             .map(|correction| (correction.place, u8::MAX))
             .or_else(|| {
-                (self.policy_options.sharing && company && map.share_ready(now, cooldown))
+                (company && map.share_ready(now, cooldown))
                     .then(|| map.shareable(perception.area, unknown))
                     .flatten()
             });
@@ -549,7 +553,7 @@ impl Engine {
         let partner_away = people
             .partner()
             .is_some_and(|(_, partner)| !perception.agents.iter().any(|other| other.id == partner));
-        let friend_target = (social && (!company || partner_away))
+        let friend_target = (!company || partner_away)
             .then(|| {
                 people.friend_to_visit(
                     now,
@@ -627,9 +631,9 @@ impl Engine {
                 hunts,
                 avoid: avoid.place(now),
                 ready,
-                habits: self.policy_options.learned.then_some((&*habits, situation)),
+                habits: Some((&*habits, situation)),
                 model: &*model,
-                plans: self.policy_options.plans,
+                plans: crate::cognition::PLANS,
                 facts,
                 intention: &intended,
                 lacked: &lacked,
@@ -730,13 +734,24 @@ impl Engine {
         target: WorldPosition,
         reason: PolicyReason,
     ) {
+        // Skilled hands are quicker at what they've practised.
+        let skilled = match goal {
+            PhysicalGoal::Craft => Some(crate::Activity::Crafting),
+            PhysicalGoal::Cook => Some(crate::Activity::Cooking),
+            PhysicalGoal::Plant => Some(crate::Activity::Farming),
+            _ => None,
+        };
+        if let Some(activity) = skilled {
+            self.practise(agent, activity);
+        }
         let duration = match (goal, reason) {
             (PhysicalGoal::Hunt, _) => super::HUNT_TICKS,
             (PhysicalGoal::WarmUp | PhysicalGoal::TendFire, _) => WARM_UP_TICKS,
-            (
-                PhysicalGoal::Craft | PhysicalGoal::Plant | PhysicalGoal::Bury | PhysicalGoal::Cook,
-                _,
-            ) => CRAFT_TICKS,
+            (PhysicalGoal::Craft | PhysicalGoal::Plant | PhysicalGoal::Cook, _) => {
+                let activity = skilled.expect("matched above");
+                crate::cognition::by_ability(CRAFT_TICKS, self.ability(agent, activity))
+            }
+            (PhysicalGoal::Bury, _) => CRAFT_TICKS,
             (PhysicalGoal::Store | PhysicalGoal::Fetch | PhysicalGoal::Drop, _) => WARM_UP_TICKS,
             // A warning is quick: a shout and a point.
             (_, PolicyReason::Warning) => WARNING_TICKS,
@@ -865,7 +880,6 @@ impl Engine {
             .map_err(perception_failure)?;
         let now = belief_seconds(self.time);
         let (mut watchers, mut informed) = (0_u16, 0_u16);
-        let social = self.policy_options.social;
         for watcher in &perception.agents {
             if watcher.id == public.sender || !can_watch(watcher.activity) {
                 continue;
@@ -887,6 +901,11 @@ impl Engine {
                     ^ id)
                     % SOUND_SHIFT_ODDS
                     == 0;
+            // Someone with an ear for words takes in each hearing twice over.
+            let quick_ear = self.ability(watcher.id, crate::Activity::Words) >= QUICK_EAR;
+            let words_talent = self
+                .innate_personality(watcher.id)
+                .talent(crate::Activity::Words);
             let mind = self.minds.get_mut(watcher.id);
             // Children ask about almost anything they aren't sure of.
             let ask_below = if mind.child {
@@ -920,6 +939,11 @@ impl Engine {
                 // A child now and then picks a word up with a vowel changed.
                 let learned = if shifts { form.shifted() } else { form };
                 mind.lexicon.hear_with_evidence(learned, heard_as);
+                if quick_ear {
+                    mind.lexicon.hear_with_evidence(learned, heard_as);
+                }
+                mind.character
+                    .practise(crate::Activity::Words, words_talent);
                 if learned != form {
                     self.word_events.push(crate::WordEvent::Shifted {
                         agent: watcher.id,
@@ -942,8 +966,8 @@ impl Engine {
                     });
                 }
             }
-            let teller = match (social, understanding.topic) {
-                (true, GestureTopic::Place(_)) => mind.notice(public.sender, public.origin, now),
+            let teller = match understanding.topic {
+                GestureTopic::Place(_) => mind.notice(public.sender, public.origin, now),
                 _ => None,
             };
             let trust = teller.map_or(crate::DEFAULT_TRUST, |slot| mind.social.trust(slot));
@@ -1163,7 +1187,7 @@ impl Engine {
         let Some(mind) = self.minds.get(agent) else {
             return (None, None);
         };
-        if !self.policy_options.sharing || !self.someone_within_call(agent) {
+        if !self.someone_within_call(agent) {
             return (None, None);
         }
         let first = |wanted: &dyn Fn(crate::Species) -> bool| {
@@ -1318,9 +1342,6 @@ impl Engine {
     /// hungry) a taste of anything it has never tried. Without one (legacy
     /// policy): what an all-knowing agent would eat.
     pub(super) fn food_values(&self, agent: AgentId) -> FoodValues {
-        if !self.policy_options.memory {
-            return FoodValues::truth();
-        }
         let hungry = self
             .population
             .needs_view(agent, self.time)
@@ -1549,7 +1570,7 @@ impl Engine {
     /// thing and hear the word, so they learn it (a child now and then with a
     /// vowel changed).
     pub(super) fn name_made(&mut self, maker: AgentId, concept: Concept, watchers: &[AgentId]) {
-        if watchers.is_empty() || !self.policy_options.memory {
+        if watchers.is_empty() {
             return;
         }
         let roll = mix(self.config.life_seed
@@ -1682,11 +1703,6 @@ impl Engine {
             })
     }
 
-    /// The cognitive features the active policy uses.
-    pub fn policy_options(&self) -> PolicyOptions {
-        self.policy_options
-    }
-
     /// A copy of what `agent` knows about places and people. `None` before it has a mind.
     /// The hut `agent` has made its home, if any.
     pub fn home_of(&self, agent: AgentId) -> Option<WorldPosition> {
@@ -1698,6 +1714,8 @@ impl Engine {
         Some(MentalMapView {
             agent,
             personality: self.personality_in_use(agent),
+            abilities: crate::Activity::ALL.map(|activity| self.ability(agent, activity)),
+            skills: mind.character.skills(),
             landmarks: mind.map.views().collect(),
             explored_tiles: mind.map.explored_tile_count(),
             child: mind.child,
@@ -1778,13 +1796,31 @@ impl Engine {
             .map(|_| self.innate_personality(agent))
     }
 
-    /// The personality the policy acts on: innate with `social`, else average.
+    /// The personality the policy acts on: innate as life has shaped it, with
+    /// `social`; else average.
     pub(super) fn personality_in_use(&self, agent: AgentId) -> Personality {
-        if self.policy_options.social {
-            self.innate_personality(agent)
-        } else {
-            Personality::AVERAGE
-        }
+        let innate = self.innate_personality(agent);
+        self.minds
+            .get(agent)
+            .map_or(innate, |mind| mind.character.shape(innate))
+    }
+
+    /// How good `agent` is at `activity` (0-255): talent and practice, or
+    /// average for agents without minds.
+    pub(super) fn ability(&self, agent: AgentId, activity: crate::Activity) -> u8 {
+        let talent = self.innate_personality(agent).talent(activity);
+        self.minds
+            .get(agent)
+            .map_or(talent / 2, |mind| mind.character.ability(activity, talent))
+    }
+
+    /// `agent` did `activity` once: its skill grows (only minds hold skill).
+    pub(super) fn practise(&mut self, agent: AgentId, activity: crate::Activity) {
+        let talent = self.innate_personality(agent).talent(activity);
+        self.minds
+            .get_mut(agent)
+            .character
+            .practise(activity, talent);
     }
 
     /// Gestures completed during the latest tick (private intent included: tools only).

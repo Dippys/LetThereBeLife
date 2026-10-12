@@ -699,6 +699,13 @@ pub(super) fn person_rows(agent: &AgentInspection) -> Vec<Row> {
     if !about.is_empty() {
         rows.push(Row::Text(about.join(" · "), colors::UI_DIM));
     }
+    if let Some(knack) = agent
+        .memory
+        .as_ref()
+        .and_then(|memory| labels::knack(memory.abilities))
+    {
+        rows.push(Row::Text(knack, colors::UI_DIM));
+    }
     rows.push(Row::Gap);
 
     let (doing, why) = doing(agent);

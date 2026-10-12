@@ -214,7 +214,7 @@ fn structure_reserved_after_move_request_blocks_at_movement_completion() {
 }
 
 #[test]
-fn equal_time_builders_resolve_overlap_by_agent_id_without_double_spending() {
+fn builders_asking_for_the_same_site_never_both_spend() {
     let mut engine = resident_engine(128);
     let bounds = engine.world().initial_bounds();
     let center = (bounds.min.y + 2..bounds.max.y - 2)
@@ -281,10 +281,15 @@ fn equal_time_builders_resolve_overlap_by_agent_id_without_double_spending() {
             .population
             .add_inventory(agent, crate::Material::Stone, SHELTER_STONE_COST);
     }
-    engine.activate_physical_policy().unwrap();
-    engine.tick();
-
-    let structure = engine.structure_views(1).next().unwrap();
+    // Both ask for the same site in the same tick: the first gets it.
+    let structure = engine
+        .request_build_shelter(AgentId::new(0), center)
+        .unwrap();
+    assert!(
+        engine
+            .request_build_shelter(AgentId::new(1), center)
+            .is_err()
+    );
     assert_eq!(structure.position, center);
     assert_eq!(structure.builder, Some(AgentId::new(0)));
     assert_eq!(

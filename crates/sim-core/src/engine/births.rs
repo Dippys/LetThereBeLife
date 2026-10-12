@@ -418,17 +418,26 @@ impl Engine {
 
 /// Each trait is the average of the parents' plus up to `TRAIT_VARIATION` either way.
 fn blend(mother: Personality, father: Personality, roll: u64) -> Personality {
-    let trait_of = |a: u8, b: u8, index: u32| {
-        let spread = (2 * TRAIT_VARIATION + 1) as u64;
-        let variation = ((roll >> (index * 8)) % spread) as i32 - TRAIT_VARIATION;
+    let spread = (2 * TRAIT_VARIATION + 1) as u64;
+    let mix_of = |a: u8, b: u8, index: u32| {
+        let key = crate::wildlife::mix(roll ^ u64::from(index));
+        let variation = (key % spread) as i32 - TRAIT_VARIATION;
         ((i32::from(a) + i32::from(b)) / 2 + variation).clamp(0, 255) as u8
     };
+    let (mother_traits, father_traits) = (mother.traits(), father.traits());
     Personality {
-        curiosity: trait_of(mother.curiosity, father.curiosity, 0),
-        caution: trait_of(mother.caution, father.caution, 1),
-        sociability: trait_of(mother.sociability, father.sociability, 2),
-        diligence: trait_of(mother.diligence, father.diligence, 3),
+        talents: std::array::from_fn(|index| {
+            mix_of(
+                mother.talents[index],
+                father.talents[index],
+                8 + index as u32,
+            )
+        }),
+        ..mother
     }
+    .with_traits(std::array::from_fn(|index| {
+        mix_of(mother_traits[index], father_traits[index], index as u32)
+    }))
 }
 
 #[cfg(test)]
@@ -437,26 +446,18 @@ mod tests {
 
     #[test]
     fn children_take_after_both_parents() {
-        let low = Personality {
-            curiosity: 40,
-            caution: 40,
-            sociability: 40,
-            diligence: 40,
-        };
+        let low = Personality::AVERAGE.with_traits([40; 8]);
         let high = Personality {
-            curiosity: 220,
-            caution: 220,
-            sociability: 220,
-            diligence: 220,
+            talents: [220; crate::Activity::COUNT],
+            ..Personality::AVERAGE.with_traits([220; 8])
+        };
+        let low = Personality {
+            talents: [40; crate::Activity::COUNT],
+            ..low
         };
         for roll in 0..50 {
             let child = blend(low, high, mix(roll));
-            for value in [
-                child.curiosity,
-                child.caution,
-                child.sociability,
-                child.diligence,
-            ] {
+            for value in child.traits().into_iter().chain(child.talents) {
                 assert!((100..=160).contains(&value), "{value}");
             }
         }

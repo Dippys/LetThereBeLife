@@ -223,6 +223,7 @@ impl Engine {
         self.age_people();
         self.grow_plants();
         self.tend_families();
+        self.feel();
         // Autonomous agents re-schedule constantly; without this, stale events
         // were only pruned on manual commands and piled up during long runs.
         self.compact_scheduler_if_needed();

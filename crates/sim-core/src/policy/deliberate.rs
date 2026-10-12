@@ -56,7 +56,10 @@ impl Temperament {
             caution,
             sociability,
             diligence,
+            ..
         } = personality;
+        // A good wayfinder dares go farther from water and still find the way back.
+        let wayfinding = personality.talent(crate::Activity::Wayfinding);
         Self {
             top_up_thirst: Personality::scale(caution, 4_000, 2_000) as u16,
             top_up_hunger: Personality::scale(caution, 4_500, 2_500) as u16,
@@ -64,7 +67,8 @@ impl Temperament {
             curiosity_target: Personality::scale(curiosity, 1, 3) as usize,
             excursion_chance: Personality::scale(curiosity, 30, 140) as u16,
             prepare_exposure: Personality::scale(caution, 6_000, 4_000) as u16,
-            leash_percent: Personality::scale(caution, 65, 35) as u64,
+            leash_percent: (Personality::scale(caution, 65, 35)
+                + Personality::scale(wayfinding, -10, 10)) as u64,
             work_chance: Personality::scale(diligence, 0, 512).min(256) as u16,
             visit_chance: Personality::scale(sociability, 0, 200) as u16,
             stays_with_company: sociability >= 160,
@@ -92,6 +96,8 @@ pub(crate) const HUT_SPACING: u64 = 96;
 const STORE_LOAD: u8 = 9;
 /// Food carried before a stocking trip home (more than is kept back on storing).
 const STOCK_LOAD: u8 = 7;
+/// Raw meat carried that's worth a walk to a remembered hearth to cook.
+const COOKING_TRIP_MEAT: u8 = 3;
 /// Wood a basket or a spear takes.
 const TOOL_WOOD: u8 = 2;
 /// Planting happens this close to home (cells), with this much food on
@@ -623,10 +629,12 @@ impl Planner<'_> {
             .map(|structure| structure.position)
     }
 
-    /// Someone who keeps fire, carrying raw meat, with a fire burning in view:
-    /// goes to it and cooks the meat.
+    /// Someone who keeps fire, carrying raw meat: cooks it at a fire burning
+    /// in view, or with enough meat to be worth the walk, heads for a hearth
+    /// it remembers.
     fn cook(&self, inventory: InventoryView) -> Option<Deliberation> {
-        if !self.mind.knows_hearths || inventory.amount(Material::Meat) == 0 {
+        let meat = inventory.amount(Material::Meat);
+        if !self.mind.knows_hearths || meat == 0 {
             return None;
         }
         let now = (self.needs.at.ticks() / 60) as u32;
@@ -641,8 +649,14 @@ impl Planner<'_> {
                     structure.position.y,
                     structure.position.x,
                 )
-            })?;
-        self.at_hut(fire.position, PhysicalGoal::Cook, PolicyReason::Cooking)
+            });
+        match fire {
+            Some(fire) => self.at_hut(fire.position, PhysicalGoal::Cook, PolicyReason::Cooking),
+            None if meat >= COOKING_TRIP_MEAT => self
+                .travel_to_known(LandmarkKind::HEARTH, PhysicalGoal::Explore)
+                .map(|trip| trip.with_reason(PolicyReason::Cooking)),
+            None => None,
+        }
     }
 
     /// The hut at `hut` belongs to another family, as far as it knows.

@@ -1,5 +1,5 @@
 use super::*;
-use crate::{PolicyOptions, Species};
+use crate::Species;
 
 /// A small band with full minds, animals, and some history behind it.
 fn lived_in_world() -> Engine {
@@ -20,9 +20,7 @@ fn lived_in_world() -> Engine {
         .unwrap();
     engine.release_wildlife(area, 6, 1);
     engine.set_founders(spots.len() as u32);
-    engine
-        .activate_physical_policy_with_options(PolicyOptions::full())
-        .unwrap();
+    engine.activate_physical_policy().unwrap();
     engine
 }
 

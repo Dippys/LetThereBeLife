@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::Engine;
 
 /// Bumped whenever the saved layout changes; older saves are refused.
-const SAVE_VERSION: u32 = 15;
+const SAVE_VERSION: u32 = 16;
 
 /// What a save holds, borrowed from a running engine.
 #[derive(Serialize)]
@@ -24,7 +24,6 @@ struct SavedRef<'a> {
     buried: &'a std::collections::BTreeSet<crate::AgentId>,
     sickened: u64,
     policy_active: &'a bool,
-    policy_options: &'a crate::PolicyOptions,
     minds: &'a crate::cognition::Minds,
     families: &'a super::births::Families,
     gave_up: &'a u64,
@@ -56,7 +55,6 @@ struct Saved {
     buried: std::collections::BTreeSet<crate::AgentId>,
     sickened: u64,
     policy_active: bool,
-    policy_options: crate::PolicyOptions,
     minds: crate::cognition::Minds,
     families: super::births::Families,
     gave_up: u64,
@@ -120,7 +118,6 @@ impl Engine {
             buried: &self.buried,
             sickened: self.sickened,
             policy_active: &self.policy_active,
-            policy_options: &self.policy_options,
             minds: &self.minds,
             families: &self.families,
             gave_up: &self.gave_up,
@@ -178,7 +175,6 @@ impl Engine {
         engine.buried = saved.buried;
         engine.sickened = saved.sickened;
         engine.policy_active = saved.policy_active;
-        engine.policy_options = saved.policy_options;
         engine.minds = saved.minds;
         engine.families = saved.families;
         engine.gave_up = saved.gave_up;

@@ -1110,3 +1110,44 @@ in their first year. Up to 6 wolves (was 4). Animals are 32 B; save version 15.
 3,397 were born; bites 1,578 against 2,542; 461 deer and 40 wolves left against 664 and 80.
 Exhaustion deaths 21 against 12.
 
+## D-136: Walking to a hearth to cook (2026-10-12)
+
+**Decision:** Someone who keeps fire and carries 3 or more raw meat heads for a hearth it
+remembers to cook it, not only at a fire already in view.
+**Why:** Food rots unless cooked (D-134) and people seldom cooked.
+**Consequences:** Over 10 years in 20 valleys: meat cooked 190 times against 152; 437 survivors
+against 442 (noise); about 350,000 units still rot, since people gather far more than they eat.
+
+## D-137: Temperament, talents and skills (2026-10-12)
+
+**Decision:** `Personality` has 8 traits (adding boldness, warmth, temper, steadiness) and 8
+talents, one per `Activity` (foraging, hunting, crafting, building, cooking, farming, wayfinding,
+words); children blend both parents' traits and talents. `cognition::Character` (24 B per mind)
+keeps skill per activity, grown by each go (faster with talent, slower near mastery, and per a
+practice rate so frequent work teaches less per go) and faded by an eighth each year; founders
+start with skill equal to talent. Ability (talent plus twice skill, over 3) scales gather yield,
+hunting strikes, craft, cook, sow and build times, and someone with an ear for words takes each
+hearing in twice; wayfinding talent lengthens how far people dare roam. Traits drift up to 40 from
+where they started with what happens (`engine/feelings.rs`): bites make people timid, plans that
+work bolder, tips proved wrong hotter-tempered and colder, right ones warmer, losses less steady.
+The person panel names the standout trait and what someone is good and poor at. Mind 1,920 B.
+**Why:** The owner wanted unique people who are better at some things than others, and a more
+dynamic personality (docs/plans/FEELINGS.md, P1).
+**Consequences:** Over 10 years in 20 valleys: 448 survivors against 437, cold deaths 21 against
+24, births 119 against 121. Specialists appear: in one valley the best hunter is at 204 with a
+median of 96, the best farmer 215 (median 41), the best maker 222 (median 33). Starting founders
+at half their talent made everyone below average (419 survivors), and too slow a foraging rate
+left most people poor foragers (cold deaths 35): both were fixed before this was kept.
+
+## D-138: One mind for everyone (2026-10-12)
+
+**Decision:** The mindless and partial minds are gone: `PolicyOptions`, the reactive selection
+policy, `activate_physical_policy_with_*`, and the study's `--mind`, `--no-help`, `--scripted` and
+`--plans` flags. Every agent remembers, has a personality, relationships, habits and plans; the
+plan bits live in `cognition::PLANS`. Tests that compared modes were removed; those that used
+mindless agents to set up a situation now use full minds (or manual requests) and check the same
+thing. Canonical scenarios now run full minds; fingerprints refreshed.
+**Why:** The owner: "I don't care about legacy, we can purge anything outdated."
+**Consequences:** Less code and one behaviour to reason about; no more comparisons against a
+mindless baseline.
+

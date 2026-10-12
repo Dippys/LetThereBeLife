@@ -8,9 +8,9 @@ use crate::routing::RoutePlanner;
 use crate::scheduler::{MAX_DUE_EVENTS_PER_TICK, Scheduler};
 use crate::{
     AgentId, AgentSpawnError, Engine, EngineConfig, GenerateAreaError, InitialInventoryError,
-    InventoryView, PolicyOptions, PopulationInit, PopulationInitError, PopulationInitOutcome,
-    SimTime, SpawnKind, SpawnObjectError, Standability, World, WorldChunk, WorldChunkLoad,
-    WorldPosition, WorldQueryError, WorldRect,
+    InventoryView, PopulationInit, PopulationInitError, PopulationInitOutcome, SimTime, SpawnKind,
+    SpawnObjectError, Standability, World, WorldChunk, WorldChunkLoad, WorldPosition,
+    WorldQueryError, WorldRect,
 };
 
 /// Returned when setup that must precede the first tick is attempted later.
@@ -112,7 +112,6 @@ impl Engine {
         self.health_diagnostics.clear();
         self.death_records.clear();
         self.policy_active = false;
-        self.policy_options = PolicyOptions::default();
         self.minds = Minds::new(self.config.life_seed);
         self.route_outcomes.clear();
         self.route_planner = RoutePlanner::default();

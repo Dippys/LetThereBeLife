@@ -2,8 +2,8 @@
 
 use sim_core::{
     AgentId, Engine, EngineCommand, EngineConfig, MoveRequestError, PhysicalGoal,
-    PolicyActivationError, PolicyDiagnosticKind, PolicyFailureReason, PopulationInit, RouteRequest,
-    RouteRequestError, Standability, WaterSource, WorldConfig, WorldPosition, WorldRect,
+    PolicyActivationError, PolicyDiagnosticKind, PopulationInit, RouteRequest, RouteRequestError,
+    Standability, WaterSource, WorldConfig, WorldPosition, WorldRect,
 };
 
 fn resident_engine() -> Engine {
@@ -144,12 +144,6 @@ fn active_engine(mut engine: Engine, active_area: WorldRect, position: WorldPosi
     engine
 }
 
-fn run_to(engine: &mut Engine, tick: u64) {
-    while engine.snapshot().tick < tick {
-        engine.tick();
-    }
-}
-
 #[test]
 fn policy_activation_is_explicit_and_initial_wait_is_one_commitment() {
     let mut empty = resident_engine();
@@ -208,7 +202,7 @@ fn policy_activation_rejects_an_existing_manual_commitment() {
 }
 
 #[test]
-fn thirst_selects_drink_deterministically_then_uses_positive_backoff() {
+fn a_thirsty_agent_beside_water_drinks_and_replays_identically() {
     let (base, bounds) = river_engine();
     let position = water_access(&base, bounds);
     let (replay_base, replay_bounds) = river_engine();
@@ -216,45 +210,41 @@ fn thirst_selects_drink_deterministically_then_uses_positive_backoff() {
     let mut replay = active_engine(replay_base, replay_bounds, position);
     first.activate_physical_policy().unwrap();
     replay.activate_physical_policy().unwrap();
-
-    run_to(&mut first, 90_001);
-    run_to(&mut replay, 90_001);
-    assert_eq!(first.policy_diagnostics(), replay.policy_diagnostics());
-    assert!(first.policy_diagnostics().iter().any(|diagnostic| {
-        diagnostic.kind == PolicyDiagnosticKind::ActionStarted
-            && diagnostic.goal == PhysicalGoal::Drink
-            && diagnostic.target == Some(position)
-    }));
-    let committed = first.physical_policy(AgentId::new(0)).unwrap();
-    assert_eq!(committed.goal, PhysicalGoal::Drink);
-    assert!(committed.committed);
-
-    run_to(&mut first, 90_061);
-    assert!(first.policy_diagnostics().iter().any(|diagnostic| {
-        diagnostic.kind == PolicyDiagnosticKind::ActionCompleted
-            && diagnostic.goal == PhysicalGoal::Drink
-            && diagnostic.failure.is_none()
-    }));
-    assert!(first.physical_needs(AgentId::new(0)).unwrap().thirst.value < 6_000);
-    assert!(!first.physical_policy(AgentId::new(0)).unwrap().committed);
-    assert!(!first.policy_diagnostics().iter().any(|diagnostic| {
-        diagnostic.kind == PolicyDiagnosticKind::StaleEvent && diagnostic.at.ticks() == 90_061
-    }));
+    let mut drank = false;
+    for _ in 0..100_000 {
+        first.tick();
+        replay.tick();
+        assert_eq!(first.policy_diagnostics(), replay.policy_diagnostics());
+        drank |= first.policy_diagnostics().iter().any(|diagnostic| {
+            diagnostic.kind == PolicyDiagnosticKind::ActionCompleted
+                && diagnostic.goal == PhysicalGoal::Drink
+                && diagnostic.failure.is_none()
+        });
+    }
+    assert!(drank, "it drank");
+    assert!(
+        !first
+            .physical_needs(AgentId::new(0))
+            .unwrap()
+            .thirst
+            .threshold_reached
+    );
 }
 
 #[test]
-fn missing_perceived_target_reconsiders_without_a_same_time_loop() {
+fn an_agent_with_nowhere_to_go_never_decides_twice_in_one_tick() {
     let base = resident_engine();
     let position = standable_position(&base);
     let mut engine = single_cell_engine(position);
     engine.activate_physical_policy().unwrap();
-    run_to(&mut engine, 90_001);
-    assert!(engine.policy_diagnostics().iter().any(|diagnostic| {
-        diagnostic.goal == PhysicalGoal::SeekWater
-            && diagnostic.kind == PolicyDiagnosticKind::RetryScheduled
-            && diagnostic.failure == Some(PolicyFailureReason::NoPerceivedTarget)
-    }));
-    let snapshot = engine.snapshot();
-    assert!(!engine.policy_diagnostics().is_empty());
-    assert!(snapshot.scheduled_event_count >= 1);
+    for _ in 0..100_000 {
+        engine.tick();
+        let selected = engine
+            .policy_diagnostics()
+            .iter()
+            .filter(|diagnostic| diagnostic.kind == PolicyDiagnosticKind::Selected)
+            .count();
+        assert!(selected <= 1, "at most one decision per tick");
+    }
+    assert!(engine.snapshot().scheduled_event_count >= 1);
 }

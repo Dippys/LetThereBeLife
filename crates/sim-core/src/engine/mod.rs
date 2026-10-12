@@ -14,6 +14,7 @@ mod setup;
 pub use setup::SimulationAdvanced;
 pub(crate) mod births;
 mod family;
+mod feelings;
 mod life;
 mod names;
 mod plants;
@@ -39,7 +40,7 @@ use crate::structures::StructureStore;
 use crate::{
     AgentId, DeathRecord, HealthDiagnostic, HintOutcomeEvent, InterpretationEvent,
     MoveRequestError, MovementEventOutcome, MovementScheduled, NeedThresholdEventOutcome,
-    PolicyDiagnostic, PolicyOptions, RouteEventOutcome, SignalEvent, SimTime, SleepDiagnostic,
+    PolicyDiagnostic, RouteEventOutcome, SignalEvent, SimTime, SleepDiagnostic,
     StructureDiagnostic, World, WorldConfig, WorldPosition, WorldRect,
 };
 
@@ -143,7 +144,6 @@ pub struct Engine {
     health_diagnostics: Vec<HealthDiagnostic>,
     death_records: Vec<DeathRecord>,
     policy_active: bool,
-    policy_options: PolicyOptions,
     minds: Minds,
     signal_events: Vec<SignalEvent>,
     interpretation_events: Vec<InterpretationEvent>,
@@ -220,7 +220,6 @@ impl Engine {
             health_diagnostics: Vec::new(),
             death_records: Vec::new(),
             policy_active: false,
-            policy_options: PolicyOptions::default(),
             minds: Minds::new(config.life_seed),
             signal_events: Vec::new(),
             interpretation_events: Vec::new(),
@@ -294,7 +293,6 @@ impl Engine {
                 self.health_diagnostics.clear();
                 self.death_records.clear();
                 self.policy_active = false;
-                self.policy_options = PolicyOptions::default();
                 self.minds = Minds::new(self.config.life_seed);
                 self.signal_events.clear();
                 self.interpretation_events.clear();

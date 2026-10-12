@@ -1,5 +1,5 @@
 use super::*;
-use crate::{InventoryView, Material, NeedKind, PolicyOptions, PolicyReason, StructureKind};
+use crate::{InventoryView, Material, NeedKind, PolicyReason, StructureKind};
 
 /// A builder carrying a hearth's stone and wood next to a free site, and a
 /// child watching who has never seen fire.
@@ -31,7 +31,6 @@ fn builder_and_watcher() -> (Engine, WorldPosition) {
             ]),
         )
         .unwrap();
-    engine.policy_options = PolicyOptions::full();
     engine.minds.set_founders(1);
     (engine, site)
 }

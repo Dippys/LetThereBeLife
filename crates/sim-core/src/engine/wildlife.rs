@@ -391,9 +391,6 @@ impl Engine {
     /// who saw a person bring an animal down learns it can be hunted.
     fn witness(&mut self, event: WildlifeEvent) {
         self.wildlife_events.push(event);
-        if !self.policy_options.memory {
-            return;
-        }
         let (species, position, actor) = match event {
             WildlifeEvent::Bite {
                 species,
@@ -625,7 +622,11 @@ impl Engine {
             + u64::from(edge.is_some()) * EDGE_CHANCE
             + point)
             .saturating_add_signed(self.strength(hunter))
+            .saturating_add_signed(
+                (i64::from(self.ability(hunter, crate::Activity::Hunting)) - 128) / 8,
+            )
             .clamp(5, 95);
+        self.practise(hunter, crate::Activity::Hunting);
         let roll = mix(self.config.life_seed
             ^ 0x4855_4e54
             ^ (u64::from(hunter.get()) << 40)

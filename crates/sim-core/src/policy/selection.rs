@@ -1,10 +1,9 @@
 //! Goal selection: urgency scoring, objective access search (water, food,
 //! resources, shelter), and the selected policy action.
 
-use super::exploration::{exploration_target, varied_exploration_heading};
 use crate::{
     InventoryView, Material, NeedKind, PhysicalNeedsView, PhysicalPerception, WorldPosition,
-    policy::{ExplorationHeading, FoodValues, PhysicalGoal, PolicyReason},
+    policy::{PhysicalGoal, PolicyReason},
     structures::{SHELTER_WOOD_COST, StructureState},
 };
 
@@ -21,78 +20,6 @@ pub(crate) struct PolicyAction {
     pub(crate) target: WorldPosition,
     pub(crate) reason: PolicyReason,
     pub(crate) duration: u64,
-}
-
-#[cfg(test)]
-pub(crate) fn select(
-    origin: WorldPosition,
-    needs: PhysicalNeedsView,
-    inventory: InventoryView,
-    perception: &PhysicalPerception,
-) -> PolicySelection {
-    select_with_exploration(origin, needs, inventory, perception, None).0
-}
-
-pub(crate) fn select_with_exploration(
-    origin: WorldPosition,
-    needs: PhysicalNeedsView,
-    inventory: InventoryView,
-    perception: &PhysicalPerception,
-    exploration_heading: Option<ExplorationHeading>,
-) -> (PolicySelection, Option<ExplorationHeading>) {
-    let selection = match most_urgent(needs) {
-        Some(NeedKind::Thirst) => PolicySelection {
-            goal: PhysicalGoal::SeekWater,
-            target: nearest_water_access(origin, perception),
-            reason: PolicyReason::ThirstThreshold,
-        },
-        Some(NeedKind::Hunger) if FoodValues::truth().carried(inventory) > 0 => PolicySelection {
-            goal: PhysicalGoal::Eat,
-            target: Some(origin),
-            reason: PolicyReason::HungerThreshold,
-        },
-        Some(NeedKind::Hunger) => PolicySelection {
-            goal: PhysicalGoal::SeekFood,
-            target: nearest_resource_access(origin, perception, |kind| {
-                FoodValues::truth().is_food(kind) && inventory.can_add(kind)
-            }),
-            reason: PolicyReason::HungerThreshold,
-        },
-        Some(NeedKind::Rest) => PolicySelection {
-            goal: PhysicalGoal::Sleep,
-            target: nearest_shelter_access(origin, perception).or(Some(origin)),
-            reason: PolicyReason::RestThreshold,
-        },
-        Some(NeedKind::Exposure) => shelter_selection(
-            origin,
-            inventory,
-            perception,
-            PolicyReason::ExposureThreshold,
-        ),
-        None => shelter_selection(origin, inventory, perception, PolicyReason::NoUrgentNeed),
-    };
-    let Some(heading) = exploration_heading else {
-        return (selection, None);
-    };
-    if (selection.target.is_some() && selection.goal != PhysicalGoal::Wait)
-        || (selection.goal == PhysicalGoal::Wait && is_safe_anchor(origin, perception))
-    {
-        return (selection, None);
-    }
-    let heading = varied_exploration_heading(needs.agent, origin, heading);
-    exploration_target(origin, perception, heading).map_or(
-        (selection, None),
-        |(target, heading)| {
-            (
-                PolicySelection {
-                    goal: PhysicalGoal::Explore,
-                    target: Some(target),
-                    reason: selection.reason,
-                },
-                Some(heading),
-            )
-        },
-    )
 }
 
 /// The need past its threshold with the highest relative urgency, if any.
@@ -122,14 +49,6 @@ pub(super) fn most_urgent(needs: PhysicalNeedsView) -> Option<NeedKind> {
         }
         other => other,
     }
-}
-
-fn is_safe_anchor(origin: WorldPosition, perception: &PhysicalPerception) -> bool {
-    perception
-        .drinkable_water
-        .iter()
-        .any(|water| origin.x.abs_diff(water.position.x) + origin.y.abs_diff(water.position.y) <= 1)
-        || nearest_shelter_access(origin, perception) == Some(origin)
 }
 
 pub(super) fn shelter_selection(

@@ -2,7 +2,7 @@
 //! goals, reasons, and words. Presentation only.
 
 use sim_core::{
-    AcquaintanceView, AgentActivity, AgentId, AnimalMode, BiomeType, Concept, DeathCause,
+    AcquaintanceView, Activity, AgentActivity, AgentId, AnimalMode, BiomeType, Concept, DeathCause,
     FeatureKind, GestureTopic, LandmarkKind, LifeStage, LifeView, Material, Mime, Personality,
     PhysicalGoal, PolicyReason, Sex, SleepQuality, SpawnKind, Species, StructureKind, SurfaceType,
     Tie, VocalForm,
@@ -314,6 +314,10 @@ pub fn personality(personality: Personality) -> &'static str {
         (personality.caution, "careful", "daring"),
         (personality.sociability, "sociable", "a loner"),
         (personality.diligence, "hard-working", "easygoing"),
+        (personality.boldness, "bold", "timid"),
+        (personality.warmth, "warm", "cold"),
+        (personality.temper, "hot-tempered", "even-tempered"),
+        (personality.steadiness, "steady", "moody"),
     ];
     let mut summary = "balanced";
     let mut strongest = NOTABLE_TRAIT_DEVIATION - 1;
@@ -325,6 +329,46 @@ pub fn personality(personality: Personality) -> &'static str {
         }
     }
     summary
+}
+
+/// Ability from which a person counts as good at something, and below which poor.
+const GOOD_AT: u8 = 160;
+const POOR_AT: u8 = 70;
+
+/// What someone is best and worst at, if either stands out ("good at
+/// hunting · poor at building").
+pub fn knack(abilities: [u8; Activity::COUNT]) -> Option<String> {
+    let name = |activity: Activity| match activity {
+        Activity::Foraging => "foraging",
+        Activity::Hunting => "hunting",
+        Activity::Crafting => "making things",
+        Activity::Building => "building",
+        Activity::Cooking => "cooking",
+        Activity::Farming => "growing food",
+        Activity::Wayfinding => "finding the way",
+        Activity::Words => "words",
+    };
+    let ranked = |better: bool| {
+        Activity::ALL
+            .into_iter()
+            .max_by_key(|&activity| {
+                let value = abilities[activity as usize];
+                (
+                    if better { value } else { 255 - value },
+                    std::cmp::Reverse(activity),
+                )
+            })
+            .expect("activities")
+    };
+    let (best, worst) = (ranked(true), ranked(false));
+    let mut parts = Vec::new();
+    if abilities[best as usize] >= GOOD_AT {
+        parts.push(format!("good at {}", name(best)));
+    }
+    if abilities[worst as usize] <= POOR_AT {
+        parts.push(format!("poor at {}", name(worst)));
+    }
+    (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
 /// Simulated time as `1h 05m` (or `45s` in the first minute).
@@ -464,12 +508,7 @@ mod tests {
 
     #[test]
     fn personality_names_the_most_pronounced_trait_deterministically() {
-        let average = Personality {
-            curiosity: 128,
-            caution: 128,
-            sociability: 128,
-            diligence: 128,
-        };
+        let average = Personality::AVERAGE;
         assert_eq!(personality(average), "balanced");
         assert_eq!(
             personality(Personality {
@@ -493,6 +532,18 @@ mod tests {
                 ..average
             }),
             "a loner"
+        );
+    }
+
+    #[test]
+    fn knack_names_what_stands_out() {
+        let mut abilities = [128; Activity::COUNT];
+        assert_eq!(knack(abilities), None);
+        abilities[Activity::Hunting as usize] = 200;
+        abilities[Activity::Building as usize] = 40;
+        assert_eq!(
+            knack(abilities).as_deref(),
+            Some("good at hunting · poor at building")
         );
     }
 

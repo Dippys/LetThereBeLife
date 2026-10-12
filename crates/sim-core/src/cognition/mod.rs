@@ -4,6 +4,7 @@
 //! physical truth stays in the world, population, and resource stores.
 
 mod affordances;
+mod character;
 mod crafts;
 mod dialogue;
 mod fauna;
@@ -18,8 +19,10 @@ mod reading;
 mod signal;
 mod social;
 
+pub use affordances::AffordanceView;
 pub(crate) use affordances::Affordances;
-pub use affordances::{AffordanceView, BELIEF_UNIT};
+pub use character::DRIFT_LIMIT;
+pub(crate) use character::{Character, by_ability};
 pub(crate) use crafts::Crafts;
 pub use dialogue::{CONSEQUENCE_WEIGHT, REPAIR_WEIGHT};
 pub(crate) use dialogue::{Dialogue, LEAD_SECONDS, Lead, PendingCorrection};
@@ -37,7 +40,7 @@ pub(crate) use map::{HintCheck, HintSource, MentalMap, spent_kinds, visible_kind
 pub use map::{LANDMARK_SLOTS, MERGE_RADIUS, SEARCH_SPACING, VISIT_TILE_SIZE, VISITED_TILE_SLOTS};
 pub use model::{BeliefView, Facts};
 pub(crate) use model::{EFFECTS as MADE, Model, need_level};
-pub use personality::Personality;
+pub use personality::{Activity, Personality};
 pub(crate) use reading::ListenerContext;
 pub use reading::{READING_CANDIDATES, Reading, ReadingReasons, concept_topic};
 pub use signal::{DesiredEffect, Mime, PublicSignal, Tone, Understanding, UtteranceIntent};
@@ -200,6 +203,10 @@ pub struct LandmarkView {
 pub struct MentalMapView {
     pub agent: AgentId,
     pub personality: Personality,
+    /// How good it is at each `Activity` (0-255): talent and practice.
+    pub abilities: [u8; Activity::COUNT],
+    /// Its practised skill at each `Activity` (0-255).
+    pub skills: [u8; Activity::COUNT],
     pub landmarks: Vec<LandmarkView>,
     pub explored_tiles: usize,
     /// A child of the band (started with no words) rather than a founder.
@@ -483,51 +490,15 @@ pub struct HintOutcomeEvent {
     pub at: SimTime,
 }
 
-/// Which cognitive features the autonomous policy uses.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct PolicyOptions {
-    /// Wander when nothing useful is in view (legacy viewer behavior).
-    pub exploration: bool,
-    /// Remember places, explore unvisited areas, travel to remembered places,
-    /// and plan trips around known water.
-    pub memory: bool,
-    /// Point out remembered places to nearby agents (requires `memory`).
-    pub sharing: bool,
-    /// Individual personalities, relationships, visiting friends, and trust-
-    /// weighted hints (requires `memory`). Without it everyone is average.
-    pub social: bool,
-    /// Hungry agents ask others for food, who may give some (requires `social`).
-    pub helping: bool,
-    /// Being cold or tired is answered by the choice that has worked best
-    /// before (docs/plans/LEARNING.md phase 2), not a fixed order (requires `memory`).
-    pub learned: bool,
-    /// The needs met by planning (docs/plans/THINKING.md): bit `1 << NeedKind
-    /// index` set means that need is eased by a plan from the agent's own
-    /// cause-and-effect model, held as an intention; bit 4 gets ready for a
-    /// hard season it remembers coming; bit 5 spends idle time getting what
-    /// has proved useful (requires `memory`).
-    pub plans: u8,
-}
-
-impl PolicyOptions {
-    /// Every cognitive feature: the full current agent mind.
-    pub const fn full() -> Self {
-        Self {
-            exploration: true,
-            memory: true,
-            sharing: true,
-            social: true,
-            helping: true,
-            learned: true,
-            // Getting ready for hard seasons (bit 4) is built but off (D-120);
-            // idle time works toward what has proved useful (bit 5, D-123).
-            plans: 1 << crate::NeedKind::Hunger as u8
-                | 1 << crate::NeedKind::Thirst as u8
-                | 1 << crate::NeedKind::Exposure as u8
-                | 1 << 5,
-        }
-    }
-}
+/// The needs met by planning (docs/plans/THINKING.md): bit `1 << NeedKind
+/// index` set means that need is eased by a plan from the agent's own
+/// cause-and-effect model, held as an intention; bit 4 gets ready for a hard
+/// season it remembers coming (built but off, D-120); bit 5 spends idle time
+/// getting what has proved useful (D-123).
+pub(crate) const PLANS: u8 = 1 << crate::NeedKind::Hunger as u8
+    | 1 << crate::NeedKind::Thirst as u8
+    | 1 << crate::NeedKind::Exposure as u8
+    | 1 << 5;
 
 impl GestureTopic {
     /// The concept a topic is about.
@@ -583,6 +554,8 @@ pub(crate) struct Mind {
     pub(crate) sown: Sown,
     /// Simulated second before which it won't fall sick by a body again.
     pub(crate) sick_until: u32,
+    /// Skills from practice, and how life has shifted its traits.
+    pub(crate) character: Character,
 }
 
 /// Seconds after eating somewhere before a bush there counts as having come
@@ -893,6 +866,11 @@ impl Minds {
             },
             child,
             model: Model::instinct(),
+            character: if child {
+                Character::default()
+            } else {
+                Character::seasoned(&Personality::of(self.seed, agent))
+            },
             ..Mind::default()
         }
     }

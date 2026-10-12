@@ -6,8 +6,43 @@ use crate::AgentId;
 
 const PERSONALITY_SEED: u64 = 0x5045_5253_4f4e_414c;
 
-/// Four traits, each 0 (low) to 255 (high). Derived deterministically from the
-/// world seed and the agent's id, so a replay always gets the same people.
+/// Things a person can be better or worse at (docs/plans/FEELINGS.md).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[repr(u8)]
+pub enum Activity {
+    /// Picking berries and other food.
+    Foraging,
+    Hunting,
+    /// Knapping, spears, baskets, hides.
+    Crafting,
+    /// Huts and hearths, and chopping wood or breaking stone for them.
+    Building,
+    Cooking,
+    Farming,
+    /// Finding the way out and back.
+    Wayfinding,
+    /// Picking up words.
+    Words,
+}
+
+impl Activity {
+    pub const COUNT: usize = 8;
+    pub const ALL: [Self; Self::COUNT] = [
+        Self::Foraging,
+        Self::Hunting,
+        Self::Crafting,
+        Self::Building,
+        Self::Cooking,
+        Self::Farming,
+        Self::Wayfinding,
+        Self::Words,
+    ];
+}
+
+/// Eight traits and eight talents, each 0 (low) to 255 (high). Founders' come
+/// from the life seed; children's are a blend of their parents'.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct Personality {
     /// Explores more often and farther; settles for less knowledge before exploring.
@@ -18,6 +53,16 @@ pub struct Personality {
     pub sociability: u8,
     /// Gathers and builds when nothing is pressing instead of resting.
     pub diligence: u8,
+    /// Frightened less easily, and calms sooner.
+    pub boldness: u8,
+    /// Grateful and fond of people readily, slow to anger.
+    pub warmth: u8,
+    /// Angered easily and strongly.
+    pub temper: u8,
+    /// Feelings fade faster; worries less.
+    pub steadiness: u8,
+    /// Inborn knack for each `Activity`.
+    pub talents: [u8; Activity::COUNT],
 }
 
 impl Personality {
@@ -27,24 +72,76 @@ impl Personality {
         caution: 128,
         sociability: 128,
         diligence: 128,
+        boldness: 128,
+        warmth: 128,
+        temper: 128,
+        steadiness: 128,
+        talents: [128; Activity::COUNT],
     };
 
-    /// The agent's innate personality. Each trait averages two random bytes, so
-    /// most agents are moderate and extremes are rare.
+    /// The agent's innate personality. Each trait and talent averages two
+    /// random bytes, so most people are moderate and extremes are rare.
     pub fn of(seed: u64, agent: AgentId) -> Self {
-        let mut key = seed ^ PERSONALITY_SEED ^ (u64::from(agent.get()) << 17);
-        key = (key ^ (key >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-        key = (key ^ (key >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-        key ^= key >> 31;
-        let trait_at = |index: u32| {
-            let pair = (key >> (index * 16)) as u16;
+        let draw = |salt: u64| {
+            let mut key = seed ^ PERSONALITY_SEED ^ salt ^ (u64::from(agent.get()) << 17);
+            key = (key ^ (key >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            key = (key ^ (key >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            key ^ (key >> 31)
+        };
+        let values = [
+            draw(0),
+            draw(0x7472_6169_7473),
+            draw(0x7461_6c65_6e74),
+            draw(0x6b6e_6163_6b73),
+        ];
+        let at = |index: usize| {
+            let pair = (values[index / 4] >> ((index % 4) * 16)) as u16;
             ((u16::from(pair as u8) + (pair >> 8)) / 2) as u8
         };
         Self {
-            curiosity: trait_at(0),
-            caution: trait_at(1),
-            sociability: trait_at(2),
-            diligence: trait_at(3),
+            curiosity: at(0),
+            caution: at(1),
+            sociability: at(2),
+            diligence: at(3),
+            boldness: at(4),
+            warmth: at(5),
+            temper: at(6),
+            steadiness: at(7),
+            talents: std::array::from_fn(|index| at(8 + index)),
+        }
+    }
+
+    pub const fn talent(&self, activity: Activity) -> u8 {
+        self.talents[activity as usize]
+    }
+
+    /// The eight traits in order (curiosity, caution, sociability, diligence,
+    /// boldness, warmth, temper, steadiness).
+    pub const fn traits(&self) -> [u8; 8] {
+        [
+            self.curiosity,
+            self.caution,
+            self.sociability,
+            self.diligence,
+            self.boldness,
+            self.warmth,
+            self.temper,
+            self.steadiness,
+        ]
+    }
+
+    /// This personality with its traits replaced by `traits` (same order).
+    pub const fn with_traits(self, traits: [u8; 8]) -> Self {
+        Self {
+            curiosity: traits[0],
+            caution: traits[1],
+            sociability: traits[2],
+            diligence: traits[3],
+            boldness: traits[4],
+            warmth: traits[5],
+            temper: traits[6],
+            steadiness: traits[7],
+            ..self
         }
     }
 
@@ -73,6 +170,13 @@ mod tests {
             .count();
         assert!(curious > 0 && incurious > 0, "extremes exist");
         assert!(middling > curious + incurious, "most people are moderate");
+        let person = people[17];
+        assert_ne!(
+            person.talents,
+            [person.talents[0]; Activity::COUNT],
+            "uneven talents"
+        );
+        assert_eq!(person.with_traits(person.traits()), person);
     }
 
     #[test]

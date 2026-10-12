@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
-    Concept, GestureTopic, LessonCause, PHYSICAL_POLICY_RADIUS, PolicyOptions, PolicyReason,
-    Species, cognition::Fauna,
+    Concept, GestureTopic, LessonCause, PHYSICAL_POLICY_RADIUS, PolicyReason, Species,
+    cognition::Fauna,
 };
 
 /// Speaker (agent 0) has been bitten by wolves; the listener (agent 1) hunts
@@ -19,7 +19,6 @@ fn wolf_in_sight() -> (Engine, WorldPosition) {
             &[speaker, listener],
         )
         .unwrap();
-    engine.policy_options = PolicyOptions::full();
     engine.wildlife.area = Some(area);
     let wolf = (11..16)
         .flat_map(|distance| {

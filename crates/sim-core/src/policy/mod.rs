@@ -11,9 +11,7 @@ pub use deliberate::HOME_RANGE;
 pub(crate) use deliberate::{
     HUT_SPACING, LOW_FUEL_SECONDS, MindInput, ParentInput, deliberate, heading_toward,
 };
-#[cfg(test)]
-pub(crate) use selection::select;
-pub(crate) use selection::{PolicyAction, PolicySelection, select_with_exploration};
+pub(crate) use selection::{PolicyAction, PolicySelection};
 pub(crate) use state::{PolicyPhase, PolicyState};
 
 use std::{error::Error, fmt};
@@ -79,21 +77,11 @@ pub(crate) fn perceived_facts(
 }
 
 /// How much an agent wants to eat each material (indexed by `Material as usize`,
-/// in belief units): positive means "food, to me". Comes from the agent's beliefs,
-/// or from real properties for the mindless legacy policy.
+/// in belief units): positive means "food, to me". Comes from the agent's beliefs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct FoodValues(pub(crate) [i16; Material::COUNT]);
 
 impl FoodValues {
-    /// What an all-knowing agent would value (the legacy policy has no beliefs).
-    pub(crate) fn truth() -> Self {
-        Self(Material::ALL.map(|material| {
-            let properties = material.properties();
-            let unit = crate::cognition::BELIEF_UNIT;
-            (properties.nutrition / unit) as i16 - 2 * (properties.toxicity / unit) as i16
-        }))
-    }
-
     pub(crate) const fn is_food(self, material: Material) -> bool {
         self.0[material as usize] > 0
     }

@@ -6,8 +6,8 @@ use std::{collections::BTreeSet, fmt};
 
 use sim_core::{
     AgentActivity, AgentId, AgentView, DeathCause, Engine, EngineCommand, EngineConfig,
-    PhysicalGoal, PolicyDiagnosticKind, PolicyOptions, PopulationInit, Standability, TickOutcome,
-    WaterSource, WorldConfig, WorldPosition, WorldRect,
+    PhysicalGoal, PolicyDiagnosticKind, PopulationInit, Standability, TickOutcome, WaterSource,
+    WorldConfig, WorldPosition, WorldRect,
 };
 
 use crate::scenario::ScenarioError;
@@ -28,7 +28,6 @@ pub struct StudyConfig {
     pub population: u32,
     pub ticks: u64,
     pub spawn: StudySpawn,
-    pub mind: PolicyOptions,
     /// Agent whose last decisions are kept in `StudyReport::trace`.
     pub trace: Option<u32>,
     /// Percent of the generated food left at the start (100 = all; lower is scarcer).
@@ -99,7 +98,6 @@ impl StudyConfig {
             population,
             ticks,
             spawn: StudySpawn::AnyLand,
-            mind: PolicyOptions::full(),
             trace: None,
             food_percent: 100,
             wildlife: true,
@@ -266,6 +264,8 @@ pub struct WildlifeStats {
     pub huts: u64,
     pub huts_fallen: u64,
     pub stored: u64,
+    /// Per activity, the best and the median skill among the living at the end.
+    pub skills: [(u8, u8); sim_core::Activity::COUNT],
     /// Food in huts as each winter began.
     pub winter_stock: Vec<u32>,
     /// People who noticed seeds grow; bushes planted, and times planting was watched.
@@ -423,7 +423,7 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
         engine.bond(AgentId::new(child as u32), AgentId::new(parent as u32));
     }
     engine
-        .activate_physical_policy_with_options(config.mind)
+        .activate_physical_policy()
         .map_err(|error| ScenarioError(format!("policy activation failed: {error}")))?;
 
     let population = config.population as usize;
@@ -856,6 +856,16 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
             needs,
             makes,
         });
+    }
+    for activity in sim_core::Activity::ALL {
+        let mut skills: Vec<u8> = living
+            .iter()
+            .map(|(_, mind)| mind.skills[activity as usize])
+            .collect();
+        skills.sort_unstable();
+        if let (Some(&best), Some(&median)) = (skills.last(), skills.get(skills.len() / 2)) {
+            wildlife.skills[activity as usize] = (best, median);
+        }
     }
     let homes: std::collections::BTreeSet<_> =
         living.iter().filter_map(|(_, mind)| mind.home).collect();
@@ -1740,7 +1750,7 @@ impl fmt::Display for StudyReport {
         };
         writeln!(
             formatter,
-            "study seed={} life seed={} world={}x{} agents={} ticks={} spawn={:?} mind={}",
+            "study seed={} life seed={} world={}x{} agents={} ticks={} spawn={:?}",
             config.seed,
             config.life_seed,
             config.world_side,
@@ -1748,12 +1758,6 @@ impl fmt::Display for StudyReport {
             config.population,
             config.ticks,
             config.spawn,
-            match (config.mind.memory, config.mind.sharing, config.mind.social) {
-                (false, _, _) => "legacy",
-                (true, false, false) => "memory",
-                (true, true, false) => "sharing",
-                (true, _, true) => "full",
-            }
         )?;
         writeln!(
             formatter,
@@ -1931,6 +1935,14 @@ impl fmt::Display for StudyReport {
             "\n  plans: formed {formed} ({readying} getting ready), completed {completed}, given up {revised}; most often: {}",
             common.join("; ")
         )?;
+        let skills: Vec<String> = sim_core::Activity::ALL
+            .into_iter()
+            .map(|activity| {
+                let (best, median) = self.wildlife.skills[activity as usize];
+                format!("{activity:?} {best}/{median}")
+            })
+            .collect();
+        write!(formatter, "\n  skills (best/median): {}", skills.join(", "))?;
         let [open, sheltered, by_fire] = self.wildlife.sleeps;
         write!(
             formatter,

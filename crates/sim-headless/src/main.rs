@@ -5,7 +5,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut ticks = None;
     let mut seed = None;
     let mut life_seed: Option<u64> = None;
-    let mut plans: Option<u8> = None;
     let mut no_night = false;
     let mut agent_count = None;
     let mut batch_size = 1_000_u64;
@@ -22,10 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut success_lines = 0_usize;
     let mut lesson_lines = 0_usize;
     let mut explain = None;
-    let mut mind = sim_core::PolicyOptions::full();
     let mut food_percent = 100_u8;
-    let mut no_help = false;
-    let mut scripted = false;
     let mut no_wildlife = false;
     let mut no_regrowth = false;
     let mut config_path = DEFAULT_CONFIG_PATH.to_owned();
@@ -41,8 +37,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--valley" => valley = true,
             "--apart" => apart = true,
             "--food" => food_percent = parse_next(&mut args, "--food"),
-            "--no-help" => no_help = true,
-            "--scripted" => scripted = true,
             "--no-wildlife" => no_wildlife = true,
             "--no-regrowth" => no_regrowth = true,
             "--trace" => trace = Some(parse_next(&mut args, "--trace")),
@@ -51,28 +45,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--successes" => success_lines = parse_next(&mut args, "--successes"),
             "--lessons" => lesson_lines = parse_next(&mut args, "--lessons"),
             "--explain" => explain = Some(parse_next::<u32>(&mut args, "--explain")),
-            "--mind" => {
-                mind = match args.next().as_deref() {
-                    Some("legacy") => sim_core::PolicyOptions {
-                        exploration: true,
-                        ..sim_core::PolicyOptions::default()
-                    },
-                    Some("memory") => sim_core::PolicyOptions {
-                        sharing: false,
-                        social: false,
-                        ..sim_core::PolicyOptions::full()
-                    },
-                    Some("sharing") => sim_core::PolicyOptions {
-                        social: false,
-                        ..sim_core::PolicyOptions::full()
-                    },
-                    Some("full") => sim_core::PolicyOptions::full(),
-                    _ => {
-                        eprintln!("--mind requires legacy, memory, sharing, or full");
-                        std::process::exit(2);
-                    }
-                }
-            }
             "--ticks" => ticks = Some(parse_next(&mut args, "--ticks")),
             // One simulated hour is one year of life.
             "--years" => {
@@ -80,14 +52,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--seed" => seed = Some(parse_next(&mut args, "--seed")),
             "--no-night" => no_night = true,
-            "--plans" => plans = Some(parse_next::<u8>(&mut args, "--plans")),
             "--life-seed" => life_seed = Some(parse_next(&mut args, "--life-seed")),
             "--agents" => agent_count = Some(parse_next(&mut args, "--agents")),
             "--batch-size" => batch_size = parse_next(&mut args, "--batch-size"),
             "--config" => config_path = parse_next(&mut args, "--config"),
             "--help" | "-h" => {
                 println!(
-                    "Usage: sim-headless [--canonical | --study [--near-water | --groups | --valley | --apart] [--mind legacy|memory|sharing|full] [--no-help] [--scripted] [--plans NEEDMASK] [--no-wildlife] [--no-regrowth] [--no-night] [--food PERCENT] [--verbose] [--trace AGENT] [--comms N] [--misreads N] [--successes N] [--lessons N] [--explain AGENT]] [--config PATH] [--ticks NUMBER | --years NUMBER] [--seed NUMBER] [--life-seed NUMBER] [--agents NUMBER] [--batch-size NUMBER]"
+                    "Usage: sim-headless [--canonical | --study [--near-water | --groups | --valley | --apart] [--no-wildlife] [--no-regrowth] [--no-night] [--food PERCENT] [--verbose] [--trace AGENT] [--comms N] [--misreads N] [--successes N] [--lessons N] [--explain AGENT]] [--config PATH] [--ticks NUMBER | --years NUMBER] [--seed NUMBER] [--life-seed NUMBER] [--agents NUMBER] [--batch-size NUMBER]"
                 );
                 return Ok(());
             }
@@ -109,12 +80,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             config.life_seed = life_seed;
         }
         config.nights = !no_night;
-        config.mind = sim_core::PolicyOptions {
-            helping: mind.helping && !no_help,
-            learned: mind.learned && !scripted,
-            plans: plans.unwrap_or(mind.plans),
-            ..mind
-        };
         config.food_percent = food_percent.min(100);
         config.wildlife = !no_wildlife;
         config.regrowth = !no_regrowth;

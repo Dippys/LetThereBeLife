@@ -22,9 +22,6 @@ impl Engine {
     /// if the partner has been gone too long, and pairs with someone in view
     /// when the feeling is mutual.
     pub(super) fn pair_up(&mut self, agent: AgentId, perception: &PhysicalPerception) {
-        if !self.policy_options.social {
-            return;
-        }
         let now = belief_seconds(self.time);
         let age = self.age_of(agent);
         let others: Vec<AgentId> = perception

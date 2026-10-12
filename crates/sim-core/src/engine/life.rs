@@ -30,6 +30,22 @@ impl Engine {
             .unwrap_or_else(|| crate::Personality::of(self.config.life_seed, agent))
     }
 
+    /// Gives `agent` this personality, as if born with it.
+    #[cfg(test)]
+    pub(crate) fn set_personality_for_test(
+        &mut self,
+        agent: AgentId,
+        personality: crate::Personality,
+    ) {
+        let mut life = self.life_of(agent);
+        life.inherited = Some(personality);
+        let index = agent.get() as usize;
+        if self.lives.len() <= index {
+            self.lives.resize(index + 1, None);
+        }
+        self.lives[index] = Some(life);
+    }
+
     /// Years of age of `agent` now.
     pub(super) fn age_of(&self, agent: AgentId) -> u32 {
         self.life_of(agent).age(self.life_seconds())
@@ -170,6 +186,7 @@ impl Engine {
         }
         let year = now / TICKS_PER_YEAR;
         self.welcome_newcomers(year);
+        self.fade_skills();
         let living: Vec<AgentId> = self
             .population
             .views(usize::MAX)

@@ -31,7 +31,7 @@ and a `tests.rs` or `tests/` folder next to it. Every file starts with a `//!` l
 | Module | Responsibility |
 |---|---|
 | `lib.rs` | `mod` declarations and public re-exports only |
-| `engine/` | `Engine` facade. `mod.rs` (struct, config, commands, snapshot), `tick.rs` (event dispatch), `setup.rs` (world loads, population, spawn), `views.rs` (read-only accessors), `routes.rs`, `policy.rs` (activation with `PolicyOptions`, decision handling, drink/eat/gather effects), `cognition.rs` (observe → deliberate, gesture start/completion and who sees it, `mental_map`/`signal_events` views), `requests.rs` (asking for food, reading the request, giving or refusing), `wildlife.rs` (animals, bites, hunting, witnesses, wounded people coming round), `life.rs` (age, yearly old-age deaths, strength, elder healing), `family.rs` (who grew up together, couples forming and fading), `births.rs` (`Families`: conception, pregnancy, carried babies, weaning into children, newcomers), `names.rs` (calling names out and bystanders learning them), `actions.rs` (sleep requests, action and wake completion), `shelter.rs`, `errors.rs` (error mapping) |
+| `engine/` | `Engine` facade. `mod.rs` (struct, config, commands, snapshot), `tick.rs` (event dispatch), `setup.rs` (world loads, population, spawn), `views.rs` (read-only accessors), `routes.rs`, `policy.rs` (activation, decision handling, drink/eat/gather effects), `feelings.rs` (what happens to people shapes their traits; yearly skill fade), `cognition.rs` (observe → deliberate, gesture start/completion and who sees it, `mental_map`/`signal_events` views), `requests.rs` (asking for food, reading the request, giving or refusing), `wildlife.rs` (animals, bites, hunting, witnesses, wounded people coming round), `life.rs` (age, yearly old-age deaths, strength, elder healing), `family.rs` (who grew up together, couples forming and fading), `births.rs` (`Families`: conception, pregnancy, carried babies, weaning into children, newcomers), `names.rs` (calling names out and bystanders learning them), `actions.rs` (sleep requests, action and wake completion), `shelter.rs`, `errors.rs` (error mapping) |
 | `life` | `Life` (12 B: birth second, sex, inherited personality, given `Name`), life stages, old-age risk. A year is four simulated hours (one turn of the seasons). People present at the start get theirs from the seed; people born later have it stored by the engine |
 | `agent/` | `AgentId(u32)`, `SimTime`, 6-byte `AgentRecord`, `AgentView`, errors, perception types, `ScheduledEvent` (32 B). `population/` splits the dense `Population` store: `init`, `movement`, `vitals` (needs + health), `policy`, `sleep`, `inventory`, `perception` |
 | `policy/` | Decision-making. `selection.rs` is the original reactive policy (what's in view only). `deliberate.rs` is the memory-driven policy: travel to remembered places by waypoints, spiral search when no water is known, novelty exploration with a walk-back leash, top-ups before trips, home shelters, pointing out places. `exploration.rs`, `state.rs` (`PolicyState`, 12 B) |
@@ -93,11 +93,11 @@ perceive (radius 8, truth) ──► MentalMap::observe ──► deliberate ─
        (gesture::interpret) ◄──────┴──── awake agents in view see the gesture
 ```
 
-- `PolicyOptions { exploration, memory, sharing, social }` picks the policy at activation.
-  `social` adds personalities (otherwise everyone is `Personality::AVERAGE`), relationships,
-  visiting friends, trust-weighted hints, and "I've been there" gestures. The legacy
-  (`activate_physical_policy[_with_exploration]`) path is unchanged, and canonical scenarios use it.
-  The viewer and the study use `PolicyOptions::full()`.
+- One mind for everyone (D-138): every agent has memory, personality, relationships, learned
+  habits and plans. `Personality` holds 8 traits and 8 talents (inherited by children);
+  `cognition::Character` holds skill per `Activity` (grown by practice, faded yearly) and how far
+  life has moved each trait. `Engine::ability` combines talent and skill, and actions scale
+  their speed, yield or success by it.
 - Beliefs never touch truth. A remembered place is checked only by looking again: if it's in view
   and nothing of that kind is there, the memory is dropped (or a hint loses confidence).
 - **Properties, not types:** world features yield `Material`s whose `MaterialProperties` (nutrition,

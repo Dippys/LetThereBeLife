@@ -1,7 +1,6 @@
 //! The rest of the vertical slice (plan M7), release-only:
 //! `cargo test --release -p sim-headless --test slice -- --ignored` (part of scripts/validate).
 
-use sim_core::PolicyOptions;
 use sim_headless::{StudyConfig, StudySpawn, VALLEY_POPULATION, run_study};
 
 fn valley(seed: u64, ticks: u64) -> StudyConfig {
@@ -59,40 +58,25 @@ fn across_valleys<T: Send>(
 }
 
 /// In famine valleys (5% of the food, nothing grows back, no game to hunt),
-/// people ask each other for food and food changes hands; without helping,
-/// nobody asks. Whether that keeps more of the band on its feet is no longer
+/// people ask each other for food and food changes hands. Whether that keeps more of the band on its feet is no longer
 /// asserted: since storage and huts (D-102) these valleys are mild and the
 /// few gifts change survival by 1-3 people either way (D-110, docs/STATUS.md).
 #[test]
 #[ignore = "release-only: run with --release --ignored (part of scripts/validate)"]
 fn people_in_famine_valleys_ask_for_food_and_get_some() {
-    let run = |seed: u64, helping: bool| {
+    let results = across_valleys(1..=40, |seed| {
         let mut config = valley(seed, 600_000);
         config.food_percent = 5;
         config.wildlife = false;
         config.regrowth = false;
-        config.mind = PolicyOptions {
-            helping,
-            ..PolicyOptions::full()
-        };
-        run_study(config).ok()
-    };
-    let results = across_valleys(1..=40, |seed| {
-        let with_help = run(seed, true)?;
-        let without = run(seed, false)?;
-        Some((
-            with_help.comms.summary().requests[2],
-            without.comms.summary().requests[0],
-        ))
+        Some(run_study(config).ok()?.comms.summary().requests[2])
     });
     assert_eq!(
         results.len(),
         20,
         "the livable valleys among the seeds changed"
     );
-    let gifts: u64 = results.iter().map(|result| result.0).sum();
-    let asked_alone: u64 = results.iter().map(|result| result.1).sum();
-    assert_eq!(asked_alone, 0, "without helping nobody asks");
+    let gifts: u64 = results.iter().sum();
     assert!(gifts > 0, "food changed hands");
 }
 

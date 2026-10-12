@@ -90,56 +90,12 @@ lays out phases 0–10, from world → physical agents → cognition → communi
 - **Headless:** canonical scenarios with fingerprint hashes, and the **behavior study**
   (`--study`), which measures survival, roaming, idleness, and gestures, with per-agent traces.
 
-## Survival (behavior study, refreshed 2026-10-10)
+## Survival (behavior study, 2026-10-12)
 
-20 agents, 600k ticks (~2.8 simulated hours), no supplies. Survivors per scenario. Mind columns:
-legacy = old reactive policy, memory = mental map, sharing = plus gestures, full = plus
-personality, relationships, and learned knowledge (what the viewer runs).
-
-| Seed (terrain) | Spawn | legacy | memory | sharing | full |
-|---|---|---|---|---|---|
-| 1 (savanna/desert) | random land | 9 | 20 | 19 | 20 |
-| 1 | groups of 5 | 10 | 20 | 20 | 20 |
-| 1 | near water | 10 | 19 | 19 | 19 |
-| 4 | random land | 14 | 20 | 20 | 20 |
-| 4 | groups | 10 | 20 | 20 | 20 |
-| 4 | near water | 13 | 20 | 20 | 20 |
-| 7 (desert/alpine) | random land | 1 | 2 | 2 | 4 |
-| 7 | groups | 0 | 1 | 3 | 0 |
-| 7 | near water | 5 | 14 | 15 | 17 |
-| 9 (small island) | random land | 5 | 16 | 17 | 16 |
-| 9 | groups | 6 | 18 | 18 | 20 |
-| 9 | near water | 4 | 18 | 19 | 19 |
-| 42 (forest) | random land | 16 | 19 | 20 | 20 |
-| 42 | groups | 14 | 20 | 20 | 20 |
-| 42 | near water | 15 | 20 | 20 | 20 |
-| **Total of 300** | | **132** | **247** | **252** | **255** |
-
-Legacy fell from 154 when a third of the bushes became bitter (less food for agents that don't
-remember places). In the valley (20 people with wildlife, 1.2M ticks, the 66 livable valleys among
-seeds 1-120), 1,238 of 1,320 are alive and on their feet at the end. Earlier figures (such as
-"119 of 120") counted people lying collapsed after wolf bites as survivors: before wounded people
-could come round (D-082), 168 of 1,303 "survivors" were collapsed for good.
-
-The social layer doesn't add survival, since most scenarios were at their ceiling. It makes agents
-different from each other and makes sharing work: in group spawns, time in company and the share of
-gestures that tell someone something new rose severalfold on seeds 1, 9, and 42 (D-069). The seed 7
-near-water drop (16 → 12) is luck, not personality: the dead span every trait profile, and all
-starved without ever finding food in a desert with ~190 bushes.
-
-Do personalities behave differently? 100 agents in groups, seeds 1, 4, and 42 (agents below vs at
-or above each trait's midpoint):
-
-| Trait | Behavior | Low | High |
-|---|---|---|---|
-| Curiosity | ground explored (tiles) | 172–227 | 218–317 |
-| Caution | peak thirst | 3,978–4,786 | 3,449–4,370 |
-| Sociability | % time in company | 12–18% | 28–47% |
-| Diligence | % time idle | 64–70% | 48–66% |
-
-Over 2.4M ticks (~11 hours), seeds 1, 4, and 42 keep all 20 agents alive with the full mind, and
-idle time is around 55% instead of 80–90%. The "legacy" column already includes the waterholes.
-Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
+The valley, 10 years, 20 valleys (seeds 1-57), paired life seeds: about 440 survivors of a band
+that starts at 20 per valley and grows by births; deaths from cold 17-24, and most food that's
+gathered rots (D-134). Run-to-run noise between near-identical versions is about ±10 survivors,
+so changes are judged on behaviour counts as much as on survival.
 
 ## Known problems and limitations
 
@@ -179,14 +135,17 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
   code 9): 1 in 19 runs on 2026-10-09, 2 in 14 on 2026-10-10, then 0 in 8, then 2 in 8 `--valley`
   smokes after M7, then 1 in 12 smokes after the living world. It happens with and without agents. Cause unknown, possibly GPU teardown.
 - The world archive needs regenerating for generator v2 (`--pregenerate-world`).
-- **Minds are 1,896 B per agent** (mental map 372 B). That's fine at viewer scale; the spec's 10M
+- **Minds are 1,920 B per agent** (mental map 372 B). That's fine at viewer scale; the spec's 10M
   agents would need ~8 GB, so compaction comes later.
 - **Greedy waypoints can pace around obstacles.** Agents no longer step straight back to where they
   were and collapse into sleep when exhausted, but longer cycles are possible.
 
 ## Recent changes
 
-- 2026-10-12 (latest): wildlife browses, ages and is born in spring (D-135).
+- 2026-10-12 (latest): temperament, talents and skills: people are better at some things,
+  specialists emerge, traits drift with life (D-137); one mind for everyone, legacy modes gone
+  (D-138); people walk to a hearth to cook (D-136).
+- 2026-10-12: wildlife browses, ages and is born in spring (D-135).
 - 2026-10-12: food rots unless cooked (D-134).
 - 2026-10-12: sown berries are a season's crop (D-132); the dead rot and sicken until
   buried, and burial is learned (D-133).
@@ -267,12 +226,13 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
 
 ## What's next
 
-1. **Thinking agents** (docs/plans/THINKING.md): plans for cold, hunger and thirst on (D-118,
+1. **Making things** (docs/plans/MAKING.md): a recipe table learned by trying and watching;
+   preserved food first (rotting is the main loss), then composite tools, then building designs.
+   Then **feelings** (docs/plans/FEELINGS.md, P2-P6).
+2. **Thinking agents** (docs/plans/THINKING.md): plans for cold, hunger and thirst on (D-118,
    D-119); idle time works toward what has proved useful (D-123); people show others what they
    don't know (D-121). Getting ready for hard seasons is built but off (D-120). Next: readiness
    by stocking rather than staying; plans for more of calm time.
-2. **Settlements:** homes (D-109), living plants (D-111) and warm hearths (D-112) are in. Next:
-   people knowing whose hut is whose, and families sharing a home.
 3. **Learning what works** (docs/plans/LEARNING.md): phases 1-2 done, plus understanding what
    choices bring about (D-103, D-105, D-108). Next: how long steps take, copying others, food and
    water, multi-step projects.

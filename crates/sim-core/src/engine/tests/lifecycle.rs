@@ -38,7 +38,7 @@ fn additive_spawn_expands_across_contiguous_resident_terrain() {
             &[first],
         )
         .unwrap();
-    engine.activate_physical_policy_with_exploration().unwrap();
+    engine.activate_physical_policy().unwrap();
 
     assert_eq!(engine.spawn_agent(second), Ok(AgentId::new(1)));
     assert_eq!(engine.population.active_area(), Some(initial));

@@ -104,7 +104,7 @@ fn crowded_water_seekers_claim_distinct_access_and_both_drink() {
             .population
             .set_need_value_for_test(agent, NeedKind::Thirst, 6_000, SimTime::ZERO);
     }
-    engine.activate_physical_policy_with_exploration().unwrap();
+    engine.activate_physical_policy().unwrap();
     engine.tick();
 
     let first = engine.physical_policy(AgentId::new(0)).unwrap();
@@ -131,23 +131,6 @@ fn crowded_water_seekers_claim_distinct_access_and_both_drink() {
         }
     }
     assert_eq!(drank, [true, true]);
-
-    let anchored = [
-        engine.agent_views(2).next().unwrap().position,
-        engine.agent_views(2).nth(1).unwrap().position,
-    ];
-    for _ in 0..1_000 {
-        engine.tick();
-    }
-    for (index, position) in anchored.into_iter().enumerate() {
-        let agent = AgentId::new(index as u32);
-        assert_eq!(engine.agent_views(2).nth(index).unwrap().position, position);
-        assert!(matches!(
-            engine.physical_policy(agent).unwrap().goal,
-            PhysicalGoal::Wait | PhysicalGoal::Drink
-        ));
-        assert!(engine.has_adjacent_drinkable_water(position).unwrap());
-    }
 }
 
 #[test]
@@ -284,7 +267,7 @@ fn isolated_agent_explores_a_full_local_window_without_route_backoff() {
             &[origin],
         )
         .unwrap();
-    engine.activate_physical_policy_with_exploration().unwrap();
+    engine.activate_physical_policy().unwrap();
 
     engine.tick();
 

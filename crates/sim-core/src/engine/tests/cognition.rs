@@ -1,7 +1,5 @@
 use super::*;
-use crate::{
-    GestureTopic, LandmarkKind, LandmarkSource, PerceivedWater, PhysicalPerception, PolicyOptions,
-};
+use crate::{GestureTopic, LandmarkKind, LandmarkSource, PerceivedWater, PhysicalPerception};
 
 fn two_neighbours() -> (Engine, WorldPosition, WorldPosition) {
     let mut engine = resident_engine(64);
@@ -135,8 +133,7 @@ fn agents_cannot_point_at_places_they_do_not_remember() {
 }
 
 fn social_neighbours() -> (Engine, WorldPosition) {
-    let (mut engine, sender, _) = two_neighbours();
-    engine.policy_options = PolicyOptions::full();
+    let (engine, sender, _) = two_neighbours();
     (engine, sender)
 }
 
@@ -232,25 +229,12 @@ fn explored_gestures_mark_ground_for_watchers() {
 }
 
 #[test]
-fn personalities_are_stable_per_agent_and_average_without_social() {
-    let (mut engine, _, _) = two_neighbours();
+fn personalities_are_stable_per_agent() {
+    let (engine, _, _) = two_neighbours();
     let innate = engine.personality(AgentId::new(0)).unwrap();
     assert_eq!(
         innate,
         crate::Personality::of(engine.config.life_seed, AgentId::new(0))
-    );
-    engine.policy_options = PolicyOptions {
-        social: false,
-        ..PolicyOptions::full()
-    };
-    remember_water(
-        &mut engine,
-        AgentId::new(0),
-        WorldPosition { x: 500, y: 500 },
-    );
-    assert_eq!(
-        engine.mental_map(AgentId::new(0)).unwrap().personality,
-        crate::Personality::AVERAGE
     );
 }
 

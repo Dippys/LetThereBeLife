@@ -2,8 +2,8 @@
 //! persistent knowledge, and memory-driven behavior stays deterministic.
 
 use sim_core::{
-    AgentId, Engine, EngineCommand, EngineConfig, LandmarkKind, LandmarkSource, PolicyOptions,
-    PopulationInit, Standability, WaterSource, WorldConfig, WorldPosition, WorldRect,
+    AgentId, Engine, EngineCommand, EngineConfig, LandmarkKind, LandmarkSource, PopulationInit,
+    Standability, WaterSource, WorldConfig, WorldPosition, WorldRect,
 };
 
 /// A seed-1 area containing a lake or river, with every cell resident.
@@ -60,9 +60,7 @@ fn thinking_engine() -> (Engine, WorldPosition) {
             &[spawn],
         )
         .unwrap();
-    engine
-        .activate_physical_policy_with_options(PolicyOptions::full())
-        .unwrap();
+    engine.activate_physical_policy().unwrap();
     (engine, spawn)
 }
 
@@ -103,25 +101,4 @@ fn memory_driven_runs_replay_identically() {
         first.mental_map(AgentId::new(0)),
         second.mental_map(AgentId::new(0))
     );
-}
-
-#[test]
-fn legacy_activation_keeps_agents_mindless() {
-    let (mut engine, bounds) = watered_engine();
-    let spawn = first_water_access(&engine, bounds);
-    engine
-        .initialize_population(
-            PopulationInit {
-                active_area: bounds,
-                population: 1,
-            },
-            &[spawn],
-        )
-        .unwrap();
-    engine.activate_physical_policy_with_exploration().unwrap();
-    for _ in 0..1_000 {
-        engine.tick();
-    }
-    assert!(!engine.policy_options().memory);
-    assert!(engine.mental_map(AgentId::new(0)).is_none());
 }
