@@ -85,7 +85,7 @@ fn mind_layout_is_bounded() {
     // intention 20, avoid 12, seasons 11, sown 12, sick timer 4, beliefs 15 + 6 + 2,
     // child flag, parent id, grief and loneliness timers, and padding.
     assert_eq!(size_of::<MentalMap>(), 372);
-    assert_eq!(size_of::<super::Mind>(), 2_088);
+    assert_eq!(size_of::<super::Mind>(), 2_096);
 }
 
 #[test]

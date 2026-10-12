@@ -250,6 +250,10 @@ pub enum PolicyReason {
     Taking,
     /// Having it out with someone who wronged it.
     Confronting,
+    /// Working toward a tool it wants to make.
+    Project,
+    /// Asking someone to show it how to make something.
+    AskingToBeShown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1268,3 +1268,43 @@ valley: being hungry with nothing, near another family's hut with food in it, ra
 Without the hourly limit one valley had 1,794 stand-offs; jealous anger on every sighting gave 447
 in five years in one valley.
 
+## D-146: Why people freeze, and huddling (2026-10-12)
+
+**Decision:** A trace of cold deaths (8 valleys) showed nearly all were homeless, alone, frightened
+to the full and wandering in search of shelter, often children; fear keeps people from roaming, so
+they know fewer huts when it gets cold. Sleeping in the open pressed against someone else
+(`SleepQuality::Huddled`) now warms a little (exposure -3 against -4 under a roof), and a cold or
+tired person with nobody's roof to sleep under may choose it like any option. Huddled sleep is
+allowed when cold, and doesn't wait to warm through.
+**Why:** The owner asked why cold deaths rose (19 to 28 over the feelings steps).
+**Consequences:** The rise is mostly chance and a bigger band (births up a tenth). With huddling
+alone, cold deaths stayed at 28 (a first version that only kept huddlers from getting colder let
+winter chill freeze them asleep: 43). Over 10 years in 20 valleys with D-147 and D-148: 512
+survivors against 508, cold deaths 20 against 28, births 211 against 208; 66 huddled sleeps.
+
+## D-147: Feelings and making in the viewer (2026-10-12)
+
+**Decision:** Signs over people show a stand-off (x) or a strong feeling first (frightened !,
+grieving ;, angry, envious or jealous >, proud +, ashamed -, miserable _), then what they're
+doing (trying something new ?, cooking or smoking ^). The feed tells discoveries ("Ana found out
+how to make dried meat"), stone walls, stand-offs, food taken, and being shown how to make
+something (`LifeEvent`); making food while watched no longer floods it. The person panel says
+what someone can make. `Engine::face` gives what shows on a face.
+**Why:** The owner asked to see the new life in the viewer.
+
+## D-148: Projects, and asking to be shown (2026-10-12)
+
+**Decision:** When idle (diligence and making skill set how often), a person picks the most useful
+tool it would use and doesn't have (axe if it chops, stone spear if it hunts, cloak, digging stick
+if it plants or buries, basket) and works on the first missing part: gathers wood or stone where it
+remembers them, hunts or carves for a hide, makes the blade or cord first, then makes the tool
+(`PolicyReason::Project`). One it doesn't know how to make, it asks someone it trusts in view to
+show it (`PolicyReason::AskingToBeShown`), with its word for the tool if it has one. The one asked
+reads the word with its own lexicon, or hearing none guesses at a tool it can make; if willing
+(trust and family, less anger) and carrying the parts, it makes one there, and the asker learns by
+watching. Save 24, mind 2,096 B.
+**Why:** The owner wanted making connected to plans and to language.
+**Consequences:** 2,239 requests over 10 years in 20 valleys, all answered with something other than
+what was asked: nobody had discovered axes or cloaks to show, so teachers showed baskets and spears,
+which askers learned. Real teaching waits on the first discoveries.
+

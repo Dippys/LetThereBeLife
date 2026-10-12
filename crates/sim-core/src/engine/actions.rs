@@ -574,6 +574,10 @@ impl Engine {
         if theirs {
             self.thefts += 1;
             let watchers = self.watchers_of(agent);
+            self.life_events.push(crate::LifeEvent::Took {
+                agent,
+                seen: !watchers.is_empty(),
+            });
             if !watchers.is_empty() {
                 self.thefts_seen += 1;
                 self.minds
@@ -642,6 +646,11 @@ impl Engine {
         };
         let mine = force(self, agent, other) + (roll % 64) as u32;
         let theirs = force(self, other, agent) + ((roll >> 8) % 64) as u32;
+        self.life_events.push(crate::LifeEvent::StandOff {
+            agent,
+            other,
+            backed_down: mine > theirs,
+        });
         if mine > theirs {
             // It backs down.
             self.backed_down += 1;
@@ -729,6 +738,22 @@ impl Engine {
             .any(|(material, _)| material.properties().cutting);
         let attempt = self.minds.get_mut(agent).crafts.take_pending();
         if attempt.is_some() {
+            // A project's known recipe is simply made; anything else is a try.
+            if let Some((index, recipe)) = attempt.recipe().filter(|(index, _)| {
+                self.minds
+                    .get(agent)
+                    .is_some_and(|mind| mind.crafts.knows(*index))
+            }) {
+                let ready = recipe
+                    .inputs
+                    .iter()
+                    .all(|&(input, count)| inventory.amount(input) >= count)
+                    && inventory.can_add(recipe.output);
+                if !ready {
+                    return Err(PolicyFailureReason::InsufficientMaterials);
+                }
+                return self.make(agent, index, recipe);
+            }
             return self.try_attempt(agent, attempt);
         }
         let crafts = self
@@ -853,6 +878,10 @@ impl Engine {
             && inventory.can_add(recipe.output)
         {
             self.discoveries += 1;
+            self.life_events.push(crate::LifeEvent::Discovered {
+                agent,
+                made: recipe.output,
+            });
             return self.make(agent, index, recipe);
         }
         // What's used up is spoiled; tools come through a failed try.
@@ -949,6 +978,7 @@ impl Engine {
         self.population.take(agent, Material::Stone, stone);
         self.practise(agent, crate::Activity::Building);
         self.stone_huts += 1;
+        self.life_events.push(crate::LifeEvent::Walled { agent });
         let watchers = self.watchers_of(agent);
         for who in std::iter::once(agent).chain(watchers) {
             self.minds

@@ -245,6 +245,13 @@ pub(crate) struct MindInput<'a> {
     pub(crate) crafts: crate::cognition::Crafts,
     /// Where someone it's furious with stands, close by.
     pub(crate) confront: Option<WorldPosition>,
+    /// How good it is at making things (0-255).
+    pub(crate) crafting: u8,
+    /// Whom it would ask for something now (someone it trusts, in view).
+    pub(crate) teacher: Option<WorldPosition>,
+    /// Knows planting, or burial (a digging stick helps either).
+    pub(crate) knows_planting: bool,
+    pub(crate) knows_burial: bool,
     /// How it feels.
     pub(crate) feelings: crate::Feelings,
     /// Where it stood at its previous decision (it won't step straight back).
@@ -289,6 +296,11 @@ pub(crate) struct MindInput<'a> {
     /// Set when a plan step couldn't be done for want of something: what it
     /// tried, and what it lacked.
     pub(crate) lacked: &'a std::cell::Cell<Option<(crate::cognition::Choice, u16)>>,
+    /// Set to the recipe a project's making step is for, so the engine makes
+    /// that one.
+    pub(crate) making: &'a std::cell::Cell<Option<usize>>,
+    /// Set to the tool it asks to be shown how to make.
+    pub(crate) asking: &'a std::cell::Cell<Option<Material>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -804,6 +816,12 @@ impl Planner<'_> {
             return Some(Deliberation::act(PhysicalGoal::DigPit, site, reason));
         }
         None
+    }
+
+    /// Chance (out of 256) that an idle moment goes to a project: diligence
+    /// and skill at making.
+    fn project_chance(&self) -> u16 {
+        (u16::from(self.mind.personality.diligence) + u16::from(self.mind.crafting)) / 4
     }
 
     /// A drying rack in view that dries now (not in winter).
@@ -1463,6 +1481,7 @@ impl Planner<'_> {
                     .map(|trip| trip.with_reason(PolicyReason::Warming)),
             );
         }
+        options.extend(self.huddle(reason));
         options.extend(self.gather_known_wood(inventory));
         options.extend(self.explore(reason, true));
         self.pick(options)
@@ -1503,6 +1522,7 @@ impl Planner<'_> {
                 toward: None,
             });
         }
+        options.extend(self.huddle(reason));
         options.extend(self.gather_known_wood(inventory));
         options.extend(self.explore(reason, false));
         self.pick(options)
@@ -1646,6 +1666,28 @@ impl Planner<'_> {
             .min_by_key(|&cell| (manhattan(self.origin, cell), cell.y, cell.x))
     }
 
+    /// Somewhere to sleep pressed against someone in view (family first),
+    /// which keeps the cold from getting worse when there's no roof.
+    fn huddle(&self, reason: PolicyReason) -> Option<Deliberation> {
+        let me = self.needs.agent;
+        let other = self
+            .perception
+            .agents
+            .iter()
+            .filter(|other| other.id != me && other.activity != crate::AgentActivity::Dead)
+            .min_by_key(|other| (manhattan(self.origin, other.position), other.id.get()))?;
+        let spot = (-1..=1)
+            .flat_map(|dy| (-1..=1).map(move |dx| (dx, dy)))
+            .filter(|&offset| offset != (0, 0))
+            .map(|(dx, dy)| WorldPosition {
+                x: other.position.x + dx,
+                y: other.position.y + dy,
+            })
+            .filter(|&cell| self.can_sleep_on(cell))
+            .min_by_key(|&cell| (manhattan(self.origin, cell), cell.y, cell.x))?;
+        Some(Deliberation::act(PhysicalGoal::Sleep, spot, reason))
+    }
+
     /// Where the agent stands if it can sleep there, else the nearest such cell in view.
     fn free_sleeping_spot(&self) -> Option<WorldPosition> {
         if self.can_sleep_on(self.origin) {
@@ -1766,6 +1808,14 @@ impl Planner<'_> {
         // Someone who can knap and has no edge makes one from a carried stone.
         if works && let Some(craft) = self.make_tool(inventory) {
             return craft;
+        }
+        // A tool it would use and knows how to make: work toward it, the
+        // diligent and the skilled at making most of all.
+        if works
+            && self.roll(0x5052_4f4a) < self.project_chance()
+            && let Some(step) = self.project(inventory)
+        {
+            return step;
         }
         // The curious try new things with what they carry.
         if works && let Some(trial) = self.experiment(inventory) {
@@ -1966,6 +2016,143 @@ impl Planner<'_> {
             trip: false,
             toward: Some(hearth),
         })
+    }
+
+    /// A project: a tool it knows how to make, doesn't have, and would use
+    /// (an axe if it chops, a stone spear if it hunts, a cloak against the
+    /// cold, a digging stick if it plants or buries, a basket). Each idle
+    /// moment it works on the first part it's missing: gathering wood or
+    /// stone, hunting for a hide, making the blade or the cord, then putting
+    /// the tool together.
+    fn project(&self, inventory: InventoryView) -> Option<Deliberation> {
+        let crafts = self.mind.crafts;
+        let has = |test: fn(crate::MaterialProperties) -> bool| {
+            inventory
+                .carried()
+                .any(|(material, _)| test(material.properties()))
+        };
+        let worth = |tool: Material| -> u8 {
+            match tool {
+                Material::Axe if self.mind.able && !has(|p| p.chop >= 3) => 3,
+                Material::StoneSpear if self.mind.hunts && !has(|p| p.strike >= 30) => 3,
+                Material::Cloak if !has(|p| p.warmth >= 3) => 2,
+                Material::DiggingStick
+                    if (self.mind.knows_planting || self.mind.knows_burial) && !has(|p| p.digs) =>
+                {
+                    1
+                }
+                Material::Basket if !has(|p| p.room > 0) => 1,
+                _ => 0,
+            }
+        };
+        let known = |tool: Material| {
+            crate::RECIPES
+                .iter()
+                .enumerate()
+                .any(|(index, recipe)| recipe.output == tool && crafts.knows(index))
+        };
+        // The most useful tool, known or not: one it can't make, it asks
+        // someone it trusts to show it how.
+        let target = [
+            Material::Axe,
+            Material::StoneSpear,
+            Material::Cloak,
+            Material::DiggingStick,
+            Material::Basket,
+        ]
+        .into_iter()
+        .filter(|&tool| worth(tool) > 0)
+        .max_by_key(|&tool| (worth(tool), known(tool)))?;
+        if !known(target) {
+            let teacher = self.mind.teacher?;
+            self.mind.asking.set(Some(target));
+            return Some(Deliberation::act(
+                PhysicalGoal::Signal,
+                teacher,
+                PolicyReason::AskingToBeShown,
+            ));
+        }
+        self.next_part(target, inventory, 0)
+    }
+
+    /// The next step toward making `thing`: a missing part first (made, if
+    /// it knows how; else gathered or hunted for), then making it.
+    fn next_part(
+        &self,
+        thing: Material,
+        inventory: InventoryView,
+        depth: u8,
+    ) -> Option<Deliberation> {
+        let crafts = self.mind.crafts;
+        let (index, recipe) = crate::RECIPES
+            .iter()
+            .copied()
+            .enumerate()
+            .find(|(index, recipe)| recipe.output == thing && crafts.knows(*index))?;
+        let has_edge = inventory
+            .carried()
+            .any(|(material, _)| material.properties().cutting);
+        for (input, count) in recipe.inputs {
+            if count == 0 || inventory.amount(input) >= count {
+                continue;
+            }
+            if depth < 2
+                && let Some(step) = self.next_part(input, inventory, depth + 1)
+            {
+                return Some(step);
+            }
+            return match input {
+                Material::Wood | Material::Stone => {
+                    if !inventory.can_add(input) || !self.can_handle(input) {
+                        return None;
+                    }
+                    nearest_resource_access(self.origin, self.perception, |found| {
+                        found == input && inventory.can_add(found)
+                    })
+                    .map(|target| {
+                        Deliberation::act(
+                            PhysicalGoal::GatherMaterial,
+                            target,
+                            PolicyReason::Project,
+                        )
+                    })
+                    .or_else(|| {
+                        LandmarkKind::of_material(input)
+                            .and_then(|place| {
+                                self.travel_to_known(place, PhysicalGoal::GatherMaterial)
+                            })
+                            .map(|trip| trip.with_reason(PolicyReason::Project))
+                    })
+                }
+                // A hide comes off a carcass, with an edge, or from a kill.
+                Material::Hide if has_edge => {
+                    nearest_resource_access(self.origin, self.perception, |found| {
+                        found == Material::Meat && inventory.can_add(found)
+                    })
+                    .map(|target| {
+                        Deliberation::act(
+                            PhysicalGoal::GatherMaterial,
+                            target,
+                            PolicyReason::Project,
+                        )
+                    })
+                    .or_else(|| self.hunt(inventory))
+                }
+                _ => None,
+            };
+        }
+        if recipe.method == Method::Edge && !has_edge {
+            return self.next_part(Material::Blade, inventory, depth + 1);
+        }
+        if !matches!(recipe.method, Method::Hand | Method::Edge) || !inventory.can_add(thing) {
+            return None;
+        }
+        self.mind.making.set(Some(index));
+        Some(Deliberation::act(
+            PhysicalGoal::Craft,
+            self.origin,
+            PolicyReason::Project,
+        ))
     }
 
     /// Makes something it knows how to make when it has none with that use

@@ -243,6 +243,8 @@ pub const fn reason(reason: PolicyReason) -> Option<&'static str> {
         PolicyReason::Building => "Building by home",
         PolicyReason::Taking => "Helping themselves to food that isn't theirs",
         PolicyReason::Confronting => "Furious with them",
+        PolicyReason::Project => "Working toward a tool",
+        PolicyReason::AskingToBeShown => "Asking to be shown how to make something",
     })
 }
 
@@ -263,6 +265,7 @@ pub const fn sleep(quality: SleepQuality) -> &'static str {
         SleepQuality::OpenGround => "out in the open",
         SleepQuality::Sheltered => "under shelter",
         SleepQuality::Hearthside => "under shelter by a fire",
+        SleepQuality::Huddled => "huddled against someone",
     }
 }
 

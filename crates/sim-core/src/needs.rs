@@ -192,7 +192,8 @@ impl NeedState {
         let remaining = self.numerator(NeedKind::Rest, now);
         let recovery = u128::from(quality.rest_recovery_per_period());
         let rest_elapsed = remaining.div_ceil(recovery);
-        let exposure_elapsed = if recover_exposure {
+        // Only sleep that warms waits to get warm.
+        let exposure_elapsed = if recover_exposure && quality.exposure_rate_per_period() < 0 {
             // Warm up well below the threshold before getting up: waking just
             // under it, the cold (worse in winter) would send it straight back.
             let target =

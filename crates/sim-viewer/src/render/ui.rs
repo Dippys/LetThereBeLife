@@ -728,6 +728,17 @@ pub(super) fn person_rows(agent: &AgentInspection) -> Vec<Row> {
         if !parts.is_empty() {
             rows.push(Row::Text(parts.join(" · "), colors::UI_DIM));
         }
+        if memory.can_make != 0 {
+            let things: Vec<&str> = Material::ALL
+                .into_iter()
+                .filter(|&material| memory.can_make & 1 << material as u32 != 0)
+                .map(labels::material)
+                .collect();
+            rows.push(Row::Text(
+                format!("Can make {}", things.join(", ")),
+                colors::UI_DIM,
+            ));
+        }
     }
     rows.push(Row::Gap);
 

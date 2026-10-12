@@ -23,6 +23,8 @@ use crate::{
 /// Anger at someone who refused it food (before temper); a gift eases as much.
 const REFUSED_ANGER: u8 = 32;
 const REFUSED_SHAME: u8 = 40;
+/// Willingness (trust, family, less anger) needed to show someone how to make something.
+const SHOW_THRESHOLD: i32 = 200;
 /// Food handed over per request: one meal.
 const GIFT: u8 = FOOD_CONSUMPTION;
 /// Willingness (see `decide_gift`) needed to share with someone who isn't one's child.
@@ -43,13 +45,26 @@ impl Engine {
         agent: AgentId,
         perception: &PhysicalPerception,
     ) -> Option<(AgentId, WorldPosition)> {
-        let mind = self.minds.get(agent);
-        if mind.is_some_and(|mind| !mind.dialogue.may_request(belief_seconds(self.time)))
-            || self
-                .food_values(agent)
-                .carried(self.population.inventory(agent)?)
-                > 0
+        if self
+            .food_values(agent)
+            .carried(self.population.inventory(agent)?)
+            > 0
         {
+            return None;
+        }
+        self.ask_target(agent, perception)
+    }
+
+    /// Whom `agent` would ask for something, if it may ask now: the one in
+    /// view it trusts most (its parent first, then family), never someone it
+    /// holds in contempt.
+    pub(super) fn ask_target(
+        &self,
+        agent: AgentId,
+        perception: &PhysicalPerception,
+    ) -> Option<(AgentId, WorldPosition)> {
+        let mind = self.minds.get(agent);
+        if mind.is_some_and(|mind| !mind.dialogue.may_request(belief_seconds(self.time))) {
             return None;
         }
         perception
@@ -359,6 +374,100 @@ impl Engine {
         } else {
             RequestResponse::Refused
         }
+    }
+
+    /// Asks `teacher` to show it how to make `tool` (completing an
+    /// `AskingToBeShown` gesture): with its word for the tool if it has one.
+    /// The one asked reads the word with its own lexicon (or, hearing none,
+    /// guesses from what it can make itself), and if it's willing, knows how,
+    /// and carries the parts, makes one there and then: whoever watches,
+    /// the asker most of all, learns how.
+    pub(super) fn apply_show_request(
+        &mut self,
+        asker: AgentId,
+        teacher: AgentId,
+        tool: crate::Material,
+    ) -> Result<(), PolicyFailureReason> {
+        let now = belief_seconds(self.time);
+        let word = self
+            .minds
+            .get(asker)
+            .and_then(|mind| mind.lexicon.produce(Concept::Material(tool)));
+        let inventory = self
+            .population
+            .inventory(teacher)
+            .ok_or(PolicyFailureReason::InconsistentState)?;
+        let teacher_mind = self.minds.get(teacher);
+        let crafts = teacher_mind.map(|mind| mind.crafts).unwrap_or_default();
+        // What the teacher takes it to mean.
+        let heard = word
+            .and_then(|form| {
+                teacher_mind.and_then(|mind| mind.lexicon.recognize_with_strength(form))
+            })
+            .map(|(concept, _)| concept)
+            .and_then(|concept| match concept {
+                Concept::Material(material) => Some(material),
+                _ => None,
+            });
+        let can_make = |material: crate::Material| {
+            crate::RECIPES.iter().enumerate().find(|(index, recipe)| {
+                recipe.output == material
+                    && crafts.knows(*index)
+                    && matches!(recipe.method, crate::Method::Hand | crate::Method::Edge)
+            })
+        };
+        let guess = heard.or_else(|| {
+            // No word it knows: it guesses at a tool it can make itself.
+            [
+                crate::Material::Axe,
+                crate::Material::StoneSpear,
+                crate::Material::Cloak,
+                crate::Material::DiggingStick,
+                crate::Material::Basket,
+                crate::Material::Spear,
+            ]
+            .into_iter()
+            .find(|&material| can_make(material).is_some())
+        });
+        let (trust, family, anger) = teacher_mind
+            .and_then(|mind| {
+                let slot = mind.social.slot_of(asker)?;
+                Some((
+                    i32::from(mind.social.trust(slot)),
+                    mind.social.tie(slot).is_some(),
+                    i32::from(mind.social.anger(slot)),
+                ))
+            })
+            .unwrap_or((i32::from(crate::DEFAULT_TRUST), false, 0));
+        let willing = trust + if family { FAMILY_WILLINGNESS } else { 0 } - anger >= SHOW_THRESHOLD;
+        let shown = guess.filter(|_| willing).and_then(|material| {
+            let (index, recipe) = can_make(material)?;
+            let has_edge = inventory
+                .carried()
+                .any(|(material, _)| material.properties().cutting);
+            let ready = recipe
+                .inputs
+                .iter()
+                .all(|&(input, count)| inventory.amount(input) >= count)
+                && (recipe.method != crate::Method::Edge || has_edge)
+                && inventory.can_add(recipe.output);
+            ready.then_some((index, *recipe))
+        });
+        self.minds
+            .get_mut(asker)
+            .dialogue
+            .request_answered(now, shown.is_none());
+        let Some((index, recipe)) = shown else {
+            return Err(PolicyFailureReason::TargetUnavailable);
+        };
+        self.make(teacher, index, recipe)?;
+        self.life_events.push(crate::LifeEvent::Showed {
+            teacher,
+            learner: asker,
+            made: recipe.output,
+            wanted: tool,
+        });
+        Ok(())
     }
 
     /// Requests for food from the latest tick (for logs and tools).

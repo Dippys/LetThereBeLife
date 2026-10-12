@@ -270,7 +270,8 @@ impl Feed {
         for craft in engine
             .craft_events()
             .iter()
-            .filter(|craft| craft.watchers > 0)
+            // Food is made all the time; tools are worth telling.
+            .filter(|craft| craft.watchers > 0 && craft.made.properties().nutrition == 0)
         {
             self.push(
                 format!(
@@ -283,6 +284,83 @@ impl Feed {
                 Some(craft.agent),
                 agent_position(engine, craft.agent),
             );
+        }
+
+        // Discoveries, stone walls, stand-offs, takings.
+        for event in engine.life_events() {
+            let (text, tone, agent) = match *event {
+                sim_core::LifeEvent::Discovered { agent, made } => (
+                    format!(
+                        "{} found out how to make {}",
+                        name(engine, agent),
+                        crate::labels::material(made)
+                    ),
+                    Tone::Good,
+                    agent,
+                ),
+                sim_core::LifeEvent::Walled { agent } => (
+                    format!("{} walled their hut in stone", name(engine, agent)),
+                    Tone::Good,
+                    agent,
+                ),
+                sim_core::LifeEvent::StandOff {
+                    agent,
+                    other,
+                    backed_down,
+                } => (
+                    if backed_down {
+                        format!(
+                            "{} faced {} down, and {} backed off",
+                            name(engine, agent),
+                            name(engine, other),
+                            name(engine, other)
+                        )
+                    } else {
+                        format!(
+                            "{} and {} came to blows",
+                            name(engine, agent),
+                            name(engine, other)
+                        )
+                    },
+                    Tone::Bad,
+                    agent,
+                ),
+                sim_core::LifeEvent::Showed {
+                    teacher,
+                    learner,
+                    made,
+                    wanted,
+                } => (
+                    if made == wanted {
+                        format!(
+                            "{} showed {} how to make {}",
+                            name(engine, teacher),
+                            name(engine, learner),
+                            crate::labels::material(made)
+                        )
+                    } else {
+                        format!(
+                            "{} wanted to learn {}, but {} showed them {}",
+                            name(engine, learner),
+                            crate::labels::material(wanted),
+                            name(engine, teacher),
+                            crate::labels::material(made)
+                        )
+                    },
+                    Tone::Talk,
+                    teacher,
+                ),
+                sim_core::LifeEvent::Took { agent, seen } => (
+                    format!(
+                        "{} took food from another family's hut{}",
+                        name(engine, agent),
+                        if seen { ", and was seen" } else { "" }
+                    ),
+                    Tone::Bad,
+                    agent,
+                ),
+            };
+            self.push(text, tone, Some(agent), agent_position(engine, agent));
         }
 
         for fallen in engine

@@ -267,6 +267,11 @@ pub struct WildlifeStats {
     /// Living people showing each feeling at the end, and faces misread.
     pub feelings: [u64; sim_core::Feeling::COUNT],
     pub faces_misread: u64,
+    /// Decisions spent working toward a tool.
+    pub projects: u64,
+    /// Times someone was shown how to make something, and how many of those
+    /// showed something other than what was asked.
+    pub shown: (u64, u64),
     /// Living people angry with someone at the end.
     pub angry: u64,
     /// Takings from others' huts, seen takings, stand-offs, backing down, scuffles.
@@ -296,7 +301,7 @@ pub struct WildlifeStats {
     pub plans: [u64; 3],
     pub plan_shapes: std::collections::BTreeMap<String, u64>,
     /// Sleeps begun in the open, under a roof, and under a roof by a fire.
-    pub sleeps: [u64; 3],
+    pub sleeps: [u64; 4],
     /// Sleeps begun at night.
     pub night_sleeps: u64,
     /// Plants that took root and died of age; trees and bushes at the start and end.
@@ -576,7 +581,17 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                         wildlife.night_sleeps += u64::from(engine.is_night());
                     }
                 }
+                for event in engine.life_events() {
+                    if let sim_core::LifeEvent::Showed { made, wanted, .. } = *event {
+                        wildlife.shown.0 += 1;
+                        wildlife.shown.1 += u64::from(made != wanted);
+                    }
+                }
                 for decision in engine.policy_diagnostics() {
+                    wildlife.projects += u64::from(
+                        decision.reason == sim_core::PolicyReason::Project
+                            && decision.kind == PolicyDiagnosticKind::Selected,
+                    );
                     wildlife.building[3] += u64::from(
                         decision.goal == PhysicalGoal::Repair
                             && decision.kind == PolicyDiagnosticKind::ActionCompleted
@@ -899,6 +914,7 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
     }
     wildlife.faces_misread = engine.faces_misread();
     wildlife.conflict = engine.conflict_counts();
+
     wildlife.angry = living
         .iter()
         .filter(|(_, mind)| {
@@ -1989,7 +2005,10 @@ impl fmt::Display for StudyReport {
         let made = |material: sim_core::Material| self.wildlife.made[material as usize];
         write!(
             formatter,
-            "\n  making: tried {tries} times ({found} made something); dried meat {}, dried berries {}, pemmican {}; cord {}, axes {}, stone spears {}, digging sticks {}, cloaks {}",
+            "\n  making: tried {tries} times ({found} made something); decisions toward tools {}, shown how {} times ({} not what was asked); dried meat {}, dried berries {}, pemmican {}; cord {}, axes {}, stone spears {}, digging sticks {}, cloaks {}",
+            self.wildlife.projects,
+            self.wildlife.shown.0,
+            self.wildlife.shown.1,
             made(sim_core::Material::DriedMeat),
             made(sim_core::Material::DriedBerries),
             made(sim_core::Material::Pemmican),
@@ -2024,10 +2043,10 @@ impl fmt::Display for StudyReport {
             formatter,
             "\n  building: drying racks {racks}, storage pits {pits}, huts walled in stone {stone}, repairs {repairs}"
         )?;
-        let [open, sheltered, by_fire] = self.wildlife.sleeps;
+        let [open, sheltered, by_fire, huddled] = self.wildlife.sleeps;
         write!(
             formatter,
-            "\n  sleeps: in the open {open}, under a roof {sheltered}, under a roof by a fire {by_fire}; begun at night {}",
+            "\n  sleeps: in the open {open}, under a roof {sheltered}, under a roof by a fire {by_fire}, huddled {huddled}; begun at night {}",
             self.wildlife.night_sleeps
         )?;
         // What people learned works: the choices that best eased each need.

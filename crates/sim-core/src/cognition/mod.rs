@@ -227,6 +227,8 @@ pub struct MentalMapView {
     pub skills: [u8; Activity::COUNT],
     /// The feeling showing on its face, if any.
     pub feeling: Option<Feeling>,
+    /// What it knows how to make, in recipe order (each thing once).
+    pub can_make: Vec<crate::Material>,
     pub landmarks: Vec<LandmarkView>,
     pub explored_tiles: usize,
     /// A child of the band (started with no words) rather than a founder.
@@ -437,6 +439,35 @@ pub struct CraftEvent {
     pub watchers: u16,
 }
 
+/// Something worth telling about people's lives (latest tick, for logs and
+/// the viewer).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LifeEvent {
+    /// It tried something new and it worked: the first of it it ever made.
+    Discovered {
+        agent: AgentId,
+        made: crate::Material,
+    },
+    /// It walled its hut in stone.
+    Walled { agent: AgentId },
+    /// It faced `other` down: `other` backed down, or they came to blows.
+    StandOff {
+        agent: AgentId,
+        other: AgentId,
+        backed_down: bool,
+    },
+    /// It took food from another family's hut; `seen` if anyone saw.
+    Took { agent: AgentId, seen: bool },
+    /// Asked to show `learner` how to make `wanted`, `teacher` made `made`
+    /// in front of them (something else, if it misread what was asked).
+    Showed {
+        teacher: AgentId,
+        learner: AgentId,
+        made: crate::Material,
+        wanted: crate::Material,
+    },
+}
+
 /// Someone put fuel on a fire (latest tick, for logs and tools).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FireEvent {
@@ -580,6 +611,8 @@ pub(crate) struct Mind {
     pub(crate) feelings: Feelings,
     /// Simulated second of its last stand-off (it won't start another soon).
     pub(crate) confronted_at: u32,
+    /// The tool its planned request asks to be shown how to make.
+    pub(crate) asking: Option<crate::Material>,
 }
 
 /// Seconds after eating somewhere before a bush there counts as having come

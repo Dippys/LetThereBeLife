@@ -9,6 +9,9 @@ pub enum SleepQuality {
     Sheltered = 1,
     /// Under a roof with a burning fire close by: warms twice as fast.
     Hearthside = 2,
+    /// In the open, pressed against someone else: body heat warms, nearly as
+    /// well as a roof.
+    Huddled = 3,
 }
 
 /// How near a burning fire must be, in cells, to warm a hut's sleepers.
@@ -17,7 +20,7 @@ pub const FIRE_WARMTH_REACH: i64 = 6;
 impl SleepQuality {
     pub(crate) const fn rest_recovery_per_period(self) -> u8 {
         match self {
-            Self::OpenGround => 8,
+            Self::OpenGround | Self::Huddled => 8,
             Self::Sheltered | Self::Hearthside => 12,
         }
     }
@@ -25,6 +28,7 @@ impl SleepQuality {
     pub(crate) const fn exposure_rate_per_period(self) -> i8 {
         match self {
             Self::OpenGround => 2,
+            Self::Huddled => -3,
             Self::Sheltered => -4,
             Self::Hearthside => -8,
         }
@@ -32,7 +36,7 @@ impl SleepQuality {
 
     /// Under a roof.
     pub const fn sheltered(self) -> bool {
-        !matches!(self, Self::OpenGround)
+        matches!(self, Self::Sheltered | Self::Hearthside)
     }
 }
 

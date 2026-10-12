@@ -61,6 +61,7 @@ fn mind(lexicon: Vec<LexiconEntryView>, acquaintances: Vec<AcquaintanceView>) ->
         abilities: [128; sim_core::Activity::COUNT],
         skills: [64; sim_core::Activity::COUNT],
         feeling: None,
+        can_make: Vec::new(),
         personality: Personality {
             curiosity: 210,
             ..Personality::AVERAGE

@@ -230,6 +230,7 @@ impl Engine {
             .exploration_heading(agent)
             .unwrap_or(ExplorationHeading::North);
         let personality = self.personality_in_use(agent);
+        let crafting = self.ability(agent, crate::Activity::Crafting);
         let night = self.is_night();
         let wayfinding = self
             .innate_personality(agent)
@@ -237,6 +238,7 @@ impl Engine {
         let at = self.time;
         let latest_signal = self.next_signal_id;
         let beg = self.beg_target(agent, perception);
+        let teacher = self.ask_target(agent, perception);
         let food = self.food_values(agent);
         self.check_leads(agent, perception, now);
         let (seen_danger, seen_prey, wary) = self.animals_of_interest(agent, origin, perception);
@@ -444,6 +446,7 @@ impl Engine {
             character,
             feelings,
             confronted_at,
+            asking: _,
             habits,
             home,
             model,
@@ -503,6 +506,8 @@ impl Engine {
         let facts = crate::policy::perceived_facts(perception, inventory, needs, food, now);
         let intended = std::cell::Cell::new(*intention);
         let lacked = std::cell::Cell::new(None);
+        let making = std::cell::Cell::new(None);
+        let asking = std::cell::Cell::new(None);
         let own_home = home.hut();
         // Without a home of its own, its family's is home; huts it has seen
         // others live in are theirs.
@@ -833,6 +838,10 @@ impl Engine {
                 knows_hearths: crafts.knows_hearths(),
                 crafts: *crafts,
                 feelings: *feelings,
+                crafting,
+                teacher: teacher.map(|(_, position)| position),
+                knows_planting: crafts.knows_planting(),
+                knows_burial: crafts.knows_burial(),
                 confront: perception
                     .agents
                     .iter()
@@ -873,6 +882,8 @@ impl Engine {
                 facts,
                 intention: &intended,
                 lacked: &lacked,
+                making: &making,
+                asking: &asking,
             },
         );
         {
@@ -882,6 +893,19 @@ impl Engine {
             mind.intention = after;
             if let Some((choice, fact)) = lacked.get() {
                 mind.model.lacked(choice, fact);
+            }
+            // Asking someone to show it how to make a tool.
+            if let (Some(tool), Some((teacher, at))) = (asking.get(), teacher) {
+                mind.asking = Some(tool);
+                mind.dialogue.plan_request(teacher, at);
+            }
+            // A project's making step: make that very thing.
+            if let Some(index) = making.get() {
+                let recipe = crate::RECIPES[index];
+                mind.crafts.set_pending(crate::cognition::Attempt::new(
+                    recipe.kinds(),
+                    recipe.method,
+                ));
             }
             self.note_intention(agent, before, after, facts);
         }
@@ -1133,6 +1157,9 @@ impl Engine {
             .position;
         let now = belief_seconds(self.time);
         if let Some(giver) = self.minds.get_mut(sender).dialogue.take_request(place) {
+            if let Some(tool) = self.minds.get_mut(sender).asking.take() {
+                return self.apply_show_request(sender, giver, tool);
+            }
             return self.apply_request(sender, from, giver);
         }
         let correction = self
@@ -1967,6 +1994,16 @@ impl Engine {
     }
 
     /// People who began mourning during the latest tick (for logs and tools).
+    /// Discoveries, stone walls, stand-offs and takings from the latest tick.
+    pub fn life_events(&self) -> &[crate::LifeEvent] {
+        &self.life_events
+    }
+
+    /// The feeling showing on `agent`'s face, if any (what others can see).
+    pub fn face(&self, agent: AgentId) -> Option<crate::Feeling> {
+        self.minds.get(agent)?.feelings.shown()
+    }
+
     pub fn grief_events(&self) -> &[crate::GriefEvent] {
         &self.grief_events
     }
@@ -2061,6 +2098,16 @@ impl Engine {
             abilities: crate::Activity::ALL.map(|activity| self.ability(agent, activity)),
             skills: mind.character.skills(),
             feeling: mind.feelings.shown(),
+            can_make: {
+                let mut made: Vec<crate::Material> = crate::RECIPES
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| mind.crafts.knows(*index))
+                    .map(|(_, recipe)| recipe.output)
+                    .collect();
+                made.dedup();
+                made
+            },
             landmarks: mind.map.views().collect(),
             explored_tiles: mind.map.explored_tile_count(),
             child: mind.child,

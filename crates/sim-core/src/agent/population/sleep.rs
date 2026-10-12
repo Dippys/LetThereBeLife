@@ -65,9 +65,33 @@ impl Population {
         if let Some(structure) = structure {
             return Err(SleepRequestError::StructureOccupied(structure));
         }
-        // Too cold to sleep in the open, unless so exhausted it collapses anyway.
+        // Pressed against someone else in the open, the cold doesn't get worse.
+        let huddled = !sheltered
+            && (-1..=1).any(|dy| {
+                (-1..=1).any(|dx| {
+                    (dx, dy) != (0, 0)
+                        && self
+                            .spatial
+                            .occupant(WorldPosition {
+                                x: position.x + dx,
+                                y: position.y + dy,
+                            })
+                            .is_some_and(|other| {
+                                other != agent
+                                    && self
+                                        .records
+                                        .get(other.0 as usize)
+                                        .is_some_and(|record| !record.activity.is_terminal())
+                            })
+                })
+            });
+        // Too cold to sleep in the open alone, unless so exhausted it
+        // collapses anyway.
         let needs = self.needs[index].view(agent, now);
-        if !sheltered && needs.exposure.threshold_reached && needs.rest.value < crate::REST_COLLAPSE
+        if !sheltered
+            && !huddled
+            && needs.exposure.threshold_reached
+            && needs.rest.value < crate::REST_COLLAPSE
         {
             return Err(SleepRequestError::UnsafeExposure);
         }
@@ -76,6 +100,8 @@ impl Population {
         }
         Ok(if sheltered {
             SleepQuality::Sheltered
+        } else if huddled {
+            SleepQuality::Huddled
         } else {
             SleepQuality::OpenGround
         })

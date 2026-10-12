@@ -206,6 +206,12 @@ pub(super) const SIGN_FOOD: u32 = rgba(235, 80, 120, 255);
 pub(super) const SIGN_WORK: u32 = rgba(196, 150, 100, 255);
 pub(super) const SIGN_HUNT: u32 = rgba(240, 210, 90, 255);
 pub(super) const SIGN_DANGER: u32 = rgba(255, 80, 70, 255);
+pub(super) const SIGN_GRIEF: u32 = rgba(150, 160, 200, 255);
+pub(super) const SIGN_ANGER: u32 = rgba(255, 120, 40, 255);
+pub(super) const SIGN_PRIDE: u32 = rgba(255, 220, 90, 255);
+pub(super) const SIGN_SHAME: u32 = rgba(240, 150, 190, 255);
+pub(super) const SIGN_LOW: u32 = rgba(150, 150, 160, 255);
+pub(super) const SIGN_TRY: u32 = rgba(190, 140, 250, 255);
 
 /// Ground worn by walking: darker the more it's trodden.
 pub(super) fn worn(wear: u16) -> u32 {

@@ -135,14 +135,16 @@ so changes are judged on behaviour counts as much as on survival.
   code 9): 1 in 19 runs on 2026-10-09, 2 in 14 on 2026-10-10, then 0 in 8, then 2 in 8 `--valley`
   smokes after M7, then 1 in 12 smokes after the living world. It happens with and without agents. Cause unknown, possibly GPU teardown.
 - The world archive needs regenerating for generator v2 (`--pregenerate-world`).
-- **Minds are 2,088 B per agent** (mental map 372 B). That's fine at viewer scale; the spec's 10M
+- **Minds are 2,096 B per agent** (mental map 372 B). That's fine at viewer scale; the spec's 10M
   agents would need ~8 GB, so compaction comes later.
 - **Greedy waypoints can pace around obstacles.** Agents no longer step straight back to where they
   were and collapse into sleep when exhausted, but longer cycles are possible.
 
 ## Recent changes
 
-- 2026-10-12 (latest): feelings toward people (anger), worry, hope, frustration, surprise,
+- 2026-10-12 (latest): huddling; projects toward tools; asking to be shown how to make
+  something; feelings, discoveries and stand-offs shown in the viewer (D-146 to D-148).
+- 2026-10-12: feelings toward people (anger), worry, hope, frustration, surprise,
   relief, disgust (D-144); pride, shame, envy, jealousy, taking and confrontation (D-145).
 - 2026-10-12: feelings, part one: fear, contentment, misery, boredom, loneliness,
   grief, shown on faces and sometimes misread (D-143).
@@ -237,8 +239,9 @@ so changes are judged on behaviour counts as much as on survival.
 ## What's next
 
 1. **Feelings** (docs/plans/FEELINGS.md) and **making things** (docs/plans/MAKING.md) are done
-   (D-137 to D-145). Open: taking food hasn't happened yet; cold deaths rose with feelings
-   (19 to 28 over 20 valley-decades); expressions could show in the viewer as signs.
+   (D-137 to D-148). Open: taking food hasn't happened yet; nobody has discovered axes or cloaks,
+   so asking to be shown teaches baskets and spears instead; people could talk about feelings and
+   recipes in words.
    (Making things, docs/plans/MAKING.md, is done: D-139, D-141, D-142.)
 2. **Thinking agents** (docs/plans/THINKING.md): plans for cold, hunger and thirst on (D-118,
    D-119); idle time works toward what has proved useful (D-123); people show others what they

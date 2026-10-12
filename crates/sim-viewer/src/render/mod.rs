@@ -405,6 +405,8 @@ pub struct MemoryInspection {
     pub abilities: [u8; sim_core::Activity::COUNT],
     /// The feeling showing on their face, if any.
     pub feeling: Option<sim_core::Feeling>,
+    /// What they know how to make: a bit per material.
+    pub can_make: u32,
     acquaintances: [AcquaintanceView; ACQUAINTANCE_SLOTS],
     acquaintance_len: u8,
     lexicon: [LexiconEntryView; LEXICON_SLOTS],
@@ -464,6 +466,10 @@ impl MemoryInspection {
             personality: view.personality,
             abilities: view.abilities,
             feeling: view.feeling,
+            can_make: view
+                .can_make
+                .iter()
+                .fold(0, |bits, &material| bits | 1 << material as u32),
             acquaintances,
             acquaintance_len: acquaintance_len as u8,
             lexicon,
@@ -1798,21 +1804,48 @@ const MIN_NAME_CELL_PIXELS: f32 = 24.0;
 /// A name under someone: where they're drawn, the name, its color.
 pub(super) type Name = ([f32; 2], String, u32);
 
-/// Signs for the living people in `bounds`: asleep, by a fire, at water,
-/// eating, carrying or gathering, building, hunting, running.
+/// Signs for the living people in `bounds`: a stand-off or a strong feeling
+/// on the face first (frightened, grieving, angry, proud, ashamed,
+/// miserable), else what they're doing: asleep, by a fire, at water, eating,
+/// carrying or gathering, building, hunting, running, trying something new.
 fn people_signs(engine: &sim_core::Engine, bounds: sim_core::WorldRect) -> Vec<PersonSign> {
     use sim_core::{AgentActivity, PhysicalGoal, PolicyReason};
     engine
         .agent_views(MAX_AGENT_INSTANCES)
         .filter(|agent| bounds.contains(agent.position))
         .filter_map(|agent| {
+            let policy = engine.physical_policy(agent.id);
+            if agent.activity == AgentActivity::Dead {
+                return None;
+            }
+            if policy.is_some_and(|policy| policy.goal == PhysicalGoal::Confront) {
+                return Some((agent.position, 'x', colors::SIGN_DANGER));
+            }
+            let felt = match engine.face(agent.id) {
+                _ if agent.activity == AgentActivity::Sleeping => None,
+                Some(sim_core::Feeling::Fear) => Some(('!', colors::SIGN_DANGER)),
+                Some(sim_core::Feeling::Grief) => Some((';', colors::SIGN_GRIEF)),
+                Some(
+                    sim_core::Feeling::Frustration
+                    | sim_core::Feeling::Envy
+                    | sim_core::Feeling::Jealousy,
+                ) => Some(('>', colors::SIGN_ANGER)),
+                Some(sim_core::Feeling::Pride) => Some(('+', colors::SIGN_PRIDE)),
+                Some(sim_core::Feeling::Shame) => Some(('-', colors::SIGN_SHAME)),
+                Some(sim_core::Feeling::Misery) => Some(('_', colors::SIGN_LOW)),
+                _ => None,
+            };
+            if let Some((symbol, color)) = felt {
+                return Some((agent.position, symbol, color));
+            }
             let sign = match agent.activity {
                 AgentActivity::Dead => return None,
                 AgentActivity::Sleeping => ('z', colors::SIGN_SLEEP),
                 AgentActivity::Building => ('#', colors::SIGN_BUILD),
                 _ => {
-                    let policy = engine.physical_policy(agent.id)?;
+                    let policy = policy?;
                     match (policy.goal, policy.reason) {
+                        (_, PolicyReason::Experimenting) => ('?', colors::SIGN_TRY),
                         (_, PolicyReason::Fleeing) => ('!', colors::SIGN_DANGER),
                         (PhysicalGoal::Hunt, _) | (_, PolicyReason::Hunting) => {
                             ('!', colors::SIGN_HUNT)
@@ -1825,6 +1858,7 @@ fn people_signs(engine: &sim_core::Engine, bounds: sim_core::WorldRect) -> Vec<P
                             ('~', colors::SIGN_WATER)
                         }
                         (PhysicalGoal::Eat | PhysicalGoal::SeekFood, _) => ('*', colors::SIGN_FOOD),
+                        (PhysicalGoal::Cook, _) => ('^', colors::SIGN_FIRE),
                         (
                             PhysicalGoal::GatherMaterial
                             | PhysicalGoal::Store

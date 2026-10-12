@@ -45,6 +45,7 @@ impl Engine {
         self.word_events.clear();
         self.fire_events.clear();
         self.craft_events.clear();
+        self.life_events.clear();
         self.farm_events.clear();
         self.burial_events.clear();
         self.wildlife_events.clear();
