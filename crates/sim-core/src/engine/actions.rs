@@ -140,6 +140,7 @@ impl Engine {
             PhysicalGoal::WarmUp => self.apply_warm_up(event.agent),
             PhysicalGoal::TendFire => self.apply_tend_fire(event.agent),
             PhysicalGoal::Craft => self.apply_craft(event.agent),
+            PhysicalGoal::Plant => self.apply_plant(event.agent, target),
             PhysicalGoal::Store => self.apply_store(event.agent, target),
             PhysicalGoal::Fetch => self.apply_fetch(event.agent, target),
             PhysicalGoal::Drop => self.apply_drop(event.agent),
@@ -635,6 +636,128 @@ impl Engine {
         Ok(())
     }
 
+    /// Berries eaten on open ground (no bush near) may drop a seed beside the
+    /// eater, which comes up as a bush. The eater remembers where it ate.
+    fn drop_seeds(&mut self, agent: AgentId, material: crate::Material) {
+        let Some(bush) = bush_of(material) else {
+            return;
+        };
+        let Some(position) = self.population.view(agent).map(|view| view.position) else {
+            return;
+        };
+        let bush_near = (-SEED_CLEARANCE..=SEED_CLEARANCE).any(|dy| {
+            (-SEED_CLEARANCE..=SEED_CLEARANCE).any(|dx| {
+                let at = WorldPosition {
+                    x: position.x + dx,
+                    y: position.y + dy,
+                };
+                self.world
+                    .feature_at(at)
+                    .is_some_and(|feature| bush_of(feature.kind.base_resource().kind).is_some())
+                    || self.spawned_objects.at(at).is_some_and(|object| {
+                        object
+                            .kind
+                            .feature()
+                            .is_some_and(|kind| bush_of(kind.base_resource().kind).is_some())
+                    })
+            })
+        });
+        if bush_near {
+            return;
+        }
+        let now = (self.time.ticks() / 60) as u32;
+        self.minds.get_mut(agent).sown.ate_at(position, now);
+        let draw = crate::wildlife::mix(
+            self.config.life_seed
+                ^ 0x5345_4544_5345_4544
+                ^ self.time.ticks()
+                ^ u64::from(agent.get()) << 40,
+        );
+        if draw % SEED_ODDS != 0 {
+            return;
+        }
+        let turn = (draw >> 8) as usize % 4;
+        let spots = [(0, -1), (1, 0), (0, 1), (-1, 0)].map(|(dx, dy)| WorldPosition {
+            x: position.x + dx,
+            y: position.y + dy,
+        });
+        if let Some(spot) = (0..4)
+            .map(|step| spots[(turn + step) % 4])
+            .find(|&spot| self.can_sprout_at(spot))
+            && let Some(sprout) = crate::SpawnKind::growing(bush)
+        {
+            self.spawned_objects.plant(spot, sprout, 0);
+            self.plants_sprouted += 1;
+        }
+    }
+
+    /// Pushes a carried berry into the ground at `target` (beside the agent),
+    /// where it comes up as a bush. Anyone watching sees how it's done.
+    pub(super) fn apply_plant(
+        &mut self,
+        agent: AgentId,
+        target: WorldPosition,
+    ) -> Result<(), PolicyFailureReason> {
+        if !self
+            .minds
+            .get(agent)
+            .is_some_and(|mind| mind.crafts.knows_planting())
+        {
+            return Err(PolicyFailureReason::TargetUnavailable);
+        }
+        let position = self
+            .population
+            .view(agent)
+            .ok_or(PolicyFailureReason::InconsistentState)?
+            .position;
+        if position.x.abs_diff(target.x) + position.y.abs_diff(target.y) != 1
+            || !self.can_sprout_at(target)
+        {
+            return Err(PolicyFailureReason::TargetUnavailable);
+        }
+        let inventory = self
+            .population
+            .inventory(agent)
+            .ok_or(PolicyFailureReason::InconsistentState)?;
+        // It plants what it eats.
+        let food = self.food_values(agent);
+        let (seed, bush) = crate::Material::ALL
+            .into_iter()
+            .filter(|&material| food.is_food(material) && inventory.amount(material) > 0)
+            .find_map(|material| Some((material, bush_of(material)?)))
+            .ok_or(PolicyFailureReason::InsufficientMaterials)?;
+        let sprout =
+            crate::SpawnKind::growing(bush).ok_or(PolicyFailureReason::InconsistentState)?;
+        if self.population.take(agent, seed, 1) < 1 {
+            return Err(PolicyFailureReason::InconsistentState);
+        }
+        self.spawned_objects.plant(target, sprout, 0);
+        self.plants_sprouted += 1;
+        let watchers: Vec<AgentId> = self
+            .perceive_physical(agent, crate::PHYSICAL_POLICY_RADIUS)
+            .map(|perception| {
+                perception
+                    .agents
+                    .iter()
+                    .filter(|other| {
+                        other.id != agent && super::cognition::can_watch(other.activity)
+                    })
+                    .map(|other| other.id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        for &watcher in &watchers {
+            self.minds.get_mut(watcher).crafts.saw_planting();
+        }
+        self.farm_events.push(crate::FarmEvent {
+            agent,
+            at: target,
+            planted: true,
+            watchers: watchers.len() as u16,
+        });
+        Ok(())
+    }
+
     /// Eats one unit of whatever carried material the agent most wants to eat.
     /// The agent feels what it really does; anyone watching sees it eat, and
     /// sees it retch if it was sickening.
@@ -655,6 +778,7 @@ impl Engine {
             return Ok(());
         }
         let retched = properties.toxicity > 0;
+        self.drop_seeds(agent, material);
         let eater = self.minds.get_mut(agent);
         eater.model.used(
             crate::cognition::Choice::Eat,
@@ -848,4 +972,19 @@ impl Engine {
         }
         failure.map_or(Ok(false), Err)
     }
+}
+
+/// Eating on open ground drops a seed that comes up with odds 1 in this.
+const SEED_ODDS: u64 = 4;
+/// No bush within this many cells counts as open ground.
+const SEED_CLEARANCE: i64 = 2;
+
+/// The bush whose fruit `material` is, if it is one.
+fn bush_of(material: crate::Material) -> Option<crate::FeatureKind> {
+    [
+        crate::FeatureKind::BerryBush,
+        crate::FeatureKind::BitterBush,
+    ]
+    .into_iter()
+    .find(|bush| bush.base_resource().kind == material)
 }

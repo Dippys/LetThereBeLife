@@ -173,14 +173,16 @@ Before them, legacy agents near seed 1's only lake all died by ~250k ticks.
   code 9): 1 in 19 runs on 2026-10-09, 2 in 14 on 2026-10-10, then 0 in 8, then 2 in 8 `--valley`
   smokes after M7, then 1 in 12 smokes after the living world. It happens with and without agents. Cause unknown, possibly GPU teardown.
 - The world archive needs regenerating for generator v2 (`--pregenerate-world`).
-- **Minds are 1,816 B per agent** (mental map 372 B). That's fine at viewer scale; the spec's 10M
+- **Minds are 1,832 B per agent** (mental map 372 B). That's fine at viewer scale; the spec's 10M
   agents would need ~8 GB, so compaction comes later.
 - **Greedy waypoints can pace around obstacles.** Agents no longer step straight back to where they
   were and collapse into sleep when exhausted, but longer cycles are possible.
 
 ## Recent changes
 
-- 2026-10-12 (latest): people know whose hut is whose and keep to their family's or a
+- 2026-10-12 (latest): farming learned from noticing a bush where berries were eaten, then
+  planting by home and teaching by being watched (D-128).
+- 2026-10-12: people know whose hut is whose and keep to their family's or a
   friend's; stocking a hut before a winter remembered as hungry (D-127); ticks 1.5-1.8x faster
   with identical results (D-126).
 - 2026-10-12: day and night, colder and sleepy (D-124); unknown places shown only to

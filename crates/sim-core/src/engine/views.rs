@@ -249,6 +249,10 @@ impl Engine {
     }
 
     /// Things made during the latest tick (for logs and tools).
+    pub fn farm_events(&self) -> &[crate::FarmEvent] {
+        &self.farm_events
+    }
+
     pub fn craft_events(&self) -> &[crate::CraftEvent] {
         &self.craft_events
     }

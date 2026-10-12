@@ -273,6 +273,7 @@ impl Engine {
             .map(|other| other.id)
             .collect();
         let hint_outcomes = &mut self.hint_outcomes;
+        let farm_events = &mut self.farm_events;
         let lessons = &mut self.lesson_events;
         let griefs = &mut self.grief_events;
         let mind = self.minds.get_mut(agent);
@@ -361,7 +362,28 @@ impl Engine {
             intention,
             avoid,
             seasons,
+            sown,
         } = mind;
+        // A bush bearing berries where it once ate some on open ground: seeds grow.
+        let fruit = perception
+            .resources
+            .iter()
+            .filter(|found| {
+                matches!(
+                    found.resource.kind,
+                    crate::Material::Berries | crate::Material::Bitterberries
+                )
+            })
+            .map(|found| found.position);
+        if sown.sprouted(fruit, now) {
+            crafts.saw_planting();
+            farm_events.push(crate::FarmEvent {
+                agent,
+                at: origin,
+                planted: false,
+                watchers: 0,
+            });
+        }
         // How hard this season is, and what to get ready if the next one was
         // hard last time it came round: being where a hut is if it was cold,
         // having food on hand if it was hungry (in the last month before it).
@@ -575,6 +597,7 @@ impl Engine {
                 home,
                 others_huts: &others_huts,
                 stocking,
+                plants: crafts.knows_planting() && season != crate::Season::Winter,
                 avoid: avoid.place(now),
                 ready,
                 habits: self.policy_options.learned.then_some((&*habits, situation)),
@@ -683,7 +706,7 @@ impl Engine {
         let duration = match (goal, reason) {
             (PhysicalGoal::Hunt, _) => super::HUNT_TICKS,
             (PhysicalGoal::WarmUp | PhysicalGoal::TendFire, _) => WARM_UP_TICKS,
-            (PhysicalGoal::Craft, _) => CRAFT_TICKS,
+            (PhysicalGoal::Craft | PhysicalGoal::Plant, _) => CRAFT_TICKS,
             (PhysicalGoal::Store | PhysicalGoal::Fetch | PhysicalGoal::Drop, _) => WARM_UP_TICKS,
             // A warning is quick: a shout and a point.
             (_, PolicyReason::Warning) => WARNING_TICKS,

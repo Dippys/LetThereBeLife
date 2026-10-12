@@ -81,10 +81,10 @@ fn mind_layout_is_bounded() {
     assert_eq!(size_of::<super::PendingCorrection>(), 32);
     assert_eq!(size_of::<super::Dialogue>(), 112);
     // Map 372, social 288, lexicon 192, habits 204, dialogue 112, home 8, model 536,
-    // intention 20, avoid 12, seasons 11, beliefs 15 + 6 + 2,
+    // intention 20, avoid 12, seasons 11, sown 12, beliefs 15 + 6 + 2,
     // child flag, parent id, grief and loneliness timers, and padding.
     assert_eq!(size_of::<MentalMap>(), 372);
-    assert_eq!(size_of::<super::Mind>(), 1_816);
+    assert_eq!(size_of::<super::Mind>(), 1_832);
 }
 
 #[test]
@@ -612,4 +612,22 @@ fn someone_is_shown_the_kind_of_place_they_are_not_believed_to_know() {
         "the water they know isn't worth showing first"
     );
     assert_eq!(map.shareable(here, 0).unwrap().0, lake, "otherwise in turn");
+}
+
+#[test]
+fn a_bush_where_it_ate_berries_shows_seeds_grow() {
+    let mut sown = super::Sown::default();
+    sown.ate_at(at(10, 10), 100);
+    // A later meal elsewhere doesn't move the spot it's watching.
+    sown.ate_at(at(50, 50), 200);
+    assert!(
+        !sown.sprouted([at(10, 11)].into_iter(), 300),
+        "too soon to tell"
+    );
+    assert!(!sown.sprouted([at(13, 10)].into_iter(), 1_000), "not there");
+    assert!(sown.sprouted([at(10, 11)].into_iter(), 1_000));
+    assert!(
+        !sown.sprouted([at(10, 11)].into_iter(), 1_100),
+        "learned once"
+    );
 }

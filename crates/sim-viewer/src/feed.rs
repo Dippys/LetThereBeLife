@@ -330,6 +330,29 @@ impl Feed {
             );
         }
 
+        for farm in engine.farm_events() {
+            let who = name(engine, farm.agent);
+            if farm.planted {
+                self.push(
+                    if farm.watchers > 0 {
+                        format!("{who} planted berries while {} watched", farm.watchers)
+                    } else {
+                        format!("{who} planted berries")
+                    },
+                    Tone::Good,
+                    Some(farm.agent),
+                    farm.at,
+                );
+            } else {
+                self.tell(
+                    engine,
+                    format!("{who} saw a bush come up where they had eaten berries"),
+                    Tone::Good,
+                    Some(farm.agent),
+                    farm.at,
+                );
+            }
+        }
         for fire in engine.fire_events().iter().filter(|fire| fire.relit) {
             self.push(
                 format!("{} relit a fire", name(engine, fire.agent)),

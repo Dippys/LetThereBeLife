@@ -277,9 +277,10 @@ impl Population {
             | PhysicalGoal::TendFire
             | PhysicalGoal::Wait => AgentActivity::Idle,
             PhysicalGoal::Craft => AgentActivity::Building,
-            PhysicalGoal::Store | PhysicalGoal::Fetch | PhysicalGoal::Drop => {
-                AgentActivity::Gathering
-            }
+            PhysicalGoal::Store
+            | PhysicalGoal::Fetch
+            | PhysicalGoal::Drop
+            | PhysicalGoal::Plant => AgentActivity::Gathering,
             PhysicalGoal::Incapacitated => AgentActivity::Incapacitated,
         };
         if !scheduler.can_schedule(

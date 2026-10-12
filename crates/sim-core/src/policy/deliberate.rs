@@ -92,6 +92,11 @@ pub(crate) const HUT_SPACING: u64 = 96;
 const STORE_LOAD: u8 = 9;
 /// Food carried before a stocking trip home (more than is kept back on storing).
 const STOCK_LOAD: u8 = 7;
+/// Planting happens this close to home (cells), with this much food on
+/// hand, while fewer than this many food bushes are in view.
+const PLANTING_RANGE: u64 = 8;
+const PLANTING_SPARE: u8 = 3;
+const FEW_BUSHES: usize = 4;
 /// Food in the home hut that's stock enough for winter.
 const STOCKED_FOOD: u32 = 24;
 /// A fire with less than this much burning left (seconds) is worth feeding.
@@ -189,6 +194,8 @@ pub(crate) struct MindInput<'a> {
     pub(crate) others_huts: &'a [WorldPosition],
     /// Late autumn after a hungry winter: carry food home and put it away.
     pub(crate) stocking: bool,
+    /// Knows seeds grow, and it's a growing season.
+    pub(crate) plants: bool,
     /// A place it recently couldn't get to, avoided for now.
     pub(crate) avoid: Option<WorldPosition>,
     /// Something to get ready for a hard season it remembers coming.
@@ -644,6 +651,58 @@ impl Planner<'_> {
             toward: Some(home),
             ..trip
         })
+    }
+
+    /// Near home with berries to spare and few bushes in view: plant one on
+    /// a free cell beside it (open ground, nothing growing or built there).
+    fn plant(&self, inventory: InventoryView) -> Option<Deliberation> {
+        let home = self.mind.home?;
+        let food = self.mind.food;
+        if !self.mind.plants
+            || manhattan(home, self.origin) > PLANTING_RANGE
+            || food.carried(inventory) < PLANTING_SPARE
+        {
+            return None;
+        }
+        let bushes = self
+            .perception
+            .resources
+            .iter()
+            .chain(&self.perception.spent_resources)
+            .filter(|found| {
+                food.is_food(found.resource.kind)
+                    && found.resource.kind.properties().regrow_seconds > 0
+            })
+            .count();
+        if bushes >= FEW_BUSHES {
+            return None;
+        }
+        let taken = |cell: WorldPosition| {
+            self.perception
+                .resources
+                .iter()
+                .chain(&self.perception.spent_resources)
+                .any(|found| found.position == cell)
+                || self
+                    .perception
+                    .structures
+                    .iter()
+                    .any(|structure| structure.position == cell)
+        };
+        let spot = [(0, -1), (-1, 0), (1, 0), (0, 1)]
+            .map(|(dx, dy)| WorldPosition {
+                x: self.origin.x + dx,
+                y: self.origin.y + dy,
+            })
+            .into_iter()
+            .find(|&cell| {
+                candidate_available(self.origin, self.perception, cell) && !taken(cell)
+            })?;
+        Some(Deliberation::act(
+            PhysicalGoal::Plant,
+            spot,
+            PolicyReason::Planting,
+        ))
     }
 
     /// Goes to `hut` and does `goal` there (beside it), for `reason`.
@@ -1330,6 +1389,10 @@ impl Planner<'_> {
         // Someone who keeps fire and has none near home builds one.
         if works && let Some(hearth) = self.make_hearth(inventory) {
             return hearth;
+        }
+        // Someone who knows seeds grow plants berries by home, where few bushes are.
+        if works && let Some(plant) = self.plant(inventory) {
+            return plant;
         }
         let shelter_in_view = nearest_shelter_access(origin, self.perception).is_some();
         if !works {

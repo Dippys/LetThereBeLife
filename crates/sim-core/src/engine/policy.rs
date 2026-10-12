@@ -161,6 +161,7 @@ impl Engine {
                 | PhysicalGoal::WarmUp
                 | PhysicalGoal::TendFire
                 | PhysicalGoal::Craft
+                | PhysicalGoal::Plant
                 | PhysicalGoal::Store
                 | PhysicalGoal::Fetch
                 | PhysicalGoal::Drop

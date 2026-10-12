@@ -157,6 +157,7 @@ pub struct Engine {
     word_events: Vec<crate::WordEvent>,
     fire_events: Vec<crate::FireEvent>,
     craft_events: Vec<crate::CraftEvent>,
+    farm_events: Vec<crate::FarmEvent>,
     /// Trips abandoned because the agent stopped getting closer (for tools).
     gave_up: u64,
     /// Days and nights pass (switched off for comparisons).
@@ -224,6 +225,7 @@ impl Engine {
             word_events: Vec::new(),
             fire_events: Vec::new(),
             craft_events: Vec::new(),
+            farm_events: Vec::new(),
             gave_up: 0,
             nights: true,
             plants_sprouted: 0,
@@ -292,6 +294,7 @@ impl Engine {
                 self.word_events.clear();
                 self.fire_events.clear();
                 self.craft_events.clear();
+                self.farm_events.clear();
                 self.gave_up = 0;
                 self.plants_sprouted = 0;
                 self.plants_died = 0;

@@ -389,6 +389,18 @@ pub enum WordEvent {
     },
 }
 
+/// Someone noticed a bush where it had eaten berries (and learned that seeds
+/// grow), or planted one (latest tick, for logs and tools).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FarmEvent {
+    pub agent: AgentId,
+    pub at: WorldPosition,
+    /// It planted on purpose (otherwise, it noticed one had come up).
+    pub planted: bool,
+    /// How many saw it planted (and learned how).
+    pub watchers: u16,
+}
+
 /// Someone made something (latest tick, for logs and tools).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CraftEvent {
@@ -567,6 +579,52 @@ pub(crate) struct Mind {
     pub(crate) avoid: Avoid,
     /// How hard each season was, the last time it lived through it.
     pub(crate) seasons: SeasonMemory,
+    /// Where it last ate berries on open ground.
+    pub(crate) sown: Sown,
+}
+
+/// Seconds after eating somewhere before a bush there counts as having come
+/// up from it, and after which the spot is forgotten.
+const SOWN_WAIT: u32 = 600;
+const SOWN_FORGET: u32 = crate::SECONDS_PER_YEAR as u32;
+
+/// Where it last ate berries with no bush near, and when: if a bush bearing
+/// berries stands there later, it has seen seeds grow.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct Sown {
+    spot: Option<crate::agent::CompactPosition>,
+    at: u32,
+}
+
+impl Sown {
+    /// It ate berries at `position` with no bush near (kept until it learns
+    /// something from the spot, or forgets it).
+    pub(crate) fn ate_at(&mut self, position: WorldPosition, now: u32) {
+        if self.spot.is_none() || now.saturating_sub(self.at) > SOWN_FORGET {
+            self.spot = crate::agent::CompactPosition::checked(position);
+            self.at = now;
+        }
+    }
+
+    /// Whether a bush bearing berries now stands within a cell of the spot,
+    /// a while after it ate there: seeds grow.
+    pub(crate) fn sprouted(
+        &mut self,
+        mut bushes: impl Iterator<Item = WorldPosition>,
+        now: u32,
+    ) -> bool {
+        let Some(spot) = self.spot.map(crate::agent::CompactPosition::world) else {
+            return false;
+        };
+        if now.saturating_sub(self.at) < SOWN_WAIT {
+            return false;
+        }
+        let grew = bushes.any(|bush| bush.x.abs_diff(spot.x) + bush.y.abs_diff(spot.y) <= 1);
+        if grew {
+            self.spot = None;
+        }
+        grew
+    }
 }
 
 /// How cold and how hungry it got in each season the last time it came round

@@ -175,6 +175,8 @@ pub enum PhysicalGoal {
     Fetch = 18,
     /// Set down what it doesn't need, to make room.
     Drop = 19,
+    /// Push a carried berry into the ground beside the agent.
+    Plant = 20,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -228,6 +230,8 @@ pub enum PolicyReason {
     Fetching,
     /// Setting things down to make room.
     Unloading,
+    /// Planting berries near home.
+    Planting,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -263,6 +263,8 @@ pub struct WildlifeStats {
     pub stored: u64,
     /// Food in huts as each winter began.
     pub winter_stock: Vec<u32>,
+    /// People who noticed seeds grow; bushes planted, and times planting was watched.
+    pub farming: [u64; 3],
     /// Plans formed, completed, and given up; and how often each plan (its
     /// steps, as text) was formed.
     pub plans: [u64; 3],
@@ -562,6 +564,14 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                     food.sick += u64::from(meal.retched);
                     food.first_tastes += u64::from(meal.first_taste);
                     food.watched += u64::from(meal.watchers);
+                }
+                for farm in engine.farm_events() {
+                    if farm.planted {
+                        wildlife.farming[1] += 1;
+                        wildlife.farming[2] += u64::from(farm.watchers);
+                    } else {
+                        wildlife.farming[0] += 1;
+                    }
                 }
                 for craft in engine.craft_events() {
                     wildlife.blades += 1;
@@ -1950,6 +1960,11 @@ impl fmt::Display for StudyReport {
             formatter,
             "; food in huts as winter began {:?}",
             self.wildlife.winter_stock
+        )?;
+        let [noticed, planted, watched] = self.wildlife.farming;
+        write!(
+            formatter,
+            "\n  farming: noticed seeds grow {noticed}, bushes planted {planted} (watched {watched} times)"
         )?;
         let [(trees_before, bushes_before), (trees, bushes)] = self.wildlife.plants;
         write!(

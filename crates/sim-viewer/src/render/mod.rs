@@ -1788,7 +1788,8 @@ fn people_signs(engine: &sim_core::Engine, bounds: sim_core::WorldRect) -> Vec<P
                             PhysicalGoal::GatherMaterial
                             | PhysicalGoal::Store
                             | PhysicalGoal::Fetch
-                            | PhysicalGoal::Craft,
+                            | PhysicalGoal::Craft
+                            | PhysicalGoal::Plant,
                             _,
                         ) => ('=', colors::SIGN_WORK),
                         (PhysicalGoal::BuildShelter | PhysicalGoal::BuildHearth, _) => {

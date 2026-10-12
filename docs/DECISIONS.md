@@ -1009,3 +1009,17 @@ against 40; 135 huts lived in by 446 people (141 by 453 before). Without the fri
 was 455 and 52 (people slept out rather than in a stranger's hut). Food is put away but still
 hardly ever fetched back out.
 
+## D-128: Farming from what people notice (2026-10-12)
+
+**Decision:** Berries eaten on open ground (no bush within 2 cells) drop a seed that comes up as a
+bush beside the eater with odds 1 in 4. The eater remembers the spot; seeing a bush bearing berries
+within a cell of it later teaches it that seeds grow (`Crafts::planting`). Someone who knows plants
+berries on a free cell beside it (new goal `Plant`) when within 8 cells of home, carrying 3 or more
+food, with fewer than 4 food bushes in view, outside winter; anyone watching learns how. Nobody
+starts out knowing. Minds are 1,832 B.
+**Why:** The user asked for farming that begins with accidental sprouting and is learned by
+noticing it, not given.
+**Consequences:** Over 10 years in 20 valleys: 469 survivors against 467, deaths from cold 35
+against 41; 646 people noticed seeds grow, 639 bushes were planted, watched 1,029 times. People
+stay nearer home (tiles visited 7,414 against 8,161).
+
