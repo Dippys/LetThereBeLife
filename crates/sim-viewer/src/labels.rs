@@ -65,6 +65,8 @@ pub const fn material(material: Material) -> &'static str {
         Material::Meat => "meat",
         Material::Blade => "blades",
         Material::Hide => "hides",
+        Material::Spear => "spears",
+        Material::Basket => "baskets",
     }
 }
 
@@ -172,7 +174,7 @@ pub const fn goal(goal: PhysicalGoal) -> &'static str {
         PhysicalGoal::BuildHearth => "Building a hearth",
         PhysicalGoal::WarmUp => "Warming up by a fire",
         PhysicalGoal::TendFire => "Putting wood on a fire",
-        PhysicalGoal::Craft => "Knapping a stone blade",
+        PhysicalGoal::Craft => "Making a tool",
         PhysicalGoal::Store => "Putting things away in a hut",
         PhysicalGoal::Fetch => "Getting food from a hut",
         PhysicalGoal::Drop => "Setting things down",

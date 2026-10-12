@@ -538,10 +538,20 @@ impl Engine {
                 .into_iter()
                 .find(|material| material.properties().cutting && inventory.amount(*material) > 0)
         });
-        let chance =
-            (STRIKE_CHANCE + HELPER_CHANCE * helpers + u64::from(edge.is_some()) * EDGE_CHANCE)
-                .saturating_add_signed(self.strength(hunter))
-                .clamp(5, 95);
+        // A spear's point reaches further in.
+        let point = self.population.inventory(hunter).map_or(0, |inventory| {
+            inventory
+                .carried()
+                .map(|(material, _)| u64::from(material.properties().strike))
+                .max()
+                .unwrap_or(0)
+        });
+        let chance = (STRIKE_CHANCE
+            + HELPER_CHANCE * helpers
+            + u64::from(edge.is_some()) * EDGE_CHANCE
+            + point)
+            .saturating_add_signed(self.strength(hunter))
+            .clamp(5, 95);
         let roll = mix(self.config.life_seed
             ^ 0x4855_4e54
             ^ (u64::from(hunter.get()) << 40)

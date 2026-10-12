@@ -1035,3 +1035,18 @@ hides: `MaterialProperties::worn`) are never set down or put away. Save version 
 against 35; 51 people wear hides at the end. Before skinning came first, a full load of meat left
 no room and nobody got one.
 
+## D-130: Spears and baskets (2026-10-12)
+
+**Decision:** Two made things, both from 2 wood, kept on the body like blades and hides:
+- a `Spear` (shaped with a blade carried, `needs_edge`) adds 15 to a strike's chance to land;
+- a `Basket` adds 6 to what its carrier can hold (`InventoryView::capacity`).
+Whoever knows knapping, with an edge in hand and wood to spare, makes a basket, and if old enough
+to hunt, a spear (`make_tool`; `apply_craft` makes the first of blade, basket, spear it lacks).
+Material properties `strike`, `room`, `needs_edge`. Minds 1,840 B; save version 11. Founders no
+longer start with words for made things (`Concept::is_made`): with 15 concepts in 16 lexicon
+slots, inherited tool words crowded out words like water.
+**Why:** The user asked for tools after hide clothing: spears and baskets.
+**Consequences:** Over 10 years in 20 valleys: 491 survivors against 484, deaths from cold 26
+against 34 (more food carried and stored). Before founders lost the tool words it was 502 and 21,
+with 175 spears and 184 baskets made.
+

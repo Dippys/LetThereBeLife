@@ -598,6 +598,7 @@ impl Engine {
                 others_huts: &others_huts,
                 stocking,
                 plants: crafts.knows_planting() && season != crate::Season::Winter,
+                hunts,
                 avoid: avoid.place(now),
                 ready,
                 habits: self.policy_options.learned.then_some((&*habits, situation)),

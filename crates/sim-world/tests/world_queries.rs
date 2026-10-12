@@ -86,7 +86,11 @@ fn inspect_candidate(world: &World, position: WorldPosition) -> Option<Candidate
                             &mut inputs.food
                         }
                         Material::Wood => &mut inputs.wood,
-                        Material::Stone | Material::Blade | Material::Hide => &mut inputs.stone,
+                        Material::Stone
+                        | Material::Blade
+                        | Material::Hide
+                        | Material::Spear
+                        | Material::Basket => &mut inputs.stone,
                     };
                     *total += u32::from(resource.capacity);
                 }

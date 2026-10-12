@@ -73,12 +73,22 @@ impl InventoryView {
         total
     }
 
-    /// Room left for more of `kind`: the load is shared by every material.
-    pub const fn remaining_capacity(self, _kind: Material) -> u8 {
-        CARRY_CAPACITY.saturating_sub(self.total())
+    /// How much it can carry in all: two hands' worth, more with a basket.
+    pub fn capacity(self) -> u8 {
+        CARRY_CAPACITY
+            + self
+                .carried()
+                .map(|(material, _)| material.properties().room)
+                .max()
+                .unwrap_or(0)
     }
 
-    pub const fn can_add(self, kind: Material) -> bool {
+    /// Room left for more of `kind`: the load is shared by every material.
+    pub fn remaining_capacity(self, _kind: Material) -> u8 {
+        self.capacity().saturating_sub(self.total())
+    }
+
+    pub fn can_add(self, kind: Material) -> bool {
         self.remaining_capacity(kind) > 0
     }
 }
@@ -317,6 +327,28 @@ mod tests {
         assert_eq!(size_of::<ResourceDelta>(), 12);
         assert_eq!(align_of::<ResourceDelta>(), 4);
         assert_eq!(size_of::<Delta>(), 8);
+    }
+
+    #[test]
+    fn a_basket_holds_more_and_tools_are_kept() {
+        let hands = InventoryView::of(&[(Material::Wood, CARRY_CAPACITY)]);
+        assert!(!hands.can_add(Material::Berries));
+        let basket =
+            InventoryView::of(&[(Material::Wood, CARRY_CAPACITY - 1), (Material::Basket, 1)]);
+        assert_eq!(
+            basket.capacity(),
+            CARRY_CAPACITY + Material::Basket.properties().room
+        );
+        assert!(basket.can_add(Material::Berries));
+        for kept in [
+            Material::Blade,
+            Material::Hide,
+            Material::Spear,
+            Material::Basket,
+        ] {
+            assert!(kept.properties().worn(), "{kept:?} stays on the body");
+        }
+        assert!(!Material::Wood.properties().worn());
     }
 
     #[test]

@@ -92,6 +92,8 @@ pub(crate) const HUT_SPACING: u64 = 96;
 const STORE_LOAD: u8 = 9;
 /// Food carried before a stocking trip home (more than is kept back on storing).
 const STOCK_LOAD: u8 = 7;
+/// Wood a basket or a spear takes.
+const TOOL_WOOD: u8 = 2;
 /// Planting happens this close to home (cells), with this much food on
 /// hand, while fewer than this many food bushes are in view.
 const PLANTING_RANGE: u64 = 8;
@@ -196,6 +198,8 @@ pub(crate) struct MindInput<'a> {
     pub(crate) stocking: bool,
     /// Knows seeds grow, and it's a growing season.
     pub(crate) plants: bool,
+    /// Old enough (and able) to hunt.
+    pub(crate) hunts: bool,
     /// A place it recently couldn't get to, avoided for now.
     pub(crate) avoid: Option<WorldPosition>,
     /// Something to get ready for a hard season it remembers coming.
@@ -350,7 +354,7 @@ fn instinct(
             Deliberation::act(PhysicalGoal::Eat, origin, PolicyReason::HungerThreshold)
         }
         Some(NeedKind::Hunger)
-            if inventory.total() >= crate::CARRY_CAPACITY
+            if inventory.total() >= inventory.capacity()
                 && let Some(drop) = planner.make_room(inventory) =>
         {
             drop
@@ -530,7 +534,7 @@ impl Planner<'_> {
 
     /// A full load while short of food or of the wood for its hut: set some down.
     fn make_room(&self, inventory: InventoryView) -> Option<Deliberation> {
-        let full = inventory.total() >= crate::CARRY_CAPACITY;
+        let full = inventory.total() >= inventory.capacity();
         let food = self.mind.food;
         let short_of_food = food.carried(inventory) < self.temperament.food_reserve;
         let short_of_wood =
@@ -1585,8 +1589,22 @@ impl Planner<'_> {
         let has_edge = crate::Material::ALL
             .into_iter()
             .any(|material| material.properties().cutting && inventory.amount(material) > 0);
-        if !self.mind.knows_knapping || has_edge {
+        if !self.mind.knows_knapping {
             return None;
+        }
+        if has_edge {
+            // With an edge in hand: a basket, and for a hunter a spear, from
+            // wood it carries.
+            let has = |wanted: fn(crate::MaterialProperties) -> bool| {
+                inventory
+                    .carried()
+                    .any(|(material, _)| wanted(material.properties()))
+            };
+            let lacks = !has(|properties| properties.room > 0)
+                || (self.mind.hunts && !has(|properties| properties.strike > 0));
+            return (lacks && inventory.amount(Material::Wood) >= TOOL_WOOD).then(|| {
+                Deliberation::act(PhysicalGoal::Craft, self.origin, PolicyReason::Crafting)
+            });
         }
         let (input, amount) = crate::Material::ALL
             .into_iter()

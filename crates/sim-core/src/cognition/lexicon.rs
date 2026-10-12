@@ -47,6 +47,15 @@ impl Concept {
         }
         all
     };
+    /// Something people make or wear (a blade, a hide, a spear, a basket):
+    /// nobody starts out with a word for it.
+    pub const fn is_made(self) -> bool {
+        match self {
+            Self::Material(material) => material.properties().worn(),
+            _ => false,
+        }
+    }
+
     pub const BERRIES: Self = Self::Material(Material::Berries);
     pub const BITTERBERRIES: Self = Self::Material(Material::Bitterberries);
     pub const WOOD: Self = Self::Material(Material::Wood);
@@ -214,7 +223,10 @@ impl Lexicon {
     pub(crate) fn founding(seed: u64, agent: AgentId) -> Self {
         let mut lexicon = Self::default();
         let family = agent.get() / FAMILY_SIZE;
-        for concept in Concept::ALL {
+        for concept in Concept::ALL
+            .into_iter()
+            .filter(|concept| !concept.is_made())
+        {
             let roll = mix(seed ^ (u64::from(agent.get()) << 20) ^ (concept.index() as u64) << 4);
             let conventional = family_form(seed, family, concept);
             let form = if roll % 100 < VARIANT_PERCENT {
@@ -460,6 +472,14 @@ mod tests {
         for id in 0..FAMILY_SIZE {
             let lexicon = Lexicon::founding(seed, AgentId::new(id));
             for concept in Concept::ALL {
+                if concept.is_made() {
+                    assert_eq!(
+                        lexicon.produce(concept),
+                        None,
+                        "no word yet for {concept:?}"
+                    );
+                    continue;
+                }
                 if lexicon.produce(concept) == Some(founding_form(seed, concept)) {
                     agree += 1;
                 } else {

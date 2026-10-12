@@ -30,6 +30,10 @@ pub enum Material {
     Blade,
     /// A deer's or wolf's skin, cut off with a blade: worn, it keeps the cold off.
     Hide,
+    /// A wooden shaft shaped to a point with a blade: strikes land more often.
+    Spear,
+    /// Woven from twigs: holds more than two hands can.
+    Basket,
 }
 
 /// How a material is taken from where it's found: the motion anyone watching
@@ -73,18 +77,24 @@ pub struct MaterialProperties {
     pub regrow_seconds: u32,
     /// Cold kept off the wearer while carried (less chill on exposure).
     pub warmth: i8,
+    /// Added to the chance (in %) a strike at an animal lands, while carried.
+    pub strike: u8,
+    /// Extra things its carrier can hold.
+    pub room: u8,
+    /// Making it needs a cutting edge carried, to shape it.
+    pub needs_edge: bool,
 }
 
 impl MaterialProperties {
     /// Kept on the body rather than set down or put away: a cutting edge, or
     /// something worn for warmth.
     pub const fn worn(self) -> bool {
-        self.cutting || self.warmth > 0
+        self.cutting || self.warmth > 0 || self.strike > 0 || self.room > 0
     }
 }
 
 impl Material {
-    pub const COUNT: usize = 7;
+    pub const COUNT: usize = 9;
     pub const ALL: [Self; Self::COUNT] = [
         Self::Berries,
         Self::Bitterberries,
@@ -93,6 +103,8 @@ impl Material {
         Self::Meat,
         Self::Blade,
         Self::Hide,
+        Self::Spear,
+        Self::Basket,
     ];
 
     pub const fn properties(self) -> MaterialProperties {
@@ -109,6 +121,9 @@ impl Material {
                 builds: false,
                 regrow_seconds: 1_200,
                 warmth: 0,
+                strike: 0,
+                room: 0,
+                needs_edge: false,
             },
             Self::Bitterberries => MaterialProperties {
                 cutting: false,
@@ -122,6 +137,9 @@ impl Material {
                 builds: false,
                 regrow_seconds: 1_200,
                 warmth: 0,
+                strike: 0,
+                room: 0,
+                needs_edge: false,
             },
             Self::Wood => MaterialProperties {
                 cutting: false,
@@ -135,6 +153,9 @@ impl Material {
                 builds: true,
                 regrow_seconds: 2 * 3_600,
                 warmth: 0,
+                strike: 0,
+                room: 0,
+                needs_edge: false,
             },
             Self::Stone => MaterialProperties {
                 cutting: false,
@@ -148,6 +169,9 @@ impl Material {
                 builds: false,
                 regrow_seconds: 0,
                 warmth: 0,
+                strike: 0,
+                room: 0,
+                needs_edge: false,
             },
             Self::Meat => MaterialProperties {
                 cutting: false,
@@ -161,6 +185,9 @@ impl Material {
                 builds: false,
                 regrow_seconds: 0,
                 warmth: 0,
+                strike: 0,
+                room: 0,
+                needs_edge: false,
             },
             Self::Blade => MaterialProperties {
                 cutting: true,
@@ -174,6 +201,9 @@ impl Material {
                 builds: false,
                 regrow_seconds: 0,
                 warmth: 0,
+                strike: 0,
+                room: 0,
+                needs_edge: false,
             },
             Self::Hide => MaterialProperties {
                 cutting: false,
@@ -187,6 +217,41 @@ impl Material {
                 builds: false,
                 regrow_seconds: 0,
                 warmth: 1,
+                strike: 0,
+                room: 0,
+                needs_edge: false,
+            },
+            Self::Spear => MaterialProperties {
+                cutting: false,
+                made_from: Some((Self::Wood, 2)),
+                fuel_seconds: 0,
+                seasonal: false,
+                handling: Handling::Pick,
+                fixed_source: false,
+                nutrition: 0,
+                toxicity: 0,
+                builds: false,
+                regrow_seconds: 0,
+                warmth: 0,
+                strike: 15,
+                room: 0,
+                needs_edge: true,
+            },
+            Self::Basket => MaterialProperties {
+                cutting: false,
+                made_from: Some((Self::Wood, 2)),
+                fuel_seconds: 0,
+                seasonal: false,
+                handling: Handling::Pick,
+                fixed_source: false,
+                nutrition: 0,
+                toxicity: 0,
+                builds: false,
+                regrow_seconds: 0,
+                warmth: 0,
+                strike: 0,
+                room: 6,
+                needs_edge: false,
             },
         }
     }

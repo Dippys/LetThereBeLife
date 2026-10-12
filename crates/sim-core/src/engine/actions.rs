@@ -586,13 +586,25 @@ impl Engine {
             .population
             .inventory(agent)
             .ok_or(PolicyFailureReason::InconsistentState)?;
-        let (made, (input, amount)) = crate::Material::ALL
-            .into_iter()
-            .filter_map(|material| Some((material, material.properties().made_from?)))
-            .find(|&(made, (input, amount))| {
-                inventory.amount(input) >= amount && inventory.can_add(made)
-            })
-            .ok_or(PolicyFailureReason::TargetUnavailable)?;
+        // The first thing it can make that it doesn't have yet: a blade, then
+        // a basket, then a spear (shaped with the blade).
+        let has_edge = inventory
+            .carried()
+            .any(|(material, _)| material.properties().cutting);
+        let (made, (input, amount)) = [
+            crate::Material::Blade,
+            crate::Material::Basket,
+            crate::Material::Spear,
+        ]
+        .into_iter()
+        .filter_map(|material| Some((material, material.properties().made_from?)))
+        .find(|&(made, (input, amount))| {
+            inventory.amount(made) == 0
+                && (!made.properties().needs_edge || has_edge)
+                && inventory.amount(input) >= amount
+                && inventory.can_add(made)
+        })
+        .ok_or(PolicyFailureReason::TargetUnavailable)?;
         if self.population.take(agent, input, amount) < amount {
             return Err(PolicyFailureReason::InconsistentState);
         }

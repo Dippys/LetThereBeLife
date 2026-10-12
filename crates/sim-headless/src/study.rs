@@ -288,6 +288,9 @@ pub struct WildlifeStats {
     pub know_knapping: [u64; 2],
     /// Living people wearing a hide at the end.
     pub wearing_hides: u64,
+    /// Spears and baskets made.
+    pub spears: u64,
+    pub baskets: u64,
     /// For each need (hungry, thirsty, tired, cold): each choice's summed
     /// value times tries, and the tries, over every living mind's habits.
     pub habits: [[(i64, u64); sim_core::Choice::COUNT]; 4],
@@ -576,7 +579,9 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                     }
                 }
                 for craft in engine.craft_events() {
-                    wildlife.blades += 1;
+                    wildlife.blades += u64::from(craft.made == sim_core::Material::Blade);
+                    wildlife.spears += u64::from(craft.made == sim_core::Material::Spear);
+                    wildlife.baskets += u64::from(craft.made == sim_core::Material::Basket);
                     wildlife.watched_crafts += u64::from(craft.watchers);
                 }
                 for fire in engine.fire_events() {
@@ -1953,8 +1958,12 @@ impl fmt::Display for StudyReport {
         let [founders_knap, children_knap] = self.wildlife.know_knapping;
         write!(
             formatter,
-            "\n  tools: blades made {} (watched {} times); know how to knap: founders {founders_knap}, children {children_knap}; wearing hides {}",
-            self.wildlife.blades, self.wildlife.watched_crafts, self.wildlife.wearing_hides
+            "\n  tools: blades made {} (watched {} times); know how to knap: founders {founders_knap}, children {children_knap}; wearing hides {}; spears made {}, baskets made {}",
+            self.wildlife.blades,
+            self.wildlife.watched_crafts,
+            self.wildlife.wearing_hides,
+            self.wildlife.spears,
+            self.wildlife.baskets
         )?;
         write!(
             formatter,

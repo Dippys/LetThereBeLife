@@ -753,7 +753,7 @@ pub(super) fn person_rows(agent: &AgentInspection) -> Vec<Row> {
                 "{} ({} of {})",
                 labels::carried(inventory),
                 inventory.total(),
-                sim_core::CARRY_CAPACITY
+                inventory.capacity()
             )
         };
         rows.push(Row::Pair("Carrying", carried));
