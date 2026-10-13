@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use sim_core::{AgentActivity, Engine, WorldPosition, WorldRect};
+use sim_core::{Engine, WorldPosition, WorldRect};
 
 /// Ticks between halvings of the wear, so old paths fade (an eighth of a year).
 const FADE_TICKS: u64 = sim_core::TICKS_PER_YEAR / 8;
@@ -15,24 +15,16 @@ pub const SHOWN_WEAR: u16 = 6;
 #[derive(Debug, Default)]
 pub struct PathWear {
     wear: BTreeMap<(i64, i64), u16>,
-    /// Where each person stood at the last tick, by id.
-    last: Vec<Option<WorldPosition>>,
 }
 
 impl PathWear {
     /// Notes every step taken in the latest tick.
     pub fn record_tick(&mut self, engine: &Engine) {
-        for agent in engine.agent_views(usize::MAX) {
-            let index = agent.id.get() as usize;
-            if self.last.len() <= index {
-                self.last.resize(index + 1, None);
-            }
-            let moved = self.last[index].is_some_and(|last| last != agent.position);
-            self.last[index] = (agent.activity != AgentActivity::Dead).then_some(agent.position);
-            if moved {
+        for outcome in engine.movement_outcomes() {
+            if outcome.kind == sim_core::MovementOutcomeKind::Moved {
                 let wear = self
                     .wear
-                    .entry((agent.position.x, agent.position.y))
+                    .entry((outcome.target.x, outcome.target.y))
                     .or_default();
                 *wear = (*wear + 1).min(MAX_WEAR);
             }
@@ -58,6 +50,5 @@ impl PathWear {
 
     pub fn clear(&mut self) {
         self.wear.clear();
-        self.last.clear();
     }
 }

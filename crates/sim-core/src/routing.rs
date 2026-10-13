@@ -101,6 +101,23 @@ pub(crate) struct RoutePlanner {
     nodes: Vec<RouteNode>,
     by_position: NodeIndex,
     open: BinaryHeap<OpenNode>,
+    /// The last route found, destination first (so the next step is last).
+    path: Vec<CompactPosition>,
+}
+
+/// Whether a step from `from` onto the neighboring `to` is still open, as the
+/// planner would judge it: inside the active area, no structure, passable.
+pub(crate) fn step_open(
+    environment: RouteEnvironment<'_>,
+    from: WorldPosition,
+    to: WorldPosition,
+) -> bool {
+    environment.active_area.contains(to)
+        && environment.structures.structure_at(to).is_none()
+        && environment
+            .spawned_objects
+            .traversal_step(environment.world, from, to)
+            .is_ok_and(|step| step.cost().is_some())
 }
 
 /// Cells across the grid of node numbers around a search's origin.
@@ -210,6 +227,12 @@ impl RoutePlanner {
             self.nodes[index].closed = true;
             expansions += 1;
             if open.position == destination {
+                self.path.clear();
+                let mut node = open.node;
+                while node != 0 {
+                    self.path.push(self.nodes[usize::from(node)].position);
+                    node = self.nodes[usize::from(node)].parent;
+                }
                 return Ok(RoutePlan {
                     next: self.first_step(open.node).world(),
                     expansions,
@@ -288,6 +311,21 @@ impl RoutePlanner {
             }
         }
         Err(RouteRequestError::NoPath { expansions })
+    }
+
+    /// The rest of the last route found after its first step, destination
+    /// first (so the next step is last).
+    pub(crate) fn rest_of_path(&self) -> Vec<CompactPosition> {
+        self.path[..self.path.len().saturating_sub(1)].to_vec()
+    }
+
+    /// Whether `request` from `origin` is still one the planner would take on.
+    pub(crate) fn valid(
+        environment: RouteEnvironment<'_>,
+        origin: WorldPosition,
+        request: RouteRequest,
+    ) -> bool {
+        validate_request(environment, origin, request).is_ok()
     }
 
     fn first_step(&self, mut node: u16) -> CompactPosition {

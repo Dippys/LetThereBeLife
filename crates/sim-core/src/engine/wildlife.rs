@@ -228,32 +228,49 @@ impl Engine {
         self.wildlife.rot(now);
     }
 
-    /// The nearest bush with berries within `reach` of `here`.
+    /// The nearest bush with berries within `reach` of `here` (ties go to the
+    /// first in row-major order). Only cells with a bush, generated or
+    /// placed, are looked at.
     fn fruit_near(&self, here: WorldPosition, reach: i64) -> Option<WorldPosition> {
-        let mut nearest: Option<(i64, WorldPosition)> = None;
-        for dy in -reach..=reach {
-            for dx in -reach..=reach {
-                let cell = WorldPosition {
-                    x: here.x + dx,
-                    y: here.y + dy,
-                };
-                let fruit =
-                    self.available_resource_at(cell)
-                        .ok()
-                        .flatten()
-                        .is_some_and(|resource| {
-                            matches!(
-                                resource.kind,
-                                crate::Material::Berries | crate::Material::Bitterberries
-                            ) && resource.capacity > 0
-                        });
-                let distance = dx.abs().max(dy.abs());
-                if fruit && nearest.is_none_or(|(best, _)| distance < best) {
-                    nearest = Some((distance, cell));
-                }
+        let area = WorldRect {
+            min: WorldPosition {
+                x: here.x - reach,
+                y: here.y - reach,
+            },
+            max: WorldPosition {
+                x: here.x + reach + 1,
+                y: here.y + reach + 1,
+            },
+        };
+        let mut candidates = Vec::new();
+        self.world.visit_features_in_area(area, |feature| {
+            if matches!(
+                feature.kind,
+                crate::FeatureKind::BerryBush | crate::FeatureKind::BitterBush
+            ) {
+                candidates.push(feature.position);
             }
-        }
-        nearest.map(|(_, cell)| cell)
+        });
+        candidates.extend(
+            self.spawned_objects
+                .in_area(area)
+                .into_iter()
+                .map(|object| object.position),
+        );
+        candidates
+            .into_iter()
+            .filter(|&cell| {
+                self.available_resource_at(cell)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|resource| {
+                        matches!(
+                            resource.kind,
+                            crate::Material::Berries | crate::Material::Bitterberries
+                        ) && resource.capacity > 0
+                    })
+            })
+            .min_by_key(|cell| (chebyshev(here, *cell), cell.y, cell.x))
     }
 
     fn apply_animal_move(&mut self, index: usize, choice: Move) {

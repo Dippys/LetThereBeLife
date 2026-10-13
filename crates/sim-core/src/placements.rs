@@ -135,6 +135,18 @@ pub(crate) struct SpawnedObjects {
     /// Placed ponds among the objects (none, usually, so steps skip looking).
     #[serde(skip)]
     ponds: u32,
+    /// Where the objects are, by tile of `TILE` cells square, each tile's
+    /// positions in row-major order: what's in a small area is found from a
+    /// few tiles rather than whole rows. Lookups only, never iterated.
+    #[serde(skip)]
+    tiles: std::collections::HashMap<(i16, i16), Vec<CompactSpawnPosition>>,
+}
+
+/// Cells across a tile of the placed-object index.
+const TILE: i16 = 32;
+
+const fn tile_of(key: CompactSpawnPosition) -> (i16, i16) {
+    (key.x.div_euclid(TILE), key.y.div_euclid(TILE))
 }
 
 impl SpawnedObjects {
@@ -162,17 +174,42 @@ impl SpawnedObjects {
             replaced.is_none(),
             "placement validation rejects replacement"
         );
+        self.index(key);
         self.ponds += u32::from(kind == SpawnKind::Water);
         self.revision = self.revision.saturating_add(1);
     }
 
-    /// Counts the placed ponds again (after loading).
+    /// Counts the placed ponds and indexes the objects again (after loading).
     pub(crate) fn recount_ponds(&mut self) {
         self.ponds = self
             .objects
             .values()
             .filter(|object| object.kind == SpawnKind::Water)
             .count() as u32;
+        self.reindex();
+    }
+
+    fn index(&mut self, key: CompactSpawnPosition) {
+        let tile = self.tiles.entry(tile_of(key)).or_default();
+        if let Err(at) = tile.binary_search(&key) {
+            tile.insert(at, key);
+        }
+    }
+
+    fn unindex(&mut self, key: CompactSpawnPosition) {
+        if let Some(tile) = self.tiles.get_mut(&tile_of(key))
+            && let Ok(at) = tile.binary_search(&key)
+        {
+            tile.remove(at);
+        }
+    }
+
+    fn reindex(&mut self) {
+        self.tiles.clear();
+        let keys: Vec<CompactSpawnPosition> = self.objects.keys().copied().collect();
+        for key in keys {
+            self.index(key);
+        }
     }
 
     /// Sows a seed of `kind` at `position`: it comes up bare and bears nothing
@@ -190,6 +227,7 @@ impl SpawnedObjects {
             },
         );
         debug_assert!(replaced.is_none(), "sowing checks the spot is free");
+        self.index(key);
         self.ponds += u32::from(kind == SpawnKind::Water);
         self.revision = self.revision.saturating_add(1);
     }
@@ -200,6 +238,7 @@ impl SpawnedObjects {
         self.objects.retain(|_, object| !object.sown);
         let died = (before - self.objects.len()) as u64;
         if died > 0 {
+            self.reindex();
             self.revision = self.revision.saturating_add(1);
         }
         died
@@ -210,6 +249,7 @@ impl SpawnedObjects {
         if let Some(key) = CompactSpawnPosition::checked(position)
             && let Some(removed) = self.objects.remove(&key)
         {
+            self.unindex(key);
             self.ponds -= u32::from(removed.kind == SpawnKind::Water);
             self.revision = self.revision.saturating_add(1);
         }
@@ -220,31 +260,46 @@ impl SpawnedObjects {
         self.now = now;
     }
 
-    /// The objects in row `y` from `min_x` up to (not including) `max_x`, by x.
-    pub(crate) fn in_row(
-        &self,
-        y: i64,
-        min_x: i64,
-        max_x: i64,
-    ) -> impl Iterator<Item = SpawnedObjectView> + '_ {
-        let clamp = |value: i64| value.clamp(i64::from(i16::MIN), i64::from(i16::MAX)) as i16;
-        let row = i16::try_from(y).ok();
-        let (low, high) = (clamp(min_x), clamp(max_x));
-        row.filter(|_| low < high)
-            .into_iter()
-            .flat_map(move |row| {
-                self.objects.range(
-                    CompactSpawnPosition { y: row, x: low }..CompactSpawnPosition {
-                        y: row,
-                        x: high,
-                    },
-                )
+    /// The objects in `area`, row by row and by x within a row.
+    pub(crate) fn in_area(&self, area: crate::WorldRect) -> Vec<SpawnedObjectView> {
+        let (Some(low), Some(high)) = (
+            CompactSpawnPosition::checked(area.min),
+            CompactSpawnPosition::checked(WorldPosition {
+                x: area.max.x - 1,
+                y: area.max.y - 1,
+            }),
+        ) else {
+            return Vec::new();
+        };
+        if area.max.x <= area.min.x || area.max.y <= area.min.y {
+            return Vec::new();
+        }
+        let (first, last) = (tile_of(low), tile_of(high));
+        let mut keys = Vec::new();
+        for tile_y in first.1..=last.1 {
+            for tile_x in first.0..=last.0 {
+                if let Some(tile) = self.tiles.get(&(tile_x, tile_y)) {
+                    keys.extend(
+                        tile.iter()
+                            .copied()
+                            .filter(|key| area.contains(key.world())),
+                    );
+                }
+            }
+        }
+        if first != last {
+            keys.sort_unstable();
+        }
+        keys.into_iter()
+            .filter_map(|key| {
+                let object = self.objects.get(&key)?;
+                Some(SpawnedObjectView {
+                    position: key.world(),
+                    kind: object.kind,
+                    remaining: object.kind.resource().map(|_| object.remaining(self.now)),
+                })
             })
-            .map(|(key, object)| SpawnedObjectView {
-                position: key.world(),
-                kind: object.kind,
-                remaining: object.kind.resource().map(|_| object.remaining(self.now)),
-            })
+            .collect()
     }
 
     pub(crate) fn at(&self, position: WorldPosition) -> Option<SpawnedObjectView> {
@@ -347,6 +402,7 @@ impl SpawnedObjects {
         object.since = now;
         if object.remaining == 0 && object.kind == SpawnKind::Tree {
             self.objects.remove(&key);
+            self.unindex(key);
         }
         self.revision = self.revision.saturating_add(1);
         Some((resource.kind, gathered))
@@ -383,5 +439,41 @@ mod tests {
         assert_eq!(align_of::<CompactSpawnPosition>(), 2);
         assert_eq!(size_of::<SpawnedObject>(), 8);
         assert_eq!(align_of::<SpawnedObject>(), 4);
+    }
+
+    #[test]
+    fn objects_in_an_area_come_from_the_tile_index_in_row_order() {
+        let at = |x: i64, y: i64| WorldPosition { x, y };
+        let mut objects = SpawnedObjects::default();
+        for (x, y) in [(5, 5), (40, 5), (-3, 31), (33, 33), (31, 32), (70, 70)] {
+            objects.insert(at(x, y), SpawnKind::BerryBush);
+        }
+        objects.sow(at(32, 31), SpawnKind::BerryBush, 0);
+        objects.remove(at(5, 5));
+        let area = crate::WorldRect {
+            min: at(-4, 0),
+            max: at(41, 40),
+        };
+        let scan = |objects: &SpawnedObjects| -> Vec<WorldPosition> {
+            objects
+                .objects
+                .keys()
+                .map(|key| key.world())
+                .filter(|position| area.contains(*position))
+                .collect()
+        };
+        let found = |objects: &SpawnedObjects| -> Vec<WorldPosition> {
+            objects
+                .in_area(area)
+                .into_iter()
+                .map(|object| object.position)
+                .collect()
+        };
+        assert_eq!(found(&objects), scan(&objects));
+        assert_eq!(found(&objects).len(), 5);
+        assert_eq!(objects.wither_sown(), 1);
+        assert_eq!(found(&objects), scan(&objects));
+        objects.reindex();
+        assert_eq!(found(&objects).len(), 4);
     }
 }

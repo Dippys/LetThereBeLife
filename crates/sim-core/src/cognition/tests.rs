@@ -22,6 +22,7 @@ fn view_around(center: WorldPosition) -> PhysicalPerception {
         structures: Vec::new(),
         traversable_cells: Vec::new(),
         reachable_cells: Vec::new(),
+        reachable_mask: Vec::new(),
         reserved_cells: Vec::new(),
         spent_resources: Vec::new(),
         animals: Vec::new(),

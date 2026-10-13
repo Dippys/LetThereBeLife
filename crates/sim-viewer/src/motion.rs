@@ -25,22 +25,19 @@ impl Motion {
     /// Notes the latest tick's steps and newcomers.
     pub fn record_tick(&mut self, engine: &Engine) {
         let tick = engine.snapshot().tick;
-        for agent in engine.agent_views(usize::MAX) {
-            let index = agent.id.get() as usize;
+        for outcome in engine.movement_outcomes() {
+            if outcome.kind != sim_core::MovementOutcomeKind::Moved {
+                continue;
+            }
+            let index = outcome.agent.get() as usize;
             if self.steps.len() <= index {
                 self.steps.resize(index + 1, None);
             }
-            match &mut self.steps[index] {
-                Some(step) if step.to == agent.position => {}
-                slot => {
-                    let from = slot.map_or(agent.position, |step| step.to);
-                    *slot = Some(Step {
-                        from,
-                        to: agent.position,
-                        at: tick,
-                    });
-                }
-            }
+            self.steps[index] = Some(Step {
+                from: outcome.from.unwrap_or(outcome.target),
+                to: outcome.target,
+                at: tick,
+            });
         }
         for event in engine.family_events() {
             if let FamilyEvent::Arrived { woman, man } = *event {

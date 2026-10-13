@@ -29,7 +29,9 @@ pub use wildlife::{HUNT_TICKS, STRIKE_RANGE};
 
 use std::time::Duration;
 
-use crate::agent::Population;
+use std::collections::BTreeMap;
+
+use crate::agent::{CompactPosition, Population};
 use crate::cognition::Minds;
 use crate::diagnostics::RuntimeCounters;
 use crate::placements::SpawnedObjects;
@@ -208,6 +210,10 @@ pub struct Engine {
     spawned_objects: SpawnedObjects,
     structures: StructureStore,
     route_planner: RoutePlanner,
+    /// The rest of each walker's planned route (destination, then the steps
+    /// left, the next one last): followed until a step is blocked, then
+    /// planned again.
+    route_paths: BTreeMap<AgentId, (CompactPosition, Vec<CompactPosition>)>,
     runtime_counters: RuntimeCounters,
 }
 
@@ -284,6 +290,7 @@ impl Engine {
             spawned_objects: SpawnedObjects::default(),
             structures: StructureStore::default(),
             route_planner: RoutePlanner::default(),
+            route_paths: BTreeMap::new(),
             runtime_counters: RuntimeCounters::default(),
         }
     }
@@ -362,6 +369,7 @@ impl Engine {
                 self.spawned_objects = SpawnedObjects::default();
                 self.structures = StructureStore::default();
                 self.route_planner = RoutePlanner::default();
+                self.route_paths.clear();
                 self.runtime_counters = RuntimeCounters::default();
                 EngineCommandOutcome::Applied
             }

@@ -336,3 +336,54 @@ fn a_structure_across_a_corridor_leaves_no_path() {
         Err(RouteRequestError::NoPath { .. })
     ));
 }
+
+#[test]
+fn a_planned_route_is_remembered_as_an_open_walk_to_its_destination() {
+    let mut engine = resident_engine(256);
+    let origin = standable_steps(&engine, 1)[0].0;
+    engine
+        .initialize_population(
+            PopulationInit {
+                active_area: engine.world().initial_bounds(),
+                population: 1,
+            },
+            &[origin],
+        )
+        .unwrap();
+    let active_area = engine.world().initial_bounds();
+    let environment = crate::routing::RouteEnvironment {
+        world: &engine.world,
+        spawned_objects: &engine.spawned_objects,
+        structures: &engine.structures,
+        active_area,
+    };
+    let (destination, plan) = (6..30)
+        .flat_map(|distance| [(distance, 0), (0, distance), (-distance, 0), (0, -distance)])
+        .map(|(dx, dy)| WorldPosition {
+            x: origin.x + dx,
+            y: origin.y + dy,
+        })
+        .find_map(|destination| {
+            let request = crate::RouteRequest {
+                destination,
+                max_expansions: crate::routing::MAX_ROUTE_EXPANSIONS,
+            };
+            engine
+                .route_planner
+                .plan(environment, origin, request)
+                .ok()
+                .filter(|plan| plan.expansions > 4)
+                .map(|plan| (destination, plan))
+        })
+        .expect("a route somewhere nearby");
+    // The rest of the route, next step last: from the first step, each step
+    // is to a neighbor and open, ending at the destination.
+    let rest = engine.route_planner.rest_of_path();
+    let mut at = plan.next;
+    for step in rest.iter().rev().map(|step| step.world()) {
+        assert_eq!(at.x.abs_diff(step.x) + at.y.abs_diff(step.y), 1);
+        assert!(crate::routing::step_open(environment, at, step));
+        at = step;
+    }
+    assert_eq!(at, destination);
+}

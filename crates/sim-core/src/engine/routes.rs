@@ -75,6 +75,7 @@ impl Engine {
         };
         self.runtime_counters.route_expansions += u64::from(expansions);
         let plan = plan?;
+        self.remember_route(agent, request.destination);
         let scheduled = self
             .population
             .schedule_route_step(
@@ -111,17 +112,42 @@ impl Engine {
             self.finish_route(agent, RouteOutcomeKind::Arrived);
             return;
         }
-        match self.route_planner.plan(
-            RouteEnvironment {
-                world: &self.world,
-                spawned_objects: &self.spawned_objects,
-                structures: &self.structures,
-                active_area,
-            },
-            origin,
-            request,
-        ) {
-            Ok(plan) => {
+        let environment = RouteEnvironment {
+            world: &self.world,
+            spawned_objects: &self.spawned_objects,
+            structures: &self.structures,
+            active_area,
+        };
+        // The route planned earlier, while its next step is still open.
+        let destination = crate::agent::CompactPosition::checked(request.destination);
+        let cached = self
+            .route_paths
+            .get(&agent)
+            .filter(|(to, _)| Some(*to) == destination)
+            .and_then(|(_, steps)| steps.last())
+            .map(|step| step.world())
+            .filter(|&next| {
+                origin.x.abs_diff(next.x) + origin.y.abs_diff(next.y) == 1
+                    && crate::routing::step_open(environment, origin, next)
+                    && crate::routing::RoutePlanner::valid(environment, origin, request)
+            });
+        let next = match cached {
+            Some(next) => {
+                if let Some((_, steps)) = self.route_paths.get_mut(&agent) {
+                    steps.pop();
+                }
+                Ok(next)
+            }
+            None => {
+                let planned = self.route_planner.plan(environment, origin, request);
+                if planned.is_ok() {
+                    self.remember_route(agent, request.destination);
+                }
+                planned.map(|plan| plan.next)
+            }
+        };
+        match next {
+            Ok(next) => {
                 if let Err(error) = self.population.schedule_route_step(
                     &mut self.scheduler,
                     MovementEnvironment {
@@ -132,12 +158,25 @@ impl Engine {
                     self.time,
                     agent,
                     request,
-                    plan.next,
+                    next,
                 ) {
                     self.finish_route(agent, map_move_route_failure_kind(error));
                 }
             }
             Err(error) => self.finish_route(agent, map_route_failure_kind(error)),
+        }
+    }
+
+    /// Keeps the rest of the route just planned for `agent`.
+    fn remember_route(&mut self, agent: AgentId, destination: WorldPosition) {
+        match crate::agent::CompactPosition::checked(destination) {
+            Some(to) => {
+                self.route_paths
+                    .insert(agent, (to, self.route_planner.rest_of_path()));
+            }
+            None => {
+                self.route_paths.remove(&agent);
+            }
         }
     }
 
@@ -158,6 +197,7 @@ impl Engine {
                 Err(_) => RouteOutcomeKind::InconsistentOccupancy,
             };
         self.population.clear_route(agent);
+        self.route_paths.remove(&agent);
         self.route_outcomes.push(RouteEventOutcome {
             agent,
             at: self.time,

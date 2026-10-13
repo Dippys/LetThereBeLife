@@ -144,7 +144,9 @@ so changes are judged on behaviour counts as much as on survival.
 
 ## Recent changes
 
-- 2026-10-13 (latest): tinkering finds axes, cloaks and stone spears; people grumble about
+- 2026-10-13 (latest): the engine runs about twice as fast with identical results; the viewer
+  reaches about 6,450× (D-152).
+- 2026-10-13: tinkering finds axes, cloaks and stone spears; people grumble about
   those who wronged them, by name, and the blame can land on the wrong person; warned-about
   spots no longer set people fleeing to and from their huts all night (D-149 to D-151).
 - 2026-10-12: huddling; projects toward tools; asking to be shown how to make

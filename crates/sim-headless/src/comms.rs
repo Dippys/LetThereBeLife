@@ -103,6 +103,11 @@ pub struct SuccessEpisode {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct CommunicationLog {
     exchanges: Vec<Exchange>,
+    /// Each receiver's receptions (as exchange and reception indices, in
+    /// order) not yet acted on that changed its mind, and those whose hint
+    /// hasn't been checked yet.
+    awaiting_act: std::collections::BTreeMap<AgentId, Vec<(usize, usize)>>,
+    awaiting_outcome: std::collections::BTreeMap<AgentId, Vec<(usize, usize)>>,
     lessons: Vec<LessonEvent>,
     requests: Vec<sim_core::RequestEvent>,
     leads_followed: u64,
@@ -128,12 +133,18 @@ impl CommunicationLog {
             });
         }
         for interpretation in engine.interpretation_events() {
-            if let Some(exchange) = self
-                .exchanges
-                .iter_mut()
-                .rev()
-                .find(|exchange| exchange.signal.id == interpretation.signal)
-            {
+            if let Some(index) = self.exchange_index(interpretation.signal) {
+                let exchange = &mut self.exchanges[index];
+                let entry = (index, exchange.receptions.len());
+                let mut lists = vec![&mut self.awaiting_outcome];
+                if interpretation.changed {
+                    lists.push(&mut self.awaiting_act);
+                }
+                for list in lists {
+                    let receptions = list.entry(interpretation.receiver).or_default();
+                    let at = receptions.partition_point(|&other| other < entry);
+                    receptions.insert(at, entry);
+                }
                 exchange.receptions.push(Reception {
                     interpretation: *interpretation,
                     acted_at: None,
@@ -150,20 +161,20 @@ impl CommunicationLog {
             }
             // Checking out a hint (goal Explore) names no kind: any place hint counts.
             let kind = kind_for_goal(decision.goal);
-            if let Some(reception) =
-                self.latest_reception(decision.agent, None, kind, |reception| {
-                    reception.interpretation.changed && reception.acted_at.is_none()
-                })
-            {
-                reception.acted_at = Some(decision.at.ticks());
+            if let Some(found) = Self::latest_reception(
+                &self.exchanges,
+                &mut self.awaiting_act,
+                decision.agent,
+                None,
+                kind,
+            ) {
+                self.exchanges[found.0].receptions[found.1].acted_at = Some(decision.at.ticks());
             }
         }
         for repair in engine.repair_events() {
             if let Some(reception) = self
-                .exchanges
-                .iter_mut()
-                .rev()
-                .find(|exchange| exchange.signal.id == repair.signal)
+                .exchange_index(repair.signal)
+                .map(|index| &mut self.exchanges[index])
                 .and_then(|exchange| {
                     exchange
                         .receptions
@@ -177,67 +188,71 @@ impl CommunicationLog {
         self.lessons.extend_from_slice(engine.lesson_events());
         self.requests.extend_from_slice(engine.request_events());
         for lead in engine.lead_events() {
-            if let Some(reception) = self
-                .exchanges
-                .iter_mut()
-                .rev()
-                .find(|exchange| exchange.signal.id == lead.signal)
-                .and_then(|exchange| {
-                    exchange
-                        .receptions
-                        .iter_mut()
-                        .find(|reception| reception.interpretation.receiver == lead.agent)
-                })
-                && reception.acted_at.is_none()
+            if let Some(index) = self.exchange_index(lead.signal)
+                && let Some(at) = self.exchanges[index]
+                    .receptions
+                    .iter()
+                    .position(|reception| reception.interpretation.receiver == lead.agent)
+                && self.exchanges[index].receptions[at].acted_at.is_none()
             {
-                reception.acted_at = Some(lead.at.ticks());
+                self.exchanges[index].receptions[at].acted_at = Some(lead.at.ticks());
+                if let Some(list) = self.awaiting_act.get_mut(&lead.agent)
+                    && let Ok(found) = list.binary_search(&(index, at))
+                {
+                    list.remove(found);
+                }
                 self.leads_followed += 1;
             }
         }
         for request in engine.request_events() {
-            if let Some(exchange) = self
-                .exchanges
-                .iter_mut()
-                .rev()
-                .find(|exchange| exchange.signal.id == request.signal)
-            {
-                exchange.answer = Some(request.response);
+            if let Some(index) = self.exchange_index(request.signal) {
+                self.exchanges[index].answer = Some(request.response);
             }
         }
         for outcome in engine.hint_outcomes() {
-            if let Some(reception) = self.latest_reception(
+            if let Some(found) = Self::latest_reception(
+                &self.exchanges,
+                &mut self.awaiting_outcome,
                 outcome.agent,
                 outcome.teller,
                 Some(outcome.kind),
-                |reception| reception.outcome.is_none(),
             ) {
-                reception.outcome = Some((outcome.confirmed, outcome.at.ticks()));
+                self.exchanges[found.0].receptions[found.1].outcome =
+                    Some((outcome.confirmed, outcome.at.ticks()));
             }
         }
     }
 
-    /// The most recent reception by `receiver` about `kind` (from `sender`, if given).
+    /// The most recent reception still waiting in `awaiting` by `receiver`
+    /// about `kind` (from `sender`, if given): newest exchange first, within
+    /// one in the order received. It's taken off the list.
     fn latest_reception(
-        &mut self,
+        exchanges: &[Exchange],
+        awaiting: &mut std::collections::BTreeMap<AgentId, Vec<(usize, usize)>>,
         receiver: AgentId,
         sender: Option<AgentId>,
         kind: Option<LandmarkKind>,
-        accept: impl Fn(&Reception) -> bool,
-    ) -> Option<&mut Reception> {
-        self.exchanges
-            .iter_mut()
+    ) -> Option<(usize, usize)> {
+        let entries = awaiting.get_mut(&receiver)?;
+        let found = entries
+            .chunk_by(|a, b| a.0 == b.0)
             .rev()
-            .filter(|exchange| sender.is_none_or(|sender| exchange.signal.signal.sender == sender))
-            .flat_map(|exchange| exchange.receptions.iter_mut())
-            .find(|reception| {
-                reception.interpretation.receiver == receiver
+            .flatten()
+            .copied()
+            .find(|&(exchange, reception)| {
+                let exchange = &exchanges[exchange];
+                let reception = &exchange.receptions[reception];
+                sender.is_none_or(|sender| exchange.signal.signal.sender == sender)
                     && match (kind, reception.interpretation.understood) {
                         (Some(kind), understood) => understood == GestureTopic::Place(kind),
                         (None, GestureTopic::Place(_)) => true,
                         (None, GestureTopic::Explored | GestureTopic::Animal(_)) => false,
                     }
-                    && accept(reception)
-            })
+            })?;
+        if let Ok(at) = entries.binary_search(&found) {
+            entries.remove(at);
+        }
+        Some(found)
     }
 
     pub fn exchanges(&self) -> &[Exchange] {

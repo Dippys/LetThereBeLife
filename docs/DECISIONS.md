@@ -1352,3 +1352,25 @@ away didn't stop it.
 **Consequences:** No valley has a flee storm. With D-149 and D-150, over 10 years in 20 valleys:
 512 survivors against 512, cold deaths 21 against 20, births 198 against 211, wolf bites 956
 against 955. The warning test now puts its wolf 5-6 cells away.
+
+## D-152: Speed, with results unchanged (2026-10-13)
+
+**Decision:** The engine runs about twice as fast with identical results (study output and
+fingerprints match byte for byte):
+- Walkers follow the route they planned instead of planning it again every step, until a step is
+  blocked (`Engine::route_paths`, saved; save 26).
+- Grazing deer look for berries only where bushes are, not in every cell around them.
+- Perception reads structures and placed objects through one walk and a 32-cell tile index
+  (`SpawnedObjects::tiles`, rebuilt on load). It keeps only the feature kind per cell, and checks
+  reachability with a mask (`PhysicalPerception::reachable_mask`) and a bordered grid.
+- World chunks are found through a hash index (`ChunkMap`) and walked in order through a
+  sorted one.
+- Release builds use full LTO.
+
+The viewer's step and path recorders read the tick's moves instead of every person. The study's
+communication log is indexed, so heavy valleys no longer slow down quadratically (valley 46, 10
+years: 7 min 53 s to 26 s).
+**Why:** The owner found the "1 year a second" speed reached only about 3,200×. It now reaches
+about 6,450× in the viewer. Per year, decisions (perception and deliberation, about 20 µs each)
+are now most of the cost. More speed would mean fewer decisions while walking, which changes
+behaviour.

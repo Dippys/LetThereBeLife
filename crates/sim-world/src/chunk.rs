@@ -2,7 +2,7 @@
 
 use crate::{CHUNK_SIZE, Feature, GenerateAreaError, TerrainCell, WorldPosition, WorldRect};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ChunkCoord {
     pub x: i64,
     pub y: i64,

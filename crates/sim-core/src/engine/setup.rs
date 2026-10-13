@@ -115,6 +115,7 @@ impl Engine {
         self.minds = Minds::new(self.config.life_seed);
         self.route_outcomes.clear();
         self.route_planner = RoutePlanner::default();
+        self.route_paths.clear();
         self.runtime_counters = RuntimeCounters::default();
         Ok(outcome)
     }

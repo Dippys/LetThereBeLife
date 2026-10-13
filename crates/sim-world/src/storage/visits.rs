@@ -152,6 +152,43 @@ impl World {
         }
     }
 
+    /// Visits the features in `bounds`, chunk by chunk (row-major within each
+    /// chunk), without visiting the cells between them.
+    pub fn visit_features_in_area(&self, bounds: WorldRect, mut visitor: impl FnMut(&Feature)) {
+        if bounds.max.x <= bounds.min.x || bounds.max.y <= bounds.min.y {
+            return;
+        }
+        let first = ChunkCoord::from_world_position(bounds.min);
+        let last = ChunkCoord::from_world_position(WorldPosition {
+            x: bounds.max.x - 1,
+            y: bounds.max.y - 1,
+        });
+        for chunk_y in first.y..=last.y {
+            for chunk_x in first.x..=last.x {
+                let coord = ChunkCoord {
+                    x: chunk_x,
+                    y: chunk_y,
+                };
+                let Some(chunk) = self.chunks.get(&coord) else {
+                    continue;
+                };
+                let Some(clipped) = intersection(chunk.bounds(coord), bounds) else {
+                    continue;
+                };
+                let features = chunk.features();
+                let start = features.partition_point(|feature| feature.position.y < clipped.min.y);
+                for feature in features[start..]
+                    .iter()
+                    .take_while(|feature| feature.position.y < clipped.max.y)
+                {
+                    if clipped.contains(feature.position) {
+                        visitor(feature);
+                    }
+                }
+            }
+        }
+    }
+
     /// Visits every resident cell in one known chunk without scanning other entries.
     pub fn visit_cells_in_chunk(
         &self,

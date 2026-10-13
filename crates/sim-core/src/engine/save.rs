@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::Engine;
 
 /// Bumped whenever the saved layout changes; older saves are refused.
-const SAVE_VERSION: u32 = 25;
+const SAVE_VERSION: u32 = 26;
 
 /// What a save holds, borrowed from a running engine.
 #[derive(Serialize)]
@@ -40,6 +40,13 @@ struct SavedRef<'a> {
     resource_deltas: &'a crate::resources::ResourceDeltas,
     spawned_objects: &'a crate::placements::SpawnedObjects,
     structures: &'a crate::structures::StructureStore,
+    route_paths: &'a std::collections::BTreeMap<
+        crate::AgentId,
+        (
+            crate::agent::CompactPosition,
+            Vec<crate::agent::CompactPosition>,
+        ),
+    >,
     runtime_counters: &'a crate::diagnostics::RuntimeCounters,
 }
 
@@ -73,6 +80,13 @@ struct Saved {
     resource_deltas: crate::resources::ResourceDeltas,
     spawned_objects: crate::placements::SpawnedObjects,
     structures: crate::structures::StructureStore,
+    route_paths: std::collections::BTreeMap<
+        crate::AgentId,
+        (
+            crate::agent::CompactPosition,
+            Vec<crate::agent::CompactPosition>,
+        ),
+    >,
     runtime_counters: crate::diagnostics::RuntimeCounters,
 }
 
@@ -149,6 +163,7 @@ impl Engine {
             resource_deltas: &self.resource_deltas,
             spawned_objects: &self.spawned_objects,
             structures: &self.structures,
+            route_paths: &self.route_paths,
             runtime_counters: &self.runtime_counters,
         };
         let mut output = std::io::BufWriter::new(output);
@@ -220,6 +235,7 @@ impl Engine {
         engine.spawned_objects = saved.spawned_objects;
         engine.spawned_objects.recount_ponds();
         engine.structures = saved.structures;
+        engine.route_paths = saved.route_paths;
         engine.runtime_counters = saved.runtime_counters;
         Ok(engine)
     }

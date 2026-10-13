@@ -143,7 +143,7 @@ impl Population {
         // Each cell is looked up once: its terrain and generated feature
         // (chunk by chunk), then anything placed or grown there, and any structure.
         let width_cells = width as usize;
-        let mut terrain: Vec<Option<(crate::TerrainCell, Option<crate::Feature>)>> = Vec::new();
+        let mut terrain: Vec<Option<(crate::TerrainCell, Option<crate::FeatureKind>)>> = Vec::new();
         terrain
             .try_reserve_exact(cell_count)
             .map_err(|_| PerceptionError::AllocationFailed)?;
@@ -151,22 +151,27 @@ impl Population {
         world.visit_area(area, |position, cell, feature| {
             let index = (position.y - area.min.y) as usize * width_cells
                 + (position.x - area.min.x) as usize;
-            terrain[index] = Some((cell, feature));
+            terrain[index] = Some((cell, feature.map(|feature| feature.kind)));
         });
+        if !crate::WORLD_GENERATION_BOUNDS.contains(area.min)
+            || !crate::WORLD_GENERATION_BOUNDS.contains(WorldPosition {
+                x: area.max.x - 1,
+                y: area.max.y - 1,
+            })
+        {
+            return Err(PerceptionError::OutsideWorld);
+        }
+        // What's placed and built in view, walked alongside the cells.
+        let mut row_objects = spawned_objects.in_area(area).into_iter().peekable();
+        let mut row_structures = structures.positions_in(area).peekable();
         for y in area.min.y..area.max.y {
-            // What's placed and built in this row, walked alongside the cells.
-            let mut row_objects = spawned_objects.in_row(y, area.min.x, area.max.x).peekable();
-            let mut row_structures = structures.xs_in_row(y, area.min.x, area.max.x).peekable();
             for x in area.min.x..area.max.x {
                 let position = WorldPosition { x, y };
-                if !crate::WORLD_GENERATION_BOUNDS.contains(position) {
-                    return Err(PerceptionError::OutsideWorld);
-                }
                 let index = (y - area.min.y) as usize * width_cells + (x - area.min.x) as usize;
                 let (cell, feature) = terrain[index].ok_or(PerceptionError::Unloaded)?;
                 elevations.push(cell.elevation);
-                let object = row_objects.next_if(|object| object.position.x == x);
-                let built = row_structures.next_if_eq(&x).is_some();
+                let object = row_objects.next_if(|object| object.position == position);
+                let built = row_structures.next_if_eq(&position).is_some();
                 let placed_water = object.is_some_and(|object| object.kind == SpawnKind::Water);
                 let water = cell
                     .water()
@@ -177,7 +182,7 @@ impl Population {
                 let blocks = |kind: crate::FeatureKind| {
                     matches!(kind, crate::FeatureKind::Tree | crate::FeatureKind::Rock)
                 };
-                if feature.is_some_and(|feature| blocks(feature.kind))
+                if feature.is_some_and(blocks)
                     || object
                         .and_then(|object| object.kind.feature())
                         .is_some_and(blocks)
@@ -189,7 +194,7 @@ impl Population {
                 {
                     try_push(&mut drinkable_water, PerceivedWater { position, source })?;
                 }
-                let base = feature.map(crate::Feature::base_resource);
+                let base = feature.map(crate::FeatureKind::base_resource);
                 let placed = object.and_then(|object| {
                     let mut resource = object.kind.resource()?;
                     resource.capacity = object.remaining?;
@@ -214,7 +219,7 @@ impl Population {
                 }
             }
         }
-        let reachable_cells = {
+        let (reachable_cells, reachable_mask) = {
             let swimmable: Vec<WorldPosition> =
                 drinkable_water.iter().map(|water| water.position).collect();
             reachable_cells(
@@ -234,6 +239,7 @@ impl Population {
             structures: perceived_structures,
             traversable_cells,
             reachable_cells,
+            reachable_mask,
             reserved_cells,
             spent_resources,
             animals: Vec::new(),

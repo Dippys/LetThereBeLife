@@ -313,68 +313,57 @@ pub(super) fn reachable_cells(
     traversable_cells: &[WorldPosition],
     swimmable_cells: &[WorldPosition],
     elevations: &[u16],
-) -> Result<Vec<WorldPosition>, PerceptionError> {
+) -> Result<(Vec<WorldPosition>, Vec<bool>), PerceptionError> {
     let width =
         usize::try_from(area.max.x - area.min.x).map_err(|_| PerceptionError::AreaOutsideActive)?;
     let height =
         usize::try_from(area.max.y - area.min.y).map_err(|_| PerceptionError::AreaOutsideActive)?;
-    let cell_count = width
+    width
         .checked_mul(height)
         .ok_or(PerceptionError::AreaTooLarge {
             requested: u64::MAX,
             maximum: MAX_PERCEPTION_CELLS,
         })?;
+    // A grid with a closed border a cell wide all round, so the search needs
+    // no edge checks: 0 closed, 1 open, 2 reached; water only carries the
+    // search across.
+    let stride = width + 2;
     let cell_index = |position: WorldPosition| {
-        (position.y - area.min.y) as usize * width + (position.x - area.min.x) as usize
+        (position.y - area.min.y + 1) as usize * stride + (position.x - area.min.x + 1) as usize
     };
     let mut reachability = Vec::new();
     reachability
-        .try_reserve_exact(cell_count)
+        .try_reserve_exact(stride * (height + 2))
         .map_err(|_| PerceptionError::AllocationFailed)?;
-    reachability.resize(cell_count, 0_u8);
-    // 1: open, 2: reached; water only carries the search across.
+    reachability.resize(stride * (height + 2), 0_u8);
+    let mut heights = vec![0_u16; stride * (height + 2)];
+    for (row, line) in elevations.chunks_exact(width).take(height).enumerate() {
+        let start = (row + 1) * stride + 1;
+        heights[start..start + width].copy_from_slice(line);
+    }
     for &position in traversable_cells.iter().chain(swimmable_cells) {
         if area.contains(position) {
             reachability[cell_index(position)] = 1;
         }
     }
-    let mut queue = Vec::new();
+    let mut queue: Vec<usize> = Vec::new();
     queue
         .try_reserve(traversable_cells.len() + swimmable_cells.len())
         .map_err(|_| PerceptionError::AllocationFailed)?;
-    if reachability[cell_index(origin)] == 1 {
+    if area.contains(origin) && reachability[cell_index(origin)] == 1 {
         reachability[cell_index(origin)] = 2;
-        queue.push(origin);
+        queue.push(cell_index(origin));
     }
 
     let mut head = 0;
     while let Some(&current) = queue.get(head) {
         head += 1;
-        for neighbor in [
-            WorldPosition {
-                x: current.x,
-                y: current.y - 1,
-            },
-            WorldPosition {
-                x: current.x - 1,
-                y: current.y,
-            },
-            WorldPosition {
-                x: current.x + 1,
-                y: current.y,
-            },
-            WorldPosition {
-                x: current.x,
-                y: current.y + 1,
-            },
-        ] {
-            if !area.contains(neighbor) || reachability[cell_index(neighbor)] != 1 {
-                continue;
-            }
-            if elevations[cell_index(current)].abs_diff(elevations[cell_index(neighbor)])
-                <= MAX_TRAVERSABLE_ELEVATION_DELTA
+        let here = heights[current];
+        for neighbor in [current - stride, current - 1, current + 1, current + stride] {
+            if reachability[neighbor] == 1
+                && here.abs_diff(heights[neighbor]) <= MAX_TRAVERSABLE_ELEVATION_DELTA
             {
-                reachability[cell_index(neighbor)] = 2;
+                reachability[neighbor] = 2;
                 queue.push(neighbor);
             }
         }
@@ -384,13 +373,18 @@ pub(super) fn reachable_cells(
     reachable
         .try_reserve(queue.len())
         .map_err(|_| PerceptionError::AllocationFailed)?;
+    let mut mask = vec![false; width * height];
     reachable.extend(
         traversable_cells
             .iter()
             .copied()
             .filter(|position| reachability[cell_index(*position)] == 2),
     );
-    Ok(reachable)
+    for position in &reachable {
+        mask[(position.y - area.min.y) as usize * width + (position.x - area.min.x) as usize] =
+            true;
+    }
+    Ok((reachable, mask))
 }
 
 fn invalid_spawn_reason(

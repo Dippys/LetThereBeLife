@@ -243,12 +243,7 @@ fn cardinal_neighbors(position: WorldPosition) -> std::array::IntoIter<WorldPosi
 }
 
 fn traversable(perception: &PhysicalPerception, position: WorldPosition) -> bool {
-    perception
-        .reachable_cells
-        .binary_search_by_key(&(position.y, position.x), |candidate| {
-            (candidate.y, candidate.x)
-        })
-        .is_ok()
+    perception.reachable(position)
 }
 
 pub(super) fn candidate_available(

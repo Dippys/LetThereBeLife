@@ -1,7 +1,8 @@
 //! The `World` store: a declared bootstrap area plus a deterministic,
 //! chunk-backed materialization cache.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::hash::{BuildHasherDefault, Hasher};
 
 use crate::{
     ChunkCoord, ChunkInspection, ChunkLocalPosition, ChunkPresence, GenerateAreaError,
@@ -26,8 +27,92 @@ pub struct World {
     seed: u64,
     width: u32,
     height: u32,
-    chunks: BTreeMap<ChunkCoord, LoadedChunk>,
+    chunks: ChunkMap,
     revision: u64,
+}
+
+/// Resident chunks: found by coordinate through a hash index (lookups only,
+/// many per tick), walked in coordinate order through a sorted one.
+#[derive(Debug, Clone, Default)]
+struct ChunkMap {
+    chunks: Vec<LoadedChunk>,
+    order: BTreeMap<ChunkCoord, usize>,
+    lookup: HashMap<ChunkCoord, usize, BuildHasherDefault<CoordHasher>>,
+}
+
+impl PartialEq for ChunkMap {
+    fn eq(&self, other: &Self) -> bool {
+        self.len() == other.len() && self.iter().eq(other.iter())
+    }
+}
+
+impl Eq for ChunkMap {}
+
+impl ChunkMap {
+    fn get(&self, coord: &ChunkCoord) -> Option<&LoadedChunk> {
+        self.lookup.get(coord).map(|&index| &self.chunks[index])
+    }
+
+    fn insert(&mut self, coord: ChunkCoord, chunk: LoadedChunk) {
+        match self.lookup.get(&coord) {
+            Some(&index) => self.chunks[index] = chunk,
+            None => {
+                let index = self.chunks.len();
+                self.chunks.push(chunk);
+                self.order.insert(coord, index);
+                self.lookup.insert(coord, index);
+            }
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.chunks.len()
+    }
+
+    /// In coordinate order.
+    fn iter(&self) -> impl Iterator<Item = (&ChunkCoord, &LoadedChunk)> {
+        self.order
+            .iter()
+            .map(|(coord, &index)| (coord, &self.chunks[index]))
+    }
+}
+
+impl<'a> IntoIterator for &'a ChunkMap {
+    type Item = (&'a ChunkCoord, &'a LoadedChunk);
+    type IntoIter = Box<dyn Iterator<Item = Self::Item> + 'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Box::new(self.iter())
+    }
+}
+
+/// A fast hash for chunk coordinates (a multiply and a fold), for the
+/// lookup index only.
+#[derive(Default)]
+struct CoordHasher(u64);
+
+impl Hasher for CoordHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            self.write_u64(u64::from(byte));
+        }
+    }
+
+    fn write_i64(&mut self, value: i64) {
+        self.write_u64(value as u64);
+    }
+
+    fn write_i32(&mut self, value: i32) {
+        self.write_u64(u64::from(value as u32));
+    }
+
+    fn write_u64(&mut self, value: u64) {
+        self.0 = (self.0.rotate_left(5) ^ value).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+
+    fn finish(&self) -> u64 {
+        self.0 ^ (self.0 >> 29)
+    }
 }
 
 impl World {
@@ -37,7 +122,7 @@ impl World {
             seed,
             width: config.initial_width(),
             height: config.initial_height(),
-            chunks: BTreeMap::new(),
+            chunks: ChunkMap::default(),
             revision: 0,
         }
     }
