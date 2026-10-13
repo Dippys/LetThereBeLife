@@ -1374,3 +1374,17 @@ years: 7 min 53 s to 26 s).
 about 6,450× in the viewer. Per year, decisions (perception and deliberation, about 20 µs each)
 are now most of the cost. More speed would mean fewer decisions while walking, which changes
 behaviour.
+
+## D-153: Dead plants sprout again from stumps and roots (2026-10-14)
+
+**Decision:** Each spring, a felled or dead tree near people sprouts again from its stump (odds
+1 in 8 a year), and a dead bush comes up from its roots (1 in 4), unless someone or something
+stands there. A tree starts as a sapling with 2 wood; a bush grows its berries back.
+**Why:** The owner saw bands die out after a while. Over 80 years, generated plants died or were
+felled and never came back, so valleys lost their trees (463 to 0 in one run) and three quarters
+of their bushes. Then fires, huts and food failed, and cold killed the band. Four life seeds in
+world 1 ended with 0, 7, 8 and 23 people.
+**Consequences:** Over 80 years in six life seeds of world 1: 25 to 98 people, with 5 to 19 cold
+deaths; trees 387-650, bushes about 3,700. Seedlings spreading into open ground make bushes level
+off at about 2.8 times the start. Over 10 years in 20 valleys there is no clear change: 507
+survivors against 512, cold deaths 26 against 21, births 202 against 198.

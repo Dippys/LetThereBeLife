@@ -294,6 +294,20 @@ impl ResourceDeltas {
         );
     }
 
+    /// The dead plant at `position` comes up again from its roots or stump,
+    /// holding `remaining` and growing from now on.
+    pub(crate) fn revive(&mut self, position: WorldPosition, remaining: u16) {
+        if let Some(key) = CompactFeaturePosition::checked(position) {
+            self.remaining.insert(
+                key,
+                Delta {
+                    remaining,
+                    since: self.now,
+                },
+            );
+        }
+    }
+
     /// Whether the generated plant at `position` has died or been felled.
     pub(crate) fn is_dead(&self, position: WorldPosition) -> bool {
         CompactFeaturePosition::checked(position)
@@ -343,6 +357,28 @@ mod tests {
     use std::mem::{align_of, size_of};
 
     use super::*;
+
+    #[test]
+    fn a_dead_plant_sprouts_again_and_grows() {
+        let mut deltas = ResourceDeltas::default();
+        let at = WorldPosition { x: 3, y: 4 };
+        let tree = BaseResource {
+            capacity: 120,
+            kind: Material::Wood,
+        };
+        deltas.kill(at);
+        assert!(deltas.is_dead(at));
+        assert_eq!(deltas.remaining_of(at, tree), None, "a stump grows nothing");
+        deltas.revive(at, 2);
+        assert!(!deltas.is_dead(at));
+        assert_eq!(
+            deltas.remaining_of(at, tree).map(|wood| wood.capacity),
+            Some(2)
+        );
+        deltas.advance(crate::SimTime::from_ticks(60 * 60 * 60 * 24 * 30));
+        let grown = deltas.remaining_of(at, tree).unwrap().capacity;
+        assert!(grown > 2 && grown <= 120, "{grown}");
+    }
 
     #[test]
     fn compact_inventory_and_delta_layouts_are_fixed() {

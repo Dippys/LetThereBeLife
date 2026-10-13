@@ -144,7 +144,9 @@ so changes are judged on behaviour counts as much as on survival.
 
 ## Recent changes
 
-- 2026-10-13 (latest): the engine runs about twice as fast with identical results; the viewer
+- 2026-10-14 (latest): felled trees and dead bushes sprout again, so valleys stay green and
+  bands last for generations instead of dying out (D-153).
+- 2026-10-13: the engine runs about twice as fast with identical results; the viewer
   reaches about 6,450× (D-152).
 - 2026-10-13: tinkering finds axes, cloaks and stone spears; people grumble about
   those who wronged them, by name, and the blame can land on the wrong person; warned-about

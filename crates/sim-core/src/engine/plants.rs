@@ -19,6 +19,11 @@ const TREE_SEEDING_ODDS: u64 = 15;
 const SEED_REACH: i64 = 5;
 /// How far around a plant counts as its patch (7x7 cells).
 const PATCH_REACH: i64 = 3;
+/// A felled or dead tree's stump sprouts again in a given year with odds 1
+/// in this; a dead bush comes up again from its roots with odds 1 in
+/// `ROOTS_SPROUT_ODDS`. So the land comes back to what grew on it.
+const STUMP_SPROUT_ODDS: u64 = 8;
+const ROOTS_SPROUT_ODDS: u64 = 4;
 /// Wood a sapling starts with (it grows like any tree).
 const SAPLING_WOOD: u16 = 2;
 /// Plants live, die and seed only this close (cells) to someone living:
@@ -89,6 +94,38 @@ impl Engine {
                 living.push((position, kind));
             }
         }
+        // Stumps and roots of dead plants sprout again, where nothing stands
+        // on them.
+        let dead: Vec<WorldPosition> = self
+            .resource_deltas
+            .dead()
+            .filter(|&position| near_people(position))
+            .collect();
+        for position in dead {
+            let Some(kind) = self.world.feature_at(position).map(|feature| feature.kind) else {
+                continue;
+            };
+            let odds = match kind {
+                FeatureKind::Tree => STUMP_SPROUT_ODDS,
+                FeatureKind::BerryBush | FeatureKind::BitterBush => ROOTS_SPROUT_ODDS,
+                FeatureKind::Rock => continue,
+            };
+            if roll(position, 0x5350_524f) % odds != 0
+                || self.population.spatial().occupant(position).is_some()
+                || self.structures.structure_at(position).is_some()
+            {
+                continue;
+            }
+            let start = if kind == FeatureKind::Tree {
+                SAPLING_WOOD
+            } else {
+                0
+            };
+            self.resource_deltas.revive(position, start);
+            living.push((position, kind));
+            self.plants_sprouted += 1;
+        }
+        living.sort_unstable_by_key(|&(position, kind)| (position.y, position.x, kind as u8));
         // Where living plants stand, row by row, for counting a patch quickly.
         let mut standing: std::collections::BTreeSet<(i64, i64)> = living
             .iter()
