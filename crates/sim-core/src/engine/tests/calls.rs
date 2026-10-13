@@ -129,6 +129,11 @@ fn a_wolf_misread_as_deer_is_hunted_found_out_and_corrected() {
             .quarry
             .is_some()
     );
+    // Carrying all the food it likes to have, it has no reason to stock up
+    // at berries it sees far off.
+    engine
+        .population
+        .add_inventory(AgentId::new(1), crate::Material::Berries, 9);
     let choice = decide(&mut engine, AgentId::new(1));
     assert_eq!(choice.reason, PolicyReason::Hunting);
     assert_eq!(engine.lead_events().len(), 1);

@@ -149,8 +149,11 @@ fn people_run_from_animals_they_fear_and_go_after_ones_they_hunt() {
     let fleeing = decide(&mut engine);
     assert_eq!(fleeing.reason, PolicyReason::Fleeing);
 
-    // Same spot with a deer instead: a diligent hunter closes in or strikes.
+    // Same spot with a deer instead: a diligent hunter closes in or strikes
+    // (carrying all the food it likes to have, so berries seen far off don't
+    // draw it away).
     engine.wildlife.animals.clear();
+    engine.population.add_inventory(agent, Material::Berries, 9);
     let deer_at = free_cell_near(&engine, origin, 2);
     assert!(engine.spawn_animal(Species::Deer, deer_at));
     let mut hunted = false;
@@ -195,4 +198,31 @@ fn someone_knocked_down_by_bites_comes_round_and_decides_again() {
     let health = engine.health(victim).unwrap();
     assert_eq!(health.status, crate::HealthStatus::Healthy);
     assert!(health.value > crate::HEALTH_INCAPACITATION_THRESHOLD);
+}
+
+#[test]
+fn a_pond_far_ahead_is_made_out_roughly_and_not_one_behind() {
+    let engine = resident_engine(256);
+    let origin = standable_steps(&engine, 1)[0].0;
+    let mut engine = engine;
+    let pond = (30..60)
+        .map(|distance| WorldPosition {
+            x: origin.x + distance,
+            y: origin.y,
+        })
+        .find(|&cell| engine.can_sprout_at(cell))
+        .expect("open ground to the east");
+    engine.spawned_objects.insert(pond, crate::SpawnKind::Water);
+    let agent = AgentId::new(0);
+    let near_pond = |sightings: &[super::super::sight::Sighting]| {
+        sightings.iter().any(|sighting| {
+            sighting.kind == crate::cognition::LandmarkKind::Water
+                && sighting.estimate.x.abs_diff(pond.x) <= 6
+                && sighting.estimate.y.abs_diff(pond.y) <= 6
+        })
+    };
+    let ahead = engine.far_sight(agent, origin, crate::policy::ExplorationHeading::East);
+    let behind = engine.far_sight(agent, origin, crate::policy::ExplorationHeading::West);
+    assert!(near_pond(&ahead), "seen: {ahead:?}");
+    assert!(!near_pond(&behind));
 }

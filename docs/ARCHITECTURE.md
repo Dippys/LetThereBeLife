@@ -87,7 +87,8 @@ Engine::new(config)                         // empty world + empty population, O
 ## Agent minds (beliefs vs truth)
 
 ```text
-perceive (radius 8, truth) ──► MentalMap::observe ──► deliberate ──► goal + target
+perceive (radius 10, truth) ─► MentalMap::observe ──► deliberate ──► goal + target
+far_sight (cone 80, vague) ──► remember_seen_far ▲         │
                                    ▲                       │
        watcher infers rough place  │                       └─► Signal action (120 ticks)
        (gesture::interpret) ◄──────┴──── awake agents in view see the gesture

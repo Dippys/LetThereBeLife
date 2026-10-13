@@ -69,6 +69,8 @@ pub(crate) struct Landmark {
 }
 
 const NONE: u8 = u8::MAX;
+/// `Landmark::teller` of a place it made out far off itself.
+const FAR_OFF: u8 = u8::MAX;
 
 /// Where a hint came from. Kept with the hint so that checking it later can
 /// teach the listener about the word and the teller.
@@ -80,18 +82,24 @@ pub(crate) struct HintSource {
     pub(crate) signal: u64,
     /// The direction the teller pointed, if known.
     pub(crate) bearing: Option<ExplorationHeading>,
+    /// Made out far off by the agent itself, not told.
+    pub(crate) far: bool,
 }
 
 impl HintSource {
+    /// From nobody in particular.
+    pub(crate) const NOBODY: Self = Self {
+        teller: None,
+        form: None,
+        alternative: None,
+        signal: 0,
+        bearing: None,
+        far: false,
+    };
+
     #[cfg(test)]
     pub(crate) const fn anonymous() -> Self {
-        Self {
-            teller: None,
-            form: None,
-            alternative: None,
-            signal: 0,
-            bearing: None,
-        }
+        Self::NOBODY
     }
 
     #[cfg(test)]
@@ -137,7 +145,7 @@ impl Landmark {
         HintCheck {
             kind,
             confirmed,
-            teller: (self.teller != 0).then(|| self.teller - 1),
+            teller: (self.teller != 0 && self.teller != FAR_OFF).then(|| self.teller - 1),
             form: (self.form != NONE).then_some(crate::VocalForm(self.form)),
             alternative: (self.alternative != NONE).then(|| {
                 crate::Concept::ALL[usize::from(self.alternative) % crate::Concept::COUNT]
@@ -492,6 +500,26 @@ impl MentalMap {
     /// Stores a place inferred from another agent's gesture, with a confidence
     /// that reflects trust in the teller. Returns whether the map changed.
     /// First-hand memories are never displaced by hearsay.
+    /// Remembers a place it made out far off, looking `bearing`: vague like a
+    /// hint, but nobody's word, and not something to go and check out of
+    /// curiosity; it's there for when it's needed.
+    pub(crate) fn remember_seen_far(
+        &mut self,
+        kind: LandmarkKind,
+        estimate: WorldPosition,
+        uncertainty: u8,
+        now: u32,
+        bearing: ExplorationHeading,
+        confidence: u8,
+    ) -> bool {
+        let source = HintSource {
+            far: true,
+            bearing: Some(bearing),
+            ..HintSource::NOBODY
+        };
+        self.remember_told(kind, estimate, uncertainty, now, source, confidence)
+    }
+
     pub(crate) fn remember_told(
         &mut self,
         kind: LandmarkKind,
@@ -545,7 +573,11 @@ impl MentalMap {
             confidence: confidence.max(FORGET_CONFIDENCE),
             uncertainty: uncertainty.max(1),
             probes: source.bearing.map_or(0, |bearing| (bearing as u8 + 1) << 4),
-            teller: source.teller.map_or(0, |slot| slot + 1),
+            teller: if source.far {
+                FAR_OFF
+            } else {
+                source.teller.map_or(0, |slot| slot + 1)
+            },
             form: source.form.map_or(NONE, |form| form.0),
             alternative: source
                 .alternative

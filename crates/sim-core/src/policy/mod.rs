@@ -18,7 +18,7 @@ use std::{error::Error, fmt};
 
 use crate::{AgentId, InventoryView, Material, SimTime, WorldPosition};
 
-pub const PHYSICAL_POLICY_RADIUS: u8 = 8;
+pub const PHYSICAL_POLICY_RADIUS: u8 = 10;
 
 /// What an agent perceives of its circumstances: its pressing needs, what it
 /// sees at hand (by its own food beliefs), and what it carries.

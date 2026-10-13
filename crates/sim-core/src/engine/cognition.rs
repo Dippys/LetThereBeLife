@@ -239,6 +239,32 @@ impl Engine {
         let teacher = self.ask_target(agent, perception);
         let food = self.food_values(agent);
         self.check_leads(agent, perception, now);
+        // Far ahead, the way it's been walking (or wherever its eyes wander
+        // when standing still): landmarks, vaguely.
+        let came_from = self
+            .minds
+            .get(agent)
+            .and_then(|mind| mind.map.came_from(origin));
+        let glance = (self.time.ticks() / 600 + u64::from(agent.get())) % 8;
+        let facing = came_from.map_or_else(
+            || crate::policy::ExplorationHeading::North.rotated(glance as i8),
+            |from| crate::policy::heading_toward(from, origin),
+        );
+        // Standing still, it looks again only once its eyes have turned.
+        let turned = self
+            .minds
+            .get(agent)
+            .is_none_or(|mind| mind.glanced != glance as u8 + 1);
+        let sightings = if came_from.is_some() || turned {
+            self.minds.get_mut(agent).glanced = if came_from.is_some() {
+                0
+            } else {
+                glance as u8 + 1
+            };
+            self.far_sight(agent, origin, facing)
+        } else {
+            Vec::new()
+        };
         let (seen_danger, seen_prey, wary) = self.animals_of_interest(agent, origin, perception);
         // Young children don't hunt.
         let pregnant = self
@@ -474,6 +500,7 @@ impl Engine {
             sown,
             sick_until: _,
             grumbled_at: _,
+            glanced: _,
         } = mind;
         // A bush bearing berries where it once ate some on open ground: seeds grow.
         let fruit = perception
@@ -600,6 +627,16 @@ impl Engine {
                 );
             },
         );
+        for sighting in &sightings {
+            map.remember_seen_far(
+                sighting.kind,
+                sighting.estimate,
+                sighting.uncertainty,
+                now,
+                facing,
+                super::sight::Sighting::CONFIDENCE,
+            );
+        }
         // New ground covered: practice at finding the way.
         let explored_new = map.explored_tile_count() > explored;
         if explored_new {
@@ -1371,6 +1408,7 @@ impl Engine {
                             .map(|(concept, _)| concept),
                         signal: id,
                         bearing: Some(bearing),
+                        far: false,
                     };
                     mind.map
                         .remember_told(kind, estimate, uncertainty, now, source, confidence)
@@ -1417,6 +1455,7 @@ impl Engine {
                     alternative: Some(best),
                     signal: id,
                     bearing: Some(bearing),
+                    far: false,
                 };
                 changed |= mind.map.remember_told(
                     kind,
@@ -1819,6 +1858,7 @@ impl Engine {
                             public.origin,
                             question.estimate,
                         )),
+                        far: false,
                     };
                     listener.map.remember_told(
                         right,

@@ -625,6 +625,8 @@ pub(crate) struct Mind {
     pub(crate) asking: Option<crate::Material>,
     /// Simulated second it last grumbled about someone.
     pub(crate) grumbled_at: u32,
+    /// Which way (heading + 1) it last looked far off while standing still.
+    pub(crate) glanced: u8,
 }
 
 /// Seconds after eating somewhere before a bush there counts as having come

@@ -144,7 +144,10 @@ so changes are judged on behaviour counts as much as on survival.
 
 ## Recent changes
 
-- 2026-10-14 (latest): felled trees and dead bushes sprout again, so valleys stay green and
+- 2026-10-14 (latest): people see 10 cells around them in detail, and make out water, trees,
+  bushes, rocks, huts and fires up to 80 cells ahead, vaguely, unless a hill is in the way
+  (D-154).
+- 2026-10-14: felled trees and dead bushes sprout again, so valleys stay green and
   bands last for generations instead of dying out (D-153).
 - 2026-10-13: the engine runs about twice as fast with identical results; the viewer
   reaches about 6,450× (D-152).

@@ -1388,3 +1388,35 @@ world 1 ended with 0, 7, 8 and 23 people.
 deaths; trees 387-650, bushes about 3,700. Seedlings spreading into open ground make bushes level
 off at about 2.8 times the start. Over 10 years in 20 valleys there is no clear change: 507
 survivors against 512, cold deaths 26 against 21, births 202 against 198.
+
+## D-154: Seeing farther: near sight 10, far sight 80 (2026-10-14)
+
+**Decision:** Detailed vision covers 10 cells around a person (was 8). Beyond it, at each
+decision, a person makes out landmarks in a 90° cone 80 cells deep in the direction it's facing
+(`Engine::far_sight`): water, trees, bushes, rocks, huts and fires, the nearest of each kind.
+- **Facing:** the way it just walked; standing still, its eyes turn to a new direction every 10
+  seconds, and it looks again only when they have turned (`Mind::glanced`).
+- **Hills:** a hill between eye and target hides it (line of sight over elevation; trees stand
+  taller than bushes).
+- **Bushes:** beyond 40 cells, bitter and sweet ones look alike.
+- **Vagueness:** what it sees is placed up to a tenth of the distance off and remembered like a
+  hint, with a search radius of a twentieth of the distance (`MentalMap::remember_seen_far`,
+  marked as nobody's word).
+
+Save 27.
+**Why:** The owner asked for people to see farther, in a cone ahead. Detailed vision 100 cells
+wide would cost about 27 times as much per look, so far sight notices only landmarks.
+**Consequences:** Over 10 years in 40 valleys (seeds 1-57 and 60-79), against D-153:
+
+| | D-153 | Far sight |
+|---|---|---|
+| Survivors | 829 | 832 |
+| Cold deaths | 39 | 36 |
+| Births | 334 | 338 |
+| Complete misunderstanding episodes | 100 | 102 |
+
+About 20% slower. Variants measured:
+- Far sight alone, looking at every decision: 826 survivors, 106 episodes.
+- Far sight alone, looking again on turning: 822 survivors, 135 episodes.
+- Keeping far sightings out of what curiosity checks: births fell to 295 (people wandered from
+  company more), so curiosity may check them.

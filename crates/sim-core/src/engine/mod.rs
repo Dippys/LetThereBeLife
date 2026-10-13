@@ -19,6 +19,7 @@ mod life;
 mod names;
 mod plants;
 mod shelter;
+mod sight;
 mod tick;
 mod views;
 mod wildlife;
