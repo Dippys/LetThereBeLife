@@ -90,10 +90,10 @@ lays out phases 0–10, from world → physical agents → cognition → communi
 - **Headless:** canonical scenarios with fingerprint hashes, and the **behavior study**
   (`--study`), which measures survival, roaming, idleness, and gestures, with per-agent traces.
 
-## Survival (behavior study, 2026-10-12)
+## Survival (behavior study, 2026-10-13)
 
-The valley, 10 years, 20 valleys (seeds 1-57), paired life seeds: about 440 survivors of a band
-that starts at 20 per valley and grows by births; deaths from cold 17-24, and most food that's
+The valley, 10 years, 20 valleys (seeds 1-57), paired life seeds: about 510 survivors of a band
+that starts at 20 per valley and grows by births; deaths from cold about 20, and most food that's
 gathered rots (D-134). Run-to-run noise between near-identical versions is about ±10 survivors,
 so changes are judged on behaviour counts as much as on survival.
 
@@ -135,6 +135,8 @@ so changes are judged on behaviour counts as much as on survival.
   code 9): 1 in 19 runs on 2026-10-09, 2 in 14 on 2026-10-10, then 0 in 8, then 2 in 8 `--valley`
   smokes after M7, then 1 in 12 smokes after the living world. It happens with and without agents. Cause unknown, possibly GPU teardown.
 - The world archive needs regenerating for generator v2 (`--pregenerate-world`).
+- **Some people believe deer are dangerous** (from misread warnings) and keep away from herds
+  grazing by their hut, sometimes sleeping out in the cold.
 - **Minds are 2,096 B per agent** (mental map 372 B). That's fine at viewer scale; the spec's 10M
   agents would need ~8 GB, so compaction comes later.
 - **Greedy waypoints can pace around obstacles.** Agents no longer step straight back to where they
@@ -142,7 +144,10 @@ so changes are judged on behaviour counts as much as on survival.
 
 ## Recent changes
 
-- 2026-10-12 (latest): huddling; projects toward tools; asking to be shown how to make
+- 2026-10-13 (latest): tinkering finds axes, cloaks and stone spears; people grumble about
+  those who wronged them, by name, and the blame can land on the wrong person; warned-about
+  spots no longer set people fleeing to and from their huts all night (D-149 to D-151).
+- 2026-10-12: huddling; projects toward tools; asking to be shown how to make
   something; feelings, discoveries and stand-offs shown in the viewer (D-146 to D-148).
 - 2026-10-12: feelings toward people (anger), worry, hope, frustration, surprise,
   relief, disgust (D-144); pride, shame, envy, jealousy, taking and confrontation (D-145).
@@ -239,10 +244,9 @@ so changes are judged on behaviour counts as much as on survival.
 ## What's next
 
 1. **Feelings** (docs/plans/FEELINGS.md) and **making things** (docs/plans/MAKING.md) are done
-   (D-137 to D-148). Open: taking food hasn't happened yet; nobody has discovered axes or cloaks,
-   so asking to be shown teaches baskets and spears instead; people could talk about feelings and
-   recipes in words.
-   (Making things, docs/plans/MAKING.md, is done: D-139, D-141, D-142.)
+   (D-137 to D-151). Open: taking food hasn't happened yet; asking to be shown still almost
+   always gets something else (askers rarely ask someone who has an axe); people grumble about
+   each other but don't yet talk about feelings or who's good at what.
 2. **Thinking agents** (docs/plans/THINKING.md): plans for cold, hunger and thirst on (D-118,
    D-119); idle time works toward what has proved useful (D-123); people show others what they
    don't know (D-121). Getting ready for hard seasons is built but off (D-120). Next: readiness

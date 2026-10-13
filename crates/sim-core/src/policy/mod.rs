@@ -254,6 +254,8 @@ pub enum PolicyReason {
     Project,
     /// Asking someone to show it how to make something.
     AskingToBeShown,
+    /// Fiddling with the things it carries, after a tool nobody has shown it.
+    Tinkering,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

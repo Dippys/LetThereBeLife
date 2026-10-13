@@ -254,6 +254,45 @@ fn a_greeting_teaches_bystanders_a_name() {
 }
 
 #[test]
+fn grumbling_about_someone_by_name_angers_whoever_goes_by_it() {
+    let mut engine = acquainted(10, false);
+    let (teller, listener) = (AgentId::new(0), AgentId::new(1));
+    // It grumbles about someone it calls by the listener's own name.
+    let own = engine.life(listener).unwrap().name;
+    engine.grumble(teller, AgentId::new(5), own);
+    let mind = engine.minds.get(listener).unwrap();
+    let slot = mind.social.slot_of(teller).unwrap();
+    assert!(mind.social.anger(slot) > 0, "it took that badly");
+    assert!(matches!(
+        engine.life_events.last(),
+        Some(crate::LifeEvent::Grumbled {
+            heard: 0,
+            overheard: false,
+            ..
+        })
+    ));
+    // Another name it calls the teller by: it thinks less of the teller.
+    let other = crate::Name(own.0 + 1);
+    engine
+        .minds
+        .get_mut(listener)
+        .social
+        .learn_name(slot, other);
+    let before = engine.minds.get(listener).unwrap().social.trust(slot);
+    engine.grumble(teller, AgentId::new(5), other);
+    let after = engine.minds.get(listener).unwrap().social.trust(slot);
+    assert!(after < before);
+    assert!(matches!(
+        engine.life_events.last(),
+        Some(crate::LifeEvent::Grumbled {
+            heard: 1,
+            wrong: 1,
+            ..
+        })
+    ));
+}
+
+#[test]
 fn a_dwindling_band_is_joined_by_newcomers_with_their_own_words() {
     let mut engine = two_people();
     engine.set_founders(2);

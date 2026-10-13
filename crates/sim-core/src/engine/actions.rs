@@ -25,6 +25,8 @@ const CONFRONT_FOOD: u8 = 2;
 const CONFRONT_SHAME: u8 = 90;
 const CONFRONT_FEAR: u8 = 80;
 const CONFRONT_SETTLED: u8 = 96;
+/// Frustration at a try that made nothing.
+const FAILED_TRY: u8 = 24;
 /// Health a scuffle costs each side.
 const SCUFFLE_WOUND: u16 = 800;
 /// Most batches smoked at one sitting.
@@ -875,8 +877,12 @@ impl Engine {
                 .inputs
                 .iter()
                 .all(|&(input, count)| inventory.amount(input) >= count)
-            && inventory.can_add(recipe.output)
         {
+            // It works, but there's no room to hold what it makes: it puts it
+            // off, none the wiser.
+            if !inventory.can_add(recipe.output) {
+                return Err(PolicyFailureReason::InventoryFull);
+            }
             self.discoveries += 1;
             self.life_events.push(crate::LifeEvent::Discovered {
                 agent,
@@ -884,13 +890,18 @@ impl Engine {
             });
             return self.make(agent, index, recipe);
         }
-        // What's used up is spoiled; tools come through a failed try.
+        // Food tried is spoiled, and what was cut with an edge; things put
+        // together by hand come apart again, and tools come through.
+        let cut = attempt.method() == crate::Method::Edge;
         for kind in attempt.kinds().into_iter().flatten() {
-            if !kind.properties().worn() {
+            let properties = kind.properties();
+            if !properties.worn() && (cut || properties.nutrition > 0) {
                 self.population.take(agent, kind, 1);
             }
         }
-        self.minds.get_mut(agent).crafts.failed(attempt);
+        let mind = self.minds.get_mut(agent);
+        mind.crafts.failed(attempt);
+        mind.feelings.feel(crate::Feeling::Frustration, FAILED_TRY);
         Ok(())
     }
 

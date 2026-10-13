@@ -5,8 +5,9 @@ use crate::{
 };
 
 /// Speaker (agent 0) has been bitten by wolves; the listener (agent 1) hunts
-/// deer and has never met a wolf. A wolf stands a few cells from the speaker.
-fn wolf_in_sight() -> (Engine, WorldPosition) {
+/// deer and has never met a wolf. A wolf stands `distance` cells from the
+/// speaker.
+fn wolf_in_sight(distance: std::ops::Range<i64>) -> (Engine, WorldPosition) {
     let mut engine = resident_engine(64);
     let (speaker, listener) = standable_shelter_site(&engine);
     let area = engine.world().initial_bounds();
@@ -20,7 +21,7 @@ fn wolf_in_sight() -> (Engine, WorldPosition) {
         )
         .unwrap();
     engine.wildlife.area = Some(area);
-    let wolf = (11..16)
+    let wolf = distance
         .flat_map(|distance| {
             [(distance, 0), (-distance, 0), (0, distance), (0, -distance)].map(|(dx, dy)| {
                 WorldPosition {
@@ -66,7 +67,8 @@ fn word(engine: &mut Engine, agent: u32, concept: Concept) -> crate::VocalForm {
 
 #[test]
 fn a_warning_makes_a_listener_who_knows_the_word_run() {
-    let (mut engine, wolf) = wolf_in_sight();
+    // Close enough to run from, not so close that warning is too late.
+    let (mut engine, wolf) = wolf_in_sight(5..7);
     let choice = decide(&mut engine, AgentId::new(0));
     assert_eq!(choice.reason, PolicyReason::Warning);
     assert_eq!(choice.target, Some(wolf));
@@ -100,7 +102,7 @@ fn a_warning_makes_a_listener_who_knows_the_word_run() {
 
 #[test]
 fn a_wolf_misread_as_deer_is_hunted_found_out_and_corrected() {
-    let (mut engine, wolf) = wolf_in_sight();
+    let (mut engine, wolf) = wolf_in_sight(11..16);
     assert_eq!(
         decide(&mut engine, AgentId::new(0)).reason,
         PolicyReason::Warning

@@ -1308,3 +1308,47 @@ watching. Save 24, mind 2,096 B.
 what was asked: nobody had discovered axes or cloaks to show, so teachers showed baskets and spears,
 which askers learned. Real teaching waits on the first discoveries.
 
+
+## D-149: Tinkering toward tools (2026-10-13)
+
+**Decision:** Someone who wants a tool nobody has shown it asks someone it trusts half the time;
+otherwise it tinkers (`PolicyReason::Tinkering`) with what it carries that isn't food. It starts
+from what already does part of the job (an edge for an axe or stone spear, something warm for a
+cloak) and the newest thing it learned to make (`Crafts::newest`), and tries the combinations with
+the fewest kinds first (`Crafts::untried_with`; working with an edge counts as using it). The
+person picks the exact try and the engine makes it (the `making` cell holds an `Attempt`). Failed
+tries frustrate, and someone past its patience (diligence sets it) leaves tinkering for a while.
+Cord binds and is kept on the body. A failed try spoils only food and what was cut with an edge
+(things put together by hand come apart again). A try that works when there's no room to hold the
+result is put off, not remembered as a failure (a bug that had people learn cord "doesn't work").
+**Why:** Projects and teaching waited on axes and cloaks that blind tries among ~180 combinations
+never found.
+**Consequences:** Over 10 years in 20 valleys (with D-150, D-151): axes 0 → 42, cloaks 2 → 12,
+stone spears 0 → 5 (26 in a run without the D-151 fix: chance is large here). Without grumbling,
+tinkering alone gave 509 survivors and 14 cold deaths, with 29 cloaks.
+
+## D-150: Grumbling about people (2026-10-13)
+
+**Decision:** Someone angry with a person whose name it knows, with a trusted friend in view,
+grumbles about them at most hourly: it says the name and scowls (`Engine::grumble`). Listeners
+hear only the name. Each awake listener within earshot who trusts the teller trusts whoever *it*
+calls by that name less (16), and family of the teller take up the grudge (anger 16). Whoever goes
+by that name, hearing it said with a scowl, is angered at the teller (24). `LifeEvent::Grumbled`
+goes to the feed when someone took it in; save 25.
+**Why:** The owner asked for people to talk about each other. Names can be misheard, so blame can
+land on the wrong person for a believable reason.
+**Consequences:** 4,952 grumbles over 10 years in 20 valleys; 11,792 listeners took one in, 939 of
+them about someone else of that name; 1,741 overheard by the one meant. Stand-offs rose from 286 to
+494, since families now share grudges.
+
+## D-151: Warned-about spots count only when close (2026-10-13)
+
+**Decision:** A spot someone warned about is a danger only within 7 cells (as near as a seen wolf
+that sets people running), not 20.
+**Why:** Tracing cold deaths showed people near home fleeing a warned spot 15 cells off, walking
+back to their hut, fleeing again, all night, until they froze ("flee storms" of 4,000-23,000 flee
+decisions in a few valleys per run, in every version tested). Letting the warning go once far
+away didn't stop it.
+**Consequences:** No valley has a flee storm. With D-149 and D-150, over 10 years in 20 valleys:
+512 survivors against 512, cold deaths 21 against 20, births 198 against 211, wolf bites 956
+against 955. The warning test now puts its wolf 5-6 cells away.

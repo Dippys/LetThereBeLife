@@ -108,6 +108,13 @@ pub(crate) struct Crafts {
     planting: u8,
     /// Sickness by a rotting body it has felt, or burials it has watched.
     burial: u8,
+    /// The last new thing it learned to make (`Material` + 1; 0 for none).
+    newest: u8,
+}
+
+/// One of `options`, by `roll`.
+fn pick(options: &[Attempt], roll: u64) -> Option<Attempt> {
+    (!options.is_empty()).then(|| options[(roll % options.len() as u64) as usize])
 }
 
 fn mix(mut key: u64) -> u64 {
@@ -196,7 +203,15 @@ impl Crafts {
 
     /// It made recipe `index`, or watched it made.
     pub(crate) fn learn(&mut self, index: usize) {
+        if !self.knows(index) {
+            self.newest = RECIPES[index].output as u8 + 1;
+        }
         self.recipes |= 1 << index;
+    }
+
+    /// The last new thing it learned to make, the one it's keenest to use.
+    pub(crate) fn newest(self) -> Option<Material> {
+        (self.newest > 0).then(|| Material::ALL[usize::from(self.newest - 1) % Material::COUNT])
     }
 
     pub(crate) const fn knows_design(self, design: Design) -> bool {
@@ -236,6 +251,33 @@ impl Crafts {
         methods: &[Method],
         roll: u64,
     ) -> Option<Attempt> {
+        pick(&self.options(carried, methods, &[]), roll)
+    }
+
+    /// As `untried`, among the combinations that use everything in `with`
+    /// (an edge is used by working with it)
+    /// and, of those, the ones with the fewest kinds of thing: a tinkerer
+    /// tries the simple things first.
+    pub(crate) fn untried_with(
+        self,
+        carried: &[Material],
+        methods: &[Method],
+        with: &[Material],
+        roll: u64,
+    ) -> Option<Attempt> {
+        let options = self.options(carried, methods, with);
+        let size = |attempt: &Attempt| attempt.kinds().iter().flatten().count();
+        let fewest = options.iter().map(size).min()?;
+        let simplest: Vec<Attempt> = options
+            .into_iter()
+            .filter(|attempt| size(attempt) == fewest)
+            .collect();
+        pick(&simplest, roll)
+    }
+
+    /// Combinations of `carried` using everything in `with`, by any of
+    /// `methods`, that it hasn't tried and doesn't know make something.
+    fn options(self, carried: &[Material], methods: &[Method], with: &[Material]) -> Vec<Attempt> {
         let mut options = Vec::new();
         let count = carried.len();
         for first in 0..count {
@@ -252,6 +294,14 @@ impl Crafts {
                         continue;
                     }
                     for &method in methods {
+                        // Working with an edge uses the edge.
+                        let uses = |kind: &Material| {
+                            kinds.contains(&Some(*kind))
+                                || method == Method::Edge && kind.properties().cutting
+                        };
+                        if !with.iter().all(uses) {
+                            continue;
+                        }
                         let attempt = Attempt::new(kinds, method);
                         let known = attempt.recipe().is_some_and(|(index, _)| self.knows(index));
                         if !known && !self.tried(attempt) && !options.contains(&attempt) {
@@ -261,7 +311,7 @@ impl Crafts {
                 }
             }
         }
-        (!options.is_empty()).then(|| options[(roll % options.len() as u64) as usize])
+        options
     }
 
     /// It warmed up at a hearth.
@@ -332,6 +382,47 @@ mod tests {
         );
         crafts.failed(nothing);
         assert!(crafts.tried(nothing));
+    }
+
+    #[test]
+    fn a_tinkerer_starts_simple_from_what_it_has_and_its_newest_thing() {
+        let mut crafts = Crafts::default();
+        let carried = [Material::Wood, Material::Blade, Material::Hide];
+        let methods = [Method::Hand, Method::Edge];
+        // After a better cutter: the edge alone first, worked on one thing.
+        let first = crafts
+            .untried_with(&carried, &methods, &[Material::Blade], 0)
+            .unwrap();
+        assert_eq!(first.kinds().iter().flatten().count(), 1);
+        let mut cord = None;
+        for roll in 0..20 {
+            let Some(attempt) = crafts.untried_with(&carried, &methods, &[Material::Hide], roll)
+            else {
+                break;
+            };
+            match attempt.recipe() {
+                Some((index, recipe)) => {
+                    crafts.learn(index);
+                    cord = Some(recipe.output);
+                    break;
+                }
+                None => crafts.failed(attempt),
+            }
+        }
+        assert_eq!(cord, Some(Material::Cord), "cutting the hide makes cord");
+        assert_eq!(crafts.newest(), Some(Material::Cord));
+        // With cord, the edge and wood, the axe is among the first tries.
+        let carried = [Material::Wood, Material::Blade, Material::Cord];
+        let with = [Material::Blade, Material::Cord];
+        let mut tries = 0;
+        while let Some(attempt) = crafts.untried_with(&carried, &methods, &with, tries) {
+            tries += 1;
+            if attempt.recipe().is_some() {
+                break;
+            }
+            crafts.failed(attempt);
+        }
+        assert!(tries <= 6, "found within {tries} tries");
     }
 
     #[test]

@@ -296,9 +296,9 @@ pub(crate) struct MindInput<'a> {
     /// Set when a plan step couldn't be done for want of something: what it
     /// tried, and what it lacked.
     pub(crate) lacked: &'a std::cell::Cell<Option<(crate::cognition::Choice, u16)>>,
-    /// Set to the recipe a project's making step is for, so the engine makes
-    /// that one.
-    pub(crate) making: &'a std::cell::Cell<Option<usize>>,
+    /// Set to what a project's making step or a tinkering is to make or
+    /// try, so the engine does that one.
+    pub(crate) making: &'a std::cell::Cell<Option<crate::cognition::Attempt>>,
     /// Set to the tool it asks to be shown how to make.
     pub(crate) asking: &'a std::cell::Cell<Option<Material>>,
 }
@@ -2064,15 +2064,84 @@ impl Planner<'_> {
         .filter(|&tool| worth(tool) > 0)
         .max_by_key(|&tool| (worth(tool), known(tool)))?;
         if !known(target) {
-            let teacher = self.mind.teacher?;
-            self.mind.asking.set(Some(target));
-            return Some(Deliberation::act(
-                PhysicalGoal::Signal,
-                teacher,
-                PolicyReason::AskingToBeShown,
-            ));
+            // Among the tools it wants and can't make, any may catch its mind.
+            let unknown: Vec<Material> = [Material::Axe, Material::StoneSpear, Material::Cloak]
+                .into_iter()
+                .filter(|&tool| worth(tool) > 0 && !known(tool))
+                .collect();
+            let target = unknown
+                .get(usize::from(self.roll(0x5741_4e54)) % unknown.len().max(1))
+                .copied()
+                .unwrap_or(target);
+            // Ask someone it trusts to show it how, or else (and half the
+            // time anyway) fiddle with the things it carries that aren't food.
+            if let Some(teacher) = self.mind.teacher
+                && self.roll(0x5449_4e4b) % 2 == 0
+            {
+                self.mind.asking.set(Some(target));
+                return Some(Deliberation::act(
+                    PhysicalGoal::Signal,
+                    teacher,
+                    PolicyReason::AskingToBeShown,
+                ));
+            }
+            return self.tinker(target, inventory);
         }
         self.next_part(target, inventory, 0)
+    }
+
+    /// Fiddling with what it carries that isn't food, after a tool nobody
+    /// has shown it: starting from the thing that already does part of the
+    /// job (an edge for a chopper or a spear, something warm for a cloak),
+    /// and the newest thing it has learned to make, if it carries it.
+    fn tinker(&self, tool: Material, inventory: InventoryView) -> Option<Deliberation> {
+        // Fed up with tries that come to nothing, it lets it be a while; the
+        // diligent keep at it longer.
+        let patience = 64 + u16::from(self.mind.personality.diligence) / 2;
+        if u16::from(self.mind.feelings.level(crate::Feeling::Frustration)) >= patience {
+            return None;
+        }
+        let parts: Vec<Material> = inventory
+            .carried()
+            .map(|(material, _)| material)
+            .filter(|material| material.properties().nutrition == 0)
+            .collect();
+        let core = |test: fn(crate::MaterialProperties) -> bool| {
+            parts
+                .iter()
+                .copied()
+                .filter(|material| test(material.properties()))
+                .max_by_key(|&material| material as u8)
+        };
+        let mut with = Vec::new();
+        match tool {
+            Material::Axe | Material::StoneSpear => with.push(core(|p| p.cutting)?),
+            Material::Cloak => with.push(core(|p| p.warmth > 0)?),
+            _ => {}
+        }
+        if let Some(newest) = self.mind.crafts.newest()
+            && parts.contains(&newest)
+            && !with.contains(&newest)
+        {
+            with.push(newest);
+        }
+        let methods: &[Method] = if parts.iter().any(|part| part.properties().cutting) {
+            &[Method::Hand, Method::Edge]
+        } else {
+            &[Method::Hand]
+        };
+        let attempt = self.mind.crafts.untried_with(
+            &parts,
+            methods,
+            &with,
+            u64::from(self.roll(0x5449_4e4b_4552)),
+        )?;
+        self.mind.making.set(Some(attempt));
+        Some(Deliberation::act(
+            PhysicalGoal::Craft,
+            self.origin,
+            PolicyReason::Tinkering,
+        ))
     }
 
     /// The next step toward making `thing`: a missing part first (made, if
@@ -2084,7 +2153,7 @@ impl Planner<'_> {
         depth: u8,
     ) -> Option<Deliberation> {
         let crafts = self.mind.crafts;
-        let (index, recipe) = crate::RECIPES
+        let (_, recipe) = crate::RECIPES
             .iter()
             .copied()
             .enumerate()
@@ -2147,7 +2216,10 @@ impl Planner<'_> {
         if !matches!(recipe.method, Method::Hand | Method::Edge) || !inventory.can_add(thing) {
             return None;
         }
-        self.mind.making.set(Some(index));
+        self.mind.making.set(Some(crate::cognition::Attempt::new(
+            recipe.kinds(),
+            recipe.method,
+        )));
         Some(Deliberation::act(
             PhysicalGoal::Craft,
             self.origin,

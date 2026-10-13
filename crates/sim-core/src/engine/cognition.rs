@@ -53,8 +53,6 @@ type SightedAnimal = (crate::Species, WorldPosition);
 
 /// Animals closer than this (cells) can be told apart.
 const IDENTIFY_DISTANCE: u64 = 6;
-/// A warned-about spot this close (cells) is worth running from.
-const ALARM_DISTANCE: u64 = 20;
 /// A body lies where someone died this long (three simulated hours).
 const BODY_TICKS: u64 = 3 * 60 * 60 * 60;
 /// Ticks it takes to make something by hand (knapping a blade).
@@ -255,11 +253,13 @@ impl Engine {
         let near = |place: WorldPosition, within: u64| {
             origin.x.abs_diff(place.x).max(origin.y.abs_diff(place.y)) <= within
         };
-        // A warned-about spot nearby is a danger even out of sight; a tip about
+        // A warned-about spot as close as a seen wolf would be is a danger
+        // even out of sight (any farther, and a hut near the spot has them
+        // running off and coming back all night). A tip about
         // something to hunt is worth following when nothing better is in view.
         let alarm_place = alarm
             .map(|lead| lead.place())
-            .filter(|place| near(*place, ALARM_DISTANCE));
+            .filter(|place| near(*place, FLEE_DISTANCE));
         let danger = seen_danger.or(alarm_place);
         let quarry_place = quarry
             .map(|lead| lead.place())
@@ -268,6 +268,7 @@ impl Engine {
         let visible = visible_kinds(origin, perception);
         let spent = spent_kinds(perception);
         let mut greetings: Vec<AgentId> = Vec::new();
+        let mut grumble = None;
         let founder_names: Vec<(AgentId, crate::Name)> = if self.minds.is_founder(agent) {
             let family = agent.get() / crate::FAMILY_SIZE;
             perception
@@ -418,6 +419,23 @@ impl Engine {
             perception.agents.iter().any(|other| other.id.get() == id)
         });
 
+        // Angry with someone, with a friend about: it grumbles about them.
+        if now.saturating_sub(mind.grumbled_at) >= super::names::GRUMBLE_GAP_SECONDS
+            && let Some((about, name)) = mind.social.grudge()
+            && perception.agents.iter().any(|other| {
+                other.id != agent
+                    && other.id != about
+                    && can_watch(other.activity)
+                    && mind.social.slot_of(other.id).is_some_and(|slot| {
+                        mind.social.familiarity(slot) >= crate::FRIEND_FAMILIARITY
+                            && mind.social.trust(slot) >= crate::cognition::DEFAULT_TRUST
+                            && mind.social.anger(slot) < crate::cognition::ANGRY
+                    })
+            })
+        {
+            mind.grumbled_at = now;
+            grumble = Some((about, name));
+        }
         // Its home in view with no hut standing there: it's gone.
         if let Some(hut) = mind.home.hut()
             && perception.area.contains(hut)
@@ -455,6 +473,7 @@ impl Engine {
             seasons,
             sown,
             sick_until: _,
+            grumbled_at: _,
         } = mind;
         // A bush bearing berries where it once ate some on open ground: seeds grow.
         let fruit = perception
@@ -899,13 +918,9 @@ impl Engine {
                 mind.asking = Some(tool);
                 mind.dialogue.plan_request(teacher, at);
             }
-            // A project's making step: make that very thing.
-            if let Some(index) = making.get() {
-                let recipe = crate::RECIPES[index];
-                mind.crafts.set_pending(crate::cognition::Attempt::new(
-                    recipe.kinds(),
-                    recipe.method,
-                ));
+            // A project's making step or a tinkering: do that very thing.
+            if let Some(attempt) = making.get() {
+                mind.crafts.set_pending(attempt);
             }
             self.note_intention(agent, before, after, facts);
         }
@@ -974,6 +989,9 @@ impl Engine {
         }
         for other in greetings {
             self.call_out(agent, other);
+        }
+        if let Some((about, name)) = grumble {
+            self.grumble(agent, about, name);
         }
         if deliberation.selection.reason == PolicyReason::Begging
             && let Some((giver, position)) = beg

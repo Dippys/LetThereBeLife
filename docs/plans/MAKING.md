@@ -1,6 +1,6 @@
 # Plan: making things (food, tools, buildings)
 
-Status: M0-M3 done (D-139, D-141, D-142), 2026-10-12. Not built: lean-tos, windbreaks,
+Status: M0-M3 done (D-139, D-141, D-142), 2026-10-12; tools found by tinkering (D-149), 2026-10-13. Not built: lean-tos, windbreaks,
 containers for stew, and tool quality by maker. The owner asked for dynamic recipes, and reworked building and tool
 making with "lots of dynamics". One system covers all three: making something from materials with
 properties, by a method, discovered by trying and passed on by watching.

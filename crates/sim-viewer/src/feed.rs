@@ -325,6 +325,17 @@ impl Feed {
                     Tone::Bad,
                     agent,
                 ),
+                // Only grumbles someone took to heart make the news.
+                sim_core::LifeEvent::Grumbled { heard: 0, .. } => continue,
+                sim_core::LifeEvent::Grumbled { agent, about, .. } => (
+                    format!(
+                        "{} grumbled about {} to friends",
+                        name(engine, agent),
+                        name(engine, about)
+                    ),
+                    Tone::Bad,
+                    agent,
+                ),
                 sim_core::LifeEvent::Showed {
                     teacher,
                     learner,

@@ -1845,7 +1845,9 @@ fn people_signs(engine: &sim_core::Engine, bounds: sim_core::WorldRect) -> Vec<P
                 _ => {
                     let policy = policy?;
                     match (policy.goal, policy.reason) {
-                        (_, PolicyReason::Experimenting) => ('?', colors::SIGN_TRY),
+                        (_, PolicyReason::Experimenting | PolicyReason::Tinkering) => {
+                            ('?', colors::SIGN_TRY)
+                        }
                         (_, PolicyReason::Fleeing) => ('!', colors::SIGN_DANGER),
                         (PhysicalGoal::Hunt, _) | (_, PolicyReason::Hunting) => {
                             ('!', colors::SIGN_HUNT)

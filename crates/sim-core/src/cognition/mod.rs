@@ -458,6 +458,16 @@ pub enum LifeEvent {
     },
     /// It took food from another family's hut; `seen` if anyone saw.
     Took { agent: AgentId, seen: bool },
+    /// It grumbled about `about` by name, scowling: `heard` people took it
+    /// in, `wrong` of them about someone else (they call another by that
+    /// name), and `about` itself `overheard` it.
+    Grumbled {
+        agent: AgentId,
+        about: AgentId,
+        heard: u8,
+        wrong: u8,
+        overheard: bool,
+    },
     /// Asked to show `learner` how to make `wanted`, `teacher` made `made`
     /// in front of them (something else, if it misread what was asked).
     Showed {
@@ -613,6 +623,8 @@ pub(crate) struct Mind {
     pub(crate) confronted_at: u32,
     /// The tool its planned request asks to be shown how to make.
     pub(crate) asking: Option<crate::Material>,
+    /// Simulated second it last grumbled about someone.
+    pub(crate) grumbled_at: u32,
 }
 
 /// Seconds after eating somewhere before a bush there counts as having come

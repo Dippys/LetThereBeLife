@@ -106,13 +106,15 @@ pub struct MaterialProperties {
     pub digs: bool,
     /// About one use in this many breaks it (0 = it doesn't wear out).
     pub wear_odds: u8,
+    /// Binds things together, and is kept coiled on the body.
+    pub binds: bool,
 }
 
 impl MaterialProperties {
-    /// Kept on the body rather than set down or put away: a cutting edge, or
-    /// something worn for warmth.
+    /// Kept on the body rather than set down or put away: a cutting edge,
+    /// something worn for warmth, a weapon, a basket, cord.
     pub const fn worn(self) -> bool {
-        self.cutting || self.warmth > 0 || self.strike > 0 || self.room > 0
+        self.cutting || self.warmth > 0 || self.strike > 0 || self.room > 0 || self.binds
     }
 }
 
@@ -158,6 +160,7 @@ impl Material {
                 chop: 0,
                 digs: false,
                 wear_odds: 0,
+                binds: false,
             },
             Self::Bitterberries => MaterialProperties {
                 cutting: false,
@@ -176,6 +179,7 @@ impl Material {
                 chop: 0,
                 digs: false,
                 wear_odds: 0,
+                binds: false,
             },
             Self::Wood => MaterialProperties {
                 cutting: false,
@@ -194,6 +198,7 @@ impl Material {
                 chop: 0,
                 digs: false,
                 wear_odds: 0,
+                binds: false,
             },
             Self::Stone => MaterialProperties {
                 cutting: false,
@@ -212,6 +217,7 @@ impl Material {
                 chop: 0,
                 digs: false,
                 wear_odds: 0,
+                binds: false,
             },
             Self::Meat => MaterialProperties {
                 cutting: false,
@@ -230,6 +236,7 @@ impl Material {
                 chop: 0,
                 digs: false,
                 wear_odds: 0,
+                binds: false,
             },
             Self::Blade => MaterialProperties {
                 cutting: true,
@@ -248,6 +255,7 @@ impl Material {
                 chop: 2,
                 digs: false,
                 wear_odds: 6,
+                binds: false,
             },
             Self::Hide => MaterialProperties {
                 cutting: false,
@@ -266,6 +274,7 @@ impl Material {
                 chop: 0,
                 digs: false,
                 wear_odds: 0,
+                binds: false,
             },
             Self::Spear => MaterialProperties {
                 cutting: false,
@@ -284,6 +293,7 @@ impl Material {
                 chop: 0,
                 digs: false,
                 wear_odds: 15,
+                binds: false,
             },
             Self::Basket => MaterialProperties {
                 cutting: false,
@@ -302,6 +312,7 @@ impl Material {
                 chop: 0,
                 digs: false,
                 wear_odds: 0,
+                binds: false,
             },
             Self::Roast => MaterialProperties {
                 cutting: false,
@@ -320,6 +331,7 @@ impl Material {
                 chop: 0,
                 digs: false,
                 wear_odds: 0,
+                binds: false,
             },
             Self::DriedMeat => MaterialProperties {
                 cutting: false,
@@ -338,6 +350,7 @@ impl Material {
                 chop: 0,
                 digs: false,
                 wear_odds: 0,
+                binds: false,
             },
             Self::DriedBerries => MaterialProperties {
                 cutting: false,
@@ -356,6 +369,7 @@ impl Material {
                 chop: 0,
                 digs: false,
                 wear_odds: 0,
+                binds: false,
             },
             Self::Pemmican => MaterialProperties {
                 cutting: false,
@@ -374,6 +388,7 @@ impl Material {
                 chop: 0,
                 digs: false,
                 wear_odds: 0,
+                binds: false,
             },
             Self::Cord => MaterialProperties {
                 cutting: false,
@@ -392,6 +407,7 @@ impl Material {
                 chop: 0,
                 digs: false,
                 wear_odds: 0,
+                binds: true,
             },
             Self::Axe => MaterialProperties {
                 cutting: true,
@@ -410,6 +426,7 @@ impl Material {
                 chop: 3,
                 digs: false,
                 wear_odds: 20,
+                binds: false,
             },
             Self::StoneSpear => MaterialProperties {
                 cutting: false,
@@ -428,6 +445,7 @@ impl Material {
                 chop: 0,
                 digs: false,
                 wear_odds: 30,
+                binds: false,
             },
             Self::DiggingStick => MaterialProperties {
                 cutting: false,
@@ -446,6 +464,7 @@ impl Material {
                 chop: 0,
                 digs: true,
                 wear_odds: 20,
+                binds: false,
             },
             Self::Cloak => MaterialProperties {
                 cutting: false,
@@ -464,6 +483,7 @@ impl Material {
                 chop: 0,
                 digs: false,
                 wear_odds: 0,
+                binds: false,
             },
         }
     }

@@ -12,6 +12,15 @@ pub(super) const GREETING_GAP_SECONDS: u32 = 10 * 60;
 /// next to the person called.
 const MISHEARD_ODDS: u64 = 4;
 
+/// Seconds between one person's grumbles.
+pub(super) const GRUMBLE_GAP_SECONDS: u32 = 60 * 60;
+/// Trust a listener loses in someone grumbled about by a person it trusts.
+const HEARSAY_TRUST: u8 = 16;
+/// Anger family take up on hearing one of their own grumble about someone.
+const HEARSAY_ANGER: u8 = 16;
+/// Anger at hearing oneself grumbled about.
+const OVERHEARD_ANGER: u8 = 24;
+
 /// Someone called a person by name, and how one bystander took it (latest
 /// tick, for logs and tools).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,6 +111,74 @@ impl Engine {
                 name,
             });
         }
+    }
+
+    /// `teller` scowls and says the name it calls `about` by: those within
+    /// earshot who trust it think less of whoever they call by that name,
+    /// family take up the grudge, and whoever goes by that name is angered.
+    /// Nobody hears who was meant, only the name.
+    pub(super) fn grumble(&mut self, teller: AgentId, about: AgentId, name: crate::Name) {
+        let Some(from) = self.population.view(teller).map(|view| view.position) else {
+            return;
+        };
+        let mut nearby = Vec::new();
+        self.population.spatial().agents_in(
+            WorldRect {
+                min: WorldPosition {
+                    x: from.x - CALL_RADIUS,
+                    y: from.y - CALL_RADIUS,
+                },
+                max: WorldPosition {
+                    x: from.x + CALL_RADIUS + 1,
+                    y: from.y + CALL_RADIUS + 1,
+                },
+            },
+            &mut nearby,
+        );
+        nearby.sort_unstable();
+        let now = belief_seconds(self.time);
+        let (mut heard, mut wrong, mut overheard) = (0u8, 0u8, false);
+        for listener in nearby {
+            let awake = self
+                .population
+                .view(listener)
+                .is_some_and(|view| super::cognition::can_watch(view.activity));
+            if listener == teller || !awake {
+                continue;
+            }
+            // Its own name, said with a scowl: it takes it badly.
+            if self.life_of(listener).name == name {
+                overheard |= listener == about;
+                let mind = self.minds.get_mut(listener);
+                if let Some(slot) = mind.notice(teller, from, now) {
+                    mind.social.provoke(slot, OVERHEARD_ANGER);
+                }
+                continue;
+            }
+            let mind = self.minds.get_mut(listener);
+            let Some(named) = mind.social.slot_named(name) else {
+                continue;
+            };
+            let Some(source) = mind.social.slot_of(teller) else {
+                continue;
+            };
+            if mind.social.trust(source) < crate::cognition::DEFAULT_TRUST {
+                continue;
+            }
+            mind.social.heard_against(named, HEARSAY_TRUST);
+            if mind.social.tie(source).is_some() {
+                mind.social.provoke(named, HEARSAY_ANGER);
+            }
+            heard = heard.saturating_add(1);
+            wrong = wrong.saturating_add(u8::from(mind.social.agent_in(named) != Some(about)));
+        }
+        self.life_events.push(crate::LifeEvent::Grumbled {
+            agent: teller,
+            about,
+            heard,
+            wrong,
+            overheard,
+        });
     }
 
     /// Names called during the latest tick (for logs and tools).

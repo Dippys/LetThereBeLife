@@ -326,6 +326,29 @@ impl SocialMemory {
         (name != NO_NAME).then_some(crate::Name(name))
     }
 
+    /// Who the agent calls `name`, if anyone.
+    pub(crate) fn slot_named(&self, name: crate::Name) -> Option<u8> {
+        self.slots
+            .iter()
+            .position(|known| known.agent != EMPTY && known.name == name.0)
+            .map(|slot| slot as u8)
+    }
+
+    /// The one it's angriest with, if angry enough and it knows their name.
+    pub(crate) fn grudge(&self) -> Option<(AgentId, crate::Name)> {
+        self.slots
+            .iter()
+            .filter(|known| known.agent != EMPTY && known.anger >= ANGRY && known.name != NO_NAME)
+            .max_by_key(|known| (known.anger, u32::MAX - known.agent))
+            .map(|known| (AgentId::new(known.agent), crate::Name(known.name)))
+    }
+
+    /// It heard something against `slot`: trusts them `amount` less.
+    pub(crate) fn heard_against(&mut self, slot: u8, amount: u8) {
+        let known = &mut self.slots[usize::from(slot)];
+        known.trust = known.trust.saturating_sub(amount);
+    }
+
     /// Whether the agent already calls anyone `name`.
     pub(crate) fn knows_name(&self, name: crate::Name) -> bool {
         self.slots

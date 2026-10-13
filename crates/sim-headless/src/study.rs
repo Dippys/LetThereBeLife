@@ -269,6 +269,8 @@ pub struct WildlifeStats {
     pub faces_misread: u64,
     /// Decisions spent working toward a tool.
     pub projects: u64,
+    /// Decisions to tinker after a tool nobody showed it.
+    pub tinkering: u64,
     /// Times someone was shown how to make something, and how many of those
     /// showed something other than what was asked.
     pub shown: (u64, u64),
@@ -276,6 +278,9 @@ pub struct WildlifeStats {
     pub angry: u64,
     /// Takings from others' huts, seen takings, stand-offs, backing down, scuffles.
     pub conflict: [u64; 5],
+    /// Grumbles, listeners who took one in, those who took it to be about
+    /// someone else, and grumbles overheard by the one grumbled about.
+    pub grumbles: [u64; 4],
     /// Racks built, pits dug, huts walled in stone, repairs done.
     pub building: [u64; 4],
     /// Things tried and how many made something; units made of each material.
@@ -582,14 +587,33 @@ pub fn run_study(config: StudyConfig) -> Result<StudyReport, ScenarioError> {
                     }
                 }
                 for event in engine.life_events() {
-                    if let sim_core::LifeEvent::Showed { made, wanted, .. } = *event {
-                        wildlife.shown.0 += 1;
-                        wildlife.shown.1 += u64::from(made != wanted);
+                    match *event {
+                        sim_core::LifeEvent::Showed { made, wanted, .. } => {
+                            wildlife.shown.0 += 1;
+                            wildlife.shown.1 += u64::from(made != wanted);
+                        }
+                        sim_core::LifeEvent::Grumbled {
+                            heard,
+                            wrong,
+                            overheard,
+                            ..
+                        } => {
+                            let grumbles = &mut wildlife.grumbles;
+                            grumbles[0] += 1;
+                            grumbles[1] += u64::from(heard);
+                            grumbles[2] += u64::from(wrong);
+                            grumbles[3] += u64::from(overheard);
+                        }
+                        _ => {}
                     }
                 }
                 for decision in engine.policy_diagnostics() {
                     wildlife.projects += u64::from(
                         decision.reason == sim_core::PolicyReason::Project
+                            && decision.kind == PolicyDiagnosticKind::Selected,
+                    );
+                    wildlife.tinkering += u64::from(
+                        decision.reason == sim_core::PolicyReason::Tinkering
                             && decision.kind == PolicyDiagnosticKind::Selected,
                     );
                     wildlife.building[3] += u64::from(
@@ -2005,8 +2029,9 @@ impl fmt::Display for StudyReport {
         let made = |material: sim_core::Material| self.wildlife.made[material as usize];
         write!(
             formatter,
-            "\n  making: tried {tries} times ({found} made something); decisions toward tools {}, shown how {} times ({} not what was asked); dried meat {}, dried berries {}, pemmican {}; cord {}, axes {}, stone spears {}, digging sticks {}, cloaks {}",
+            "\n  making: tried {tries} times ({found} made something); decisions toward tools {}, tinkering {}, shown how {} times ({} not what was asked); dried meat {}, dried berries {}, pemmican {}; cord {}, axes {}, stone spears {}, digging sticks {}, cloaks {}",
             self.wildlife.projects,
+            self.wildlife.tinkering,
             self.wildlife.shown.0,
             self.wildlife.shown.1,
             made(sim_core::Material::DriedMeat),
@@ -2037,6 +2062,11 @@ impl fmt::Display for StudyReport {
         write!(
             formatter,
             "\n  conflict: food taken from others' huts {thefts} ({seen} seen); stand-offs {standoffs} ({backed} backed down, {scuffles} scuffles)"
+        )?;
+        let [grumbles, heard, wrong, overheard] = self.wildlife.grumbles;
+        write!(
+            formatter,
+            "\n  grumbling: {grumbles} grumbles about someone; taken in by {heard} listeners ({wrong} about someone else of that name); overheard by the one meant {overheard}"
         )?;
         let [racks, pits, stone, repairs] = self.wildlife.building;
         write!(

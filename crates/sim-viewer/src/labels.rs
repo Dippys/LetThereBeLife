@@ -245,6 +245,7 @@ pub const fn reason(reason: PolicyReason) -> Option<&'static str> {
         PolicyReason::Confronting => "Furious with them",
         PolicyReason::Project => "Working toward a tool",
         PolicyReason::AskingToBeShown => "Asking to be shown how to make something",
+        PolicyReason::Tinkering => "Tinkering, after a new tool",
     })
 }
 
